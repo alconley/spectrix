@@ -14,6 +14,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+
+      # Install GDK 3.0 Development Files
+      - name: Install GTK3 development files
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
+
+      # Optionally set PKG_CONFIG_PATH if gdk-3.0.pc is not found by pkg-config
+      - name: Set PKG_CONFIG_PATH
+        run: echo "PKG_CONFIG_PATH=$(pkg-config --variable pc_path pkg-config)" 
+
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -50,7 +59,7 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - run: sudo apt-get install libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
+      - run: sudo apt-get install libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libgtk-3-dev
       - uses: actions-rs/cargo@v1
         with:
           command: test
@@ -77,6 +86,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+
+      - name: Install GDK 3.0 Development Files
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
+    
+      - name: Set PKG_CONFIG_PATH
+        run: echo "PKG_CONFIG_PATH=$(pkg-config --variable pc_path pkg-config)" 
+
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -96,71 +112,10 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.72.0
+          toolchain: 1.77.0
           target: wasm32-unknown-unknown
           override: true
       - name: Download and install Trunk binary
         run: wget -qO- https://github.com/thedodd/trunk/releases/latest/download/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xzf-
       - name: Build
         run: ./trunk build
-
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-        - os: macos-latest
-          TARGET: aarch64-apple-darwin
-
-        - os: macos-latest
-          TARGET: x86_64-apple-darwin
-
-        - os: ubuntu-latest
-          TARGET: arm-unknown-linux-musleabihf
-
-        - os: ubuntu-latest
-          TARGET: armv7-unknown-linux-musleabihf
-
-        - os: ubuntu-latest
-          TARGET: x86_64-unknown-linux-musl
-
-        - os: windows-latest
-          TARGET: x86_64-pc-windows-msvc
-          EXTENSION: .exe
-
-    steps:
-    - name: Building ${{ matrix.TARGET }}
-      run: echo "${{ matrix.TARGET }}"
-
-    - uses: actions/checkout@master
-    - uses: actions-rs/toolchain@v1.0.1
-      with:
-        toolchain: stable
-        target: ${{ matrix.TARGET }}
-        override: true
-
-    - uses: actions-rs/cargo@v1
-      with:
-        use-cross: true
-        command: build
-        args: --verbose --release --target=${{ matrix.TARGET }}
-
-    - name: Rename
-      run: cp target/${{ matrix.TARGET }}/release/eframe_template${{ matrix.EXTENSION }} eframe_template-${{ matrix.TARGET }}${{ matrix.EXTENSION }}
-
-    - uses: actions/upload-artifact@master
-      with:
-        name: eframe_template-${{ matrix.TARGET }}${{ matrix.EXTENSION }}
-        path: eframe_template-${{ matrix.TARGET }}${{ matrix.EXTENSION }}
-
-    - uses: svenstaro/upload-release-action@v2
-      name: Upload binaries to release
-      if: ${{ github.event_name == 'push' }}
-      with:
-        repo_token: ${{ secrets.GITHUB_TOKEN }}
-        file: eframe_template-${{ matrix.TARGET }}${{ matrix.EXTENSION }}
-        asset_name: eframe_template-${{ matrix.TARGET }}${{ matrix.EXTENSION }}
-        tag: ${{ github.ref }}
-        prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        overwrite: true
