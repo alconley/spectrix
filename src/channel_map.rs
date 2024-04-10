@@ -18,14 +18,6 @@ pub enum ChannelType {
     DelayFrontRight,
     DelayBackLeft,
     DelayBackRight,
-    Cebra0,
-    Cebra1,
-    Cebra2,
-    Cebra3,
-    Cebra4,
-    Cebra5,
-    Cebra6,
-
     // make sure to update app.rs so the channel map combo box are updated
 
     //Invalid channel

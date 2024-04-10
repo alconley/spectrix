@@ -509,7 +509,7 @@ impl EVBApp {
     }
 
     fn ui_tabs(&mut self, ui: &mut egui::Ui) {
-        egui::TopBottomPanel::top("sps_cebra_top_panel").show_inside(ui, |ui| {
+        egui::TopBottomPanel::top("sps_top_panel").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 if ui
                     .selectable_label(
