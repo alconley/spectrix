@@ -35,4 +35,4 @@ pub use app::EVBApp;
 #[cfg(target_arch = "wasm32")]
 mod app_web;
 #[cfg(target_arch = "wasm32")]
-pub use app_web::EVBApp as EVBAppWeb;
+pub use app_web::EVBApp;
