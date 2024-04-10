@@ -75,10 +75,12 @@ pub struct EVBApp {
 
     #[serde(skip)]
     thread_handle: Option<JoinHandle<Result<(), EVBError>>>,
+
+    window: bool,
 }
 
 impl EVBApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(_cc: &eframe::CreationContext<'_>, window: bool) -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         EVBApp {
             progress: Arc::new(Mutex::new(0.0)),
@@ -87,6 +89,7 @@ impl EVBApp {
             rxn_eqn: String::from("None"),
             mass_map: MassMap::new().expect("Could not open amdc data, shutting down!"),
             thread_handle: None,
+            window,
         }
     }
 
@@ -561,83 +564,87 @@ impl EVBApp {
             ActiveTab::ScalerList => self.scaler_list_ui(ui),
         }
     }
+
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("File", |ui| {
+            if ui.button("Open Config...").clicked() {
+                let result = rfd::FileDialog::new()
+                    .set_directory(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+                    .add_filter("YAML file", &["yaml"])
+                    .pick_file();
+
+                if let Some(real_path) = result {
+                    self.read_params_from_file(&real_path)
+                }
+            }
+            if ui.button("Save Config...").clicked() {
+                let result = rfd::FileDialog::new()
+                    .set_directory(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+                    .add_filter("YAML file", &["yaml"])
+                    .save_file();
+
+                if let Some(real_path) = result {
+                    self.write_params_to_file(&real_path)
+                }
+            }
+        });
+
+        ui.separator();
+
+        self.ui_tabs(ui);
+
+        ui.separator();
+
+        ui.add(
+            egui::widgets::ProgressBar::new(match self.progress.lock() {
+                Ok(x) => *x,
+                Err(_) => 0.0,
+            })
+            .show_percentage(),
+        );
+
+        // Check if the thread handle exists to determine if the process is running
+        let is_running = self.thread_handle.is_some();
+        if is_running {
+            ui.add(egui::Spinner::new());
+        }
+
+        if ui
+            .add_enabled(
+                self.thread_handle.is_none(),
+                egui::widgets::Button::new("Run"),
+            )
+            .clicked()
+        {
+            info!("Starting processor...");
+            match self.check_and_startup_processing_thread() {
+                Ok(_) => (),
+                Err(e) => error!(
+                    "Could not start processor, recieved the following error: {}",
+                    e
+                ),
+            };
+        } else {
+            self.check_and_shutdown_processing_thread();
+        }
+    }
 }
 
 impl App for EVBApp {
     #[cfg(not(target_arch = "wasm32"))]
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
-        // egui::Window::new("SE-SPS Event Builder")
-        //     .min_width(200.0)
-        //     .max_width(600.0)
-        //     .show(ctx, |ui| {
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.menu_button("File", |ui| {
-                if ui.button("Open Config...").clicked() {
-                    let result = rfd::FileDialog::new()
-                        .set_directory(
-                            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-                        )
-                        .add_filter("YAML file", &["yaml"])
-                        .pick_file();
-
-                    if let Some(real_path) = result {
-                        self.read_params_from_file(&real_path)
-                    }
-                }
-                if ui.button("Save Config...").clicked() {
-                    let result = rfd::FileDialog::new()
-                        .set_directory(
-                            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-                        )
-                        .add_filter("YAML file", &["yaml"])
-                        .save_file();
-
-                    if let Some(real_path) = result {
-                        self.write_params_to_file(&real_path)
-                    }
-                }
+        if self.window {
+            egui::Window::new("SE-SPS Event Builder")
+                .min_width(200.0)
+                .max_width(600.0)
+                .show(ctx, |ui| {
+                    self.ui(ui);
+                });
+        } else {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                self.ui(ui);
             });
-
-            ui.separator();
-
-            self.ui_tabs(ui);
-
-            ui.separator();
-
-            ui.add(
-                egui::widgets::ProgressBar::new(match self.progress.lock() {
-                    Ok(x) => *x,
-                    Err(_) => 0.0,
-                })
-                .show_percentage(),
-            );
-
-            // Check if the thread handle exists to determine if the process is running
-            let is_running = self.thread_handle.is_some();
-            if is_running {
-                ui.add(egui::Spinner::new());
-            }
-
-            if ui
-                .add_enabled(
-                    self.thread_handle.is_none(),
-                    egui::widgets::Button::new("Run"),
-                )
-                .clicked()
-            {
-                info!("Starting processor...");
-                match self.check_and_startup_processing_thread() {
-                    Ok(_) => (),
-                    Err(e) => error!(
-                        "Could not start processor, recieved the following error: {}",
-                        e
-                    ),
-                };
-            } else {
-                self.check_and_shutdown_processing_thread();
-            }
-        });
+        }
     }
 
     #[cfg(target_arch = "wasm32")]
