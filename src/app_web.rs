@@ -18,15 +18,11 @@ impl App for MUCApp {
                 .min_width(200.0)
                 .max_width(600.0)
                 .show(ctx, |ui| {
-                    ui.label(
-                        "muc is not supported in the browser yet. Please run it natively.",
-                    );
+                    ui.label("muc is not supported in the browser yet. Please run it natively.");
                 });
         } else {
             egui::CentralPanel::default().show(ctx, |ui| {
-                ui.label(
-                    "muc is not supported in the browser yet. Please run it natively.",
-                );
+                ui.label("muc is not supported in the browser yet. Please run it natively.");
             });
         }
     }
