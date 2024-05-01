@@ -1,23 +1,31 @@
-#![warn(clippy::all, rust_2018_idioms)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-// When compiling natively:
-#[cfg(not(target_arch = "wasm32"))]
-fn main() -> eframe::Result<()> {
-    env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+use muc::MUCApp;
 
-    let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([425.0, 250.0])
-            .with_min_inner_size([425.0, 250.0]),
+use eframe::egui;
+fn main() -> Result<(), eframe::Error> {
+    env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([800.0, 600.0]),
         ..Default::default()
     };
     eframe::run_native(
-        "SPS Eventbuilder",
-        native_options,
-        Box::new(|cc| Box::new(muc::MUCApp::new(cc, false))),
+        "egui_tiles example",
+        options,
+        Box::new(|_cc| {
+            #[cfg_attr(not(feature = "serde"), allow(unused_mut))]
+            let mut app = MUCApp::new();
+            #[cfg(feature = "serde")]
+            if let Some(storage) = _cc.storage {
+                if let Some(state) = eframe::get_value(storage, eframe::APP_KEY) {
+                    app = state;
+                }
+            }
+            Box::new(app)
+        }),
     )
 }
+
 
 // When compiling to web using trunk:
 #[cfg(target_arch = "wasm32")]
