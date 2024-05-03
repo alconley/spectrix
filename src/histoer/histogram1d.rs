@@ -1,9 +1,12 @@
+use crate::fitter::egui_markers::EguiFitMarkers;
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Histogram {
     pub name: String,
     pub bins: Vec<u32>,
     pub range: (f64, f64),
     pub bin_width: f64,
+    pub markers: EguiFitMarkers,
 }
 
 impl Histogram {
@@ -14,6 +17,7 @@ impl Histogram {
             bins: vec![0; number_of_bins],
             range,
             bin_width: (range.1 - range.0) / number_of_bins as f64,
+            markers: EguiFitMarkers::default(),
         }
     }
 
@@ -38,6 +42,7 @@ impl Histogram {
         Some(bin_index)
     }
 
+    // Calculate the statistics for the histogram within the specified x range.
     fn stats(&self, start_x: f64, end_x: f64) -> (u32, f64, f64) {
         let start_bin = self.get_bin(start_x).unwrap_or(0);
         let end_bin = self.get_bin(end_x).unwrap_or(self.bins.len() - 1);
@@ -80,6 +85,7 @@ impl Histogram {
         }
     }
 
+    // Generate points for the line to form a step histogram.
     fn step_histogram_points(&self) -> Vec<(f64, f64)> {
         let mut line_points: Vec<(f64, f64)> = Vec::new();
 
@@ -107,7 +113,6 @@ impl Histogram {
 
     // Generates a line to form a step histogram using egui_plot
     fn egui_histogram_step(&self, color: egui::Color32) -> egui_plot::Line {
-        
         let line_points = self.step_histogram_points();
 
         // Convert line_points to a Vec<[f64; 2]>
@@ -118,6 +123,7 @@ impl Histogram {
             .name(self.name.clone())
     }
 
+    // Renders the histogram using egui_plot
     pub fn render(&mut self, ui: &mut egui::Ui) {
         /* For custom 2d histogram plot manipulation settings*/
         let (scroll, pointer_down, modifiers) = ui.input(|i| {
@@ -144,6 +150,9 @@ impl Histogram {
             egui::Color32::BLACK
         };
 
+        // Enable interactive markers
+        self.markers.interactive_markers(ui);
+
         plot.show(ui, |plot_ui| {
             custom_plot_manipulation(plot_ui, scroll, pointer_down, modifiers);
 
@@ -163,6 +172,10 @@ impl Histogram {
                         .name(entry),
                 );
             }
+
+            self.markers.cursor_position = plot_ui.pointer_coordinate();
+            self.markers.draw_markers(plot_ui);
+
         });
     }
 }

@@ -12,7 +12,7 @@ use serde_yaml;
 
 use super::background_fitter::BackgroundFitter;
 use super::egui_markers::EguiFitMarkers;
-use super::gaussian_fitter::GaussianFitter;
+use super::gaussian::GaussianFitter;
 
 use crate::histoer::histogram1d::Histogram;
 

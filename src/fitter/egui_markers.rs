@@ -1,7 +1,7 @@
 use egui::{Color32, Stroke};
 use egui_plot::{PlotPoint, PlotUi, VLine};
 
-#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EguiFitMarkers {
     pub region_markers: Vec<f64>,
     pub peak_markers: Vec<f64>,
@@ -187,9 +187,15 @@ impl EguiFitMarkers {
                 self.sort_region_markers();
             }
 
-            // if ui.input(|i| i.key_pressed(egui::Key::Minus)) {
-            //     self.delete_closest_marker();
-            // }
+            if ui.input(|i| i.key_pressed(egui::Key::Minus)) {
+                self.delete_closest_marker();
+            }
+
+            if ui.input(|i| i.key_pressed(egui::Key::Delete)) {
+                self.clear_region_markers();
+                self.clear_peak_markers();
+                self.clear_background_markers();
+            }
         }
     }
 }

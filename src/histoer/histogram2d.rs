@@ -193,16 +193,16 @@ impl Histogram2D {
         let mut pixels = Vec::with_capacity(width * height);
 
         // Loop through each bin and assign colors based on counts
+        // Loop starts from the top row (y=0) to the bottom row (y=height-1)
         for y in 0..height {
             for x in 0..width {
-                let count = self.bins.get(&(x, y)).cloned().unwrap_or(0);
-                if count == 0 {
-                    pixels.push(egui::Color32::TRANSPARENT);
-                    continue;
+                let count = self.bins.get(&(x, height - y - 1)).cloned().unwrap_or(0);
+                let color = if count == 0 {
+                    egui::Color32::TRANSPARENT  // Use transparent for zero counts
                 } else {
-                    let color = viridis_colormap(count, self.min_count, self.max_count);
-                    pixels.push(color);
-                }
+                    viridis_colormap(count, self.min_count, self.max_count)
+                };
+                pixels.push(color);
             }
         }
 
