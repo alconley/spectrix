@@ -4,8 +4,6 @@ use super::tree::TreeBehavior;
 use super::processer::Processer;
 use super::workspacer::Workspacer;
 
-use egui_tiles::{TileId, Tiles};
-
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct MUCApp {
     tree: egui_tiles::Tree<Pane>,
@@ -19,7 +17,6 @@ pub struct MUCApp {
 
 impl Default for MUCApp {
     fn default() -> Self {
-
         let mut tiles = egui_tiles::Tiles::default();
 
         let workspacer = Workspacer::new();
@@ -51,27 +48,24 @@ impl MUCApp {
     }
 
     pub fn add_histograms_to_tree(&mut self) {
+        // let mut panes = self.processer.histogrammer.get_histogram1d_panes();
 
-        let mut panes = self.processer.histogrammer.get_histogram1d_panes();
-        
-        panes.push(Pane::Workspace(self.workspacer.clone()));
+        // panes.push(Pane::Workspace(self.workspacer.clone()));
 
-        let tree = egui_tiles::Tree::new_grid("histograms", panes);
-        
-        self.tree = tree;
+        // let tree = egui_tiles::Tree::new_grid("histograms", panes);
+
+        // self.tree = tree;
+
+        self.tree = self.processer.histogrammer.histogrammer_tree();
 
         // let tabs: Vec<TileId> = vec![tiles.insert_pane(Pane { }), tiles.insert_pane(Pane { })];
 
         // self.tree.tiles.insert_container(container);
-
-
     }
-    
 }
 
 impl eframe::App for MUCApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-
         egui::TopBottomPanel::top("muc_top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 if !self.workspacer.selected_files.borrow().is_empty() {
@@ -95,11 +89,11 @@ impl eframe::App for MUCApp {
 
             ui.separator();
 
-            ui.collapsing("Tree", |ui| {
-                ui.style_mut().wrap = Some(false);
-                let tree_debug = format!("{:#?}", self.tree);
-                ui.monospace(&tree_debug);
-            });
+            // ui.collapsing("Tree", |ui| {
+            //     ui.style_mut().wrap = Some(false);
+            //     let tree_debug = format!("{:#?}", self.tree);
+            //     ui.monospace(&tree_debug);
+            // });
 
             ui.separator();
 
@@ -117,13 +111,11 @@ impl eframe::App for MUCApp {
             if let Some(root) = self.tree.root() {
                 tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
             }
-
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             self.tree.ui(&mut self.behavior, ui);
         });
-
     }
 
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
@@ -187,4 +179,3 @@ fn tree_ui(
     // Put the tile back
     tiles.insert(tile_id, tile);
 }
-

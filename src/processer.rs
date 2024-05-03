@@ -144,6 +144,4 @@ impl Processer {
 
         ui.separator();
     }
-
-
 }

@@ -24,6 +24,8 @@ env_logger = "0.10"
 
 egui_plot = {version = "0.27.2", features = ["serde"] }
 egui_tiles = "0.8.0"
+epaint = "0.27.2"
+
 polars = { version = "0.36", features = ["lazy", "parquet", "ndarray"] }
 rfd = "0.13"
 serde = { version = "1.0", features = ["derive"] }

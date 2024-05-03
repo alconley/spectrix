@@ -1,10 +1,9 @@
-use crate::workspacer::Workspacer;
-use crate::processer::Processer;
 use super::histoer::histogram1d::Histogram;
 use super::histoer::histogram2d::Histogram2D;
+use crate::workspacer::Workspacer;
 
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Pane {
     Workspace(Workspacer),
     Histogram(Histogram),

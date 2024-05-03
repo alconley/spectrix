@@ -107,13 +107,15 @@ impl Histogram {
 
     // Generates a line to form a step histogram using egui_plot
     fn egui_histogram_step(&self, color: egui::Color32) -> egui_plot::Line {
+        
         let line_points = self.step_histogram_points();
 
         // Convert line_points to a Vec<[f64; 2]>
         let plot_points: egui_plot::PlotPoints = line_points.iter().map(|&(x, y)| [x, y]).collect();
 
-        egui_plot::Line::new(plot_points).color(color).name(self.name.clone())
-
+        egui_plot::Line::new(plot_points)
+            .color(color)
+            .name(self.name.clone())
     }
 
     pub fn render(&mut self, ui: &mut egui::Ui) {
@@ -127,42 +129,41 @@ impl Histogram {
         });
 
         let plot = egui_plot::Plot::new(self.name.clone())
-                    .legend(egui_plot::Legend::default())
-                    .allow_drag(false)
-                    .allow_zoom(false)
-                    .allow_boxed_zoom(true)
-                    .auto_bounds(egui::Vec2b::new(true, true))
-                    .allow_scroll(false);
+            .legend(egui_plot::Legend::default())
+            .allow_drag(false)
+            .allow_zoom(false)
+            .allow_boxed_zoom(true)
+            .auto_bounds(egui::Vec2b::new(true, true))
+            .allow_scroll(false);
 
-                let color = if ui.ctx().style().visuals.dark_mode {
-                    // check if the ui is in dark mode.
-                    // Light blue looks nice on dark mode but hard to see in light mode.
-                    egui::Color32::LIGHT_BLUE
-                } else {
-                    egui::Color32::BLACK
-                };
+        let color = if ui.ctx().style().visuals.dark_mode {
+            // check if the ui is in dark mode.
+            // Light blue looks nice on dark mode but hard to see in light mode.
+            egui::Color32::LIGHT_BLUE
+        } else {
+            egui::Color32::BLACK
+        };
 
-                plot.show(ui, |plot_ui| {
-                    custom_plot_manipulation(plot_ui, scroll, pointer_down, modifiers);
+        plot.show(ui, |plot_ui| {
+            custom_plot_manipulation(plot_ui, scroll, pointer_down, modifiers);
 
-                    let plot_min_x = plot_ui.plot_bounds().min()[0];
-                    let plot_max_x = plot_ui.plot_bounds().max()[0];
+            let plot_min_x = plot_ui.plot_bounds().min()[0];
+            let plot_max_x = plot_ui.plot_bounds().max()[0];
 
-                    let step_line = self.egui_histogram_step(color);
-                    
-                    plot_ui.line(step_line);
+            let step_line = self.egui_histogram_step(color);
 
-                    let stats_entries = self.legend_entries(plot_min_x, plot_max_x);
-                    for entry in stats_entries.iter() {
-                        plot_ui.text(
-                            egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
-                                .highlight(false)
-                                .color(color)
-                                .name(entry),
-                        );
-                    }
-                    
-                });
+            plot_ui.line(step_line);
+
+            let stats_entries = self.legend_entries(plot_min_x, plot_max_x);
+            for entry in stats_entries.iter() {
+                plot_ui.text(
+                    egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
+                        .highlight(false)
+                        .color(color)
+                        .name(entry),
+                );
+            }
+        });
     }
 }
 
@@ -227,4 +228,3 @@ fn custom_plot_manipulation(
         }
     }
 }
-

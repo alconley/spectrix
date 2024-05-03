@@ -4,7 +4,6 @@ pub struct TreeBehavior {
     simplification_options: egui_tiles::SimplificationOptions,
     tab_bar_height: f32,
     gap_width: f32,
-    add_child_to: Option<egui_tiles::TileId>,
 }
 
 impl Default for TreeBehavior {
@@ -13,7 +12,6 @@ impl Default for TreeBehavior {
             simplification_options: Default::default(),
             tab_bar_height: 24.0,
             gap_width: 2.0,
-            add_child_to: None,
         }
     }
 }
@@ -24,7 +22,6 @@ impl TreeBehavior {
             simplification_options,
             tab_bar_height,
             gap_width,
-            add_child_to: _,
         } = self;
 
         egui::Grid::new("behavior_ui")
@@ -75,19 +72,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
             Pane::Workspace(_workspace) => "Workspace".into(),
             Pane::Histogram(hist) => hist.name.clone().into(),
             Pane::Histogram2D(hist) => hist.name.clone().into(),
-        }
-    }
-
-    fn top_bar_right_ui(
-        &mut self,
-        _tiles: &egui_tiles::Tiles<Pane>,
-        ui: &mut egui::Ui,
-        tile_id: egui_tiles::TileId,
-        _tabs: &egui_tiles::Tabs,
-        _scroll_offset: &mut f32,
-    ) {
-        if ui.button("➕").clicked() {
-            self.add_child_to = Some(tile_id);
         }
     }
 

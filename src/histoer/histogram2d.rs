@@ -11,7 +11,7 @@ pub struct BarData {
 }
 
 // uses a hash map to store the histogram data (zero overhead for empty bins)
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Histogram2D {
     pub name: String,
     pub bins: FnvHashMap<(usize, usize), u32>,
@@ -21,11 +21,20 @@ pub struct Histogram2D {
     pub y_bin_width: f64,
     pub min_count: u32,
     pub max_count: u32,
+
+    #[serde(skip)]
+    texture: Option<egui::TextureHandle>,
 }
 
 impl Histogram2D {
     // Create a new 2D Histogram with specified ranges and number of bins for each axis
-    pub fn new(name: &str,x_bins: usize, x_range: (f64, f64), y_bins: usize, y_range: (f64, f64)) -> Self {
+    pub fn new(
+        name: &str,
+        x_bins: usize,
+        x_range: (f64, f64),
+        y_bins: usize,
+        y_range: (f64, f64),
+    ) -> Self {
         Histogram2D {
             name: name.to_string(),
             bins: FnvHashMap::default(),
@@ -35,6 +44,7 @@ impl Histogram2D {
             y_bin_width: (y_range.1 - y_range.0) / y_bins as f64,
             min_count: u32::MAX,
             max_count: u32::MIN,
+            texture: None,
         }
     }
 
@@ -58,32 +68,6 @@ impl Histogram2D {
                 self.max_count = *count;
             }
         }
-    }
-
-    // Method to generate data for egui heatmap
-    fn generate_bar_data(&self) -> Vec<BarData> {
-        let mut bars = Vec::new();
-
-        for (&(x_index, y_index), &count) in &self.bins {
-            if count == 0 {
-                continue; // Skip empty bins
-            }
-
-            let x_bin_start = self.x_range.0 + x_index as f64 * self.x_bin_width;
-            let x_bin_end = x_bin_start + self.x_bin_width;
-            let y_bin_start = self.y_range.0 + y_index as f64 * self.y_bin_width;
-            let y_bin_end = y_bin_start + self.y_bin_width;
-
-            bars.push(BarData {
-                x: (x_bin_start + x_bin_end) / 2.0,
-                y: (y_bin_start + y_bin_end) / 2.0,
-                bar_width: self.x_bin_width,
-                height: self.y_bin_width,
-                count,
-            });
-        }
-
-        bars
     }
 
     fn get_bin_x(&self, x: f64) -> Option<usize> {
@@ -184,13 +168,7 @@ impl Histogram2D {
     }
 
     /// Generates legend entries for the histogram based on the specified x range.
-    fn legend_entries(
-        &self,
-        start_x: f64,
-        end_x: f64,
-        start_y: f64,
-        end_y: f64,
-    ) -> Vec<String> {
+    fn legend_entries(&self, start_x: f64, end_x: f64, start_y: f64, end_y: f64) -> Vec<String> {
         let stats = self.stats(start_x, end_x, start_y, end_y);
         let integral_text = format!("Integral: {}", stats.0);
         let mean_x_text = format!("Mean X: {:.2}", stats.1);
@@ -205,6 +183,164 @@ impl Histogram2D {
             mean_y_text,
             stdev_y_text,
         ]
+    }
+
+    fn to_color_image(&self) -> epaint::ColorImage {
+        let width = ((self.x_range.1 - self.x_range.0) / self.x_bin_width) as usize;
+        let height = ((self.y_range.1 - self.y_range.0) / self.y_bin_width) as usize;
+
+        // Initialize a vector to hold pixel data
+        let mut pixels = Vec::with_capacity(width * height);
+
+        // Loop through each bin and assign colors based on counts
+        for y in 0..height {
+            for x in 0..width {
+                let count = self.bins.get(&(x, y)).cloned().unwrap_or(0);
+                if count == 0 {
+                    pixels.push(egui::Color32::TRANSPARENT);
+                    continue;
+                } else {
+                    let color = viridis_colormap(count, self.min_count, self.max_count);
+                    pixels.push(color);
+                }
+            }
+        }
+
+        // Create the ColorImage with the specified width and height and pixel data
+        epaint::ColorImage {
+            size: [width, height],
+            pixels,
+        }
+    }
+
+    // Convert ColorImage to ImageData (Byte array)
+    fn to_image_data(&self) -> epaint::ImageData {
+        let color_image = self.to_color_image();
+        let width = color_image.size[0];
+        let height = color_image.size[1];
+
+        // Convert Color32 pixels to a flat RGBA byte array
+        let mut rgba_data = Vec::with_capacity(width * height * 4);
+        for pixel in color_image.pixels.iter() {
+            rgba_data.extend_from_slice(&pixel.to_array()); // Assuming Color32 provides a method like `to_array()`
+        }
+
+        epaint::ImageData::Color(
+            epaint::ColorImage::from_rgba_unmultiplied([width, height], &rgba_data).into(),
+        )
+    }
+
+    pub fn render(&mut self, ui: &mut egui::Ui) {
+        // Check if texture is loaded, if not load it
+        if self.texture.is_none() {
+            let image_data = self.to_image_data(); // Convert the histogram to image data once
+            self.texture = Some(ui.ctx().load_texture(
+                self.name.clone(),
+                image_data,
+                egui::TextureOptions {
+                    magnification: egui::TextureFilter::Nearest,
+                    minification: egui::TextureFilter::Nearest,
+                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                },
+            ));
+        }
+
+        if let Some(texture) = &self.texture {
+            let plot = egui_plot::Plot::new(self.name.clone())
+                .allow_zoom(false)
+                .allow_drag(false)
+                .allow_scroll(false)
+                .legend(egui_plot::Legend::default())
+                .auto_bounds(egui::Vec2b::new(true, true));
+
+            let color = if ui.ctx().style().visuals.dark_mode {
+                egui::Color32::LIGHT_BLUE
+            } else {
+                egui::Color32::DARK_BLUE
+            };
+
+            /* For custom plot manipulation settings*/
+            let (scroll, pointer_down, modifiers) = ui.input(|i| {
+                let scroll = i.events.iter().find_map(|e| match e {
+                    egui::Event::MouseWheel { delta, .. } => Some(*delta),
+                    _ => None,
+                });
+                (scroll, i.pointer.primary_down(), i.modifiers)
+            });
+
+            // Calculate the center position
+            let center_x = (self.x_range.0 + self.x_range.1) / 2.0;
+            let center_y = (self.y_range.0 + self.y_range.1) / 2.0;
+
+            // Calculate the size of the image in plot coordinates
+            let size_x = (self.x_range.1 - self.x_range.0) as f32;
+            let size_y = (self.y_range.1 - self.y_range.0) as f32;
+
+            let heatmap_image = egui_plot::PlotImage::new(
+                &texture.clone(),
+                egui_plot::PlotPoint::new(center_x, center_y),
+                egui::Vec2::new(size_x, size_y),
+            )
+            .name(self.name.clone());
+
+            plot.show(ui, |plot_ui| {
+                custom_plot_manipulation(plot_ui, scroll, pointer_down, modifiers);
+
+                let plot_min_x = plot_ui.plot_bounds().min()[0];
+                let plot_max_x = plot_ui.plot_bounds().max()[0];
+                let plot_min_y = plot_ui.plot_bounds().min()[1];
+                let plot_max_y = plot_ui.plot_bounds().max()[1];
+
+                // make bars instead of image
+                // let heatmap = self.egui_heatmap();
+                // plot_ui.bar_chart(heatmap.color(color));
+
+                plot_ui.image(heatmap_image);
+
+                let stats_entries =
+                    self.legend_entries(plot_min_x, plot_max_x, plot_min_y, plot_max_y);
+
+                for entry in stats_entries.iter() {
+                    plot_ui.text(
+                        egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
+                            .highlight(false)
+                            .color(color)
+                            .name(entry),
+                    );
+                }
+            });
+        }
+    }
+
+    /*
+
+    // This was my inital method to make a heatmap.
+    // Found the performace to be lacking when there was a large number of bins or plots on the screen.
+
+    // Method to generate data for egui heatmap
+    fn generate_bar_data(&self) -> Vec<BarData> {
+        let mut bars = Vec::new();
+
+        for (&(x_index, y_index), &count) in &self.bins {
+            if count == 0 {
+                continue; // Skip empty bins
+            }
+
+            let x_bin_start = self.x_range.0 + x_index as f64 * self.x_bin_width;
+            let x_bin_end = x_bin_start + self.x_bin_width;
+            let y_bin_start = self.y_range.0 + y_index as f64 * self.y_bin_width;
+            let y_bin_end = y_bin_start + self.y_bin_width;
+
+            bars.push(BarData {
+                x: (x_bin_start + x_bin_end) / 2.0,
+                y: (y_bin_start + y_bin_end) / 2.0,
+                bar_width: self.x_bin_width,
+                height: self.y_bin_width,
+                count,
+            });
+        }
+
+        bars
     }
 
     fn egui_heatmap(&self) -> egui_plot::BarChart {
@@ -235,58 +371,8 @@ impl Histogram2D {
 
     }
 
-    pub fn render(&mut self, ui: &mut egui::Ui) {
-
-        let plot = egui_plot::Plot::new(self.name.clone())
-            .allow_zoom(false)
-            .allow_drag(false)
-            .allow_scroll(false)
-            .legend(egui_plot::Legend::default())
-            .auto_bounds(egui::Vec2b::new(true, true));
-
-        let color = if ui.ctx().style().visuals.dark_mode {
-            egui::Color32::LIGHT_BLUE
-        } else {
-            egui::Color32::DARK_BLUE
-        };
-
-        /* For custom plot manipulation settings*/
-        let (scroll, pointer_down, modifiers) = ui.input(|i| {
-            let scroll = i.events.iter().find_map(|e| match e {
-                egui::Event::MouseWheel { delta, .. } => Some(*delta),
-                _ => None,
-            });
-            (scroll, i.pointer.primary_down(), i.modifiers)
-        });
-
-        plot.show(ui, |plot_ui| {
-            custom_plot_manipulation(plot_ui, scroll, pointer_down, modifiers);
-
-            let plot_min_x = plot_ui.plot_bounds().min()[0];
-            let plot_max_x = plot_ui.plot_bounds().max()[0];
-            let plot_min_y = plot_ui.plot_bounds().min()[1];
-            let plot_max_y = plot_ui.plot_bounds().max()[1];
-
-            let heatmap = self.egui_heatmap();
-
-            plot_ui.bar_chart(heatmap.color(color));
-
-            let stats_entries =
-                self.legend_entries(plot_min_x, plot_max_x, plot_min_y, plot_max_y);
-
-            for entry in stats_entries.iter() {
-                plot_ui.text(
-                    egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
-                        .highlight(false)
-                        .color(color)
-                        .name(entry),
-                );
-            }
-        });
-    }
-
+    */
 }
-
 
 // Function to generate a color based on a value using the Viridis colormap, the matplotlib default.
 fn viridis_colormap(value: u32, min: u32, max: u32) -> egui::Color32 {
@@ -348,7 +434,6 @@ fn viridis_colormap(value: u32, min: u32, max: u32) -> egui::Color32 {
 
     egui::Color32::from_rgb(red as u8, green as u8, blue as u8)
 }
-
 
 fn custom_plot_manipulation(
     plot_ui: &mut egui_plot::PlotUi,

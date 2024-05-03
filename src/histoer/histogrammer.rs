@@ -1,4 +1,3 @@
-use egui_tiles::Container;
 use rfd::FileDialog;
 use serde_json; // or use serde_yaml for YAML serialization
 use std::fs::File;
@@ -10,7 +9,7 @@ use super::histogram2d::Histogram2D;
 
 use crate::pane::Pane;
 
-#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+#[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Histogrammer {
     pub histograms1d: Vec<Histogram>,
     pub histograms2d: Vec<Histogram2D>,
@@ -33,7 +32,6 @@ impl Histogrammer {
 
     // Fills a 1D histogram with data from a polars dataframe/column.
     pub fn fill_hist1d(&mut self, name: &str, lf: &LazyFrame, column_name: &str) -> bool {
-
         // find the histogram by name
         let hist: &mut Histogram = match self.histograms1d.iter_mut().find(|h| h.name == name) {
             Some(h) => h,
@@ -203,7 +201,6 @@ impl Histogrammer {
         }
     }
 
-
     pub fn get_histogram1d_name_list(&self) -> Vec<String> {
         self.histograms1d.iter().map(|h| h.name.clone()).collect()
     }
@@ -220,17 +217,6 @@ impl Histogrammer {
         self.histograms2d.iter().find(|h| h.name == name)
     }
 
-    // pub fn get_histogram1d_tiles(&self) -> egui_tiles::Tiles<Pane> {
-    //     let mut tiles = egui_tiles::Tiles::default();
-
-    //     for hist in &self.histograms1d {
-    //         tiles.insert_pane(Pane::Histogram(hist.clone()));
-    //     }
-
-    //     tiles
-
-    // }
-
     pub fn get_histogram1d_panes(&self) -> Vec<Pane> {
         let mut panes = vec![];
 
@@ -239,40 +225,42 @@ impl Histogrammer {
         }
 
         panes
-
     }
 
-    // pub fn get_histogram1d_container(&self) -> Container {
-    //     let mut childern = vec![];
+    pub fn get_histogram2d_panes(&self) -> Vec<Pane> {
+        let mut panes = vec![];
 
-    //     for hist in &self.histograms1d {
-    //         childern.push(Pane::Histogram(hist.clone()));
-    //     }
+        for hist in &self.histograms2d {
+            panes.push(Pane::Histogram2D(hist.clone()));
+        }
 
-    //     let container = egui_tiles::Container::new("Histograms", childern);
+        panes
+    }
 
-    // }
+    pub fn histogrammer_tree(&mut self) -> egui_tiles::Tree<Pane> {
+        // Initialize the egui_tiles::Tiles which will manage the Pane layout
+        let mut tiles = egui_tiles::Tiles::default();
 
+        // Create a separate tab for 1D and 2D histograms
+        let hist1d_panes: Vec<_> = self
+            .get_histogram1d_panes()
+            .into_iter()
+            .map(|pane| tiles.insert_pane(pane))
+            .collect();
+        let hist2d_panes: Vec<_> = self
+            .get_histogram2d_panes()
+            .into_iter()
+            .map(|pane| tiles.insert_pane(pane))
+            .collect();
 
-    // pub histogrammer_tree(&self) -> Tree<Pane> {
-    //     let mut tiles = egui_tiles::Tiles::default();
-    //     let mut tabs = vec![];
+        // Insert these pane groups into a tab tile structure
+        let tab1 = tiles.insert_grid_tile(hist1d_panes);
+        let tab2 = tiles.insert_grid_tile(hist2d_panes);
 
-    //     for hist in &self.histograms1d {
-    //         let pane = tiles.insert_pane(Pane::with_nr(0, hist.clone()));
-    //         tabs.push(pane);
-    //     }
+        // Collect the tabs into a vector and create the root tab tile
+        let root_tab = tiles.insert_tab_tile(vec![tab1, tab2]);
 
-    //     for hist in &self.histograms2d {
-    //         let pane = tiles.insert_pane(Pane::with_nr(0, hist.clone()));
-    //         tabs.push(pane);
-    //     }
-
-    //     let root = tiles.insert_tab_tile(tabs);
-    //     let tree = egui_tiles::Tree::new("Histograms", root, tiles);
-
-    //     tree
-    // }
-
+        // Construct the tree with a meaningful title and the root_tab, associating it with the tiles
+        egui_tiles::Tree::new("Histogrammer", root_tab, tiles)
+    }
 }
-

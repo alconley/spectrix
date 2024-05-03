@@ -1,9 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use std::rc::Rc;
 use std::cell::RefCell;
-
+use std::rc::Rc;
 
 #[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Workspacer {
@@ -122,7 +121,6 @@ impl Workspacer {
     }
 
     pub fn file_selection_ui_in_menu(&mut self, ui: &mut egui::Ui) {
-
         ui.label("Parquet Files in Directory:");
 
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -132,13 +130,13 @@ impl Workspacer {
                 .show(ui, |ui| {
                     let files = self.files.borrow();
                     let mut selected_files = self.selected_files.borrow_mut();
-    
+
                     for (index, file) in files.iter().enumerate() {
                         let file_stem = file.file_stem().unwrap_or_default().to_string_lossy();
                         let is_selected = selected_files.contains(file);
-    
+
                         let response = ui.selectable_label(is_selected, file_stem);
-    
+
                         if response.clicked() {
                             if is_selected {
                                 selected_files.retain(|f| f != file);
@@ -146,7 +144,7 @@ impl Workspacer {
                                 selected_files.push(file.clone());
                             }
                         }
-    
+
                         // After adding each file, check if it's time to end the row
                         if (index + 1) % 5 == 0 {
                             ui.end_row(); // End the current row after every 5 files
