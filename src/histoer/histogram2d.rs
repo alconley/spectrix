@@ -198,7 +198,7 @@ impl Histogram2D {
             for x in 0..width {
                 let count = self.bins.get(&(x, height - y - 1)).cloned().unwrap_or(0);
                 let color = if count == 0 {
-                    egui::Color32::TRANSPARENT  // Use transparent for zero counts
+                    egui::Color32::TRANSPARENT // Use transparent for zero counts
                 } else {
                     viridis_colormap(count, self.min_count, self.max_count)
                 };

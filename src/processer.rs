@@ -1,10 +1,8 @@
 use super::cutter::cut_handler::CutHandler;
-use super::fitter::fit_handler::FitHandler;
 use super::histoer::histogram_script::add_histograms;
 use super::histoer::histogrammer::Histogrammer;
 use super::lazyframer::LazyFramer;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
@@ -15,7 +13,6 @@ pub struct Processer {
     pub histogrammer: Histogrammer,
     pub cut_handler: CutHandler,
     pub selected_histogram: String,
-    pub fit_handler: HashMap<String, FitHandler>,
 }
 
 impl Processer {
@@ -26,7 +23,6 @@ impl Processer {
             histogrammer: Histogrammer::new(),
             cut_handler: CutHandler::new(),
             selected_histogram: String::new(),
-            fit_handler: HashMap::new(),
         }
     }
 
@@ -137,9 +133,6 @@ impl Processer {
 
                 ui.label("Recalculate histograms to filter with cuts");
             }
-
-
-
         });
 
         ui.separator();

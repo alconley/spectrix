@@ -1,4 +1,14 @@
 use crate::fitter::egui_markers::EguiFitMarkers;
+use crate::fitter::fitter::{FitModel, Fitter};
+
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PlotSettings {
+    #[serde(skip)]
+    pub cursor_position: Option<egui_plot::PlotPoint>,
+
+    pub info: bool,
+    pub color: egui::Color32,
+}
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Histogram {
@@ -7,6 +17,10 @@ pub struct Histogram {
     pub range: (f64, f64),
     pub bin_width: f64,
     pub markers: EguiFitMarkers,
+    pub plot_settings: PlotSettings,
+
+    pub temp_background_fit: Option<Fitter>,
+    pub temp_fit: Option<Fitter>,
 }
 
 impl Histogram {
@@ -18,6 +32,9 @@ impl Histogram {
             range,
             bin_width: (range.1 - range.0) / number_of_bins as f64,
             markers: EguiFitMarkers::default(),
+            plot_settings: PlotSettings::default(),
+            temp_background_fit: None,
+            temp_fit: None,
         }
     }
 
@@ -40,6 +57,55 @@ impl Histogram {
         let bin_index: usize = ((x - self.range.0) / self.bin_width).floor() as usize;
 
         Some(bin_index)
+    }
+
+    pub fn get_bin_centers(&self) -> Vec<f64> {
+        let mut bin_centers = Vec::new();
+
+        for (index, _) in self.bins.iter().enumerate() {
+            let bin_center = self.range.0 + (index as f64 * self.bin_width) + self.bin_width * 0.5;
+            bin_centers.push(bin_center);
+        }
+
+        bin_centers
+    }
+
+    // get the x_values (bin centers) between the start and end x values (inclusive
+    fn get_bin_centers_between(&self, start_x: f64, end_x: f64) -> Vec<f64> {
+        let start_bin = self.get_bin(start_x).unwrap_or(0);
+        let end_bin = self.get_bin(end_x).unwrap_or(self.bins.len() - 1);
+
+        let mut bin_centers = Vec::new();
+
+        for bin in start_bin..=end_bin {
+            if bin < self.bins.len() {
+                let bin_center =
+                    self.range.0 + (bin as f64 * self.bin_width) + self.bin_width * 0.5;
+                bin_centers.push(bin_center);
+            } else {
+                break;
+            }
+        }
+
+        bin_centers
+    }
+
+    // get the bin counts between the start and end x values (inclusive)
+    fn get_bin_counts_between(&self, start_x: f64, end_x: f64) -> Vec<f64> {
+        let start_bin = self.get_bin(start_x).unwrap_or(0);
+        let end_bin = self.get_bin(end_x).unwrap_or(self.bins.len() - 1);
+
+        let mut bin_counts = Vec::new();
+
+        for bin in start_bin..=end_bin {
+            if bin < self.bins.len() {
+                bin_counts.push(self.bins[bin] as f64);
+            } else {
+                break;
+            }
+        }
+
+        bin_counts
     }
 
     // Calculate the statistics for the histogram within the specified x range.
@@ -123,6 +189,124 @@ impl Histogram {
             .name(self.name.clone())
     }
 
+    fn fit_background(&mut self) -> Option<Fitter> {
+        // check to see if there are at least two background markers
+        if self.markers.background_markers.len() < 2 {
+            log::error!("Need to set at least two background markers to fit the histogram");
+            return None;
+        }
+
+        // get the bin centers and counts at the background markers
+        let marker_positions = self.markers.background_markers.clone();
+
+        let mut x_data = Vec::new();
+        let mut y_data = Vec::new();
+        for position in marker_positions.iter() {
+            // get the bin centers and counts at the background markers
+            let bin = self.get_bin(position.clone());
+            if let Some(bin) = bin {
+                let bin_center = self.range.0 + (bin as f64 * self.bin_width) + self.bin_width * 0.5;
+                x_data.push(bin_center);
+                y_data.push(self.bins[bin] as f64);
+            }
+        }
+
+        let mut fitter = Fitter::new(FitModel::Linear);
+        fitter.x_data = x_data;
+        fitter.y_data = y_data;
+
+        fitter.fit();
+
+        Some(fitter)
+
+    }
+    
+    fn fit_gaussians(&mut self) -> Option<Fitter> {
+        self.temp_fit = None;
+
+        // check to see if there are two region markers
+        if self.markers.region_markers.len() != 2 {
+            log::error!("Need to set two region markers to fit the histogram");
+            return None;
+        }
+
+        // remove peak markers outside of region and the position
+        self.markers.remove_peak_markers_outside_region();
+        let peak_positions = self.markers.peak_markers.clone();
+
+        // check to see if there is a temp background fit
+        if self.temp_background_fit.is_none() {
+            // if there are no background fit perform the background fit
+
+            // if there are no background markers, set the background markers to the region markers
+            if self.markers.background_markers.len() == 0 || self.markers.background_markers.len() == 1 {
+                self.markers.background_markers = self.markers.region_markers.clone();
+            }
+
+            self.temp_background_fit = self.fit_background();
+
+        }
+
+        // get background subtracted data
+        let x_data = self.get_bin_centers_between(self.markers.region_markers[0], self.markers.region_markers[1]);
+        let mut y_data = self.get_bin_counts_between(self.markers.region_markers[0], self.markers.region_markers[1]);        
+        
+        let mut fitter = Fitter::new(FitModel::Gaussian(peak_positions));
+        fitter.x_data = x_data;
+        fitter.y_data = y_data;
+
+        fitter.fit();
+
+        Some(fitter)
+    }
+
+    fn interactive(&mut self, ui: &mut egui::Ui) {
+        self.markers.cursor_position = self.plot_settings.cursor_position;
+
+        if let Some(_cursor_position) = self.plot_settings.cursor_position {
+
+            self.markers.interactive_markers(ui);
+
+            // Fit the background using "Shift" + "B"
+            if ui.input(|i| i.key_pressed(egui::Key::G)) {
+                self.temp_background_fit = None;
+                self.temp_background_fit = self.fit_background();
+            }
+
+            // Fit gaussians at the peak markers with "F"
+            if ui.input(|i| i.key_pressed(egui::Key::F)) {
+                self.temp_fit = None;
+
+                // check to see if there are two region markers
+                if self.markers.region_markers.len() != 2 {
+                    log::error!("Need to set two region markers to fit the histogram");
+                    return;
+                }
+
+                // remove peak markers outside of region and the position
+                self.markers.remove_peak_markers_outside_region();
+                let marker_positions = self.markers.peak_markers.clone();
+                
+                let mut fitter = Fitter::new(FitModel::Gaussian(marker_positions));
+                fitter.x_data = self.get_bin_centers_between(self.markers.region_markers[0], self.markers.region_markers[1]);
+                fitter.y_data = self.get_bin_counts_between(self.markers.region_markers[0], self.markers.region_markers[1]);
+
+                fitter.fit();
+
+                self.temp_fit = Some(fitter);
+
+            }
+
+            // change the information visibility boolean with "I"
+            if ui.input(|i| i.key_pressed(egui::Key::I)) {
+                self.plot_settings.info = !self.plot_settings.info;
+            }
+
+
+        }
+
+    }
+
     // Renders the histogram using egui_plot
     pub fn render(&mut self, ui: &mut egui::Ui) {
         /* For custom 2d histogram plot manipulation settings*/
@@ -143,15 +327,12 @@ impl Histogram {
             .allow_scroll(false);
 
         let color = if ui.ctx().style().visuals.dark_mode {
-            // check if the ui is in dark mode.
-            // Light blue looks nice on dark mode but hard to see in light mode.
             egui::Color32::LIGHT_BLUE
         } else {
             egui::Color32::BLACK
         };
 
-        // Enable interactive markers
-        self.markers.interactive_markers(ui);
+        self.interactive(ui);
 
         plot.show(ui, |plot_ui| {
             custom_plot_manipulation(plot_ui, scroll, pointer_down, modifiers);
@@ -161,23 +342,30 @@ impl Histogram {
 
             let step_line = self.egui_histogram_step(color);
 
-            plot_ui.line(step_line);
-
-            let stats_entries = self.legend_entries(plot_min_x, plot_max_x);
-            for entry in stats_entries.iter() {
-                plot_ui.text(
-                    egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
-                        .highlight(false)
-                        .color(color)
-                        .name(entry),
-                );
+            if self.plot_settings.info {
+                let stats_entries = self.legend_entries(plot_min_x, plot_max_x);
+                for entry in stats_entries.iter() {
+                    plot_ui.text(
+                        egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
+                            .highlight(false)
+                            .color(color)
+                            .name(entry),
+                    );
+                }
             }
 
-            self.markers.cursor_position = plot_ui.pointer_coordinate();
+            plot_ui.line(step_line);
+
+            self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
             self.markers.draw_markers(plot_ui);
+
+            if let Some(temp_fit) = &self.temp_fit {
+                temp_fit.draw(plot_ui);
+            }
 
         });
     }
+
 }
 
 fn custom_plot_manipulation(

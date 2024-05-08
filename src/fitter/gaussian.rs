@@ -2,33 +2,42 @@ use nalgebra::DVector;
 use varpro::model::builder::SeparableModelBuilder;
 use varpro::solvers::levmar::{LevMarProblemBuilder, LevMarSolver};
 
-use egui::{Color32, Stroke};
-use egui_plot::{Line, PlotPoint, PlotPoints, PlotUi};
+#[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Value {
+    pub value: f64,
+    pub uncertainty: f64,
+}
 
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GaussianParams {
-    pub amplitude: (f64, f64), // Value and uncertainty
-    pub mean: (f64, f64),
-    pub sigma: (f64, f64),
-    pub fwhm: (f64, f64),
-    pub area: (f64, f64),
+    pub amplitude: Value,
+    pub mean: Value,
+    pub sigma: Value,
+    pub fwhm: Value,
+    pub area: Value,
 }
 
 impl GaussianParams {
     // Constructor that also calculates FWHM and area
-    pub fn new(amplitude: (f64, f64), mean: (f64, f64), sigma: (f64, f64)) -> Self {
-        let fwhm = Self::calculate_fwhm(sigma.0);
-        let fwhm_uncertainty = Self::fwhm_uncertainty(sigma.1);
+    pub fn new(amplitude: Value, mean: Value, sigma: Value) -> Self {
+        let fwhm = Self::calculate_fwhm(sigma.value);
+        let fwhm_uncertainty = Self::fwhm_uncertainty(sigma.uncertainty);
 
-        let area = Self::calculate_area(amplitude.0, sigma.0);
-        let area_uncertainty = Self::area_uncertainty(amplitude, sigma);
+        let area = Self::calculate_area(amplitude.value, sigma.value);
+        let area_uncertainty = Self::area_uncertainty(amplitude.clone(), sigma.clone());
 
         GaussianParams {
             amplitude,
             mean,
             sigma,
-            fwhm: (fwhm, fwhm_uncertainty),
-            area: (area, area_uncertainty),
+            fwhm: Value {
+                value: fwhm,
+                uncertainty: fwhm_uncertainty,
+            },
+            area: Value {
+                value: area,
+                uncertainty: area_uncertainty,
+            },
         }
     }
 
@@ -48,33 +57,31 @@ impl GaussianParams {
     }
 
     // Method to calculate area uncertainty
-    fn area_uncertainty(amplitude: (f64, f64), sigma: (f64, f64)) -> f64 {
+    fn area_uncertainty(amplitude: Value, sigma: Value) -> f64 {
         let two_pi_sqrt = (2.0 * std::f64::consts::PI).sqrt();
-        ((sigma.0 * two_pi_sqrt * amplitude.1).powi(2)
-            + (amplitude.0 * two_pi_sqrt * sigma.1).powi(2))
+        ((sigma.value * two_pi_sqrt * amplitude.uncertainty).powi(2)
+            + (amplitude.value * two_pi_sqrt * sigma.uncertainty).powi(2))
         .sqrt()
     }
 }
 
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GaussianFitter {
-    pub fit_params: Option<Vec<GaussianParams>>,
     x: Vec<f64>,
     y: Vec<f64>,
     pub peak_markers: Vec<f64>,
-
-    #[serde(skip)]
-    pub decomposition_fit_line_points: Option<Vec<Vec<PlotPoint>>>,
+    pub fit_params: Option<Vec<GaussianParams>>,
+    pub fit_lines: Option<Vec<Vec<(f64, f64)>>>,
 }
 
 impl GaussianFitter {
     pub fn new(x: Vec<f64>, y: Vec<f64>, peak_markers: Vec<f64>) -> Self {
         Self {
-            fit_params: None,
             x,
             y,
             peak_markers,
-            decomposition_fit_line_points: None,
+            fit_params: None,
+            fit_lines: None,
         }
     }
 
@@ -129,6 +136,7 @@ impl GaussianFitter {
 
     pub fn multi_gauss_fit(&mut self) {
         self.fit_params = None;
+        self.fit_lines = None;
 
         // convert x and y data to DVector
         let x_data = DVector::from_vec(self.x.clone());
@@ -163,10 +171,6 @@ impl GaussianFitter {
             .observations(y_data)
             .build()
             .unwrap();
-
-        // let fit_result = LevMarSolver::default()
-        //     .fit_with_statistics(problem)
-        //     .expect("fit must succeed");
 
         if let Ok((fit_result, fit_statistics)) =
             LevMarSolver::default().fit_with_statistics(problem)
@@ -214,104 +218,169 @@ impl GaussianFitter {
 
                 // Create a GaussianParams instance which now includes FWHM and area calculations
                 let gaussian_params = GaussianParams::new(
-                    (amplitude, amplitude_variance.sqrt()),
-                    (mean, mean_variance.sqrt()),
-                    (sigma, sigma_variance.sqrt()),
+                    Value {
+                        value: amplitude,
+                        uncertainty: amplitude_variance.sqrt(),
+                    },
+                    Value {
+                        value: mean,
+                        uncertainty: mean_variance.sqrt(),
+                    },
+                    Value {
+                        value: sigma,
+                        uncertainty: sigma_variance.sqrt(),
+                    },
                 );
 
                 // Log the Gaussian component parameters including FWHM and area
                 log::info!("Peak {}: Amplitude: {:.2} ± {:.2}, Mean: {:.2} ± {:.2}, Std Dev: {:.2} ± {:.2}, FWHM: {:.2} ± {:.2}, Area: {:.2} ± {:.2}",
                     i, amplitude, amplitude_variance.sqrt(), mean, mean_variance.sqrt(), sigma, sigma_variance.sqrt(),
-                    gaussian_params.fwhm.0, gaussian_params.fwhm.1, gaussian_params.area.0, gaussian_params.area.1);
+                    gaussian_params.fwhm.value, gaussian_params.fwhm.uncertainty, gaussian_params.area.value, gaussian_params.area.uncertainty);
 
                 params.push(gaussian_params);
             }
 
             self.fit_params = Some(params);
+
+            self.get_fit_lines();
         }
     }
 
-    pub fn get_fit_decomposition_line_points(&mut self) {
+    pub fn get_fit_lines(&mut self) {
         if let Some(fit_params) = &self.fit_params {
-            let mut decomposition_fit_line_points = Vec::new();
+            let mut fit_lines = Vec::new();
 
-            // Loop through each GaussianParams struct in fit_params
             for params in fit_params.iter() {
-                let num_points = 100;
-                let start = params.mean.0 - 5.0 * params.sigma.0; // Adjust start and end to be +/- 5 sigma from the mean
-                let end = params.mean.0 + 5.0 * params.sigma.0;
+                let num_points = 1000;
+                let start = params.mean.value - 5.0 * params.sigma.value; // Adjust start and end to be +/- 5 sigma from the mean
+                let end = params.mean.value + 5.0 * params.sigma.value;
                 let step = (end - start) / num_points as f64;
 
-                let plot_points: Vec<PlotPoint> = (0..=num_points)
-                    .map(|i| {
-                        let x = start + step * i as f64;
-                        // Using coefficient (amplitude) for the Gaussian equation
-                        let y = params.amplitude.0
-                            * (-((x - params.mean.0).powi(2)) / (2.0 * params.sigma.0.powi(2)))
-                                .exp();
-                        PlotPoint::new(x, y)
-                    })
-                    .collect();
+                let mut fit_line_points = Vec::new();
+                for i in 0..num_points {
+                    let x = start + step * i as f64;
+                    // Using coefficient (amplitude) for the Gaussian equation
+                    let y = params.amplitude.value
+                        * (-((x - params.mean.value).powi(2)) / (2.0 * params.sigma.value.powi(2)))
+                            .exp();
+                    fit_line_points.push((x, y));
+                }
 
-                decomposition_fit_line_points.push(plot_points);
+                fit_lines.push(fit_line_points);
             }
 
-            self.decomposition_fit_line_points = Some(decomposition_fit_line_points);
+            self.fit_lines = Some(fit_lines);
         } else {
-            self.decomposition_fit_line_points = None;
+            self.fit_lines = None;
         }
     }
 
-    pub fn draw_decomposition_fit_lines(&self, plot_ui: &mut PlotUi, color: Color32) {
-        if let Some(decomposition_fit_line_points) = &self.decomposition_fit_line_points {
-            for points in decomposition_fit_line_points.iter() {
-                /*
-                // get the gaussian parameters
-                if let Some(params) = &self.fit_params {
-                    let mean_text = format!("Mean: {:.2} ± {:.2}", params[index].mean.0, params[index].mean.1);
-                    let fwhm_text = format!("FWHM: {:.2} ± {:.2}", params[index].fwhm.0, params[index].fwhm.1);
-                    let area_text = format!("Area: {:.2} ± {:.2}", params[index].area.0, params[index].area.1);
+    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi, color: egui::Color32) {
+        if let Some(fit_lines) = &self.fit_lines {
+            for fit in fit_lines.iter() {
+                let points: Vec<egui_plot::PlotPoint> = fit
+                    .iter()
+                    .map(|(x, y)| egui_plot::PlotPoint::new(*x, *y))
+                    .collect();
 
-                    let formatted_text = format!("{}\n{}\n{}", mean_text, fwhm_text, area_text);
-                    // would like the stats to appear when hovering over the line
-                    // add later?
-                }
-                */
-
-                let line = Line::new(PlotPoints::Owned(points.clone()))
+                let line = egui_plot::Line::new(egui_plot::PlotPoints::Owned(points.clone()))
                     .color(color)
-                    .stroke(Stroke::new(1.0, color));
+                    .stroke(egui::Stroke::new(1.0, color));
 
                 plot_ui.line(line);
             }
         }
     }
-
-    pub fn calculate_convoluted_fit_points_with_background(
-        &self,
-        slope: f64,
-        intercept: f64,
-    ) -> Vec<PlotPoint> {
-        let num_points = 1000;
-        let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        let step = (max_x - min_x) / num_points as f64;
-
-        (0..=num_points)
-            .map(|i| {
-                let x = min_x + step * i as f64;
-                // Adjust the calculation for y_gauss to use the GaussianParams struct
-                let y_gauss = self.fit_params.as_ref().map_or(0.0, |params| {
-                    params.iter().fold(0.0, |sum, param| {
-                        sum + param.amplitude.0
-                            * (-((x - param.mean.0).powi(2)) / (2.0 * param.sigma.0.powi(2))).exp()
-                    })
-                });
-                // Directly use slope and intercept to calculate the background estimate for x
-                let y_background = slope * x + intercept;
-                let y_total = y_gauss + y_background; // Correcting the Gaussian fit with the background estimate
-                PlotPoint::new(x, y_total)
-            })
-            .collect()
-    }
 }
+
+// fn decompostition_fit_points(&self, params: GaussianParams, num_points: i32) -> Vec<(f64, f64)> {
+
+//     let start = params.mean.0 - 5.0 * params.sigma.0; // Adjust start and end to be +/- 5 sigma from the mean
+//     let end = params.mean.0 + 5.0 * params.sigma.0;
+//     let step = (end - start) / num_points as f64;
+
+//     let mut decomposition_points = Vec::new();
+//     for i in 0..num_points {
+//         let x = start + step * i as f64;
+//         // Using coefficient (amplitude) for the Gaussian equation
+//         let y = params.amplitude.0
+//             * (-((x - params.mean.0).powi(2)) / (2.0 * params.sigma.0.powi(2)))
+//                 .exp();
+//         decomposition_points.push((x, y));
+//     }
+
+//     decomposition_points
+// }
+
+// pub fn get_fit_decomposition_line_points(&mut self) {
+//     if let Some(fit_params) = &self.fit_params {
+//         let mut decomposition_fit_line_points = Vec::new();
+
+//         // Loop through each GaussianParams struct in fit_params
+//         for params in fit_params.iter() {
+//             let num_points = 100;
+//             let start = params.mean.0 - 5.0 * params.sigma.0; // Adjust start and end to be +/- 5 sigma from the mean
+//             let end = params.mean.0 + 5.0 * params.sigma.0;
+//             let step = (end - start) / num_points as f64;
+
+//             let plot_points: Vec<PlotPoint> = (0..=num_points)
+//                 .map(|i| {
+//                     let x = start + step * i as f64;
+//                     // Using coefficient (amplitude) for the Gaussian equation
+//                     let y = params.amplitude.0
+//                         * (-((x - params.mean.0).powi(2)) / (2.0 * params.sigma.0.powi(2)))
+//                             .exp();
+//                     PlotPoint::new(x, y)
+//                 })
+//                 .collect();
+
+//             decomposition_fit_line_points.push(plot_points);
+//         }
+
+//         self.decomposition_fit_line_points = Some(decomposition_fit_line_points);
+//     } else {
+//         self.decomposition_fit_line_points = None;
+//     }
+// }
+
+// pub fn draw_fit(&self, plot_ui: &mut PlotUi, color: Color32) {
+//     if let Some(fit_lines) = &self.fit_lines {
+//         for fit in fit_lines.iter() {
+//             let points: Vec<PlotPoint> = fit.iter().map(|(x, y)| PlotPoint::new(*x, *y)).collect();
+
+//             let line = Line::new(PlotPoints::Owned(points.clone()))
+//                 .color(color)
+//                 .stroke(Stroke::new(1.0, color));
+
+//             plot_ui.line(line);
+//         }
+//     }
+// }
+
+// pub fn calculate_convoluted_fit_points_with_background(
+//     &self,
+//     slope: f64,
+//     intercept: f64,
+// ) -> Vec<PlotPoint> {
+//     let num_points = 1000;
+//     let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
+//     let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+//     let step = (max_x - min_x) / num_points as f64;
+
+//     (0..=num_points)
+//         .map(|i| {
+//             let x = min_x + step * i as f64;
+//             // Adjust the calculation for y_gauss to use the GaussianParams struct
+//             let y_gauss = self.fit_params.as_ref().map_or(0.0, |params| {
+//                 params.iter().fold(0.0, |sum, param| {
+//                     sum + param.amplitude.0
+//                         * (-((x - param.mean.0).powi(2)) / (2.0 * param.sigma.0.powi(2))).exp()
+//                 })
+//             });
+//             // Directly use slope and intercept to calculate the background estimate for x
+//             let y_background = slope * x + intercept;
+//             let y_total = y_gauss + y_background; // Correcting the Gaussian fit with the background estimate
+//             PlotPoint::new(x, y_total)
+//         })
+//         .collect()
+// }
