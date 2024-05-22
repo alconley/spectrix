@@ -5,7 +5,6 @@ use crate::fitter::fitter::{FitModel, Fitter};
 pub struct PlotSettings {
     #[serde(skip)]
     pub cursor_position: Option<egui_plot::PlotPoint>,
-
     pub info: bool,
     pub color: egui::Color32,
 }
@@ -249,7 +248,7 @@ impl Histogram {
 
         // get background subtracted data
         let x_data = self.get_bin_centers_between(self.markers.region_markers[0], self.markers.region_markers[1]);
-        let mut y_data = self.get_bin_counts_between(self.markers.region_markers[0], self.markers.region_markers[1]);        
+        let y_data = self.get_bin_counts_between(self.markers.region_markers[0], self.markers.region_markers[1]);        
         
         let mut fitter = Fitter::new(FitModel::Gaussian(peak_positions));
         fitter.x_data = x_data;
@@ -324,7 +323,8 @@ impl Histogram {
             .allow_zoom(false)
             .allow_boxed_zoom(true)
             .auto_bounds(egui::Vec2b::new(true, true))
-            .allow_scroll(false);
+            .allow_scroll(false)
+            .show_grid(false);
 
         let color = if ui.ctx().style().visuals.dark_mode {
             egui::Color32::LIGHT_BLUE
