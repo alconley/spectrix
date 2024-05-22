@@ -85,14 +85,6 @@ impl GaussianFitter {
         }
     }
 
-    fn linear(x: &DVector<f64>, b: f64) -> DVector<f64> {
-        x.map(|x_val| (x_val * b ))
-    }
-
-    fn linear_pd(x: &DVector<f64>, b: f64) -> DVector<f64> {
-        x.map(|x_val| ( x_val ))
-    }
-
     fn gaussian(x: &DVector<f64>, mean: f64, sigma: f64) -> DVector<f64> {
         x.map(|x_val| (-((x_val - mean).powi(2)) / (2.0 * sigma.powi(2))).exp())
     }
@@ -158,8 +150,6 @@ impl GaussianFitter {
         let mut builder_proxy = SeparableModelBuilder::<f64>::new(parameter_names)
             .initial_parameters(initial_guess)
             .independent_variable(x_data)
-            .function(&["b"], Self::linear)
-            .partial_deriv("b", Self::linear_pd)
             .function(&["mean0", "sigma"], Self::gaussian)
             .partial_deriv("mean0", Self::gaussian_pd_mean)
             .partial_deriv("sigma", Self::gaussian_pd_std_dev);

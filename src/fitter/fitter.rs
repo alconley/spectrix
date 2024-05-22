@@ -2,6 +2,48 @@ use super::gaussian::GaussianFitter;
 use super::linear::LinearFitter;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct BackgroundFitter {
+    pub x_data: Vec<f64>,
+    pub y_data: Vec<f64>,
+    pub model: FitModel,
+    pub result: Option<FitResult>,
+}
+
+impl BackgroundFitter {
+    pub fn new(x_data: Vec<f64>, y_data: Vec<f64>, model: FitModel) -> Self {
+        BackgroundFitter {
+            x_data,
+            y_data,
+            model,
+            result: None,
+        }
+    }
+
+    pub fn fit(&mut self)  {
+        match self.model {
+            FitModel::Gaussian(_) => {
+                eprintln!("Gaussian background fitting not yet implemented");
+            }
+            FitModel::Linear => {
+
+                // check x and y data are the same length
+                if self.x_data.len()!= self.y_data.len() {
+                    eprintln!("x_data and y_data must have the same length");
+                    return;
+                }
+
+                let mut linear_fitter = LinearFitter::new(self.x_data.clone(), self.y_data.clone());
+                linear_fitter.perform_linear_fit();
+
+                self.result = Some(FitResult::Linear(linear_fitter));
+
+            }
+        }
+    }
+               
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum FitModel {
     Gaussian(Vec<f64>), // put the inital peak locations in here
     Linear,
@@ -18,17 +60,19 @@ pub struct Fitter {
     pub x_data: Vec<f64>,
     pub y_data: Vec<f64>,
     pub y_err: Option<Vec<f64>>,
+    pub background: Option<Background>,
     pub model: FitModel,
     pub result: Option<FitResult>,
 }
 
 impl Fitter {
     // Constructor to create a new Fitter with empty data and specified model
-    pub fn new(model: FitModel) -> Self {
+    pub fn new(model: FitModel, background: Option<BackgroundFitter>) -> Self {
         Fitter {
             x_data: Vec::new(),
             y_data: Vec::new(),
             y_err: None,
+            background,
             model,
             result: None,
         }
@@ -38,6 +82,24 @@ impl Fitter {
         // Perform the fit based on the model
         match &self.model {
             FitModel::Gaussian(peak_markers) => {
+
+                if self.background.is_some() {
+                    // if background is linear, preform linear fit and subtract from data
+                    match &self.background.as_ref().unwrap().model {
+                        FitModel::Linear => {
+                            let mut fit = LinearFitter::new(
+                                self.background.as_ref().unwrap().x_data.clone(),
+                                self.background.as_ref().unwrap().y_data.clone(),
+                            );
+                        }
+                        
+                        FitModel::Gaussian(_) => {
+                            // TODO: implement this
+                        }
+                    }
+                }
+
+
                 // Perform Gaussian fit
                 let mut fit = GaussianFitter::new(
                     self.x_data.clone(),
@@ -49,6 +111,7 @@ impl Fitter {
 
                 self.result = Some(FitResult::Gaussian(fit));
             }
+        
 
             FitModel::Linear => {
                 // Perform Linear fit

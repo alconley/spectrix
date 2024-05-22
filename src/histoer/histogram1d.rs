@@ -7,6 +7,7 @@ pub struct PlotSettings {
     pub cursor_position: Option<egui_plot::PlotPoint>,
     pub info: bool,
     pub color: egui::Color32,
+    pub markers: EguiFitMarkers,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -15,10 +16,10 @@ pub struct Histogram {
     pub bins: Vec<u32>,
     pub range: (f64, f64),
     pub bin_width: f64,
-    pub markers: EguiFitMarkers,
+    // pub markers: EguiFitMarkers,
     pub plot_settings: PlotSettings,
 
-    pub temp_background_fit: Option<Fitter>,
+    // pub temp_background_fit: Option<Fitter>,
     pub temp_fit: Option<Fitter>,
 }
 
@@ -30,9 +31,9 @@ impl Histogram {
             bins: vec![0; number_of_bins],
             range,
             bin_width: (range.1 - range.0) / number_of_bins as f64,
-            markers: EguiFitMarkers::default(),
+            // markers: EguiFitMarkers::default(),
             plot_settings: PlotSettings::default(),
-            temp_background_fit: None,
+            // temp_background_fit: None,
             temp_fit: None,
         }
     }
@@ -190,13 +191,13 @@ impl Histogram {
 
     fn fit_background(&mut self) -> Option<Fitter> {
         // check to see if there are at least two background markers
-        if self.markers.background_markers.len() < 2 {
+        if self.plot_settings.markers.background_markers.len() < 2 {
             log::error!("Need to set at least two background markers to fit the histogram");
             return None;
         }
 
         // get the bin centers and counts at the background markers
-        let marker_positions = self.markers.background_markers.clone();
+        let marker_positions = self.plot_settings.markers.background_markers.clone();
 
         let mut x_data = Vec::new();
         let mut y_data = Vec::new();
@@ -220,81 +221,80 @@ impl Histogram {
 
     }
     
-    fn fit_gaussians(&mut self) -> Option<Fitter> {
-        self.temp_fit = None;
+    // fn fit_gaussians(&mut self) -> Option<Fitter> {
+    //     self.temp_fit = None;
 
-        // check to see if there are two region markers
-        if self.markers.region_markers.len() != 2 {
-            log::error!("Need to set two region markers to fit the histogram");
-            return None;
-        }
+    //     // check to see if there are two region markers
+    //     if self.plot_settings.markers.region_markers.len() != 2 {
+    //         log::error!("Need to set two region markers to fit the histogram");
+    //         return None;
+    //     }
 
-        // remove peak markers outside of region and the position
-        self.markers.remove_peak_markers_outside_region();
-        let peak_positions = self.markers.peak_markers.clone();
+    //     // remove peak markers outside of region and the position
+    //     self.plot_settings.markers.remove_peak_markers_outside_region();
+    //     let peak_positions = self.plot_settings.markers.peak_markers.clone();
 
-        // check to see if there is a temp background fit
-        if self.temp_background_fit.is_none() {
-            // if there are no background fit perform the background fit
+    //     // // check to see if there is a temp background fit
+    //     // if self.temp_background_fit.is_none() {
+    //     //     // if there are no background fit perform the background fit
 
-            // if there are no background markers, set the background markers to the region markers
-            if self.markers.background_markers.len() == 0 || self.markers.background_markers.len() == 1 {
-                self.markers.background_markers = self.markers.region_markers.clone();
-            }
+    //     //     // if there are no background markers, set the background markers to the region markers
+    //     //     if self.plot_settings.markers.background_markers.len() == 0 || self.plot_settings.markers.background_markers.len() == 1 {
+    //     //         self.plot_settings.markers.background_markers = self.plot_settings.markers.region_markers.clone();
+    //     //     }
 
-            self.temp_background_fit = self.fit_background();
+    //     //     self.temp_background_fit = self.fit_background();
 
-        }
+    //     // }
 
-        // get background subtracted data
-        let x_data = self.get_bin_centers_between(self.markers.region_markers[0], self.markers.region_markers[1]);
-        let y_data = self.get_bin_counts_between(self.markers.region_markers[0], self.markers.region_markers[1]);        
+    //     // get background subtracted data
+    //     let x_data = self.get_bin_centers_between(self.plot_settings.markers.region_markers[0], self.plot_settings.markers.region_markers[1]);
+    //     let y_data = self.get_bin_counts_between(self.plot_settings.markers.region_markers[0], self.plot_settings.markers.region_markers[1]);        
         
-        let mut fitter = Fitter::new(FitModel::Gaussian(peak_positions));
-        fitter.x_data = x_data;
-        fitter.y_data = y_data;
+    //     let mut fitter = Fitter::new(FitModel::Gaussian(peak_positions));
+    //     fitter.x_data = x_data;
+    //     fitter.y_data = y_data;
 
-        fitter.fit();
+    //     fitter.fit();
 
-        Some(fitter)
-    }
+    //     Some(fitter)
+    // }
 
     fn interactive(&mut self, ui: &mut egui::Ui) {
-        self.markers.cursor_position = self.plot_settings.cursor_position;
+        self.plot_settings.markers.cursor_position = self.plot_settings.cursor_position;
 
         if let Some(_cursor_position) = self.plot_settings.cursor_position {
 
-            self.markers.interactive_markers(ui);
+            self.plot_settings.markers.interactive_markers(ui);
 
-            // Fit the background using "Shift" + "B"
-            if ui.input(|i| i.key_pressed(egui::Key::G)) {
-                self.temp_background_fit = None;
-                self.temp_background_fit = self.fit_background();
-            }
+            // // // Fit the background using "Shift" + "B"
+            // if ui.input(|i| i.key_pressed(egui::Key::G)) {
+
+            // }
 
             // Fit gaussians at the peak markers with "F"
-            if ui.input(|i| i.key_pressed(egui::Key::F)) {
-                self.temp_fit = None;
+            // if ui.input(|i| i.key_pressed(egui::Key::F)) {
+            //     self.temp_fit = None;
 
-                // check to see if there are two region markers
-                if self.markers.region_markers.len() != 2 {
-                    log::error!("Need to set two region markers to fit the histogram");
-                    return;
-                }
+            //     // check to see if there are two region markers
+            //     if self.plot_settings.markers.region_markers.len() != 2 {
+            //         log::error!("Need to set two region markers to fit the histogram");
+            //         return;
+            //     }
 
-                // remove peak markers outside of region and the position
-                self.markers.remove_peak_markers_outside_region();
-                let marker_positions = self.markers.peak_markers.clone();
+            //     // remove peak markers outside of region and the position
+            //     self.plot_settings.markers.remove_peak_markers_outside_region();
+            //     let marker_positions = self.plot_settings.markers.peak_markers.clone();
                 
-                let mut fitter = Fitter::new(FitModel::Gaussian(marker_positions));
-                fitter.x_data = self.get_bin_centers_between(self.markers.region_markers[0], self.markers.region_markers[1]);
-                fitter.y_data = self.get_bin_counts_between(self.markers.region_markers[0], self.markers.region_markers[1]);
+            //     let mut fitter = Fitter::new(FitModel::Gaussian(marker_positions));
+            //     fitter.x_data = self.get_bin_centers_between(self.plot_settings.markers.region_markers[0], self.plot_settings.markers.region_markers[1]);
+            //     fitter.y_data = self.get_bin_counts_between(self.plot_settings.markers.region_markers[0], self.plot_settings.markers.region_markers[1]);
 
-                fitter.fit();
+            //     fitter.fit();
 
-                self.temp_fit = Some(fitter);
+            //     self.temp_fit = Some(fitter);
 
-            }
+            // }
 
             // change the information visibility boolean with "I"
             if ui.input(|i| i.key_pressed(egui::Key::I)) {
@@ -357,7 +357,7 @@ impl Histogram {
             plot_ui.line(step_line);
 
             self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
-            self.markers.draw_markers(plot_ui);
+            self.plot_settings.markers.draw_markers(plot_ui);
 
             if let Some(temp_fit) = &self.temp_fit {
                 temp_fit.draw(plot_ui);
