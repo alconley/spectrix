@@ -145,5 +145,4 @@ impl LazyFramer {
         }
         Ok(())
     }
-    
 }

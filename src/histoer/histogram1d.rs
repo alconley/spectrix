@@ -1,5 +1,5 @@
 use crate::fitter::egui_markers::EguiFitMarkers;
-use crate::fitter::fitter::{FitModel, Fitter};
+use crate::fitter::fitter::{BackgroundFitter, FitModel, Fitter};
 
 #[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlotSettings {
@@ -11,16 +11,49 @@ pub struct PlotSettings {
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct Fits {
+    pub temp_fit: Option<Fitter>,
+    pub temp_background_fit: Option<BackgroundFitter>,
+    pub stored_fits: Vec<Fitter>,
+}
+
+impl Fits {
+    pub fn new() -> Self {
+        Fits {
+            temp_fit: None,
+            temp_background_fit: None,
+            stored_fits: Vec::new(),
+        }
+    }
+
+    pub fn remove_temp_fits(&mut self) {
+        self.temp_fit = None;
+        self.temp_background_fit = None;
+    }
+
+    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
+        if let Some(temp_fit) = &self.temp_fit {
+            temp_fit.draw(plot_ui);
+        }
+
+        if let Some(temp_background_fit) = &self.temp_background_fit {
+            temp_background_fit.draw(plot_ui);
+        }
+
+        for fit in self.stored_fits.iter() {
+            fit.draw(plot_ui);
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Histogram {
     pub name: String,
     pub bins: Vec<u32>,
     pub range: (f64, f64),
     pub bin_width: f64,
-    // pub markers: EguiFitMarkers,
     pub plot_settings: PlotSettings,
-
-    // pub temp_background_fit: Option<Fitter>,
-    pub temp_fit: Option<Fitter>,
+    pub fits: Fits,
 }
 
 impl Histogram {
@@ -31,10 +64,8 @@ impl Histogram {
             bins: vec![0; number_of_bins],
             range,
             bin_width: (range.1 - range.0) / number_of_bins as f64,
-            // markers: EguiFitMarkers::default(),
             plot_settings: PlotSettings::default(),
-            // temp_background_fit: None,
-            temp_fit: None,
+            fits: Fits::new(),
         }
     }
 
@@ -59,6 +90,7 @@ impl Histogram {
         Some(bin_index)
     }
 
+    // Get the bin centers for the histogram
     pub fn get_bin_centers(&self) -> Vec<f64> {
         let mut bin_centers = Vec::new();
 
@@ -106,6 +138,18 @@ impl Histogram {
         }
 
         bin_counts
+    }
+
+    // get bin counts and bin center at x value
+    fn get_bin_count_and_center(&self, x: f64) -> Option<(f64, f64)> {
+        let bin = self.get_bin(x);
+        if let Some(bin) = bin {
+            let bin_center = self.range.0 + (bin as f64 * self.bin_width) + self.bin_width * 0.5;
+            let bin_count = self.bins[bin] as f64;
+            Some((bin_center, bin_count))
+        } else {
+            None
+        }
     }
 
     // Calculate the statistics for the histogram within the specified x range.
@@ -189,11 +233,15 @@ impl Histogram {
             .name(self.name.clone())
     }
 
-    fn fit_background(&mut self) -> Option<Fitter> {
+    // Fit the background with a linear line using the background markers
+    fn fit_background(&mut self) {
+        // remove temp fits
+        self.fits.remove_temp_fits();
+
         // check to see if there are at least two background markers
         if self.plot_settings.markers.background_markers.len() < 2 {
             log::error!("Need to set at least two background markers to fit the histogram");
-            return None;
+            return;
         }
 
         // get the bin centers and counts at the background markers
@@ -202,75 +250,72 @@ impl Histogram {
         let mut x_data = Vec::new();
         let mut y_data = Vec::new();
         for position in marker_positions.iter() {
-            // get the bin centers and counts at the background markers
-            let bin = self.get_bin(position.clone());
-            if let Some(bin) = bin {
-                let bin_center = self.range.0 + (bin as f64 * self.bin_width) + self.bin_width * 0.5;
+            if let Some((bin_center, bin_count)) = self.get_bin_count_and_center(position.clone()) {
                 x_data.push(bin_center);
-                y_data.push(self.bins[bin] as f64);
+                y_data.push(bin_count);
             }
         }
 
-        let mut fitter = Fitter::new(FitModel::Linear);
-        fitter.x_data = x_data;
-        fitter.y_data = y_data;
+        let mut background_fitter = BackgroundFitter::new(x_data, y_data, FitModel::Linear);
 
-        fitter.fit();
+        background_fitter.fit();
 
-        Some(fitter)
+        let temp_background_fit = background_fitter;
 
+        self.fits.temp_background_fit = Some(temp_background_fit);
     }
-    
-    // fn fit_gaussians(&mut self) -> Option<Fitter> {
-    //     self.temp_fit = None;
 
-    //     // check to see if there are two region markers
-    //     if self.plot_settings.markers.region_markers.len() != 2 {
-    //         log::error!("Need to set two region markers to fit the histogram");
-    //         return None;
-    //     }
+    fn fit_gaussians(&mut self) {
+        // check to see if there are two region markers
+        if self.plot_settings.markers.region_markers.len() != 2 {
+            log::error!("Need to set two region markers to fit the histogram");
+            return;
+        }
 
-    //     // remove peak markers outside of region and the position
-    //     self.plot_settings.markers.remove_peak_markers_outside_region();
-    //     let peak_positions = self.plot_settings.markers.peak_markers.clone();
+        // remove peak markers outside of region and the position
+        self.plot_settings
+            .markers
+            .remove_peak_markers_outside_region();
+        let peak_positions = self.plot_settings.markers.peak_markers.clone();
 
-    //     // // check to see if there is a temp background fit
-    //     // if self.temp_background_fit.is_none() {
-    //     //     // if there are no background fit perform the background fit
+        // check to see if there is a temp background fit
+        if self.fits.temp_background_fit.is_none() {
+            // if there are no background fit perform the background fit
 
-    //     //     // if there are no background markers, set the background markers to the region markers
-    //     //     if self.plot_settings.markers.background_markers.len() == 0 || self.plot_settings.markers.background_markers.len() == 1 {
-    //     //         self.plot_settings.markers.background_markers = self.plot_settings.markers.region_markers.clone();
-    //     //     }
+            // if there are 0/only 1 background marker, set the background markers to the region markers
+            if self.plot_settings.markers.background_markers.len() == 0
+                || self.plot_settings.markers.background_markers.len() == 1
+            {
+                self.plot_settings.markers.background_markers =
+                    self.plot_settings.markers.region_markers.clone();
+            }
 
-    //     //     self.temp_background_fit = self.fit_background();
-
-    //     // }
-
-    //     // get background subtracted data
-    //     let x_data = self.get_bin_centers_between(self.plot_settings.markers.region_markers[0], self.plot_settings.markers.region_markers[1]);
-    //     let y_data = self.get_bin_counts_between(self.plot_settings.markers.region_markers[0], self.plot_settings.markers.region_markers[1]);        
-        
-    //     let mut fitter = Fitter::new(FitModel::Gaussian(peak_positions));
-    //     fitter.x_data = x_data;
-    //     fitter.y_data = y_data;
-
-    //     fitter.fit();
-
-    //     Some(fitter)
-    // }
+            self.fit_background();
+        }
+    }
 
     fn interactive(&mut self, ui: &mut egui::Ui) {
         self.plot_settings.markers.cursor_position = self.plot_settings.cursor_position;
 
         if let Some(_cursor_position) = self.plot_settings.cursor_position {
-
+            /* Functions adds the keybindings related to the markers
+            "P" - Add peak marker
+            "R" - Add region marker
+            "B" - Add background marker
+            "-" - Remove the marker closest to the cursor
+            "Delete" - Remove all markers
+             */
             self.plot_settings.markers.interactive_markers(ui);
 
-            // // // Fit the background using "Shift" + "B"
-            // if ui.input(|i| i.key_pressed(egui::Key::G)) {
+            // remove temp fits with "-" or "Delete"
+            if ui.input(|i| i.key_pressed(egui::Key::Minus) || i.key_pressed(egui::Key::Delete)) {
+                self.fits.remove_temp_fits();
+            }
 
-            // }
+            // Fit the background using "G"
+            if ui.input(|i| i.modifiers.shift && i.key_pressed(egui::Key::B)) {
+                self.fit_background();
+            }
 
             // Fit gaussians at the peak markers with "F"
             // if ui.input(|i| i.key_pressed(egui::Key::F)) {
@@ -285,7 +330,7 @@ impl Histogram {
             //     // remove peak markers outside of region and the position
             //     self.plot_settings.markers.remove_peak_markers_outside_region();
             //     let marker_positions = self.plot_settings.markers.peak_markers.clone();
-                
+
             //     let mut fitter = Fitter::new(FitModel::Gaussian(marker_positions));
             //     fitter.x_data = self.get_bin_centers_between(self.plot_settings.markers.region_markers[0], self.plot_settings.markers.region_markers[1]);
             //     fitter.y_data = self.get_bin_counts_between(self.plot_settings.markers.region_markers[0], self.plot_settings.markers.region_markers[1]);
@@ -300,10 +345,7 @@ impl Histogram {
             if ui.input(|i| i.key_pressed(egui::Key::I)) {
                 self.plot_settings.info = !self.plot_settings.info;
             }
-
-
         }
-
     }
 
     // Renders the histogram using egui_plot
@@ -359,13 +401,9 @@ impl Histogram {
             self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
             self.plot_settings.markers.draw_markers(plot_ui);
 
-            if let Some(temp_fit) = &self.temp_fit {
-                temp_fit.draw(plot_ui);
-            }
-
+            self.fits.draw(plot_ui);
         });
     }
-
 }
 
 fn custom_plot_manipulation(

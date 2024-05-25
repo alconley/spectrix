@@ -4,13 +4,12 @@ pub struct Parameters {
     pub intercept: f64,
 }
 
-
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct LinearFitter {
     x_data: Vec<f64>,
     y_data: Vec<f64>,
     fit_params: Option<Parameters>,
-    fit_line: Option<Vec<(f64, f64)>>
+    fit_line: Option<Vec<(f64, f64)>>,
 }
 
 impl LinearFitter {
@@ -78,7 +77,11 @@ impl LinearFitter {
     pub fn get_fit_line(&mut self) {
         if let Some(params) = &self.fit_params {
             let x_min = self.x_data.iter().cloned().fold(f64::INFINITY, f64::min);
-            let x_max = self.x_data.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let x_max = self
+                .x_data
+                .iter()
+                .cloned()
+                .fold(f64::NEG_INFINITY, f64::max);
 
             let y_min = params.slope * x_min + params.intercept;
             let y_max = params.slope * x_max + params.intercept;
@@ -89,9 +92,11 @@ impl LinearFitter {
 
     pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi, color: egui::Color32) {
         if let Some(fit_line) = &self.fit_line {
+            let plot_points: Vec<egui_plot::PlotPoint> = fit_line
+                .iter()
+                .map(|(x, y)| egui_plot::PlotPoint::new(*x, *y))
+                .collect();
 
-            let plot_points: Vec<egui_plot::PlotPoint> = fit_line.iter().map(|(x, y)| egui_plot::PlotPoint::new(*x, *y)).collect();
-            
             let line = egui_plot::Line::new(egui_plot::PlotPoints::Owned(plot_points))
                 .color(color)
                 .stroke(egui::Stroke::new(1.0, color));
@@ -99,5 +104,4 @@ impl LinearFitter {
             plot_ui.line(line);
         }
     }
-
 }
