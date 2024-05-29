@@ -3,7 +3,7 @@ use super::linear::LinearFitter;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum FitModel {
-    Gaussian(Vec<f64>), // put the inital peak locations in here
+    Gaussian(Vec<f64>), // put the initial peak locations in here
     Linear,
 }
 
@@ -37,7 +37,7 @@ impl BackgroundFitter {
                 eprintln!("Gaussian background fitting not yet implemented");
             }
             FitModel::Linear => {
-                // check x and y data are the same length
+                // Check x and y data are the same length
                 if self.x_data.len() != self.y_data.len() {
                     eprintln!("x_data and y_data must have the same length");
                     return;
@@ -67,6 +67,25 @@ impl BackgroundFitter {
             }
         }
     }
+
+    pub fn get_background(&self, x_data: &[f64]) -> Option<Vec<f64>> {
+        if let Some(FitResult::Linear(fitter)) = &self.result {
+            Some(fitter.calculate_background(x_data))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_slope_intercept(&self) -> Option<(f64, f64)> {
+        if let Some(FitResult::Linear(fitter)) = &self.result {
+            fitter
+                .fit_params
+                .as_ref()
+                .map(|params| (params.slope, params.intercept))
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -92,14 +111,48 @@ impl Fitter {
         }
     }
 
-    pub fn fit(&mut self) -> Result<(), &'static str> {
+    fn subtract_background(&self) -> Vec<f64> {
+        if let Some(bg_fitter) = &self.background {
+            if let Some(bg_result) = bg_fitter.get_background(&self.x_data) {
+                self.y_data
+                    .iter()
+                    .zip(bg_result.iter())
+                    .map(|(y, bg)| y - bg)
+                    .collect()
+            } else {
+                self.y_data.clone()
+            }
+        } else {
+            self.y_data.clone()
+        }
+    }
+
+    pub fn get_peak_markers(&self) -> Vec<f64> {
+        if let FitModel::Gaussian(peak_markers) = &self.model {
+            peak_markers.clone()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn fit(&mut self) {
+        // Fit the background if it's defined and there is no background result
+        if let Some(bg_fitter) = &mut self.background {
+            if bg_fitter.result.is_none() {
+                bg_fitter.fit();
+            }
+        }
+
+        // Perform the background subtraction if necessary
+        let y_data_corrected = self.subtract_background();
+
         // Perform the fit based on the model
         match &self.model {
             FitModel::Gaussian(peak_markers) => {
                 // Perform Gaussian fit
                 let mut fit = GaussianFitter::new(
                     self.x_data.clone(),
-                    self.y_data.clone(),
+                    y_data_corrected,
                     peak_markers.clone(),
                 );
 
@@ -110,15 +163,13 @@ impl Fitter {
 
             FitModel::Linear => {
                 // Perform Linear fit
-                let mut fit = LinearFitter::new(self.x_data.clone(), self.y_data.clone());
+                let mut fit = LinearFitter::new(self.x_data.clone(), y_data_corrected);
 
                 fit.perform_linear_fit();
 
                 self.result = Some(FitResult::Linear(fit));
             }
         }
-
-        Ok(())
     }
 
     pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
@@ -128,6 +179,21 @@ impl Fitter {
                 FitResult::Gaussian(fit) => {
                     let color = egui::Color32::from_rgb(255, 0, 255); // purple
                     fit.draw(plot_ui, color);
+
+                    if let Some(bg_fitter) = &self.background {
+                        if let Some((slope, intercept)) = bg_fitter.get_slope_intercept() {
+                            let convoluted_points = fit
+                                .calculate_convoluted_fit_points_with_linear_background(
+                                    slope, intercept,
+                                );
+                            let line = egui_plot::Line::new(egui_plot::PlotPoints::Owned(
+                                convoluted_points,
+                            ))
+                            .color(egui::Color32::BLUE)
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::BLUE));
+                            plot_ui.line(line);
+                        }
+                    }
                 }
 
                 FitResult::Linear(fit) => {

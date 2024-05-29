@@ -117,8 +117,15 @@ impl GaussianFitter {
             initial_guesses.push(mean);
         }
 
-        // change initial sigma guess to something more resonable later
-        initial_guesses.push(1.0);
+        let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let range = max_x - min_x;
+
+        let average_sigma = range / (5.0 * self.peak_markers.len() as f64);
+
+        log::info!("Average sigma: {}", average_sigma);
+
+        initial_guesses.push(average_sigma);
 
         initial_guesses
     }
@@ -138,12 +145,17 @@ impl GaussianFitter {
         self.fit_params = None;
         self.fit_lines = None;
 
-        // convert x and y data to DVector
+        // Ensure x and y data have the same length
+        if self.x.len() != self.y.len() {
+            eprintln!("x_data and y_data must have the same length");
+            return;
+        }
+
+        // Convert x and y data to DVector
         let x_data = DVector::from_vec(self.x.clone());
         let y_data = DVector::from_vec(self.y.clone());
 
         let initial_guess = self.initial_guess();
-
         let parameter_names = self.generate_parameter_names();
 
         // Add parameters for the first peak manually
@@ -166,7 +178,7 @@ impl GaussianFitter {
         // Finalize the model building process
         let model = builder_proxy.build().unwrap();
 
-        // extract the parameters
+        // Extract the parameters
         let problem = LevMarProblemBuilder::new(model)
             .observations(y_data)
             .build()
@@ -204,13 +216,13 @@ impl GaussianFitter {
             let sigma = nonlinear_parameters[nonlinear_parameters.len() - 1];
             let sigma_variance = nonlinear_variances[nonlinear_parameters.len() - 1];
 
-            // clear peak markers and update with the mean of the gaussians
+            // Clear peak markers and update with the mean of the gaussians
             self.peak_markers.clear();
 
             // Assuming the amplitude (c) for each Gaussian comes first in linear_coefficients
             for (i, &amplitude) in linear_coefficients.iter().enumerate() {
                 let mean = nonlinear_parameters[i];
-                // update peak markers
+                // Update peak markers
                 self.peak_markers.push(mean);
 
                 let mean_variance = nonlinear_variances[i];
@@ -275,6 +287,36 @@ impl GaussianFitter {
         }
     }
 
+    pub fn calculate_convoluted_fit_points_with_linear_background(
+        &self,
+        slope: f64,
+        intercept: f64,
+    ) -> Vec<egui_plot::PlotPoint> {
+        let num_points = 1000;
+        let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let step = (max_x - min_x) / num_points as f64;
+
+        (0..=num_points)
+            .map(|i| {
+                let x = min_x + step * i as f64;
+                // Adjust the calculation for y_gauss to use the GaussianParams struct
+                let y_gauss = self.fit_params.as_ref().map_or(0.0, |params| {
+                    params.iter().fold(0.0, |sum, param| {
+                        sum + param.amplitude.value
+                            * (-((x - param.mean.value).powi(2))
+                                / (2.0 * param.sigma.value.powi(2)))
+                            .exp()
+                    })
+                });
+                // Directly use slope and intercept to calculate the background estimate for x
+                let y_background = slope * x + intercept;
+                let y_total = y_gauss + y_background; // Correcting the Gaussian fit with the background estimate
+                egui_plot::PlotPoint::new(x, y_total)
+            })
+            .collect()
+    }
+
     pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi, color: egui::Color32) {
         if let Some(fit_lines) = &self.fit_lines {
             for fit in fit_lines.iter() {
@@ -291,96 +333,5 @@ impl GaussianFitter {
             }
         }
     }
+
 }
-
-// fn decompostition_fit_points(&self, params: GaussianParams, num_points: i32) -> Vec<(f64, f64)> {
-
-//     let start = params.mean.0 - 5.0 * params.sigma.0; // Adjust start and end to be +/- 5 sigma from the mean
-//     let end = params.mean.0 + 5.0 * params.sigma.0;
-//     let step = (end - start) / num_points as f64;
-
-//     let mut decomposition_points = Vec::new();
-//     for i in 0..num_points {
-//         let x = start + step * i as f64;
-//         // Using coefficient (amplitude) for the Gaussian equation
-//         let y = params.amplitude.0
-//             * (-((x - params.mean.0).powi(2)) / (2.0 * params.sigma.0.powi(2)))
-//                 .exp();
-//         decomposition_points.push((x, y));
-//     }
-
-//     decomposition_points
-// }
-
-// pub fn get_fit_decomposition_line_points(&mut self) {
-//     if let Some(fit_params) = &self.fit_params {
-//         let mut decomposition_fit_line_points = Vec::new();
-
-//         // Loop through each GaussianParams struct in fit_params
-//         for params in fit_params.iter() {
-//             let num_points = 100;
-//             let start = params.mean.0 - 5.0 * params.sigma.0; // Adjust start and end to be +/- 5 sigma from the mean
-//             let end = params.mean.0 + 5.0 * params.sigma.0;
-//             let step = (end - start) / num_points as f64;
-
-//             let plot_points: Vec<PlotPoint> = (0..=num_points)
-//                 .map(|i| {
-//                     let x = start + step * i as f64;
-//                     // Using coefficient (amplitude) for the Gaussian equation
-//                     let y = params.amplitude.0
-//                         * (-((x - params.mean.0).powi(2)) / (2.0 * params.sigma.0.powi(2)))
-//                             .exp();
-//                     PlotPoint::new(x, y)
-//                 })
-//                 .collect();
-
-//             decomposition_fit_line_points.push(plot_points);
-//         }
-
-//         self.decomposition_fit_line_points = Some(decomposition_fit_line_points);
-//     } else {
-//         self.decomposition_fit_line_points = None;
-//     }
-// }
-
-// pub fn draw_fit(&self, plot_ui: &mut PlotUi, color: Color32) {
-//     if let Some(fit_lines) = &self.fit_lines {
-//         for fit in fit_lines.iter() {
-//             let points: Vec<PlotPoint> = fit.iter().map(|(x, y)| PlotPoint::new(*x, *y)).collect();
-
-//             let line = Line::new(PlotPoints::Owned(points.clone()))
-//                 .color(color)
-//                 .stroke(Stroke::new(1.0, color));
-
-//             plot_ui.line(line);
-//         }
-//     }
-// }
-
-// pub fn calculate_convoluted_fit_points_with_background(
-//     &self,
-//     slope: f64,
-//     intercept: f64,
-// ) -> Vec<PlotPoint> {
-//     let num_points = 1000;
-//     let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
-//     let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-//     let step = (max_x - min_x) / num_points as f64;
-
-//     (0..=num_points)
-//         .map(|i| {
-//             let x = min_x + step * i as f64;
-//             // Adjust the calculation for y_gauss to use the GaussianParams struct
-//             let y_gauss = self.fit_params.as_ref().map_or(0.0, |params| {
-//                 params.iter().fold(0.0, |sum, param| {
-//                     sum + param.amplitude.0
-//                         * (-((x - param.mean.0).powi(2)) / (2.0 * param.sigma.0.powi(2))).exp()
-//                 })
-//             });
-//             // Directly use slope and intercept to calculate the background estimate for x
-//             let y_background = slope * x + intercept;
-//             let y_total = y_gauss + y_background; // Correcting the Gaussian fit with the background estimate
-//             PlotPoint::new(x, y_total)
-//         })
-//         .collect()
-// }
