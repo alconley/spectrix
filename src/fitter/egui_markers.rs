@@ -12,6 +12,15 @@ pub struct EguiFitMarkers {
 }
 
 impl EguiFitMarkers {
+    pub fn new() -> Self {
+        EguiFitMarkers {
+            region_markers: Vec::new(),
+            peak_markers: Vec::new(),
+            background_markers: Vec::new(),
+            cursor_position: None,
+        }
+    }
+
     /* region functions */
     pub fn add_region_marker(&mut self, x: f64) {
         self.region_markers.push(x);

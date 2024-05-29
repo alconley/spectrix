@@ -333,5 +333,4 @@ impl GaussianFitter {
             }
         }
     }
-
 }

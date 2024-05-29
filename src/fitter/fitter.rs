@@ -51,17 +51,15 @@ impl BackgroundFitter {
         }
     }
 
-    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
+    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi, color: egui::Color32) {
         // Draw the fit lines
         if let Some(fit) = &self.result {
             match fit {
                 FitResult::Gaussian(fit) => {
-                    let color = egui::Color32::from_rgb(255, 0, 255); // purple
                     fit.draw(plot_ui, color);
                 }
 
                 FitResult::Linear(fit) => {
-                    let color = egui::Color32::GREEN;
                     fit.draw(plot_ui, color);
                 }
             }
@@ -172,15 +170,23 @@ impl Fitter {
         }
     }
 
-    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
+    pub fn draw(
+        &self,
+        plot_ui: &mut egui_plot::PlotUi,
+        fit_color: egui::Color32,
+        background_color: egui::Color32,
+        convoluted_color: egui::Color32,
+    ) {
         // Draw the fit lines
         if let Some(fit) = &self.result {
             match fit {
                 FitResult::Gaussian(fit) => {
-                    let color = egui::Color32::from_rgb(255, 0, 255); // purple
-                    fit.draw(plot_ui, color);
+                    fit.draw(plot_ui, fit_color);
 
                     if let Some(bg_fitter) = &self.background {
+                        // Draw the background fit
+                        bg_fitter.draw(plot_ui, background_color);
+
                         if let Some((slope, intercept)) = bg_fitter.get_slope_intercept() {
                             let convoluted_points = fit
                                 .calculate_convoluted_fit_points_with_linear_background(
@@ -189,16 +195,15 @@ impl Fitter {
                             let line = egui_plot::Line::new(egui_plot::PlotPoints::Owned(
                                 convoluted_points,
                             ))
-                            .color(egui::Color32::BLUE)
-                            .stroke(egui::Stroke::new(1.0, egui::Color32::BLUE));
+                            .color(convoluted_color)
+                            .stroke(egui::Stroke::new(1.0, convoluted_color));
                             plot_ui.line(line);
                         }
                     }
                 }
 
                 FitResult::Linear(fit) => {
-                    let color = egui::Color32::GREEN;
-                    fit.draw(plot_ui, color);
+                    fit.draw(plot_ui, fit_color);
                 }
             }
         }

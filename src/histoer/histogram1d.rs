@@ -1,13 +1,75 @@
 use crate::fitter::egui_markers::EguiFitMarkers;
 use crate::fitter::fitter::{BackgroundFitter, FitModel, Fitter};
 
-#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlotSettings {
     #[serde(skip)]
-    pub cursor_position: Option<egui_plot::PlotPoint>,
-    pub info: bool,
-    pub color: egui::Color32,
-    pub markers: EguiFitMarkers,
+    cursor_position: Option<egui_plot::PlotPoint>,
+    info: bool,
+    color: egui::Color32,
+    markers: EguiFitMarkers,
+    show_x_value: bool,
+    show_y_value: bool,
+    center_x_axis: bool,
+    center_y_axis: bool,
+    allow_zoom: bool,
+    allow_boxed_zoom: bool,
+    allow_drag: bool,
+    allow_scroll: bool,
+    clamp_grid: bool,
+    show_grid: bool,
+    sharp_grid_lines: bool,
+    show_background: bool,
+}
+
+impl Default for PlotSettings {
+    fn default() -> Self {
+        PlotSettings {
+            cursor_position: None,
+            info: true,
+            color: egui::Color32::LIGHT_BLUE,
+            markers: EguiFitMarkers::new(),
+            show_x_value: true,
+            show_y_value: true,
+            center_x_axis: false,
+            center_y_axis: false,
+            allow_zoom: true,
+            allow_boxed_zoom: true,
+            allow_drag: true,
+            allow_scroll: true,
+            clamp_grid: true,
+            show_grid: true,
+            sharp_grid_lines: true,
+            show_background: true,
+        }
+    }
+}
+
+impl PlotSettings {
+    pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
+        ui.vertical(|ui| {
+            ui.label("Plot Settings:");
+            ui.separator();
+            ui.checkbox(&mut self.info, "Show Info");
+            ui.menu_button("Manipulation Settings", |ui| {
+                ui.vertical(|ui| {
+                    ui.checkbox(&mut self.show_x_value, "Show X Value");
+                    ui.checkbox(&mut self.show_y_value, "Show Y Value");
+                    ui.checkbox(&mut self.center_x_axis, "Center X Axis");
+                    ui.checkbox(&mut self.center_y_axis, "Center Y Axis");
+                    ui.checkbox(&mut self.allow_zoom, "Allow Zoom");
+                    ui.checkbox(&mut self.allow_boxed_zoom, "Allow Boxed Zoom");
+                    ui.checkbox(&mut self.allow_drag, "Allow Drag");
+                    ui.checkbox(&mut self.allow_scroll, "Allow Scroll");
+                    ui.checkbox(&mut self.clamp_grid, "Clamp Grid");
+                    ui.checkbox(&mut self.show_grid, "Show Grid");
+                    ui.checkbox(&mut self.sharp_grid_lines, "Sharp Grid Lines");
+                    ui.checkbox(&mut self.show_background, "Show Background");
+                });
+            });
+            ui.color_edit_button_srgba(&mut self.color);
+        });
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -33,16 +95,48 @@ impl Fits {
 
     pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
         if let Some(temp_fit) = &self.temp_fit {
-            temp_fit.draw(plot_ui);
+            temp_fit.draw(
+                plot_ui,
+                egui::Color32::from_rgb(255, 0, 255),
+                egui::Color32::GREEN,
+                egui::Color32::BLUE,
+            );
         }
 
         if let Some(temp_background_fit) = &self.temp_background_fit {
-            temp_background_fit.draw(plot_ui);
+            temp_background_fit.draw(plot_ui, egui::Color32::GREEN);
         }
 
         for fit in self.stored_fits.iter() {
-            fit.draw(plot_ui);
+            fit.draw(
+                plot_ui,
+                egui::Color32::from_rgb(162, 0, 255),
+                egui::Color32::from_rgb(162, 0, 255),
+                egui::Color32::from_rgb(162, 0, 255),
+            );
         }
+    }
+
+    pub fn fit_stats_ui(&self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Fits:");
+            ui.separator();
+            ui.label(format!("Stored fits: {}", self.stored_fits.len()));
+            ui.separator();
+            ui.label("Temp fit:");
+            if self.temp_fit.is_some() {
+                ui.label("Yes");
+            } else {
+                ui.label("No");
+            }
+            ui.separator();
+            ui.label("Temp background fit:");
+            if self.temp_background_fit.is_some() {
+                ui.label("Yes");
+            } else {
+                ui.label("No");
+            }
+        });
     }
 }
 
@@ -321,18 +415,31 @@ impl Histogram {
         self.fits.temp_fit = Some(fitter);
     }
 
+    // Store the temporary fit
+    fn store_fit(&mut self) {
+        if let Some(temp_fit) = self.fits.temp_fit.clone() {
+            self.fits.stored_fits.push(temp_fit);
+            self.fits.temp_fit = None;
+        }
+    }
+
     // Handles the interactive elements of the histogram
     fn interactive(&mut self, ui: &mut egui::Ui) {
+        /* Keybindings for the histogram
+        "P" - Add peak marker
+        "R" - Add region marker
+        "B" - Add background marker
+        "-" - Remove the marker closest to the cursor
+        "Delete" - Remove all markers
+        "G" - Fit the background
+        "F" - Fit gaussians at the peak markers
+        "S" - Store the fit
+        "I" - Toggle information visibility
+         */
         self.plot_settings.markers.cursor_position = self.plot_settings.cursor_position;
 
         if let Some(_cursor_position) = self.plot_settings.cursor_position {
-            /* Functions adds the keybindings related to the markers
-            "P" - Add peak marker
-            "R" - Add region marker
-            "B" - Add background marker
-            "-" - Remove the marker closest to the cursor
-            "Delete" - Remove all markers
-             */
+            // Functions adds the keybindings related to the markers
             self.plot_settings.markers.interactive_markers(ui);
 
             // remove temp fits with "-" or "Delete"
@@ -350,6 +457,11 @@ impl Histogram {
                 self.fit_gaussians();
             }
 
+            // Store the fit with "S"
+            if ui.input(|i| i.key_pressed(egui::Key::S)) {
+                self.store_fit();
+            }
+
             // change the information visibility boolean with "I"
             if ui.input(|i| i.key_pressed(egui::Key::I)) {
                 self.plot_settings.info = !self.plot_settings.info;
@@ -360,37 +472,39 @@ impl Histogram {
     // Renders the histogram using egui_plot
     pub fn render(&mut self, ui: &mut egui::Ui) {
         /* For custom 2d histogram plot manipulation settings*/
-        let (scroll, pointer_down, modifiers) = ui.input(|i| {
-            let scroll = i.events.iter().find_map(|e| match e {
-                egui::Event::MouseWheel { delta, .. } => Some(*delta),
-                _ => None,
-            });
-            (scroll, i.pointer.primary_down(), i.modifiers)
-        });
+        // let (scroll, pointer_down, modifiers) = ui.input(|i| {
+        //     let scroll = i.events.iter().find_map(|e| match e {
+        //         egui::Event::MouseWheel { delta, .. } => Some(*delta),
+        //         _ => None,
+        //     });
+        //     (scroll, i.pointer.primary_down(), i.modifiers)
+        // });
 
         let plot = egui_plot::Plot::new(self.name.clone())
             .legend(egui_plot::Legend::default())
-            .allow_drag(false)
-            .allow_zoom(false)
-            .allow_boxed_zoom(true)
-            .auto_bounds(egui::Vec2b::new(true, true))
-            .allow_scroll(false);
-
-        let color = if ui.ctx().style().visuals.dark_mode {
-            egui::Color32::LIGHT_BLUE
-        } else {
-            egui::Color32::BLACK
-        };
+            .show_x(self.plot_settings.show_x_value)
+            .show_y(self.plot_settings.show_y_value)
+            .center_x_axis(self.plot_settings.center_x_axis)
+            .center_y_axis(self.plot_settings.center_y_axis)
+            .allow_zoom(self.plot_settings.allow_zoom)
+            .allow_boxed_zoom(self.plot_settings.allow_boxed_zoom)
+            .allow_drag(self.plot_settings.allow_drag)
+            .allow_scroll(self.plot_settings.allow_scroll)
+            .clamp_grid(self.plot_settings.clamp_grid)
+            .show_grid(self.plot_settings.show_grid)
+            .sharp_grid_lines(self.plot_settings.sharp_grid_lines)
+            .show_background(self.plot_settings.show_background)
+            .auto_bounds(egui::Vec2b::new(true, true));
 
         self.interactive(ui);
 
         plot.show(ui, |plot_ui| {
-            custom_plot_manipulation(plot_ui, scroll, pointer_down, modifiers);
+            // custom_plot_manipulation(plot_ui, scroll, pointer_down, modifiers);
 
             let plot_min_x = plot_ui.plot_bounds().min()[0];
             let plot_max_x = plot_ui.plot_bounds().max()[0];
 
-            let step_line = self.egui_histogram_step(color);
+            let step_line = self.egui_histogram_step(self.plot_settings.color);
 
             if self.plot_settings.info {
                 let stats_entries = self.legend_entries(plot_min_x, plot_max_x);
@@ -398,7 +512,7 @@ impl Histogram {
                     plot_ui.text(
                         egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
                             .highlight(false)
-                            .color(color)
+                            .color(self.plot_settings.color)
                             .name(entry),
                     );
                 }
@@ -406,14 +520,24 @@ impl Histogram {
 
             plot_ui.line(step_line);
 
-            self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
+            if plot_ui.response().hovered() {
+                self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
+            } else {
+                self.plot_settings.cursor_position = None;
+            }
+
             self.plot_settings.markers.draw_markers(plot_ui);
 
             self.fits.draw(plot_ui);
+        })
+        .response
+        .context_menu(|ui| {
+            self.plot_settings.settings_ui(ui);
         });
     }
 }
 
+/*
 fn custom_plot_manipulation(
     plot_ui: &mut egui_plot::PlotUi,
     scroll: Option<egui::Vec2>,
@@ -475,3 +599,4 @@ fn custom_plot_manipulation(
         }
     }
 }
+*/

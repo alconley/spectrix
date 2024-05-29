@@ -11,49 +11,11 @@ use crate::pane::Pane;
 
 use std::collections::HashMap;
 
-// #[derive(Default, serde::Deserialize, serde::Serialize)]
-// pub struct Histogram1DCreation {
-//     pub name: String,
-//     pub bins: usize,
-//     pub min_range: f64,
-//     pub max_range: f64,
-//     pub column_name: String,
-// }
-
-// impl Histogram1DCreation {
-//     pub fn new(name: &str, bins: usize, min_range: f64, max_range: f64, column_name: &str) -> Self {
-//         Self {
-//             name: name.to_string(),
-//             bins,
-//             min_range,
-//             max_range,
-//             column_name: column_name.to_string(),
-//         }
-//     }
-
-//     pub fn ui(&mut self, ui: &mut egui::Ui) {
-//         ui.horizontal(|ui| {
-//             ui.label("Name: ");
-//             ui.text_edit_singleline(&mut self.name);
-//             ui.label("Bins: ");
-//             ui.add(egui::widgets::DragValue::new(&mut self.bins).speed(1.0));
-//             ui.label("Min Range: ");
-//             ui.add(egui::widgets::DragValue::new(&mut self.min_range).speed(1.0));
-//             ui.label("Max Range: ");
-//             ui.add(egui::widgets::DragValue::new(&mut self.max_range).speed(1.0));
-//             ui.label("Column Name: ");
-//             ui.text_edit_singleline(&mut self.column_name);
-//         });
-//     }
-
-// }
-
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Histogrammer {
     pub histograms1d: Vec<Histogram>,
     pub histograms2d: Vec<Histogram2D>,
 
-    // pub histogram1d_creation: Vec<Histogram1DCreation>,
     #[serde(skip)]
     pub tabs: HashMap<String, Vec<Pane>>,
 }
@@ -64,8 +26,6 @@ impl Histogrammer {
         Self {
             histograms1d: Vec::new(),
             histograms2d: Vec::new(),
-
-            // histogram1d_creation: Vec::new(),
             tabs: HashMap::new(),
         }
     }

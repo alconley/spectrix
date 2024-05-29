@@ -39,7 +39,6 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
         (col("ScintRightTime") - col("ScintLeftTime")).alias("ScintRightTime_ScintLeftTime"),
     ]);
 
-    
     // h.add_fill_hist1d("Cebra0Energy", &lf, "Cebra0Energy", 512, (0.0, 4096.0));
     // h.add_fill_hist1d("Cebra1Energy", &lf, "Cebra1Energy", 512, (0.0, 4096.0));
     // h.add_fill_hist1d("Cebra2Energy", &lf, "Cebra2Energy", 512, (0.0, 4096.0));
