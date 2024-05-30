@@ -1,5 +1,6 @@
 use nalgebra::DVector;
 use varpro::model::builder::SeparableModelBuilder;
+use varpro::model::SeparableNonlinearModel;
 use varpro::solvers::levmar::{LevMarProblemBuilder, LevMarSolver};
 
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -176,13 +177,13 @@ impl GaussianFitter {
         }
 
         // Finalize the model building process
-        let model = builder_proxy.build().unwrap();
+        let model = builder_proxy.build().expect("Failed to build model");
 
         // Extract the parameters
         let problem = LevMarProblemBuilder::new(model)
             .observations(y_data)
             .build()
-            .unwrap();
+            .expect("Failed to build problem");
 
         if let Ok((fit_result, fit_statistics)) =
             LevMarSolver::default().fit_with_statistics(problem)

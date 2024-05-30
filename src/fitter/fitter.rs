@@ -126,7 +126,9 @@ impl Fitter {
     }
 
     pub fn get_peak_markers(&self) -> Vec<f64> {
-        if let FitModel::Gaussian(peak_markers) = &self.model {
+        if let Some(FitResult::Gaussian(fit)) = &self.result {
+            fit.peak_markers.clone()
+        } else if let FitModel::Gaussian(peak_markers) = &self.model {
             peak_markers.clone()
         } else {
             Vec::new()
