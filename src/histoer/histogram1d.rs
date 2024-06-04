@@ -1,5 +1,5 @@
 use crate::fitter::egui_markers::EguiFitMarkers;
-use crate::fitter::fitter::{BackgroundFitter, FitModel, Fits, Fitter};
+use crate::fitter::fitter_handler::{BackgroundFitter, FitModel, Fits, Fitter};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlotSettings {
@@ -73,6 +73,8 @@ impl PlotSettings {
                     ui.checkbox(&mut self.show_background, "Show Background");
                 });
             });
+
+            self.markers.context_menu_marker_interactions(ui);
         });
     }
 
@@ -131,7 +133,7 @@ impl Histogram {
     }
 
     // Get the bin centers for the histogram
-    fn get_bin_centers(&self) -> Vec<f64> {
+    fn _get_bin_centers(&self) -> Vec<f64> {
         self.bins
             .iter()
             .enumerate()
@@ -294,8 +296,7 @@ impl Histogram {
 
         if self.fits.temp_background_fit.is_none() {
             if self.plot_settings.markers.background_markers.len() <= 1 {
-                self.plot_settings.markers.background_markers =
-                    self.plot_settings.markers.region_markers.clone();
+                self.plot_settings.markers.background_markers.clone_from(&self.plot_settings.markers.region_markers)
             }
             self.fit_background();
         }
@@ -413,7 +414,7 @@ impl Histogram {
                     self.plot_settings.cursor_position = None;
                 }
 
-                self.plot_settings.markers.draw_markers(plot_ui);
+                self.plot_settings.markers.draw_all_markers(plot_ui);
 
                 self.fits.draw(plot_ui);
             })

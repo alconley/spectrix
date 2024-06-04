@@ -228,6 +228,12 @@ pub struct Fits {
     pub stored_fits: Vec<Fitter>,
 }
 
+impl Default for Fits {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Fits {
     pub fn new() -> Self {
         Fits {
@@ -267,7 +273,6 @@ impl Fits {
     }
 
     pub fn fit_stats_grid_ui(&mut self, ui: &mut egui::Ui) {
-
         // only show the grid if there is something to show
         if self.temp_fit.is_none() && self.stored_fits.is_empty() {
             return;
@@ -288,7 +293,7 @@ impl Fits {
                     ui.label("Area");
                     ui.end_row();
 
-                    if !self.temp_fit.is_none() {
+                    if self.temp_fit.is_some() {
                         ui.label("Current");
 
                         if let Some(temp_fit) = &self.temp_fit {

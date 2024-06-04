@@ -10,7 +10,7 @@ fn main() -> Result<(), eframe::Error> {
         ..Default::default()
     };
     eframe::run_native(
-        "egui_tiles example",
+        "muc",
         options,
         Box::new(|_cc| {
             #[cfg_attr(not(feature = "serde"), allow(unused_mut))]
