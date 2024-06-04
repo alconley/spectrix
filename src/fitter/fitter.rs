@@ -172,6 +172,15 @@ impl Fitter {
         }
     }
 
+    pub fn fitter_stats(&self, ui: &mut egui::Ui) {
+        if let Some(fit) = &self.result {
+            match fit {
+                FitResult::Gaussian(fit) => fit.fit_params_ui(ui),
+                FitResult::Linear(fit) => fit.fit_params_ui(ui),
+            }
+        }
+    }
+
     pub fn draw(
         &self,
         plot_ui: &mut egui_plot::PlotUi,
@@ -208,6 +217,106 @@ impl Fitter {
                     fit.draw(plot_ui, fit_color);
                 }
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct Fits {
+    pub temp_fit: Option<Fitter>,
+    pub temp_background_fit: Option<BackgroundFitter>,
+    pub stored_fits: Vec<Fitter>,
+}
+
+impl Fits {
+    pub fn new() -> Self {
+        Fits {
+            temp_fit: None,
+            temp_background_fit: None,
+            stored_fits: Vec::new(),
+        }
+    }
+
+    pub fn remove_temp_fits(&mut self) {
+        self.temp_fit = None;
+        self.temp_background_fit = None;
+    }
+
+    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
+        if let Some(temp_fit) = &self.temp_fit {
+            temp_fit.draw(
+                plot_ui,
+                egui::Color32::from_rgb(255, 0, 255),
+                egui::Color32::GREEN,
+                egui::Color32::BLUE,
+            );
+        }
+
+        if let Some(temp_background_fit) = &self.temp_background_fit {
+            temp_background_fit.draw(plot_ui, egui::Color32::GREEN);
+        }
+
+        for fit in self.stored_fits.iter() {
+            fit.draw(
+                plot_ui,
+                egui::Color32::from_rgb(162, 0, 255),
+                egui::Color32::from_rgb(162, 0, 255),
+                egui::Color32::from_rgb(162, 0, 255),
+            );
+        }
+    }
+
+    pub fn fit_stats_grid_ui(&mut self, ui: &mut egui::Ui) {
+
+        // only show the grid if there is something to show
+        if self.temp_fit.is_none() && self.stored_fits.is_empty() {
+            return;
+        }
+
+        let mut to_remove = None;
+
+        // make this a scrollable grid
+
+        egui::ScrollArea::both().show(ui, |ui| {
+            egui::Grid::new("fit_params_grid")
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.label("Fit");
+                    ui.label("Peak");
+                    ui.label("Mean");
+                    ui.label("FWHM");
+                    ui.label("Area");
+                    ui.end_row();
+
+                    if !self.temp_fit.is_none() {
+                        ui.label("Current");
+
+                        if let Some(temp_fit) = &self.temp_fit {
+                            temp_fit.fitter_stats(ui);
+                        }
+                    }
+
+                    if !self.stored_fits.is_empty() {
+                        for (i, fit) in self.stored_fits.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("Fit {}", i));
+
+                                ui.separator();
+
+                                if ui.button("X").clicked() {
+                                    to_remove = Some(i);
+                                }
+
+                                ui.separator();
+                            });
+                            fit.fitter_stats(ui);
+                        }
+                    }
+                });
+        });
+
+        if let Some(index) = to_remove {
+            self.stored_fits.remove(index);
         }
     }
 }

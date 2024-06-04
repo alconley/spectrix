@@ -9,6 +9,14 @@ pub struct Parameters {
     pub intercept: f64,
 }
 
+impl Parameters {
+    pub fn params_ui(&self, ui: &mut egui::Ui) {
+        // just display the value with 4 decimal places
+        ui.label(format!("Slope: {:.4}", self.slope));
+        ui.label(format!("Intercept: {:.4}", self.intercept));
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LinearFitter {
     x_data: Vec<f64>,
@@ -141,6 +149,12 @@ impl LinearFitter {
                 .collect()
         } else {
             vec![]
+        }
+    }
+
+    pub fn fit_params_ui(&self, ui: &mut egui::Ui) {
+        if let Some(params) = &self.fit_params {
+            params.params_ui(ui);
         }
     }
 }

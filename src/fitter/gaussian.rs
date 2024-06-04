@@ -65,22 +65,19 @@ impl GaussianParams {
     }
 
     pub fn params_ui(&self, ui: &mut egui::Ui) {
-        // plan to put this in a grid layout
-        ui.horizontal(|ui| {
-            ui.label(format!("{:.4} ± {:.4}", self.mean.value, self.mean.uncertainty));
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("FWHM:");
-            ui.label(format!("{:.4} ± {:.4}", self.fwhm.value, self.fwhm.uncertainty));
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Area:");
-            ui.label(format!("{:.4} ± {:.4}", self.area.value, self.area.uncertainty));
-        });
+        ui.label(format!(
+            "{:.2} ± {:.2}",
+            self.mean.value, self.mean.uncertainty
+        ));
+        ui.label(format!(
+            "{:.2} ± {:.2}",
+            self.fwhm.value, self.fwhm.uncertainty
+        ));
+        ui.label(format!(
+            "{:.2} ± {:.2}",
+            self.area.value, self.area.uncertainty
+        ));
     }
-
 }
 
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -90,7 +87,7 @@ pub struct GaussianFitter {
     pub peak_markers: Vec<f64>,
     pub fit_params: Option<Vec<GaussianParams>>,
     pub fit_lines: Option<Vec<Vec<(f64, f64)>>>,
-}   
+}
 
 impl GaussianFitter {
     pub fn new(x: Vec<f64>, y: Vec<f64>, peak_markers: Vec<f64>) -> Self {
@@ -100,7 +97,6 @@ impl GaussianFitter {
             peak_markers,
             fit_params: None,
             fit_lines: None,
-
         }
     }
 
@@ -356,9 +352,13 @@ impl GaussianFitter {
     pub fn fit_params_ui(&self, ui: &mut egui::Ui) {
         if let Some(fit_params) = &self.fit_params {
             for (i, params) in fit_params.iter().enumerate() {
-                ui.collapsing(format!("Peak {}", i), |ui| {
-                    params.params_ui(ui);
-                });
+                if i != 0 {
+                    ui.label("");
+                }
+
+                ui.label(format!("Peak {}", i));
+                params.params_ui(ui);
+                ui.end_row();
             }
         }
     }

@@ -1,5 +1,5 @@
 use crate::fitter::egui_markers::EguiFitMarkers;
-use crate::fitter::fitter::{BackgroundFitter, FitModel, Fitter};
+use crate::fitter::fitter::{BackgroundFitter, FitModel, Fits, Fitter};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlotSettings {
@@ -8,6 +8,7 @@ pub struct PlotSettings {
     info: bool,
     show_fit_stats: bool,
     color: egui::Color32,
+    show_color_changer: bool,
     markers: EguiFitMarkers,
     show_x_value: bool,
     show_y_value: bool,
@@ -30,6 +31,7 @@ impl Default for PlotSettings {
             info: true,
             show_fit_stats: true,
             color: egui::Color32::LIGHT_BLUE,
+            show_color_changer: false,
             markers: EguiFitMarkers::new(),
             show_x_value: true,
             show_y_value: true,
@@ -56,6 +58,7 @@ impl PlotSettings {
             ui.checkbox(&mut self.show_fit_stats, "Show Fit Stats");
             ui.menu_button("Manipulation Settings", |ui| {
                 ui.vertical(|ui| {
+                    ui.checkbox(&mut self.show_color_changer, "Show Color Changer");
                     ui.checkbox(&mut self.show_x_value, "Show X Value");
                     ui.checkbox(&mut self.show_y_value, "Show Y Value");
                     ui.checkbox(&mut self.center_x_axis, "Center X Axis");
@@ -70,53 +73,15 @@ impl PlotSettings {
                     ui.checkbox(&mut self.show_background, "Show Background");
                 });
             });
-            ui.color_edit_button_srgba(&mut self.color);
         });
     }
-}
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct Fits {
-    pub temp_fit: Option<Fitter>,
-    pub temp_background_fit: Option<BackgroundFitter>,
-    pub stored_fits: Vec<Fitter>,
-}
-
-impl Fits {
-    pub fn new() -> Self {
-        Fits {
-            temp_fit: None,
-            temp_background_fit: None,
-            stored_fits: Vec::new(),
-        }
-    }
-
-    pub fn remove_temp_fits(&mut self) {
-        self.temp_fit = None;
-        self.temp_background_fit = None;
-    }
-
-    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
-        if let Some(temp_fit) = &self.temp_fit {
-            temp_fit.draw(
-                plot_ui,
-                egui::Color32::from_rgb(255, 0, 255),
-                egui::Color32::GREEN,
-                egui::Color32::BLUE,
-            );
-        }
-
-        if let Some(temp_background_fit) = &self.temp_background_fit {
-            temp_background_fit.draw(plot_ui, egui::Color32::GREEN);
-        }
-
-        for fit in self.stored_fits.iter() {
-            fit.draw(
-                plot_ui,
-                egui::Color32::from_rgb(162, 0, 255),
-                egui::Color32::from_rgb(162, 0, 255),
-                egui::Color32::from_rgb(162, 0, 255),
-            );
+    pub fn above_histo_ui(&mut self, ui: &mut egui::Ui) {
+        if self.show_color_changer {
+            ui.horizontal(|ui| {
+                ui.label("Color: ");
+                ui.color_edit_button_srgba(&mut self.color);
+            });
         }
     }
 }
@@ -415,39 +380,47 @@ impl Histogram {
 
         self.interactive(ui);
 
-        plot.show(ui, |plot_ui| {
-            let plot_min_x = plot_ui.plot_bounds().min()[0];
-            let plot_max_x = plot_ui.plot_bounds().max()[0];
+        ui.vertical(|ui| {
+            self.plot_settings.above_histo_ui(ui);
 
-            let step_line = self.egui_histogram_step(self.plot_settings.color);
+            if self.plot_settings.show_fit_stats {
+                self.fits.fit_stats_grid_ui(ui);
+            }
 
-            if self.plot_settings.info {
-                let stats_entries = self.legend_entries(plot_min_x, plot_max_x);
-                for entry in stats_entries.iter() {
-                    plot_ui.text(
-                        egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
-                            .highlight(false)
-                            .color(self.plot_settings.color)
-                            .name(entry),
-                    );
+            plot.show(ui, |plot_ui| {
+                let plot_min_x = plot_ui.plot_bounds().min()[0];
+                let plot_max_x = plot_ui.plot_bounds().max()[0];
+
+                let step_line = self.egui_histogram_step(self.plot_settings.color);
+
+                if self.plot_settings.info {
+                    let stats_entries = self.legend_entries(plot_min_x, plot_max_x);
+                    for entry in stats_entries.iter() {
+                        plot_ui.text(
+                            egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
+                                .highlight(false)
+                                .color(self.plot_settings.color)
+                                .name(entry),
+                        );
+                    }
                 }
-            }
 
-            plot_ui.line(step_line);
+                plot_ui.line(step_line);
 
-            if plot_ui.response().hovered() {
-                self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
-            } else {
-                self.plot_settings.cursor_position = None;
-            }
+                if plot_ui.response().hovered() {
+                    self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
+                } else {
+                    self.plot_settings.cursor_position = None;
+                }
 
-            self.plot_settings.markers.draw_markers(plot_ui);
+                self.plot_settings.markers.draw_markers(plot_ui);
 
-            self.fits.draw(plot_ui);
-        })
-        .response
-        .context_menu(|ui| {
-            self.plot_settings.settings_ui(ui);
+                self.fits.draw(plot_ui);
+            })
+            .response
+            .context_menu(|ui| {
+                self.plot_settings.settings_ui(ui);
+            });
         });
     }
 }
