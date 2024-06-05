@@ -73,14 +73,14 @@ impl Histogrammer {
                     }
                     Err(e) => {
                         // Handle the error, for example, log it or return an error
-                        eprintln!("Failed to convert DataFrame to ndarray: {}", e);
+                        log::error!("Failed to convert DataFrame to ndarray: {}", e);
                         false
                     }
                 }
             }
             Err(e) => {
                 // Handle the error, for example, log it or return an error
-                eprintln!("Failed to collect LazyFrame: {}", e);
+                log::error!("Failed to collect LazyFrame: {}", e);
                 false
             }
         }
@@ -103,12 +103,10 @@ impl Histogrammer {
     pub fn add_hist2d(
         &mut self,
         name: &str,
-        x_bins: usize,
-        x_range: (f64, f64),
-        y_bins: usize,
-        y_range: (f64, f64),
+        bins: (usize, usize),
+        range: ((f64, f64), (f64, f64)),
     ) {
-        let hist: Histogram2D = Histogram2D::new(name, x_bins, x_range, y_bins, y_range); // Create a new 2D histogram.
+        let hist: Histogram2D = Histogram2D::new(name, bins, range); // Create a new 2D histogram.
         self.histograms2d.push(hist); // Store it in the vector.
     }
 
@@ -158,33 +156,30 @@ impl Histogrammer {
                     }
                     Err(e) => {
                         // Handle the error, for example, log it or return an error
-                        eprintln!("Failed to convert DataFrame to ndarray: {}", e);
+                        log::error!("Failed to convert DataFrame to ndarray: {}", e);
                         false
                     }
                 }
             }
             Err(e) => {
                 // Handle the error, for example, log it or return an error
-                eprintln!("Failed to collect LazyFrame: {}", e);
+                log::error!("Failed to collect LazyFrame: {}", e);
                 false
             }
         }
     }
 
     // Adds and fills a 2D histogram with data from Polars LazyFrame columns.
-    #[allow(clippy::too_many_arguments)]
     pub fn add_fill_hist2d(
         &mut self,
         name: &str,
         lf: &LazyFrame,
         x_column_name: &str,
-        x_bins: usize,
-        x_range: (f64, f64),
         y_column_name: &str,
-        y_bins: usize,
-        y_range: (f64, f64),
+        bins: (usize, usize),
+        range: ((f64, f64), (f64, f64)),
     ) {
-        self.add_hist2d(name, x_bins, x_range, y_bins, y_range); // Add the histogram.
+        self.add_hist2d(name, bins, range); // Add the histogram.
         self.fill_hist2d(name, lf, x_column_name, y_column_name); // Fill it with data.
     }
 

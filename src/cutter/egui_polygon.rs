@@ -207,7 +207,7 @@ impl EditableEguiPolygon {
             // Load Cut button
             if ui.button("Load Cut").clicked() {
                 if let Err(e) = self.load_cut_from_json() {
-                    eprintln!("Error loading cut: {:?}", e);
+                    log::error!("Error loading cut: {:?}", e);
                 }
             }
 
@@ -219,7 +219,7 @@ impl EditableEguiPolygon {
                 .clicked()
             {
                 if let Err(e) = self.save_cut_to_json() {
-                    eprintln!("Error saving cut: {:?}", e);
+                    log::error!("Error saving cut: {:?}", e);
                 }
             }
 

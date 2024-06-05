@@ -1,8 +1,7 @@
 use eframe::App;
 
 #[derive(serde::Deserialize, serde::Serialize, Debug, Default)]
-pub struct MUCApp {
-}
+pub struct MUCApp {}
 
 impl MUCApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {

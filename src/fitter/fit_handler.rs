@@ -1,331 +1,387 @@
-// use egui_plot::PlotUi;
+use rfd::FileDialog;
 
-// use egui::Color32;
+use std::fs::File;
+use std::io::{Read, Write};
 
-// use rfd::FileDialog;
+use super::gaussian::GaussianFitter;
+use super::linear::LinearFitter;
 
-// use std::fs::File;
-// use std::io::{self, Read};
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub enum FitModel {
+    Gaussian(Vec<f64>), // put the initial peak locations in here
+    Linear,
+}
 
-// use super::egui_markers::EguiFitMarkers;
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub enum FitResult {
+    Gaussian(GaussianFitter),
+    Linear(LinearFitter),
+}
 
-// use super::fit::Fit;
-// use crate::histoer::histogram1d::Histogram;
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct BackgroundFitter {
+    pub x_data: Vec<f64>,
+    pub y_data: Vec<f64>,
+    pub model: FitModel,
+    pub result: Option<FitResult>,
+}
 
-// #[derive(Default, serde::Deserialize, serde::Serialize)]
-// pub struct FitHandler {
-//     pub histogram: Option<Histogram>,
-//     pub fits: Vec<Fit>,
-//     pub current_fit: Option<Fit>,
-//     pub markers: EguiFitMarkers,
-//     pub show_fit_stats: bool,
-//     to_remove_index: Option<usize>,
-// }
+impl BackgroundFitter {
+    pub fn new(x_data: Vec<f64>, y_data: Vec<f64>, model: FitModel) -> Self {
+        BackgroundFitter {
+            x_data,
+            y_data,
+            model,
+            result: None,
+        }
+    }
 
-// impl FitHandler {
-//     pub fn interactive_keybinds(&mut self, ui: &mut egui::Ui) {
-//         // remove the closest marker to the cursor and the fit
-//         if ui.input(|i| i.key_pressed(egui::Key::Minus)) {
-//             if let Some(fit) = &mut self.current_fit {
-//                 fit.clear();
-//             }
+    pub fn fit(&mut self) {
+        match self.model {
+            FitModel::Gaussian(_) => {
+                log::error!("Gaussian background fitting not yet implemented");
+            }
+            FitModel::Linear => {
+                // Check x and y data are the same length
+                if self.x_data.len() != self.y_data.len() {
+                    log::error!("x_data and y_data must have the same length");
+                    return;
+                }
 
-//             self.markers.delete_closest_marker();
-//         }
+                let mut linear_fitter = LinearFitter::new(self.x_data.clone(), self.y_data.clone());
+                linear_fitter.perform_linear_fit();
 
-//         // function for adding markers
-//         // Peak markers are added with the 'P' key
-//         // Background markers are added with the 'B' key
-//         // Region markers are added with the 'R' key
-//         self.markers.interactive_markers(ui);
+                self.result = Some(FitResult::Linear(linear_fitter));
+            }
+        }
+    }
 
-//         // fit the histogram with the 'F' key
-//         if ui.input(|i| i.key_pressed(egui::Key::F)) {
-//             self.fit();
-//         }
+    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi, color: egui::Color32) {
+        // Draw the fit lines
+        if let Some(fit) = &self.result {
+            match fit {
+                FitResult::Gaussian(fit) => {
+                    fit.draw(plot_ui, color);
+                }
 
-//         // store the fit with the 'S' key
-//         if ui.input(|i| i.key_pressed(egui::Key::S)) {
-//             self.store_fit();
-//         }
+                FitResult::Linear(fit) => {
+                    fit.draw(plot_ui, color);
+                }
+            }
+        }
+    }
 
-//         // clear all markers and fits with the 'Backspace' key
-//         if ui.input(|i| i.key_pressed(egui::Key::Backspace)) {
-//             self.clear_all();
-//         }
+    pub fn get_background(&self, x_data: &[f64]) -> Option<Vec<f64>> {
+        if let Some(FitResult::Linear(fitter)) = &self.result {
+            Some(fitter.calculate_background(x_data))
+        } else {
+            None
+        }
+    }
 
-//         // buttons that will be displayed in the ui
-//         ui.horizontal(|ui| {
-//             // check to see if there is at least 2 region markers
-//             if self.markers.region_markers.len() == 2
-//                 && ui
-//                     .button("Fit")
-//                     .on_hover_text("Fit the current histogram data. Shortcut: 'F' key")
-//                     .clicked()
-//             {
-//                 self.fit();
-//             }
+    pub fn get_slope_intercept(&self) -> Option<(f64, f64)> {
+        if let Some(FitResult::Linear(fitter)) = &self.result {
+            fitter
+                .fit_params
+                .as_ref()
+                .map(|params| (params.slope, params.intercept))
+        } else {
+            None
+        }
+    }
+}
 
-//             if self.current_fit.is_some() {
-//                 if ui
-//                     .button("Store fit")
-//                     .on_hover_text("Store the current fit for comparison. Shortcut: 'S' key")
-//                     .clicked()
-//                 {
-//                     self.store_fit();
-//                 }
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct Fitter {
+    pub x_data: Vec<f64>,
+    pub y_data: Vec<f64>,
+    pub y_err: Option<Vec<f64>>,
+    pub background: Option<BackgroundFitter>,
+    pub model: FitModel,
+    pub result: Option<FitResult>,
+}
 
-//                 ui.separator();
-//             }
+impl Fitter {
+    // Constructor to create a new Fitter with empty data and specified model
+    pub fn new(model: FitModel, background: Option<BackgroundFitter>) -> Self {
+        Fitter {
+            x_data: Vec::new(),
+            y_data: Vec::new(),
+            y_err: None,
+            background,
+            model,
+            result: None,
+        }
+    }
 
-//             /*
-//             ui.label("Clear Markers: ").on_hover_text("The closest marker to the cursor can be removed using the '-' key");
-//             if ui.button("Peak").on_hover_text("Clear peak markers").clicked() {
-//                 self.current_fit = None;
-//                 self.markers.clear_peak_markers();
-//             }
+    fn subtract_background(&self) -> Vec<f64> {
+        if let Some(bg_fitter) = &self.background {
+            if let Some(bg_result) = bg_fitter.get_background(&self.x_data) {
+                self.y_data
+                    .iter()
+                    .zip(bg_result.iter())
+                    .map(|(y, bg)| y - bg)
+                    .collect()
+            } else {
+                self.y_data.clone()
+            }
+        } else {
+            self.y_data.clone()
+        }
+    }
 
-//             if ui.button("Background").on_hover_text("Clear background markers").clicked() {
-//                 self.current_fit = None;
-//                 self.markers.clear_background_markers();
-//             }
+    pub fn get_peak_markers(&self) -> Vec<f64> {
+        if let Some(FitResult::Gaussian(fit)) = &self.result {
+            fit.peak_markers.clone()
+        } else if let FitModel::Gaussian(peak_markers) = &self.model {
+            peak_markers.clone()
+        } else {
+            Vec::new()
+        }
+    }
 
-//             if ui.button("Region").on_hover_text("Clear region markers").clicked() {
-//                 self.current_fit = None;
-//                 self.markers.clear_region_markers();
-//             }
+    pub fn fit(&mut self) {
+        // Fit the background if it's defined and there is no background result
+        if let Some(bg_fitter) = &mut self.background {
+            if bg_fitter.result.is_none() {
+                bg_fitter.fit();
+            }
+        }
 
-//             if ui.button("Clear all").on_hover_text("Clear all fits and markers. Shortcut: 'Backspace' key").clicked() {
-//                 self.clear_all();
-//             }
+        // Perform the background subtraction if necessary
+        let y_data_corrected = self.subtract_background();
 
-//             ui.separator();
+        // Perform the fit based on the model
+        match &self.model {
+            FitModel::Gaussian(peak_markers) => {
+                // Perform Gaussian fit
+                let mut fit = GaussianFitter::new(
+                    self.x_data.clone(),
+                    y_data_corrected,
+                    peak_markers.clone(),
+                );
 
-//             */
-//             ui.checkbox(&mut self.show_fit_stats, "Show Fit Stats");
-//         });
+                fit.multi_gauss_fit();
 
-//         if self.show_fit_stats {
-//             ui.separator();
+                self.result = Some(FitResult::Gaussian(fit));
+            }
 
-//             // Ensure there's a horizontal scroll area to contain both stats sections side by side
-//             egui::ScrollArea::horizontal().show(ui, |ui| {
-//                 ui.horizontal(|ui| {
-//                     // Current Fits
-//                     ui.vertical(|ui| {
-//                         ui.horizontal(|ui| {
-//                             ui.label("Current Fit");
+            FitModel::Linear => {
+                // Perform Linear fit
+                let mut fit = LinearFitter::new(self.x_data.clone(), y_data_corrected);
 
-//                             if ui.button("Load Fit").clicked() {
-//                                 if let Err(e) = self.load_temp_fit() {
-//                                     eprintln!("Failed to save fit: {}", e);
-//                                 }
-//                             }
+                fit.perform_linear_fit();
 
-//                             if let Some(fit) = &mut self.current_fit {
-//                                 if ui.button("Save Fit").clicked() {
-//                                     if let Err(e) = fit.save_fit_to_file() {
-//                                         eprintln!("Failed to save fit: {}", e);
-//                                     }
-//                                 }
-//                             }
-//                         });
+                self.result = Some(FitResult::Linear(fit));
+            }
+        }
+    }
 
-//                         if let Some(fit) = &mut self.current_fit {
-//                             fit.fit_ui(ui);
-//                         } else {
-//                             ui.label("No fit available");
-//                         }
-//                     });
+    pub fn fitter_stats(&self, ui: &mut egui::Ui) {
+        if let Some(fit) = &self.result {
+            match fit {
+                FitResult::Gaussian(fit) => fit.fit_params_ui(ui),
+                FitResult::Linear(fit) => fit.fit_params_ui(ui),
+            }
+        }
+    }
 
-//                     ui.separator();
+    pub fn draw(
+        &self,
+        plot_ui: &mut egui_plot::PlotUi,
+        fit_color: egui::Color32,
+        background_color: egui::Color32,
+        convoluted_color: egui::Color32,
+    ) {
+        // Draw the fit lines
+        if let Some(fit) = &self.result {
+            match fit {
+                FitResult::Gaussian(fit) => {
+                    fit.draw(plot_ui, fit_color);
 
-//                     // Stored Fits
-//                     ui.vertical(|ui| {
-//                         // Display stored fits stats in a vertical layout within the second column
+                    if let Some(bg_fitter) = &self.background {
+                        // Draw the background fit
+                        bg_fitter.draw(plot_ui, background_color);
 
-//                         ui.horizontal(|ui| {
-//                             ui.label("Stored Fits");
+                        if let Some((slope, intercept)) = bg_fitter.get_slope_intercept() {
+                            let convoluted_points = fit
+                                .calculate_convoluted_fit_points_with_linear_background(
+                                    slope, intercept,
+                                );
+                            let line = egui_plot::Line::new(egui_plot::PlotPoints::Owned(
+                                convoluted_points,
+                            ))
+                            .color(convoluted_color)
+                            .stroke(egui::Stroke::new(1.0, convoluted_color));
+                            plot_ui.line(line);
+                        }
+                    }
+                }
 
-//                             // Add a button for loading the FitHandler state
-//                             if ui.button("Load Fits").clicked() {
-//                                 match Self::load_fits_from_file() {
-//                                     Ok(fit_handler) => *self = fit_handler,
-//                                     Err(e) => eprintln!("Failed to load Fit Handler state: {}", e),
-//                                 }
-//                             }
+                FitResult::Linear(fit) => {
+                    fit.draw(plot_ui, fit_color);
+                }
+            }
+        }
+    }
+}
 
-//                             // Conditionally show the "Save Fit Handler State" button
-//                             if !self.fits.is_empty() && ui.button("Save Fits").clicked() {
-//                                 if let Err(e) = self.save_fits_to_file() {
-//                                     eprintln!("Failed to save Fit Handler state: {}", e);
-//                                 }
-//                             }
-//                         });
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct Fits {
+    pub temp_fit: Option<Fitter>,
+    pub temp_background_fit: Option<BackgroundFitter>,
+    pub stored_fits: Vec<Fitter>,
+}
 
-//                         self.stored_fit_stats_labels(ui);
-//                     });
-//                 });
-//             });
-//         }
-//     }
+impl Default for Fits {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-//     pub fn draw_fits(&mut self, plot_ui: &mut PlotUi) {
-//         // draw the current fit
-//         if let Some(fit) = &mut self.current_fit {
-//             fit.draw(plot_ui, Color32::BLUE, Color32::from_rgb(255, 0, 255));
-//         }
+impl Fits {
+    pub fn new() -> Self {
+        Fits {
+            temp_fit: None,
+            temp_background_fit: None,
+            stored_fits: Vec::new(),
+        }
+    }
 
-//         // draw the stored fits
-//         for fit in &mut self.fits {
-//             let color = Color32::from_rgb(162, 0, 255);
-//             fit.draw(plot_ui, color, color);
-//         }
-//     }
+    fn save_to_file(&self) {
+        if let Some(path) = FileDialog::new().add_filter("JSON", &["json"]).save_file() {
+            let file = File::create(path);
+            match file {
+                Ok(mut file) => {
+                    let json = serde_json::to_string(self).expect("Failed to serialize fits");
+                    file.write_all(json.as_bytes())
+                        .expect("Failed to write file");
+                }
+                Err(e) => {
+                    log::error!("Error creating file: {:?}", e);
+                }
+            }
+        }
+    }
 
-//     fn new_fit(&mut self, histogram: Histogram) {
-//         let mut fit = Fit::new(histogram, self.markers.clone());
+    fn load_from_file(&mut self) {
+        if let Some(path) = FileDialog::new().add_filter("JSON", &["json"]).pick_file() {
+            let file = File::open(path);
+            match file {
+                Ok(mut file) => {
+                    let mut contents = String::new();
+                    file.read_to_string(&mut contents)
+                        .expect("Failed to read file");
+                    let loaded_fits: Fits =
+                        serde_json::from_str(&contents).expect("Failed to deserialize fits");
+                    self.stored_fits.extend(loaded_fits.stored_fits); // Append loaded fits to current stored fits
+                    self.temp_fit = loaded_fits.temp_fit; // override temp_fit
+                    self.temp_background_fit = loaded_fits.temp_background_fit; // override temp_background_fit
+                }
+                Err(e) => {
+                    log::error!("Error opening file: {:?}", e);
+                }
+            }
+        }
+    }
 
-//         if let Err(e) = fit.fit_gaussian() {
-//             eprintln!("Failed to fit gaussian: {}", e);
-//         }
+    pub fn save_and_load_ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            if ui.button("Save Fits").clicked() {
+                self.save_to_file();
+            }
 
-//         self.markers = fit.markers.clone(); // update the makers with the fit markers
-//         self.current_fit = Some(fit);
-//     }
+            if ui.button("Load Fits").clicked() {
+                self.load_from_file();
+            }
+        });
+    }
 
-//     fn fit(&mut self) {
-//         if let Some(histogram) = self.histogram.clone() {
-//             self.new_fit(histogram);
-//         } else {
-//             eprintln!("No histogram selected for fitting.");
-//         }
-//     }
+    pub fn remove_temp_fits(&mut self) {
+        self.temp_fit = None;
+        self.temp_background_fit = None;
+    }
 
-//     fn stored_fit_stats_labels(&mut self, ui: &mut egui::Ui) {
-//         if !self.fits.is_empty() {
-//             egui::ScrollArea::vertical()
-//                 .id_source("stored_fit_scroll")
-//                 .show(ui, |ui| {
-//                     egui::Grid::new("stored_fit_stats_grid")
-//                         .striped(true)
-//                         .show(ui, |ui| {
-//                             // Headers
-//                             ui.label("Fit Index");
-//                             ui.label("Mean");
-//                             ui.label("FWHM");
-//                             ui.label("Area");
-//                             ui.end_row(); // End the header row
+    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
+        if let Some(temp_fit) = &self.temp_fit {
+            temp_fit.draw(
+                plot_ui,
+                egui::Color32::from_rgb(255, 0, 255),
+                egui::Color32::GREEN,
+                egui::Color32::BLUE,
+            );
+        }
 
-//                             // Iterate over stored fits to fill in the grid with fit statistics
+        if let Some(temp_background_fit) = &self.temp_background_fit {
+            temp_background_fit.draw(plot_ui, egui::Color32::GREEN);
+        }
 
-//                             for (fit_index, fit) in self.fits.iter().enumerate() {
-//                                 // Assuming each fit has a similar structure to current_fit
-//                                 // and contains fit parameters to display
-//                                 if let Some(gaussian_fitter) = &fit.fit {
-//                                     if let Some(params) = &gaussian_fitter.fit_params {
-//                                         // Display stats for each parameter set within the fit
-//                                         for (param_index, param) in params.iter().enumerate() {
-//                                             ui.label(format!("{}-{}", fit_index, param_index)); // Fit and parameter index
-//                                             ui.label(format!(
-//                                                 "{:.2} ± {:.2}",
-//                                                 param.mean.0, param.mean.1
-//                                             )); // Mean
-//                                             ui.label(format!(
-//                                                 "{:.2} ± {:.2}",
-//                                                 param.fwhm.0, param.fwhm.1
-//                                             )); // FWHM
-//                                             ui.label(format!(
-//                                                 "{:.0} ± {:.0}",
-//                                                 param.area.0, param.area.1
-//                                             )); // Area
+        for fit in self.stored_fits.iter() {
+            fit.draw(
+                plot_ui,
+                egui::Color32::from_rgb(162, 0, 255),
+                egui::Color32::from_rgb(162, 0, 255),
+                egui::Color32::from_rgb(162, 0, 255),
+            );
+        }
+    }
 
-//                                             if param_index == 0 && ui.button("X").clicked() {
-//                                                 self.to_remove_index = Some(fit_index);
-//                                                 // Mark for removal
-//                                             }
+    pub fn fit_stats_grid_ui(&mut self, ui: &mut egui::Ui) {
+        // only show the grid if there is something to show
+        if self.temp_fit.is_none() && self.stored_fits.is_empty() {
+            return;
+        }
 
-//                                             ui.end_row(); // Move to the next row for the next set of stats
-//                                         }
-//                                     }
-//                                 }
+        let mut to_remove = None;
 
-//                                 // if ui.button(format!("Remove Fit #{}", fit_index)).clicked() {
-//                                 //     self.to_remove_index = Some(fit_index); // Mark for removal
-//                                 // }
-//                             }
-//                         });
-//                 });
+        egui::Grid::new("fit_params_grid")
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label("Fit");
+                ui.label("Peak");
+                ui.label("Mean");
+                ui.label("FWHM");
+                ui.label("Area");
+                ui.end_row();
 
-//             if let Some(index) = self.to_remove_index {
-//                 self.remove_fit_at_index(index);
-//                 self.to_remove_index = None;
-//             }
-//         }
-//     }
+                if self.temp_fit.is_some() {
+                    ui.label("Current");
 
-//     fn clear_all(&mut self) {
-//         self.current_fit = None;
-//         self.markers.clear_background_markers();
-//         self.markers.clear_peak_markers();
-//         self.markers.clear_region_markers();
-//     }
+                    if let Some(temp_fit) = &self.temp_fit {
+                        temp_fit.fitter_stats(ui);
+                    }
+                }
 
-//     fn store_fit(&mut self) {
-//         if let Some(fit) = self.current_fit.take() {
-//             self.fits.push(fit);
-//         }
-//     }
+                if !self.stored_fits.is_empty() {
+                    for (i, fit) in self.stored_fits.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{}", i));
 
-//     fn remove_fit_at_index(&mut self, index: usize) {
-//         if index < self.fits.len() {
-//             self.fits.remove(index);
-//         }
-//     }
+                            ui.separator();
 
-//     fn save_fits_to_file(&self) -> Result<(), io::Error> {
-//         if let Some(path) = FileDialog::new()
-//             .set_title("Save Fit Handler State")
-//             .add_filter("YAML files", &["yaml"])
-//             .save_file()
-//         {
-//             let file = File::create(path)?;
-//             serde_yaml::to_writer(file, &self)
-//                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-//         }
-//         Ok(())
-//     }
+                            if ui.button("X").clicked() {
+                                to_remove = Some(i);
+                            }
 
-//     fn load_fits_from_file() -> Result<Self, io::Error> {
-//         if let Some(path) = FileDialog::new()
-//             .set_title("Load Fit Handler State")
-//             .add_filter("YAML files", &["yaml"])
-//             .pick_file()
-//         {
-//             let mut file = File::open(path)?;
-//             let mut contents = String::new();
-//             file.read_to_string(&mut contents)?;
-//             let fit_handler: Self = serde_yaml::from_str(&contents)
-//                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-//             return Ok(fit_handler);
-//         }
-//         Err(io::Error::new(
-//             io::ErrorKind::NotFound,
-//             "Failed to load Fit Handler state",
-//         ))
-//     }
+                            ui.separator();
+                        });
+                        fit.fitter_stats(ui);
+                    }
+                }
+            });
 
-//     fn load_temp_fit(&mut self) -> Result<(), io::Error> {
-//         // Attempt to load a Fit using the static method defined in Fit
-//         if let Ok(fit) = Fit::load_fit_from_file() {
-//             // If successful, update the current_fit with the loaded fit
-//             self.current_fit = Some(fit);
-//             Ok(())
-//         } else {
-//             Err(io::Error::new(
-//                 io::ErrorKind::NotFound,
-//                 "Failed to load fit",
-//             ))
-//         }
-//     }
-// }
+        if let Some(index) = to_remove {
+            self.stored_fits.remove(index);
+        }
+    }
+
+    pub fn fit_context_menu_ui(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("Fits", |ui| {
+            self.save_and_load_ui(ui);
+
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                self.fit_stats_grid_ui(ui);
+            });
+        });
+    }
+}

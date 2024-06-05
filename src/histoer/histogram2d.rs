@@ -1,26 +1,101 @@
 use fnv::FnvHashMap;
 
-// Define the BarData struct
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct BarData {
-    pub x: f64,
-    pub y: f64,
-    pub bar_width: f64,
-    pub height: f64,
-    pub count: u32,
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PlotSettings {
+    #[serde(skip)]
+    cursor_position: Option<egui_plot::PlotPoint>,
+    info: bool,
+    show_x_value: bool,
+    show_y_value: bool,
+    center_x_axis: bool,
+    center_y_axis: bool,
+    allow_zoom: bool,
+    allow_boxed_zoom: bool,
+    allow_drag: bool,
+    allow_scroll: bool,
+    clamp_grid: bool,
+    show_grid: bool,
+    sharp_grid_lines: bool,
+    show_background: bool,
 }
 
-// uses a hash map to store the histogram data (zero overhead for empty bins)
+impl Default for PlotSettings {
+    fn default() -> Self {
+        PlotSettings {
+            cursor_position: None,
+            info: true,
+            show_x_value: true,
+            show_y_value: true,
+            center_x_axis: false,
+            center_y_axis: false,
+            allow_zoom: true,
+            allow_boxed_zoom: true,
+            allow_drag: true,
+            allow_scroll: true,
+            clamp_grid: true,
+            show_grid: true,
+            sharp_grid_lines: true,
+            show_background: true,
+        }
+    }
+}
+
+impl PlotSettings {
+    pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
+        ui.vertical(|ui| {
+            ui.label("Plot Settings:");
+            ui.separator();
+            ui.checkbox(&mut self.info, "Show Info");
+            ui.menu_button("Manipulation Settings", |ui| {
+                ui.vertical(|ui| {
+                    ui.checkbox(&mut self.show_x_value, "Show X Value");
+                    ui.checkbox(&mut self.show_y_value, "Show Y Value");
+                    ui.checkbox(&mut self.center_x_axis, "Center X Axis");
+                    ui.checkbox(&mut self.center_y_axis, "Center Y Axis");
+                    ui.checkbox(&mut self.allow_zoom, "Allow Zoom");
+                    ui.checkbox(&mut self.allow_boxed_zoom, "Allow Boxed Zoom");
+                    ui.checkbox(&mut self.allow_drag, "Allow Drag");
+                    ui.checkbox(&mut self.allow_scroll, "Allow Scroll");
+                    ui.checkbox(&mut self.clamp_grid, "Clamp Grid");
+                    ui.checkbox(&mut self.show_grid, "Show Grid");
+                    ui.checkbox(&mut self.sharp_grid_lines, "Sharp Grid Lines");
+                    ui.checkbox(&mut self.show_background, "Show Background");
+                });
+            });
+        });
+    }
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub struct Bins {
+    x: usize,
+    x_width: f64,
+    y: usize,
+    y_width: f64,
+    counts: FnvHashMap<(usize, usize), u32>, // uses a hash map to store the histogram data (zero overhead for empty bins)
+    min_count: u32,
+    max_count: u32,
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub struct Value {
+    min: f64,
+    max: f64,
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub struct Range {
+    x: Value,
+    y: Value,
+}
+
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Histogram2D {
     pub name: String,
-    pub bins: FnvHashMap<(usize, usize), u32>,
-    pub x_range: (f64, f64),
-    pub y_range: (f64, f64),
-    pub x_bin_width: f64,
-    pub y_bin_width: f64,
-    pub min_count: u32,
-    pub max_count: u32,
+    pub bins: Bins,
+    pub range: Range,
+
+    pub plot_settings: PlotSettings,
 
     #[serde(skip)]
     texture: Option<egui::TextureHandle>,
@@ -28,64 +103,71 @@ pub struct Histogram2D {
 
 impl Histogram2D {
     // Create a new 2D Histogram with specified ranges and number of bins for each axis
-    pub fn new(
-        name: &str,
-        x_bins: usize,
-        x_range: (f64, f64),
-        y_bins: usize,
-        y_range: (f64, f64),
-    ) -> Self {
+    pub fn new(name: &str, bins: (usize, usize), range: ((f64, f64), (f64, f64))) -> Self {
         Histogram2D {
             name: name.to_string(),
-            bins: FnvHashMap::default(),
-            x_range,
-            y_range,
-            x_bin_width: (x_range.1 - x_range.0) / x_bins as f64,
-            y_bin_width: (y_range.1 - y_range.0) / y_bins as f64,
-            min_count: u32::MAX,
-            max_count: u32::MIN,
+            bins: Bins {
+                x: bins.0,
+                x_width: (range.0 .1 - range.0 .0) / bins.0 as f64,
+                y: bins.1,
+                y_width: (range.1 .1 - range.1 .0) / bins.1 as f64,
+                counts: FnvHashMap::default(),
+                min_count: u32::MAX,
+                max_count: u32::MIN,
+            },
+            range: Range {
+                x: Value {
+                    min: range.0 .0,
+                    max: range.0 .1,
+                },
+                y: Value {
+                    min: range.1 .0,
+                    max: range.1 .1,
+                },
+            },
+            plot_settings: PlotSettings::default(),
             texture: None,
         }
     }
 
     // Add a value to the histogram
     pub fn fill(&mut self, x_value: f64, y_value: f64) {
-        if x_value >= self.x_range.0
-            && x_value < self.x_range.1
-            && y_value >= self.y_range.0
-            && y_value < self.y_range.1
+        if x_value >= self.range.x.min
+            && x_value < self.range.x.max
+            && y_value >= self.range.y.min
+            && y_value < self.range.y.max
         {
-            let x_index = ((x_value - self.x_range.0) / self.x_bin_width) as usize;
-            let y_index = ((y_value - self.y_range.0) / self.y_bin_width) as usize;
-            let count = self.bins.entry((x_index, y_index)).or_insert(0);
+            let x_index = ((x_value - self.range.x.min) / self.bins.x_width) as usize;
+            let y_index = ((y_value - self.range.y.min) / self.bins.y_width) as usize;
+            let count = self.bins.counts.entry((x_index, y_index)).or_insert(0);
             *count += 1;
 
             // Update min and max counts
-            if *count < self.min_count {
-                self.min_count = *count;
+            if *count < self.bins.min_count {
+                self.bins.min_count = *count;
             }
-            if *count > self.max_count {
-                self.max_count = *count;
+            if *count > self.bins.max_count {
+                self.bins.max_count = *count;
             }
         }
     }
 
     fn get_bin_x(&self, x: f64) -> Option<usize> {
-        if x < self.x_range.0 || x > self.x_range.1 {
+        if x < self.range.x.min || x > self.range.x.max {
             return None;
         }
 
-        let bin_index: usize = ((x - self.x_range.0) / self.x_bin_width).floor() as usize;
+        let bin_index: usize = ((x - self.range.x.min) / self.bins.x_width).floor() as usize;
 
         Some(bin_index)
     }
 
     fn get_bin_y(&self, y: f64) -> Option<usize> {
-        if y < self.y_range.0 || y > self.y_range.1 {
+        if y < self.range.y.min || y > self.range.y.max {
             return None;
         }
 
-        let bin_index: usize = ((y - self.y_range.0) / self.y_bin_width).floor() as usize;
+        let bin_index: usize = ((y - self.range.y.min) / self.bins.y_width).floor() as usize;
 
         Some(bin_index)
     }
@@ -98,30 +180,40 @@ impl Histogram2D {
         end_y: f64,
     ) -> (u32, f64, f64, f64, f64) {
         let start_x_index = self.get_bin_x(start_x).unwrap_or(0);
-        let end_x_index = self
-            .get_bin_x(end_x)
-            .unwrap_or_else(|| self.bins.keys().max_by_key(|k| k.0).map_or(0, |k| k.0));
+        let end_x_index = self.get_bin_x(end_x).unwrap_or_else(|| {
+            self.bins
+                .counts
+                .keys()
+                .max_by_key(|k| k.0)
+                .map_or(0, |k| k.0)
+        });
 
         let start_y_index = self.get_bin_y(start_y).unwrap_or(0);
-        let end_y_index = self
-            .get_bin_y(end_y)
-            .unwrap_or_else(|| self.bins.keys().max_by_key(|k| k.1).map_or(0, |k| k.1));
+        let end_y_index = self.get_bin_y(end_y).unwrap_or_else(|| {
+            self.bins
+                .counts
+                .keys()
+                .max_by_key(|k| k.1)
+                .map_or(0, |k| k.1)
+        });
 
         let mut total_count = 0;
 
         let mut sum_product_x = 0.0;
         let mut sum_product_y = 0.0;
 
-        for (&(x_index, y_index), &count) in self.bins.iter() {
+        for (&(x_index, y_index), &count) in self.bins.counts.iter() {
             if x_index >= start_x_index
                 && x_index <= end_x_index
                 && y_index >= start_y_index
                 && y_index <= end_y_index
             {
-                let bin_center_x =
-                    self.x_range.0 + (x_index as f64 * self.x_bin_width) + self.x_bin_width * 0.5;
-                let bin_center_y =
-                    self.y_range.0 + (y_index as f64 * self.y_bin_width) + self.y_bin_width * 0.5;
+                let bin_center_x = self.range.x.min
+                    + (x_index as f64 * self.bins.x_width)
+                    + self.bins.x_width * 0.5;
+                let bin_center_y = self.range.y.min
+                    + (y_index as f64 * self.bins.y_width)
+                    + self.bins.y_width * 0.5;
 
                 total_count += count;
 
@@ -139,18 +231,18 @@ impl Histogram2D {
             let mut sum_squared_diff_x = 0.0;
             let mut sum_squared_diff_y = 0.0;
 
-            for (&(x_index, y_index), &count) in self.bins.iter() {
+            for (&(x_index, y_index), &count) in self.bins.counts.iter() {
                 if x_index >= start_x_index
                     && x_index <= end_x_index
                     && y_index >= start_y_index
                     && y_index <= end_y_index
                 {
-                    let bin_center_x = self.x_range.0
-                        + (x_index as f64 * self.x_bin_width)
-                        + self.x_bin_width * 0.5;
-                    let bin_center_y = self.y_range.0
-                        + (y_index as f64 * self.y_bin_width)
-                        + self.y_bin_width * 0.5;
+                    let bin_center_x = self.range.x.min
+                        + (x_index as f64 * self.bins.x_width)
+                        + self.bins.x_width * 0.5;
+                    let bin_center_y = self.range.y.min
+                        + (y_index as f64 * self.bins.y_width)
+                        + self.bins.y_width * 0.5;
 
                     let diff_x = bin_center_x - mean_x;
                     let diff_y = bin_center_y - mean_y;
@@ -186,8 +278,8 @@ impl Histogram2D {
     }
 
     fn to_color_image(&self) -> epaint::ColorImage {
-        let width = ((self.x_range.1 - self.x_range.0) / self.x_bin_width) as usize;
-        let height = ((self.y_range.1 - self.y_range.0) / self.y_bin_width) as usize;
+        let width = ((self.range.x.max - self.range.x.min) / self.bins.x_width) as usize;
+        let height = ((self.range.y.max - self.range.y.min) / self.bins.y_width) as usize;
 
         // Initialize a vector to hold pixel data
         let mut pixels = Vec::with_capacity(width * height);
@@ -196,11 +288,16 @@ impl Histogram2D {
         // Loop starts from the top row (y=0) to the bottom row (y=height-1)
         for y in 0..height {
             for x in 0..width {
-                let count = self.bins.get(&(x, height - y - 1)).cloned().unwrap_or(0);
+                let count = self
+                    .bins
+                    .counts
+                    .get(&(x, height - y - 1))
+                    .cloned()
+                    .unwrap_or(0);
                 let color = if count == 0 {
                     egui::Color32::TRANSPARENT // Use transparent for zero counts
                 } else {
-                    viridis_colormap(count, self.min_count, self.max_count)
+                    viridis_colormap(count, self.bins.min_count, self.bins.max_count)
                 };
                 pixels.push(color);
             }
@@ -247,10 +344,19 @@ impl Histogram2D {
 
         if let Some(texture) = &self.texture {
             let plot = egui_plot::Plot::new(self.name.clone())
-                .allow_zoom(false)
-                .allow_drag(false)
-                .allow_scroll(false)
                 .legend(egui_plot::Legend::default())
+                .show_x(self.plot_settings.show_x_value)
+                .show_y(self.plot_settings.show_y_value)
+                .center_x_axis(self.plot_settings.center_x_axis)
+                .center_y_axis(self.plot_settings.center_y_axis)
+                .allow_zoom(self.plot_settings.allow_zoom)
+                .allow_boxed_zoom(self.plot_settings.allow_boxed_zoom)
+                .allow_drag(self.plot_settings.allow_drag)
+                .allow_scroll(self.plot_settings.allow_scroll)
+                .clamp_grid(self.plot_settings.clamp_grid)
+                .show_grid(self.plot_settings.show_grid)
+                .sharp_grid_lines(self.plot_settings.sharp_grid_lines)
+                .show_background(self.plot_settings.show_background)
                 .auto_bounds(egui::Vec2b::new(true, true));
 
             let color = if ui.ctx().style().visuals.dark_mode {
@@ -269,12 +375,12 @@ impl Histogram2D {
             });
 
             // Calculate the center position
-            let center_x = (self.x_range.0 + self.x_range.1) / 2.0;
-            let center_y = (self.y_range.0 + self.y_range.1) / 2.0;
+            let center_x = (self.range.x.min + self.range.x.max) / 2.0;
+            let center_y = (self.range.y.min + self.range.y.max) / 2.0;
 
             // Calculate the size of the image in plot coordinates
-            let size_x = (self.x_range.1 - self.x_range.0) as f32;
-            let size_y = (self.y_range.1 - self.y_range.0) as f32;
+            let size_x = (self.range.x.max - self.range.x.min) as f32;
+            let size_y = (self.range.y.max - self.range.y.min) as f32;
 
             let heatmap_image = egui_plot::PlotImage::new(
                 &texture.clone(),
@@ -291,10 +397,6 @@ impl Histogram2D {
                 let plot_min_y = plot_ui.plot_bounds().min()[1];
                 let plot_max_y = plot_ui.plot_bounds().max()[1];
 
-                // make bars instead of image
-                // let heatmap = self.egui_heatmap();
-                // plot_ui.bar_chart(heatmap.color(color));
-
                 plot_ui.image(heatmap_image);
 
                 let stats_entries =
@@ -308,70 +410,13 @@ impl Histogram2D {
                             .name(entry),
                     );
                 }
+            })
+            .response
+            .context_menu(|ui| {
+                self.plot_settings.settings_ui(ui);
             });
         }
     }
-
-    /*
-
-    // This was my inital method to make a heatmap.
-    // Found the performace to be lacking when there was a large number of bins or plots on the screen.
-
-    // Method to generate data for egui heatmap
-    fn generate_bar_data(&self) -> Vec<BarData> {
-        let mut bars = Vec::new();
-
-        for (&(x_index, y_index), &count) in &self.bins {
-            if count == 0 {
-                continue; // Skip empty bins
-            }
-
-            let x_bin_start = self.x_range.0 + x_index as f64 * self.x_bin_width;
-            let x_bin_end = x_bin_start + self.x_bin_width;
-            let y_bin_start = self.y_range.0 + y_index as f64 * self.y_bin_width;
-            let y_bin_end = y_bin_start + self.y_bin_width;
-
-            bars.push(BarData {
-                x: (x_bin_start + x_bin_end) / 2.0,
-                y: (y_bin_start + y_bin_end) / 2.0,
-                bar_width: self.x_bin_width,
-                height: self.y_bin_width,
-                count,
-            });
-        }
-
-        bars
-    }
-
-    fn egui_heatmap(&self) -> egui_plot::BarChart {
-
-        let bars_data = self.generate_bar_data();
-        let mut bars = Vec::new();
-
-        let min: u32 = self.min_count;
-        let max: u32 = self.max_count;
-        for bar_data in bars_data {
-            let color: egui::Color32 = viridis_colormap(bar_data.count, min, max); // Determine color based on the count, using a colormap.
-
-            let bar = egui_plot::Bar {
-                orientation: egui_plot::Orientation::Vertical,
-                argument: bar_data.x,
-                value: bar_data.height,
-                bar_width: bar_data.bar_width,
-                fill: color,
-                stroke: egui::Stroke::new(1.0, color),
-                name: format!("x = {}\ny = {}\n{}", bar_data.x, bar_data.y, bar_data.count),
-                base_offset: Some(bar_data.y - bar_data.height / 2.0),
-            };
-            bars.push(bar);
-        }
-
-        // Return a BarChart object if the histogram exists, otherwise return None.
-        egui_plot::BarChart::new(bars).name(self.name.clone())
-
-    }
-
-    */
 }
 
 // Function to generate a color based on a value using the Viridis colormap, the matplotlib default.
@@ -496,3 +541,74 @@ fn custom_plot_manipulation(
         }
     }
 }
+
+/*
+    // Define the BarData struct
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct BarData {
+    pub x: f64,
+    pub y: f64,
+    pub bar_width: f64,
+    pub height: f64,
+    pub count: u32,
+}
+
+
+// This was my inital method to make a heatmap.
+// Found the performace to be lacking when there was a large number of bins or plots on the screen.
+
+// Method to generate data for egui heatmap
+fn generate_bar_data(&self) -> Vec<BarData> {
+    let mut bars = Vec::new();
+
+    for (&(x_index, y_index), &count) in &self.bins {
+        if count == 0 {
+            continue; // Skip empty bins
+        }
+
+        let x_bin_start = self.x_range.0 + x_index as f64 * self.x_bin_width;
+        let x_bin_end = x_bin_start + self.x_bin_width;
+        let y_bin_start = self.y_range.0 + y_index as f64 * self.y_bin_width;
+        let y_bin_end = y_bin_start + self.y_bin_width;
+
+        bars.push(BarData {
+            x: (x_bin_start + x_bin_end) / 2.0,
+            y: (y_bin_start + y_bin_end) / 2.0,
+            bar_width: self.x_bin_width,
+            height: self.y_bin_width,
+            count,
+        });
+    }
+
+    bars
+}
+
+fn egui_heatmap(&self) -> egui_plot::BarChart {
+
+    let bars_data = self.generate_bar_data();
+    let mut bars = Vec::new();
+
+    let min: u32 = self.min_count;
+    let max: u32 = self.max_count;
+    for bar_data in bars_data {
+        let color: egui::Color32 = viridis_colormap(bar_data.count, min, max); // Determine color based on the count, using a colormap.
+
+        let bar = egui_plot::Bar {
+            orientation: egui_plot::Orientation::Vertical,
+            argument: bar_data.x,
+            value: bar_data.height,
+            bar_width: bar_data.bar_width,
+            fill: color,
+            stroke: egui::Stroke::new(1.0, color),
+            name: format!("x = {}\ny = {}\n{}", bar_data.x, bar_data.y, bar_data.count),
+            base_offset: Some(bar_data.y - bar_data.height / 2.0),
+        };
+        bars.push(bar);
+    }
+
+    // Return a BarChart object if the histogram exists, otherwise return None.
+    egui_plot::BarChart::new(bars).name(self.name.clone())
+
+}
+
+*/

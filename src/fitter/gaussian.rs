@@ -162,7 +162,7 @@ impl GaussianFitter {
 
         // Ensure x and y data have the same length
         if self.x.len() != self.y.len() {
-            eprintln!("x_data and y_data must have the same length");
+            log::error!("x_data and y_data must have the same length");
             return;
         }
 
@@ -356,7 +356,7 @@ impl GaussianFitter {
                     ui.label("");
                 }
 
-                ui.label(format!("Peak {}", i));
+                ui.label(format!("{}", i));
                 params.params_ui(ui);
                 ui.end_row();
             }
