@@ -1,60 +1,35 @@
-use crate::fitter::egui_markers::EguiFitMarkers;
-use crate::fitter::fit_handler::{BackgroundFitter, FitModel, Fits, Fitter};
+use crate::fitter::background_fitter::BackgroundFitter;
+use crate::fitter::egui_fit_markers::EguiFitMarkers;
+use crate::fitter::egui_line::EguiLine;
+use crate::fitter::fit_handler::{FitModel, Fits, Fitter};
 
-use std::ops::RangeInclusive;
-use egui_plot::{GridInput, GridMark};
+use super::plot_settings::EguiPlotSettings;
 
+// background_fit_line: DrawLine::new(true, egui::Color32::GREEN),
+// deconvoluted_fit_line: DrawLine::new(true, egui::Color32::from_rgb(255, 0, 255)),
+// convoluted_fit_line: DrawLine::new(true, egui::Color32::BLUE),
+// stored_fit_lines: DrawLine::new(true, egui::Color32::BLUE),
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlotSettings {
     #[serde(skip)]
     cursor_position: Option<egui_plot::PlotPoint>,
-    info: bool,
+    egui_settings: EguiPlotSettings,
+    stats_info: bool,
     show_fit_stats: bool,
     fit_stats_height: f32,
-    color: egui::Color32,
-    show_color_changer: bool,
     markers: EguiFitMarkers,
-    show_x_value: bool,
-    show_y_value: bool,
-    center_x_axis: bool,
-    center_y_axis: bool,
-    allow_zoom: bool,
-    allow_boxed_zoom: bool,
-    allow_drag: bool,
-    allow_scroll: bool,
-    clamp_grid: bool,
-    show_grid: bool,
-    sharp_grid_lines: bool,
-    show_background: bool,
-    log_y_scale: bool,
-    log_x_scale: bool,
 }
 
 impl Default for PlotSettings {
     fn default() -> Self {
         PlotSettings {
             cursor_position: None,
-            info: true,
+            egui_settings: EguiPlotSettings::default(),
+            stats_info: true,
             show_fit_stats: true,
             fit_stats_height: 0.0,
-            color: egui::Color32::LIGHT_BLUE,
-            show_color_changer: false,
             markers: EguiFitMarkers::new(),
-            show_x_value: true,
-            show_y_value: true,
-            center_x_axis: false,
-            center_y_axis: false,
-            allow_zoom: true,
-            allow_boxed_zoom: true,
-            allow_drag: true,
-            allow_scroll: true,
-            clamp_grid: true,
-            show_grid: true,
-            sharp_grid_lines: true,
-            show_background: true,
-            log_y_scale: false,
-            log_x_scale: false, // not implemented yet
         }
     }
 }
@@ -64,9 +39,8 @@ impl PlotSettings {
         ui.vertical(|ui| {
             ui.label("Plot Settings:");
             ui.separator();
-            ui.checkbox(&mut self.info, "Show Info");
-            ui.checkbox(&mut self.log_y_scale, "Log Y Scale");
-            ui.checkbox(&mut self.show_fit_stats, "Show Fit Stats");
+            ui.checkbox(&mut self.stats_info, "Show Statitics");
+            ui.checkbox(&mut self.show_fit_stats, "Show Fit Statitics");
             ui.add(
                 egui::DragValue::new(&mut self.fit_stats_height)
                     .speed(1.0)
@@ -74,35 +48,10 @@ impl PlotSettings {
                     .prefix("Fit Stats Height: ")
                     .suffix(" px"),
             );
-            ui.menu_button("Manipulation Settings", |ui| {
-                ui.vertical(|ui| {
-                    ui.checkbox(&mut self.show_color_changer, "Show Color Changer");
-                    ui.checkbox(&mut self.show_x_value, "Show X Value");
-                    ui.checkbox(&mut self.show_y_value, "Show Y Value");
-                    ui.checkbox(&mut self.center_x_axis, "Center X Axis");
-                    ui.checkbox(&mut self.center_y_axis, "Center Y Axis");
-                    ui.checkbox(&mut self.allow_zoom, "Allow Zoom");
-                    ui.checkbox(&mut self.allow_boxed_zoom, "Allow Boxed Zoom");
-                    ui.checkbox(&mut self.allow_drag, "Allow Drag");
-                    ui.checkbox(&mut self.allow_scroll, "Allow Scroll");
-                    ui.checkbox(&mut self.clamp_grid, "Clamp Grid");
-                    ui.checkbox(&mut self.show_grid, "Show Grid");
-                    ui.checkbox(&mut self.sharp_grid_lines, "Sharp Grid Lines");
-                    ui.checkbox(&mut self.show_background, "Show Background");
-                });
-            });
 
-            self.markers.context_menu_marker_interactions(ui);
+            self.egui_settings.menu_button(ui);
+            self.markers.menu_button(ui);
         });
-    }
-
-    pub fn above_histo_ui(&mut self, ui: &mut egui::Ui) {
-        if self.show_color_changer {
-            ui.horizontal(|ui| {
-                ui.label("Color: ");
-                ui.color_edit_button_srgba(&mut self.color);
-            });
-        }
     }
 }
 
@@ -112,6 +61,7 @@ pub struct Histogram {
     pub bins: Vec<u32>,
     pub range: (f64, f64),
     pub bin_width: f64,
+    pub line: EguiLine,
     pub plot_settings: PlotSettings,
     pub fits: Fits,
 }
@@ -124,6 +74,7 @@ impl Histogram {
             bins: vec![0; number_of_bins],
             range,
             bin_width: (range.1 - range.0) / number_of_bins as f64,
+            line: EguiLine::new(name.to_string(), egui::Color32::LIGHT_BLUE),
             plot_settings: PlotSettings::default(),
             fits: Fits::new(),
         }
@@ -137,6 +88,21 @@ impl Histogram {
                 self.bins[index] += 1;
             }
         }
+    }
+
+    // Convert histogram bins to line points
+    fn update_line_points(&mut self) {
+        self.line.points = self
+            .bins
+            .iter()
+            .enumerate()
+            .flat_map(|(index, &count)| {
+                let start = self.range.0 + index as f64 * self.bin_width;
+                let end = start + self.bin_width;
+                let y_value = count as f64;
+                vec![[start, y_value], [end, y_value]]
+            })
+            .collect();
     }
 
     // Get the bin number for a given x position.
@@ -242,28 +208,6 @@ impl Histogram {
         }
     }
 
-    // Generates the points for a step histogram
-    fn step_histogram_points(&self) -> Vec<(f64, f64)> {
-        self.bins
-            .iter()
-            .enumerate()
-            .flat_map(|(index, &count)| {
-                let start = self.range.0 + index as f64 * self.bin_width;
-                let end = start + self.bin_width;
-                let y_value = if self.plot_settings.log_y_scale {
-                    if count > 0 {
-                        (count as f64).log10()
-                    } else {
-                        0.0 // Handle zero counts appropriately
-                    }
-                } else {
-                    count as f64
-                };
-                vec![(start, y_value), (end, y_value)]
-            })
-            .collect()
-    }
-
     // Generates legend entries for the histogram based on the specified x range.
     fn legend_entries(&self, start_x: f64, end_x: f64) -> Vec<String> {
         let (integral, mean, stdev) = self.stats(start_x, end_x);
@@ -272,18 +216,6 @@ impl Histogram {
             format!("Mean: {:.2}", mean),
             format!("Stdev: {:.2}", stdev),
         ]
-    }
-
-    // Generates a line to form a step histogram using egui_plot
-    fn egui_histogram_step(&self, color: egui::Color32) -> egui_plot::Line {
-        let plot_points: egui_plot::PlotPoints = self
-            .step_histogram_points()
-            .iter()
-            .map(|&(x, y)| [x, y])
-            .collect();
-        egui_plot::Line::new(plot_points)
-            .color(color)
-            .name(self.name.clone())
     }
 
     // Fit the background with a linear line using the background markers
@@ -350,13 +282,6 @@ impl Histogram {
         self.fits.temp_fit = Some(fitter);
     }
 
-    // Store the temporary fit
-    fn store_fit(&mut self) {
-        if let Some(temp_fit) = self.fits.temp_fit.take() {
-            self.fits.stored_fits.push(temp_fit);
-        }
-    }
-
     // Handles the interactive elements of the histogram
     fn interactive(&mut self, ui: &mut egui::Ui) {
         self.plot_settings.markers.cursor_position = self.plot_settings.cursor_position;
@@ -377,11 +302,14 @@ impl Histogram {
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::S)) {
-                self.store_fit();
+                // Store the temporary fit if it exists
+                if let Some(temp_fit) = self.fits.temp_fit.take() {
+                    self.fits.stored_fits.push(temp_fit);
+                }
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::I)) {
-                self.plot_settings.info = !self.plot_settings.info;
+                self.plot_settings.stats_info = !self.plot_settings.stats_info;
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::A)) {
@@ -390,66 +318,22 @@ impl Histogram {
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::L)) {
-                self.plot_settings.log_y_scale = !self.plot_settings.log_y_scale;
+                self.plot_settings.egui_settings.log_y = !self.plot_settings.egui_settings.log_y;
             }
         }
     }
 
     // Renders the histogram using egui_plot
     pub fn render(&mut self, ui: &mut egui::Ui) {
+        self.update_line_points(); // Ensure line points are updated
+        self.interactive(ui); // Handle interactive elements
 
-        let log_x = self.plot_settings.log_x_scale;
-        let log_y = self.plot_settings.log_y_scale;
+        let log_y = self.plot_settings.egui_settings.log_y;
 
-        let mut plot = egui_plot::Plot::new(self.name.clone())
-            .legend(egui_plot::Legend::default())
-            .show_x(self.plot_settings.show_x_value)
-            .show_y(self.plot_settings.show_y_value)
-            .center_x_axis(self.plot_settings.center_x_axis)
-            .center_y_axis(self.plot_settings.center_y_axis)
-            .allow_zoom(self.plot_settings.allow_zoom)
-            .allow_boxed_zoom(self.plot_settings.allow_boxed_zoom)
-            .allow_drag(self.plot_settings.allow_drag)
-            .allow_scroll(self.plot_settings.allow_scroll)
-            .clamp_grid(self.plot_settings.clamp_grid)
-            .show_grid(self.plot_settings.show_grid)
-            .sharp_grid_lines(self.plot_settings.sharp_grid_lines)
-            .show_background(self.plot_settings.show_background)
-            .auto_bounds(egui::Vec2b::new(true, true))
-            .label_formatter(move |name, value| {
-                let x = if log_x.clone() {
-                    10.0f64.powf(value.x)
-                } else {
-                    value.x
-                };
-                let y = if log_y {
-                    10.0f64.powf(value.y)
-                } else {
-                    value.y
-                };
-                if !name.is_empty() {
-                    format!("{name}: {x:.3}, {y:.3}")
-                } else {
-                    format!("{x:.3}, {y:.3}")
-                }
-            });
-
-        if log_x {
-            plot = plot
-                .x_grid_spacer(log_axis_spacer)
-                .x_axis_formatter(log_axis_formatter);
-        }
-        if log_y {
-            plot = plot
-                .y_grid_spacer(log_axis_spacer)
-                .y_axis_formatter(log_axis_formatter);
-        }
-
-        self.interactive(ui);
+        let mut plot = egui_plot::Plot::new(self.name.clone());
+        plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
         ui.vertical(|ui| {
-            self.plot_settings.above_histo_ui(ui);
-
             if self.plot_settings.show_fit_stats {
                 egui::ScrollArea::both()
                     .max_height(self.plot_settings.fit_stats_height)
@@ -462,21 +346,19 @@ impl Histogram {
                 let plot_min_x = plot_ui.plot_bounds().min()[0];
                 let plot_max_x = plot_ui.plot_bounds().max()[0];
 
-                let step_line = self.egui_histogram_step(self.plot_settings.color);
-
-                if self.plot_settings.info {
+                if self.plot_settings.stats_info {
                     let stats_entries = self.legend_entries(plot_min_x, plot_max_x);
                     for entry in stats_entries.iter() {
                         plot_ui.text(
                             egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
                                 .highlight(false)
-                                .color(self.plot_settings.color)
+                                .color(self.line.color)
                                 .name(entry),
                         );
                     }
                 }
 
-                plot_ui.line(step_line);
+                self.line.draw(plot_ui);
 
                 if plot_ui.response().hovered() {
                     self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
@@ -486,53 +368,14 @@ impl Histogram {
 
                 self.plot_settings.markers.draw_all_markers(plot_ui);
 
-                self.fits.draw(plot_ui);
+                self.fits.draw(plot_ui, log_y);
             })
             .response
             .context_menu(|ui| {
+                self.line.menu_button(ui);
                 self.plot_settings.settings_ui(ui);
                 self.fits.fit_context_menu_ui(ui);
             });
         });
-    }
-}
-
-
-#[allow(clippy::needless_pass_by_value)]
-fn log_axis_spacer(input: GridInput) -> Vec<GridMark> {
-    let (min, max) = input.bounds;
-    let mut marks = vec![];
-    for i in min.floor() as i32..=max.ceil() as i32 {
-        marks.extend(
-            (10..100)
-                .map(|j| {
-                    let value = i as f64 + (j as f64).log10() - 1.0;
-                    let step_size = if j == 10 {
-                        1.0
-                    } else if j % 10 == 0 {
-                        0.1
-                    } else {
-                        0.01
-                    };
-                    GridMark { value, step_size }
-                })
-                .filter(|gm| (min..=max).contains(&gm.value)),
-        );
-    }
-    marks
-}
-
-fn log_axis_formatter(gm: GridMark, max_size: usize, _bounds: &RangeInclusive<f64>) -> String {
-    let min_precision = (-gm.value + 1.0).ceil().clamp(1.0, 10.0) as usize;
-    let digits = (gm.value).ceil().max(1.0) as usize;
-    let size = digits + min_precision + 1;
-    let value = 10.0f64.powf(gm.value);
-    if size < max_size {
-        let precision = max_size.saturating_sub(digits + 1);
-        format!("{value:.precision$}")
-    } else {
-        let exp_digits = (digits as f64).log10() as usize;
-        let precision = max_size.saturating_sub(exp_digits).saturating_sub(3);
-        format!("{value:.precision$e}")
     }
 }

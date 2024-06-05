@@ -3,8 +3,11 @@ use rfd::FileDialog;
 use std::fs::File;
 use std::io::{Read, Write};
 
+use super::egui_line::EguiLine;
 use super::gaussian::GaussianFitter;
 use super::linear::LinearFitter;
+
+use crate::fitter::background_fitter::BackgroundFitter;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum FitModel {
@@ -17,80 +20,6 @@ pub enum FitResult {
     Gaussian(GaussianFitter),
     Linear(LinearFitter),
 }
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct BackgroundFitter {
-    pub x_data: Vec<f64>,
-    pub y_data: Vec<f64>,
-    pub model: FitModel,
-    pub result: Option<FitResult>,
-}
-
-impl BackgroundFitter {
-    pub fn new(x_data: Vec<f64>, y_data: Vec<f64>, model: FitModel) -> Self {
-        BackgroundFitter {
-            x_data,
-            y_data,
-            model,
-            result: None,
-        }
-    }
-
-    pub fn fit(&mut self) {
-        match self.model {
-            FitModel::Gaussian(_) => {
-                log::error!("Gaussian background fitting not yet implemented");
-            }
-            FitModel::Linear => {
-                // Check x and y data are the same length
-                if self.x_data.len() != self.y_data.len() {
-                    log::error!("x_data and y_data must have the same length");
-                    return;
-                }
-
-                let mut linear_fitter = LinearFitter::new(self.x_data.clone(), self.y_data.clone());
-                linear_fitter.perform_linear_fit();
-
-                self.result = Some(FitResult::Linear(linear_fitter));
-            }
-        }
-    }
-
-    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi, color: egui::Color32) {
-        // Draw the fit lines
-        if let Some(fit) = &self.result {
-            match fit {
-                FitResult::Gaussian(fit) => {
-                    fit.draw(plot_ui, color);
-                }
-
-                FitResult::Linear(fit) => {
-                    fit.draw(plot_ui, color);
-                }
-            }
-        }
-    }
-
-    pub fn get_background(&self, x_data: &[f64]) -> Option<Vec<f64>> {
-        if let Some(FitResult::Linear(fitter)) = &self.result {
-            Some(fitter.calculate_background(x_data))
-        } else {
-            None
-        }
-    }
-
-    pub fn get_slope_intercept(&self) -> Option<(f64, f64)> {
-        if let Some(FitResult::Linear(fitter)) = &self.result {
-            fitter
-                .fit_params
-                .as_ref()
-                .map(|params| (params.slope, params.intercept))
-        } else {
-            None
-        }
-    }
-}
-
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Fitter {
     pub x_data: Vec<f64>,
@@ -99,6 +28,8 @@ pub struct Fitter {
     pub background: Option<BackgroundFitter>,
     pub model: FitModel,
     pub result: Option<FitResult>,
+    pub deconvoluted_lines: Vec<EguiLine>,
+    pub convoluted_line: EguiLine,
 }
 
 impl Fitter {
@@ -111,6 +42,8 @@ impl Fitter {
             background,
             model,
             result: None,
+            deconvoluted_lines: Vec::new(),
+            convoluted_line: EguiLine::new("Convoluted".to_string(), egui::Color32::BLUE),
         }
     }
 
@@ -163,6 +96,16 @@ impl Fitter {
 
                 fit.multi_gauss_fit();
 
+                // get the fit_lines and store them in the deconvoluted_lines
+                let deconvoluted_default_color = egui::Color32::from_rgb(255, 0, 255);
+                if let Some(fit_lines) = &fit.fit_lines {
+                    for (i, line) in fit_lines.iter().enumerate() {
+                        let mut fit_line = EguiLine::new(format!("Peak {}", i), deconvoluted_default_color);
+                        fit_line.points = line.clone();
+                        self.deconvoluted_lines.push(fit_line);
+                    }
+                }
+
                 self.result = Some(FitResult::Gaussian(fit));
             }
 
@@ -186,40 +129,40 @@ impl Fitter {
         }
     }
 
-    pub fn draw(
-        &self,
-        plot_ui: &mut egui_plot::PlotUi,
-        fit_color: egui::Color32,
-        background_color: egui::Color32,
-        convoluted_color: egui::Color32,
-    ) {
+    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi, log_y_scale: bool) {
         // Draw the fit lines
         if let Some(fit) = &self.result {
             match fit {
                 FitResult::Gaussian(fit) => {
-                    fit.draw(plot_ui, fit_color);
+                    // Draw the deconvoluted lines
+                    for line in &self.deconvoluted_lines {
+                        line.draw(plot_ui);
+                    }
 
-                    if let Some(bg_fitter) = &self.background {
+                    if let Some(background) = &self.background {
                         // Draw the background fit
-                        bg_fitter.draw(plot_ui, background_color);
+                        background.draw(plot_ui);
 
-                        if let Some((slope, intercept)) = bg_fitter.get_slope_intercept() {
-                            let convoluted_points = fit
-                                .calculate_convoluted_fit_points_with_linear_background(
-                                    slope, intercept,
-                                );
-                            let line = egui_plot::Line::new(egui_plot::PlotPoints::Owned(
-                                convoluted_points,
-                            ))
-                            .color(convoluted_color)
-                            .stroke(egui::Stroke::new(1.0, convoluted_color));
-                            plot_ui.line(line);
-                        }
+                        // Draw the convoluted line if background fit is available
+                        // if self.convoluted_line.draw {
+                        //     if let Some((slope, intercept)) = background.get_slope_intercept() {
+                        //         let convoluted_points = fit
+                        //             .calculate_convoluted_fit_points_with_linear_background(
+                        //                 slope,
+                        //                 intercept,
+                        //                 log_y_scale,
+                        //             );
+                        //         let line = Line::new(egui::PlotPoints::Owned(convoluted_points))
+                        //             .color(self.convoluted_line.color)
+                        //             .stroke(Stroke::new(1.0, self.convoluted_line.color));
+                        //         plot_ui.line(line);
+                        //     }
+                        // }
                     }
                 }
 
                 FitResult::Linear(fit) => {
-                    fit.draw(plot_ui, fit_color);
+                    log::info!("Drawing linear fit");
                 }
             }
         }
@@ -291,6 +234,8 @@ impl Fits {
                 self.save_to_file();
             }
 
+            ui.separator();
+
             if ui.button("Load Fits").clicked() {
                 self.load_from_file();
             }
@@ -302,27 +247,17 @@ impl Fits {
         self.temp_background_fit = None;
     }
 
-    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
+    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi, log_y_scale: bool) {
         if let Some(temp_fit) = &self.temp_fit {
-            temp_fit.draw(
-                plot_ui,
-                egui::Color32::from_rgb(255, 0, 255),
-                egui::Color32::GREEN,
-                egui::Color32::BLUE,
-            );
+            temp_fit.draw(plot_ui, log_y_scale);
         }
 
         if let Some(temp_background_fit) = &self.temp_background_fit {
-            temp_background_fit.draw(plot_ui, egui::Color32::GREEN);
+            temp_background_fit.draw(plot_ui);
         }
 
         for fit in self.stored_fits.iter() {
-            fit.draw(
-                plot_ui,
-                egui::Color32::from_rgb(162, 0, 255),
-                egui::Color32::from_rgb(162, 0, 255),
-                egui::Color32::from_rgb(162, 0, 255),
-            );
+            fit.draw(plot_ui, log_y_scale);
         }
     }
 
@@ -378,6 +313,8 @@ impl Fits {
     pub fn fit_context_menu_ui(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Fits", |ui| {
             self.save_and_load_ui(ui);
+
+            ui.separator();
 
             egui::ScrollArea::vertical().show(ui, |ui| {
                 self.fit_stats_grid_ui(ui);

@@ -3,7 +3,7 @@ use fnv::FnvHashMap;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlotSettings {
     #[serde(skip)]
-    cursor_position: Option<egui_plot::PlotPoint>,
+    // cursor_position: Option<egui_plot::PlotPoint>,
     info: bool,
     show_x_value: bool,
     show_y_value: bool,
@@ -22,7 +22,7 @@ pub struct PlotSettings {
 impl Default for PlotSettings {
     fn default() -> Self {
         PlotSettings {
-            cursor_position: None,
+            // cursor_position: None,
             info: true,
             show_x_value: true,
             show_y_value: true,

@@ -78,6 +78,22 @@ impl GaussianParams {
             self.area.value, self.area.uncertainty
         ));
     }
+
+    pub fn fit_line_points(&self) -> Vec<[f64; 2]> {
+        let num_points = 1000;
+        let start = self.mean.value - 5.0 * self.sigma.value; // Adjust start and end to be +/- 5 sigma from the mean
+        let end = self.mean.value + 5.0 * self.sigma.value;
+        let step = (end - start) / num_points as f64;
+
+        (0..num_points)
+            .map(|i| {
+                let x = start + step * i as f64;
+                let y = self.amplitude.value
+                    * (-((x - self.mean.value).powi(2)) / (2.0 * self.sigma.value.powi(2))).exp();
+                [x, y]
+            })
+            .collect()
+    }
 }
 
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -86,7 +102,8 @@ pub struct GaussianFitter {
     y: Vec<f64>,
     pub peak_markers: Vec<f64>,
     pub fit_params: Option<Vec<GaussianParams>>,
-    pub fit_lines: Option<Vec<Vec<(f64, f64)>>>,
+    // pub fit_lines: Option<Vec<Vec<(f64, f64)>>>,
+    pub fit_lines: Option<Vec<Vec<[f64; 2]>>>,
 }
 
 impl GaussianFitter {
@@ -278,22 +295,8 @@ impl GaussianFitter {
             let mut fit_lines = Vec::new();
 
             for params in fit_params.iter() {
-                let num_points = 1000;
-                let start = params.mean.value - 5.0 * params.sigma.value; // Adjust start and end to be +/- 5 sigma from the mean
-                let end = params.mean.value + 5.0 * params.sigma.value;
-                let step = (end - start) / num_points as f64;
-
-                let mut fit_line_points = Vec::new();
-                for i in 0..num_points {
-                    let x = start + step * i as f64;
-                    // Using coefficient (amplitude) for the Gaussian equation
-                    let y = params.amplitude.value
-                        * (-((x - params.mean.value).powi(2)) / (2.0 * params.sigma.value.powi(2)))
-                            .exp();
-                    fit_line_points.push((x, y));
-                }
-
-                fit_lines.push(fit_line_points);
+                let line = params.fit_line_points();
+                fit_lines.push(line);
             }
 
             self.fit_lines = Some(fit_lines);
@@ -306,6 +309,7 @@ impl GaussianFitter {
         &self,
         slope: f64,
         intercept: f64,
+        log_y_scale: bool,
     ) -> Vec<egui_plot::PlotPoint> {
         let num_points = 1000;
         let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -315,7 +319,6 @@ impl GaussianFitter {
         (0..=num_points)
             .map(|i| {
                 let x = min_x + step * i as f64;
-                // Adjust the calculation for y_gauss to use the GaussianParams struct
                 let y_gauss = self.fit_params.as_ref().map_or(0.0, |params| {
                     params.iter().fold(0.0, |sum, param| {
                         sum + param.amplitude.value
@@ -324,29 +327,20 @@ impl GaussianFitter {
                             .exp()
                     })
                 });
-                // Directly use slope and intercept to calculate the background estimate for x
                 let y_background = slope * x + intercept;
-                let y_total = y_gauss + y_background; // Correcting the Gaussian fit with the background estimate
+                let y_total = y_gauss + y_background;
+                let y_total = if log_y_scale {
+                    if y_total > 0.0 {
+                        y_total.log10()
+                    } else {
+                        0.0
+                    }
+                } else {
+                    y_total
+                };
                 egui_plot::PlotPoint::new(x, y_total)
             })
             .collect()
-    }
-
-    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi, color: egui::Color32) {
-        if let Some(fit_lines) = &self.fit_lines {
-            for fit in fit_lines.iter() {
-                let points: Vec<egui_plot::PlotPoint> = fit
-                    .iter()
-                    .map(|(x, y)| egui_plot::PlotPoint::new(*x, *y))
-                    .collect();
-
-                let line = egui_plot::Line::new(egui_plot::PlotPoints::Owned(points.clone()))
-                    .color(color)
-                    .stroke(egui::Stroke::new(1.0, color));
-
-                plot_ui.line(line);
-            }
-        }
     }
 
     pub fn fit_params_ui(&self, ui: &mut egui::Ui) {

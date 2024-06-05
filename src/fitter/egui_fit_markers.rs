@@ -111,8 +111,8 @@ impl EguiFitMarkers {
         }
     }
 
-    pub fn context_menu_marker_interactions(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Markers", |ui| {
+    pub fn menu_button(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("Fit Markers", |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add(
