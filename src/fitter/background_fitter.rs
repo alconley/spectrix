@@ -42,6 +42,8 @@ impl BackgroundFitter {
                     self.fit_line.points = linear_fitter.fit_points.clone().unwrap();
                 }
 
+                self.fit_line.legend = false;
+
                 self.result = Some(FitResult::Linear(linear_fitter));
             }
         }

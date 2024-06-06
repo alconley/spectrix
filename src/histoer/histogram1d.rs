@@ -16,8 +16,6 @@ pub struct PlotSettings {
     cursor_position: Option<egui_plot::PlotPoint>,
     egui_settings: EguiPlotSettings,
     stats_info: bool,
-    show_fit_stats: bool,
-    fit_stats_height: f32,
     markers: EguiFitMarkers,
 }
 
@@ -27,8 +25,6 @@ impl Default for PlotSettings {
             cursor_position: None,
             egui_settings: EguiPlotSettings::default(),
             stats_info: true,
-            show_fit_stats: true,
-            fit_stats_height: 0.0,
             markers: EguiFitMarkers::new(),
         }
     }
@@ -40,15 +36,6 @@ impl PlotSettings {
             ui.label("Plot Settings:");
             ui.separator();
             ui.checkbox(&mut self.stats_info, "Show Statitics");
-            ui.checkbox(&mut self.show_fit_stats, "Show Fit Statitics");
-            ui.add(
-                egui::DragValue::new(&mut self.fit_stats_height)
-                    .speed(1.0)
-                    .clamp_range(0.0..=f32::INFINITY)
-                    .prefix("Fit Stats Height: ")
-                    .suffix(" px"),
-            );
-
             self.egui_settings.menu_button(ui);
             self.markers.menu_button(ui);
         });
@@ -208,14 +195,29 @@ impl Histogram {
         }
     }
 
-    // Generates legend entries for the histogram based on the specified x range.
-    fn legend_entries(&self, start_x: f64, end_x: f64) -> Vec<String> {
-        let (integral, mean, stdev) = self.stats(start_x, end_x);
-        vec![
-            format!("Integral: {}", integral),
-            format!("Mean: {:.2}", mean),
-            format!("Stdev: {:.2}", stdev),
-        ]
+    // Get the legend stat entries for the histogram
+    fn show_stats(&self, plot_ui: &mut egui_plot::PlotUi) { 
+        if self.plot_settings.stats_info {
+
+            let plot_min_x = plot_ui.plot_bounds().min()[0];
+            let plot_max_x = plot_ui.plot_bounds().max()[0];
+
+            let (integral, mean, stdev) = self.stats(plot_min_x, plot_max_x);
+            let stats_entries = vec![
+                format!("Integral: {}", integral),
+                format!("Mean: {:.2}", mean),
+                format!("Stdev: {:.2}", stdev),
+            ];
+
+            for entry in stats_entries.iter() {
+                plot_ui.text(
+                    egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
+                        .highlight(false)
+                        .color(self.line.color)
+                        .name(entry),
+                );
+            }
+        }
     }
 
     // Fit the background with a linear line using the background markers
@@ -238,6 +240,8 @@ impl Histogram {
 
         let mut background_fitter = BackgroundFitter::new(x_data, y_data, FitModel::Linear);
         background_fitter.fit();
+
+        background_fitter.fit_line.name = format!("{} Temp Background", self.name);
         self.fits.temp_background_fit = Some(background_fitter);
     }
 
@@ -278,6 +282,8 @@ impl Histogram {
 
         fitter.fit();
 
+        fitter.set_name(self.name.clone());
+
         self.plot_settings.markers.peak_markers = fitter.get_peak_markers();
         self.fits.temp_fit = Some(fitter);
     }
@@ -302,10 +308,7 @@ impl Histogram {
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::S)) {
-                // Store the temporary fit if it exists
-                if let Some(temp_fit) = self.fits.temp_fit.take() {
-                    self.fits.stored_fits.push(temp_fit);
-                }
+                self.fits.store_temp_fit();
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::I)) {
@@ -323,58 +326,55 @@ impl Histogram {
         }
     }
 
+    // Draw the histogram, fit lines, markers, and stats
+    fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+        // update the histogram and fit lines with the log setting and draw
+        let log_y = self.plot_settings.egui_settings.log_y;
+        let log_x = self.plot_settings.egui_settings.log_x;
+
+        self.line.log_y = log_y;
+        self.line.log_x = log_x;
+        self.line.draw(plot_ui);
+
+        self.fits.set_log(log_y, log_x);
+        self.fits.draw(plot_ui);
+
+        self.show_stats(plot_ui);
+
+        self.plot_settings.markers.draw_all_markers(plot_ui);
+
+        if plot_ui.response().hovered() {
+            self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
+        } else {
+            self.plot_settings.cursor_position = None;
+        }
+    }
+
+    // Handles the context menu for the histogram
+    fn context_menu(&mut self, ui: &mut egui::Ui) {
+        self.line.menu_button(ui);
+        self.plot_settings.settings_ui(ui);
+        self.fits.fit_context_menu_ui(ui);
+    }
+
     // Renders the histogram using egui_plot
     pub fn render(&mut self, ui: &mut egui::Ui) {
         self.update_line_points(); // Ensure line points are updated
         self.interactive(ui); // Handle interactive elements
 
-        let log_y = self.plot_settings.egui_settings.log_y;
-
         let mut plot = egui_plot::Plot::new(self.name.clone());
         plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
         ui.vertical(|ui| {
-            if self.plot_settings.show_fit_stats {
-                egui::ScrollArea::both()
-                    .max_height(self.plot_settings.fit_stats_height)
-                    .show(ui, |ui| {
-                        self.fits.fit_stats_grid_ui(ui);
-                    });
-            }
+
+            self.fits.fit_stats_ui(ui);
 
             plot.show(ui, |plot_ui| {
-                let plot_min_x = plot_ui.plot_bounds().min()[0];
-                let plot_max_x = plot_ui.plot_bounds().max()[0];
-
-                if self.plot_settings.stats_info {
-                    let stats_entries = self.legend_entries(plot_min_x, plot_max_x);
-                    for entry in stats_entries.iter() {
-                        plot_ui.text(
-                            egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
-                                .highlight(false)
-                                .color(self.line.color)
-                                .name(entry),
-                        );
-                    }
-                }
-
-                self.line.draw(plot_ui);
-
-                if plot_ui.response().hovered() {
-                    self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
-                } else {
-                    self.plot_settings.cursor_position = None;
-                }
-
-                self.plot_settings.markers.draw_all_markers(plot_ui);
-
-                self.fits.draw(plot_ui, log_y);
+                self.draw(plot_ui);
             })
             .response
             .context_menu(|ui| {
-                self.line.menu_button(ui);
-                self.plot_settings.settings_ui(ui);
-                self.fits.fit_context_menu_ui(ui);
+                self.context_menu(ui);
             });
         });
     }

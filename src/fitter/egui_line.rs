@@ -69,7 +69,7 @@ impl EguiLine {
         EguiLine {
             draw: true,
             name,
-            legend: false,
+            legend: true,
             highlighted: false,
             stroke: Stroke::new(1.0, color),
             width: 1.0,
@@ -94,8 +94,8 @@ impl EguiLine {
                 .points
                 .iter()
                 .map(|&[x, y]| {
-                    let x = if self.log_x && x > 0.0 { x.log10() } else { x };
-                    let y = if self.log_y && y > 0.0 { y.log10() } else { y };
+                    let x = if self.log_x && x > 0.0 { x.log10().max(0.0001) } else { x };
+                    let y = if self.log_y && y > 0.0 { y.log10().max(0.0001) } else { y };
                     PlotPoint::new(x, y)
                 })
                 .collect();
@@ -122,7 +122,8 @@ impl EguiLine {
         ui.menu_button(format!("{} Line", self.name), |ui| {
             ui.vertical(|ui| {
                 ui.checkbox(&mut self.draw, "Draw Line");
-                ui.checkbox(&mut self.legend, "Legend").on_hover_text("Show in legend");
+                ui.checkbox(&mut self.legend, "Legend")
+                    .on_hover_text("Show in legend");
                 ui.checkbox(&mut self.highlighted, "Highlighted");
 
                 self.color_selection_buttons(ui);

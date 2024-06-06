@@ -102,7 +102,6 @@ pub struct GaussianFitter {
     y: Vec<f64>,
     pub peak_markers: Vec<f64>,
     pub fit_params: Option<Vec<GaussianParams>>,
-    // pub fit_lines: Option<Vec<Vec<(f64, f64)>>>,
     pub fit_lines: Option<Vec<Vec<[f64; 2]>>>,
 }
 
@@ -305,13 +304,8 @@ impl GaussianFitter {
         }
     }
 
-    pub fn calculate_convoluted_fit_points_with_linear_background(
-        &self,
-        slope: f64,
-        intercept: f64,
-        log_y_scale: bool,
-    ) -> Vec<egui_plot::PlotPoint> {
-        let num_points = 1000;
+    pub fn convoluted_fit_points_linear_bg( &self, slope: f64, intercept: f64) -> Vec<[f64; 2]> {
+        let num_points = 3000;
         let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
         let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let step = (max_x - min_x) / num_points as f64;
@@ -329,16 +323,7 @@ impl GaussianFitter {
                 });
                 let y_background = slope * x + intercept;
                 let y_total = y_gauss + y_background;
-                let y_total = if log_y_scale {
-                    if y_total > 0.0 {
-                        y_total.log10()
-                    } else {
-                        0.0
-                    }
-                } else {
-                    y_total
-                };
-                egui_plot::PlotPoint::new(x, y_total)
+                [x, y_total]
             })
             .collect()
     }

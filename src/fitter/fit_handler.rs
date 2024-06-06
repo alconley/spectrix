@@ -22,6 +22,7 @@ pub enum FitResult {
 }
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Fitter {
+    pub name: String,
     pub x_data: Vec<f64>,
     pub y_data: Vec<f64>,
     pub y_err: Option<Vec<f64>>,
@@ -36,6 +37,7 @@ impl Fitter {
     // Constructor to create a new Fitter with empty data and specified model
     pub fn new(model: FitModel, background: Option<BackgroundFitter>) -> Self {
         Fitter {
+            name: "Fit".to_string(),
             x_data: Vec::new(),
             y_data: Vec::new(),
             y_err: None,
@@ -100,9 +102,25 @@ impl Fitter {
                 let deconvoluted_default_color = egui::Color32::from_rgb(255, 0, 255);
                 if let Some(fit_lines) = &fit.fit_lines {
                     for (i, line) in fit_lines.iter().enumerate() {
-                        let mut fit_line = EguiLine::new(format!("Peak {}", i), deconvoluted_default_color);
+                        let mut fit_line =
+                            EguiLine::new(format!("Peak {}", i), deconvoluted_default_color);
                         fit_line.points = line.clone();
+                        fit_line.legend = false;
                         self.deconvoluted_lines.push(fit_line);
+                    }
+                }
+
+                // calculate the convoluted line
+                if let Some(background) = &self.background {
+                    if let Some((slope, intercept)) = background.get_slope_intercept() {
+                        let convoluted_points = fit.convoluted_fit_points_linear_bg(
+                            slope,
+                            intercept,
+                        );
+                        let mut line = EguiLine::new("Convoluted".to_string(), egui::Color32::BLUE);
+                        line.points = convoluted_points;
+                        line.legend = false;
+                        self.convoluted_line = line;
                     }
                 }
 
@@ -129,43 +147,143 @@ impl Fitter {
         }
     }
 
-    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi, log_y_scale: bool) {
-        // Draw the fit lines
-        if let Some(fit) = &self.result {
-            match fit {
-                FitResult::Gaussian(fit) => {
-                    // Draw the deconvoluted lines
-                    for line in &self.deconvoluted_lines {
-                        line.draw(plot_ui);
-                    }
-
-                    if let Some(background) = &self.background {
-                        // Draw the background fit
-                        background.draw(plot_ui);
-
-                        // Draw the convoluted line if background fit is available
-                        // if self.convoluted_line.draw {
-                        //     if let Some((slope, intercept)) = background.get_slope_intercept() {
-                        //         let convoluted_points = fit
-                        //             .calculate_convoluted_fit_points_with_linear_background(
-                        //                 slope,
-                        //                 intercept,
-                        //                 log_y_scale,
-                        //             );
-                        //         let line = Line::new(egui::PlotPoints::Owned(convoluted_points))
-                        //             .color(self.convoluted_line.color)
-                        //             .stroke(Stroke::new(1.0, self.convoluted_line.color));
-                        //         plot_ui.line(line);
-                        //     }
-                        // }
-                    }
-                }
-
-                FitResult::Linear(fit) => {
-                    log::info!("Drawing linear fit");
-                }
-            }
+    pub fn set_background_color(&mut self, color: egui::Color32) {
+        if let Some(background) = &mut self.background {
+            background.fit_line.color = color;
         }
+    }
+
+    pub fn set_convoluted_color(&mut self, color: egui::Color32) {
+        self.convoluted_line.color = color;
+    }
+
+    pub fn set_deconvoluted_color(&mut self, color: egui::Color32) {
+        for line in &mut self.deconvoluted_lines {
+            line.color = color;
+        }
+    }
+
+    pub fn show_deconvoluted(&mut self, show: bool) {
+        for line in &mut self.deconvoluted_lines {
+            line.draw = show;
+        }
+    }
+
+    pub fn show_convoluted(&mut self, show: bool) {
+        self.convoluted_line.draw = show;
+    }
+
+    pub fn show_background(&mut self, show: bool) {
+        if let Some(background) = &mut self.background {
+            background.fit_line.draw = show;
+        }
+    }
+
+    pub fn set_name(&mut self, name: String) {
+        self.convoluted_line.name = format!("{}-Convoluted", name);
+
+        for (i, line) in self.deconvoluted_lines.iter_mut().enumerate() {
+            line.name = format!("{}-Peak {}", name, i);
+        }
+
+        if let Some(background) = &mut self.background {
+            background.fit_line.name = format!("{}-Background", name);
+        }
+    }
+    
+    pub fn lines_ui(&mut self, ui: &mut egui::Ui) {
+        if let Some(background) = &mut self.background {
+            background.fit_line.menu_button(ui);
+        }
+
+        self.convoluted_line.menu_button(ui);
+
+        for line in &mut self.deconvoluted_lines {
+            line.menu_button(ui);
+        }
+
+        ui.separator();
+    }
+
+    // Draw the background, deconvoluted, and convoluted lines
+    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
+        // Draw the deconvoluted lines
+        for line in &self.deconvoluted_lines {
+            line.draw(plot_ui);
+        }
+
+        // Draw the background if it exists
+        if let Some(background) = &self.background {
+            background.draw(plot_ui);
+        }
+
+        // Draw the convoluted line
+        self.convoluted_line.draw(plot_ui);
+    }
+    
+    // Set the log_y flag for all lines
+    pub fn set_log(&mut self, log_y: bool, log_x: bool) {
+        for line in &mut self.deconvoluted_lines {
+            line.log_y = log_y;
+            line.log_x = log_x;
+        }
+
+        if let Some(background) = &mut self.background {
+            background.fit_line.log_y = log_y;
+            background.fit_line.log_x = log_x;
+        }
+
+        self.convoluted_line.log_y = log_y;
+        self.convoluted_line.log_x = log_x;
+    }
+
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct FitSettings {
+    pub show_deconvoluted: bool,
+    pub show_convoluted: bool,
+    pub show_background: bool,
+    pub show_fit_stats: bool,
+    pub fit_stats_height: f32,
+}
+
+impl Default for FitSettings {
+    fn default() -> Self {
+        FitSettings {
+            show_deconvoluted: true,
+            show_convoluted: true,
+            show_background: true,
+            show_fit_stats: true,
+            fit_stats_height: 0.0,
+        }
+    }
+}
+
+impl FitSettings {
+    pub fn menu_ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+
+            ui.label("Fit Stats: ");
+            ui.checkbox(&mut self.show_fit_stats, "Show").on_hover_text("Show the fit statistics above the histogram");
+
+            ui.add(
+                egui::DragValue::new(&mut self.fit_stats_height)
+                    .speed(1.0)
+                    .clamp_range(0.0..=f32::INFINITY)
+                    .prefix("Height: ")
+                    .suffix(" px"),
+            ).on_hover_text("Set the height of the fit statistics grid to see more fits at once");
+        });
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.label("Show Fit Lines: ");
+            ui.checkbox(&mut self.show_deconvoluted, "Deconvoluted").on_hover_text("Show the deconvoluted peaks");
+            ui.checkbox(&mut self.show_convoluted, "Convoluted").on_hover_text("Show the convoluted line");
+            ui.checkbox(&mut self.show_background, "Background").on_hover_text("Show the background line");
+        });
     }
 }
 
@@ -174,6 +292,7 @@ pub struct Fits {
     pub temp_fit: Option<Fitter>,
     pub temp_background_fit: Option<BackgroundFitter>,
     pub stored_fits: Vec<Fitter>,
+    pub settings: FitSettings,
 }
 
 impl Default for Fits {
@@ -188,7 +307,78 @@ impl Fits {
             temp_fit: None,
             temp_background_fit: None,
             stored_fits: Vec::new(),
+            settings: FitSettings::default(),
         }
+    }
+
+    pub fn store_temp_fit(&mut self) {
+
+        if let Some(temp_fit) = &mut self.temp_fit.take() {
+            temp_fit.set_background_color(egui::Color32::DARK_GREEN);
+            temp_fit.set_convoluted_color(egui::Color32::DARK_BLUE);
+            temp_fit.set_deconvoluted_color(egui::Color32::from_rgb(150, 0, 255));
+
+            temp_fit.set_name(format!("Fit {}", self.stored_fits.len()));
+    
+            self.stored_fits.push(temp_fit.clone());
+        }
+
+        self.temp_background_fit = None;
+    }
+
+    pub fn set_log(&mut self, log_y: bool, log_x: bool) {
+        if let Some(temp_fit) = &mut self.temp_fit {
+            temp_fit.set_log(log_y, log_x);
+        }
+
+        if let Some(temp_background_fit) = &mut self.temp_background_fit {
+            temp_background_fit.fit_line.log_y = log_y;
+            temp_background_fit.fit_line.log_x = log_x;
+        }
+
+        for fit in &mut self.stored_fits {
+            fit.set_log(log_y, log_x);
+        }
+    }
+
+    pub fn set_stored_fits_background_color(&mut self, color: egui::Color32) {
+        for fit in &mut self.stored_fits {
+            if let Some(background) = &mut fit.background {
+                background.fit_line.color = color;
+            }
+        }
+    }
+
+    pub fn set_stored_fits_convoluted_color(&mut self, color: egui::Color32) {
+        for fit in &mut self.stored_fits {
+            fit.convoluted_line.color = color;
+        }
+    }
+
+    pub fn set_stored_fits_deconvoluted_color(&mut self, color: egui::Color32) {
+        for fit in &mut self.stored_fits {
+            for line in &mut fit.deconvoluted_lines {
+                line.color = color;
+            }
+        }
+    }
+
+    pub fn update_visibility(&mut self) {
+        if let Some(temp_fit) = &mut self.temp_fit {
+            temp_fit.show_deconvoluted(self.settings.show_deconvoluted);
+            temp_fit.show_convoluted(self.settings.show_convoluted);
+            temp_fit.show_background(self.settings.show_background);
+        }
+
+        for fit in &mut self.stored_fits {
+            fit.show_deconvoluted(self.settings.show_deconvoluted);
+            fit.show_convoluted(self.settings.show_convoluted);
+            fit.show_background(self.settings.show_background);
+        }
+    }
+
+    pub fn apply_visibility_settings(&mut self) {
+        self.update_visibility();
     }
 
     fn save_to_file(&self) {
@@ -247,17 +437,19 @@ impl Fits {
         self.temp_background_fit = None;
     }
 
-    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi, log_y_scale: bool) {
+    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+        self.apply_visibility_settings();
+
         if let Some(temp_fit) = &self.temp_fit {
-            temp_fit.draw(plot_ui, log_y_scale);
+            temp_fit.draw(plot_ui);
         }
 
         if let Some(temp_background_fit) = &self.temp_background_fit {
             temp_background_fit.draw(plot_ui);
         }
 
-        for fit in self.stored_fits.iter() {
-            fit.draw(plot_ui, log_y_scale);
+        for fit in &mut self.stored_fits.iter() {
+            fit.draw(plot_ui);
         }
     }
 
@@ -310,15 +502,61 @@ impl Fits {
         }
     }
 
+    pub fn fit_stats_ui(&mut self, ui: &mut egui::Ui) {
+        if self.settings.show_fit_stats {
+            egui::ScrollArea::vertical()
+                .max_height(self.settings.fit_stats_height)
+                .show(ui, |ui| {
+                    self.fit_stats_grid_ui(ui);
+                });
+        }
+    }
+
+    pub fn fit_lines_ui(&mut self, ui: &mut egui::Ui) {
+
+        egui::ScrollArea::vertical()
+            .show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.label("Fit Lines");
+
+                    ui.separator();
+
+                    if let Some(temp_fit) = &mut self.temp_fit {
+                        temp_fit.lines_ui(ui);
+                    }
+
+                    for fit in &mut self.stored_fits {
+                        fit.lines_ui(ui);
+                    }
+                });
+            });
+    }
+
     pub fn fit_context_menu_ui(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Fits", |ui| {
             self.save_and_load_ui(ui);
 
             ui.separator();
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            self.settings.menu_ui(ui);  
+
+            ui.separator();
+
+            egui::ScrollArea::vertical()
+                .max_height(300.0)
+                .id_source("Context menu fit stats grid")
+                .show(ui, |ui| {
                 self.fit_stats_grid_ui(ui);
             });
+
+            ui.separator();
+
+            egui::ScrollArea::vertical()
+                .max_height(300.0).show(ui, |ui| {
+                self.fit_lines_ui(ui);
+            }); 
+
         });
     }
+
 }
