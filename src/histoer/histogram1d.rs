@@ -197,7 +197,7 @@ impl Histogram {
             let plot_max_x = plot_ui.plot_bounds().max()[0];
 
             let (integral, mean, stdev) = self.stats(plot_min_x, plot_max_x);
-            let stats_entries = vec![
+            let stats_entries = [
                 format!("Integral: {}", integral),
                 format!("Mean: {:.2}", mean),
                 format!("Stdev: {:.2}", stdev),
@@ -226,10 +226,7 @@ impl Histogram {
         let marker_positions = self.plot_settings.markers.background_markers.clone();
         let (x_data, y_data): (Vec<f64>, Vec<f64>) = marker_positions
             .iter()
-            .filter_map(|&pos| {
-                self.get_bin_count_and_center(pos)
-                    .map(|(center, count)| (center, count))
-            })
+            .filter_map(|&pos| self.get_bin_count_and_center(pos))
             .unzip();
 
         let mut background_fitter = BackgroundFitter::new(x_data, y_data, FitModel::Linear);

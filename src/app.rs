@@ -90,7 +90,9 @@ impl eframe::App for NATApp {
 
                 if !self.workspacer.selected_files.borrow().is_empty() {
                     // Properly clone the shared state for processing
-                    self.processer.files = self.workspacer.selected_files.borrow().clone();
+                    self.processer
+                        .files
+                        .clone_from(&self.workspacer.selected_files.borrow());
                     // self.processer.calculation_ui(ui);
 
                     if ui.button("Calculate Histograms").clicked() {

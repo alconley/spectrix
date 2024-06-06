@@ -104,7 +104,7 @@ impl Fitter {
                     for (i, line) in fit_lines.iter().enumerate() {
                         let mut fit_line =
                             EguiLine::new(format!("Peak {}", i), deconvoluted_default_color);
-                        fit_line.points = line.clone();
+                        fit_line.points.clone_from(line);
                         fit_line.legend = false;
                         self.deconvoluted_lines.push(fit_line);
                     }
