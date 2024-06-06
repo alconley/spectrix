@@ -1,30 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use muc::MUCApp;
+use muc::NATApp;
 
 use eframe::egui;
-// fn main() -> Result<(), eframe::Error> {
-//     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
-//     let options = eframe::NativeOptions {
-//         viewport: egui::ViewportBuilder::default().with_inner_size([800.0, 600.0]),
-//         ..Default::default()
-//     };
-//     eframe::run_native(
-//         "muc",
-//         options,
-//         Box::new(|cc| {
-//             #[cfg_attr(not(feature = "serde"), allow(unused_mut))]
-//             let mut app = MUCApp::new(cc);
-//             #[cfg(feature = "serde")]
-//             if let Some(storage) = _cc.storage {
-//                 if let Some(state) = eframe::get_value(storage, eframe::APP_KEY) {
-//                     app = state;
-//                 }
-//             }
-//             Box::new(app)
-//         }),
-//     )
-// }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
@@ -44,7 +22,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "muc",
         native_options,
-        Box::new(|cc| Box::new(MUCApp::new(cc))),
+        Box::new(|cc| Box::new(NATApp::new(cc))),
     )
 }
 
@@ -60,9 +38,9 @@ fn main() {
     wasm_bindgen_futures::spawn_local(async {
         eframe::WebRunner::new()
             .start(
-                "the_canvas_id", // hardcode it
+                "NAT", // hardcode it
                 web_options,
-                Box::new(|cc| Box::new(muc::MUCApp::new(cc, false))),
+                Box::new(|cc| Box::new(muc::app::new(cc))),
             )
             .await
             .expect("failed to start eframe");

@@ -6,7 +6,7 @@ use super::workspacer::Workspacer;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
-pub struct MUCApp {
+pub struct NATApp {
     tree: egui_tiles::Tree<Pane>,
 
     workspacer: Workspacer,
@@ -18,7 +18,7 @@ pub struct MUCApp {
     side_panel_open: bool,
 }
 
-impl Default for MUCApp {
+impl Default for NATApp {
     fn default() -> Self {
         let mut tiles = egui_tiles::Tiles::default();
 
@@ -42,9 +42,8 @@ impl Default for MUCApp {
     }
 }
 
-impl MUCApp {
+impl NATApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
         if let Some(storage) = cc.storage {
@@ -75,8 +74,7 @@ impl MUCApp {
     }
 }
 
-impl eframe::App for MUCApp {
-
+impl eframe::App for NATApp {
     /// Called by the frame work to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
@@ -94,7 +92,6 @@ impl eframe::App for MUCApp {
                     self.processer.files = self.workspacer.selected_files.borrow().clone();
                     // self.processer.calculation_ui(ui);
 
-
                     if ui.button("Calculate Histograms").clicked() {
                         self.processer.calculate_histograms();
                         self.add_histograms_to_tree();
@@ -106,7 +103,6 @@ impl eframe::App for MUCApp {
         egui::SidePanel::left("tree")
             .max_width(300.0)
             .show_animated(ctx, self.side_panel_open, |ui| {
-
                 egui::global_dark_light_mode_buttons(ui);
 
                 ui.separator();
@@ -140,13 +136,12 @@ impl eframe::App for MUCApp {
                 if let Some(root) = self.tree.root() {
                     tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
                 }
-        });
+            });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             self.tree.ui(&mut self.behavior, ui);
         });
     }
-
 }
 
 fn tree_ui(
