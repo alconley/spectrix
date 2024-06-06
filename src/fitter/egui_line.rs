@@ -94,8 +94,16 @@ impl EguiLine {
                 .points
                 .iter()
                 .map(|&[x, y]| {
-                    let x = if self.log_x && x > 0.0 { x.log10().max(0.0001) } else { x };
-                    let y = if self.log_y && y > 0.0 { y.log10().max(0.0001) } else { y };
+                    let x = if self.log_x && x > 0.0 {
+                        x.log10().max(0.0001)
+                    } else {
+                        x
+                    };
+                    let y = if self.log_y && y > 0.0 {
+                        y.log10().max(0.0001)
+                    } else {
+                        y
+                    };
                     PlotPoint::new(x, y)
                 })
                 .collect();

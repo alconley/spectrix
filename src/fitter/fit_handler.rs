@@ -113,10 +113,8 @@ impl Fitter {
                 // calculate the convoluted line
                 if let Some(background) = &self.background {
                     if let Some((slope, intercept)) = background.get_slope_intercept() {
-                        let convoluted_points = fit.convoluted_fit_points_linear_bg(
-                            slope,
-                            intercept,
-                        );
+                        let convoluted_points =
+                            fit.convoluted_fit_points_linear_bg(slope, intercept);
                         let mut line = EguiLine::new("Convoluted".to_string(), egui::Color32::BLUE);
                         line.points = convoluted_points;
                         line.legend = false;
@@ -190,7 +188,7 @@ impl Fitter {
             background.fit_line.name = format!("{}-Background", name);
         }
     }
-    
+
     pub fn lines_ui(&mut self, ui: &mut egui::Ui) {
         if let Some(background) = &mut self.background {
             background.fit_line.menu_button(ui);
@@ -220,7 +218,7 @@ impl Fitter {
         // Draw the convoluted line
         self.convoluted_line.draw(plot_ui);
     }
-    
+
     // Set the log_y flag for all lines
     pub fn set_log(&mut self, log_y: bool, log_x: bool) {
         for line in &mut self.deconvoluted_lines {
@@ -236,7 +234,6 @@ impl Fitter {
         self.convoluted_line.log_y = log_y;
         self.convoluted_line.log_x = log_x;
     }
-
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -263,9 +260,9 @@ impl Default for FitSettings {
 impl FitSettings {
     pub fn menu_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-
             ui.label("Fit Stats: ");
-            ui.checkbox(&mut self.show_fit_stats, "Show").on_hover_text("Show the fit statistics above the histogram");
+            ui.checkbox(&mut self.show_fit_stats, "Show")
+                .on_hover_text("Show the fit statistics above the histogram");
 
             ui.add(
                 egui::DragValue::new(&mut self.fit_stats_height)
@@ -273,16 +270,20 @@ impl FitSettings {
                     .clamp_range(0.0..=f32::INFINITY)
                     .prefix("Height: ")
                     .suffix(" px"),
-            ).on_hover_text("Set the height of the fit statistics grid to see more fits at once");
+            )
+            .on_hover_text("Set the height of the fit statistics grid to see more fits at once");
         });
 
         ui.separator();
 
         ui.horizontal(|ui| {
             ui.label("Show Fit Lines: ");
-            ui.checkbox(&mut self.show_deconvoluted, "Deconvoluted").on_hover_text("Show the deconvoluted peaks");
-            ui.checkbox(&mut self.show_convoluted, "Convoluted").on_hover_text("Show the convoluted line");
-            ui.checkbox(&mut self.show_background, "Background").on_hover_text("Show the background line");
+            ui.checkbox(&mut self.show_deconvoluted, "Deconvoluted")
+                .on_hover_text("Show the deconvoluted peaks");
+            ui.checkbox(&mut self.show_convoluted, "Convoluted")
+                .on_hover_text("Show the convoluted line");
+            ui.checkbox(&mut self.show_background, "Background")
+                .on_hover_text("Show the background line");
         });
     }
 }
@@ -312,14 +313,13 @@ impl Fits {
     }
 
     pub fn store_temp_fit(&mut self) {
-
         if let Some(temp_fit) = &mut self.temp_fit.take() {
             temp_fit.set_background_color(egui::Color32::DARK_GREEN);
             temp_fit.set_convoluted_color(egui::Color32::DARK_BLUE);
             temp_fit.set_deconvoluted_color(egui::Color32::from_rgb(150, 0, 255));
 
             temp_fit.set_name(format!("Fit {}", self.stored_fits.len()));
-    
+
             self.stored_fits.push(temp_fit.clone());
         }
 
@@ -513,23 +513,21 @@ impl Fits {
     }
 
     pub fn fit_lines_ui(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.label("Fit Lines");
 
-        egui::ScrollArea::vertical()
-            .show(ui, |ui| {
-                ui.vertical(|ui| {
-                    ui.label("Fit Lines");
+                ui.separator();
 
-                    ui.separator();
+                if let Some(temp_fit) = &mut self.temp_fit {
+                    temp_fit.lines_ui(ui);
+                }
 
-                    if let Some(temp_fit) = &mut self.temp_fit {
-                        temp_fit.lines_ui(ui);
-                    }
-
-                    for fit in &mut self.stored_fits {
-                        fit.lines_ui(ui);
-                    }
-                });
+                for fit in &mut self.stored_fits {
+                    fit.lines_ui(ui);
+                }
             });
+        });
     }
 
     pub fn fit_context_menu_ui(&mut self, ui: &mut egui::Ui) {
@@ -538,7 +536,7 @@ impl Fits {
 
             ui.separator();
 
-            self.settings.menu_ui(ui);  
+            self.settings.menu_ui(ui);
 
             ui.separator();
 
@@ -546,17 +544,16 @@ impl Fits {
                 .max_height(300.0)
                 .id_source("Context menu fit stats grid")
                 .show(ui, |ui| {
-                self.fit_stats_grid_ui(ui);
-            });
+                    self.fit_stats_grid_ui(ui);
+                });
 
             ui.separator();
 
             egui::ScrollArea::vertical()
-                .max_height(300.0).show(ui, |ui| {
-                self.fit_lines_ui(ui);
-            }); 
-
+                .max_height(300.0)
+                .show(ui, |ui| {
+                    self.fit_lines_ui(ui);
+                });
         });
     }
-
 }

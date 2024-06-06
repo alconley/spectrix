@@ -196,9 +196,8 @@ impl Histogram {
     }
 
     // Get the legend stat entries for the histogram
-    fn show_stats(&self, plot_ui: &mut egui_plot::PlotUi) { 
+    fn show_stats(&self, plot_ui: &mut egui_plot::PlotUi) {
         if self.plot_settings.stats_info {
-
             let plot_min_x = plot_ui.plot_bounds().min()[0];
             let plot_max_x = plot_ui.plot_bounds().max()[0];
 
@@ -366,7 +365,6 @@ impl Histogram {
         plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
         ui.vertical(|ui| {
-
             self.fits.fit_stats_ui(ui);
 
             plot.show(ui, |plot_ui| {

@@ -4,15 +4,18 @@ use super::tree::TreeBehavior;
 use super::processer::Processer;
 use super::workspacer::Workspacer;
 
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct MUCApp {
     tree: egui_tiles::Tree<Pane>,
 
     workspacer: Workspacer,
     processer: Processer,
 
-    #[cfg_attr(feature = "serde", serde(skip))]
+    #[serde(skip)] // This how you opt-out of serialization of a field
     behavior: TreeBehavior,
+
+    side_panel_open: bool,
 }
 
 impl Default for MUCApp {
@@ -34,12 +37,20 @@ impl Default for MUCApp {
             workspacer,
             processer,
             behavior: Default::default(),
+            side_panel_open: false,
         }
     }
 }
 
 impl MUCApp {
-    pub fn new() -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+
+        // Load previous app state (if any).
+        // Note that you must enable the `persistence` feature for this to work.
+        if let Some(storage) = cc.storage {
+            return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
+        }
+
         Default::default()
     }
 
@@ -65,13 +76,24 @@ impl MUCApp {
 }
 
 impl eframe::App for MUCApp {
+
+    /// Called by the frame work to save state before shutdown.
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, eframe::APP_KEY, self);
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("muc_top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
+                ui.checkbox(&mut self.side_panel_open, "Side Panel");
+
+                ui.separator();
+
                 if !self.workspacer.selected_files.borrow().is_empty() {
                     // Properly clone the shared state for processing
                     self.processer.files = self.workspacer.selected_files.borrow().clone();
                     // self.processer.calculation_ui(ui);
+
 
                     if ui.button("Calculate Histograms").clicked() {
                         self.processer.calculate_histograms();
@@ -81,36 +103,43 @@ impl eframe::App for MUCApp {
             });
         });
 
-        egui::SidePanel::left("tree").show(ctx, |ui| {
-            if ui.button("Reset").clicked() {
-                *self = Default::default();
-            }
-            self.behavior.ui(ui);
+        egui::SidePanel::left("tree")
+            .max_width(300.0)
+            .show_animated(ctx, self.side_panel_open, |ui| {
 
-            ui.separator();
+                egui::global_dark_light_mode_buttons(ui);
 
-            // ui.collapsing("Tree", |ui| {
-            //     ui.style_mut().wrap = Some(false);
-            //     let tree_debug = format!("{:#?}", self.tree);
-            //     ui.monospace(&tree_debug);
-            // });
+                ui.separator();
 
-            ui.separator();
-
-            ui.collapsing("Active tiles", |ui| {
-                let active = self.tree.active_tiles();
-                for tile_id in active {
-                    use egui_tiles::Behavior as _;
-                    let name = self.behavior.tab_title_for_tile(&self.tree.tiles, tile_id);
-                    ui.label(format!("{} - {tile_id:?}", name.text()));
+                if ui.button("Reset").clicked() {
+                    *self = Default::default();
                 }
-            });
+                self.behavior.ui(ui);
 
-            ui.separator();
+                ui.separator();
 
-            if let Some(root) = self.tree.root() {
-                tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
-            }
+                // ui.collapsing("Tree", |ui| {
+                //     ui.style_mut().wrap = Some(false);
+                //     let tree_debug = format!("{:#?}", self.tree);
+                //     ui.monospace(&tree_debug);
+                // });
+
+                ui.separator();
+
+                ui.collapsing("Active tiles", |ui| {
+                    let active = self.tree.active_tiles();
+                    for tile_id in active {
+                        use egui_tiles::Behavior as _;
+                        let name = self.behavior.tab_title_for_tile(&self.tree.tiles, tile_id);
+                        ui.label(format!("{} - {tile_id:?}", name.text()));
+                    }
+                });
+
+                ui.separator();
+
+                if let Some(root) = self.tree.root() {
+                    tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
+                }
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -118,10 +147,6 @@ impl eframe::App for MUCApp {
         });
     }
 
-    fn save(&mut self, _storage: &mut dyn eframe::Storage) {
-        #[cfg(feature = "serde")]
-        eframe::set_value(_storage, eframe::APP_KEY, &self);
-    }
 }
 
 fn tree_ui(

@@ -304,7 +304,7 @@ impl GaussianFitter {
         }
     }
 
-    pub fn convoluted_fit_points_linear_bg( &self, slope: f64, intercept: f64) -> Vec<[f64; 2]> {
+    pub fn convoluted_fit_points_linear_bg(&self, slope: f64, intercept: f64) -> Vec<[f64; 2]> {
         let num_points = 3000;
         let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
         let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);

@@ -1,6 +1,8 @@
 use crate::pane::Pane;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct TreeBehavior {
+    #[serde(skip)]
     simplification_options: egui_tiles::SimplificationOptions,
     tab_bar_height: f32,
     gap_width: f32,
@@ -9,7 +11,14 @@ pub struct TreeBehavior {
 impl Default for TreeBehavior {
     fn default() -> Self {
         Self {
-            simplification_options: Default::default(),
+            simplification_options: egui_tiles::SimplificationOptions {
+                prune_empty_tabs: true,
+                prune_empty_containers: true,
+                prune_single_child_tabs: true,
+                prune_single_child_containers: true,
+                all_panes_must_have_tabs: true,
+                join_nested_linear_containers: true,
+            },
             tab_bar_height: 24.0,
             gap_width: 2.0,
         }

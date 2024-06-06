@@ -2,8 +2,7 @@ use super::histoer::histogram1d::Histogram;
 use super::histoer::histogram2d::Histogram2D;
 use crate::workspacer::Workspacer;
 
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub enum Pane {
     Workspace(Workspacer),
     Histogram(Histogram),
@@ -25,13 +24,14 @@ impl Pane {
                 hist.render(ui);
             }
         }
-        if ui
-            .add(egui::Button::new("Drag me!").sense(egui::Sense::drag()))
-            .drag_started()
-        {
-            egui_tiles::UiResponse::DragStarted
-        } else {
-            egui_tiles::UiResponse::None
-        }
+        // if ui
+        //     .add(egui::Button::new("").sense(egui::Sense::drag()))
+        //     .drag_started()
+        // {
+        //     egui_tiles::UiResponse::DragStarted
+        // } else {
+        //     egui_tiles::UiResponse::None
+        // }
+        egui_tiles::UiResponse::None
     }
 }
