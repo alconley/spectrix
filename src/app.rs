@@ -25,8 +25,9 @@ impl Default for NATApp {
         let workspacer = Workspacer::new();
         let processer = Processer::new();
 
-        let mut tabs = vec![];
-        tabs.push(tiles.insert_pane(Pane::Workspace(workspacer.clone())));
+        // let mut tabs = vec![];
+        // tabs.push(tiles.insert_pane(Pane::Workspace(workspacer.clone())));
+        let tabs = vec![tiles.insert_pane(Pane::Workspace(workspacer.clone()))];
 
         let root = tiles.insert_tab_tile(tabs);
 
@@ -101,7 +102,7 @@ impl eframe::App for NATApp {
         });
 
         egui::SidePanel::left("tree")
-            .max_width(300.0)
+            .max_width(200.0)
             .show_animated(ctx, self.side_panel_open, |ui| {
                 egui::global_dark_light_mode_buttons(ui);
 

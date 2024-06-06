@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use muc::NATApp;
+use nat::NATApp;
 
 use eframe::egui;
 
@@ -20,12 +20,11 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "muc",
+        "NAT",
         native_options,
         Box::new(|cc| Box::new(NATApp::new(cc))),
     )
 }
-
 
 // When compiling to web using trunk:
 #[cfg(target_arch = "wasm32")]
@@ -40,7 +39,7 @@ fn main() {
             .start(
                 "NAT", // hardcode it
                 web_options,
-                Box::new(|cc| Box::new(muc::app::new(cc))),
+                Box::new(|cc| Box::new(NATApp::new(cc))),
             )
             .await
             .expect("failed to start eframe");

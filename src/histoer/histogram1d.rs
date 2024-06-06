@@ -5,11 +5,6 @@ use crate::fitter::fit_handler::{FitModel, Fits, Fitter};
 
 use super::plot_settings::EguiPlotSettings;
 
-// background_fit_line: DrawLine::new(true, egui::Color32::GREEN),
-// deconvoluted_fit_line: DrawLine::new(true, egui::Color32::from_rgb(255, 0, 255)),
-// convoluted_fit_line: DrawLine::new(true, egui::Color32::BLUE),
-// stored_fit_lines: DrawLine::new(true, egui::Color32::BLUE),
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlotSettings {
     #[serde(skip)]
@@ -325,6 +320,34 @@ impl Histogram {
         }
     }
 
+    // create a ui function to show the keybinds in the context menu
+    fn keybinds_ui(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("Keybind Help", |ui| {
+            egui::ScrollArea::vertical()
+            .id_source("keybinds_scroll")
+            .max_height(300.0)
+            .show(ui, |ui| {
+                ui.heading("Keybinds");
+                ui.separator();
+                ui.label("Markers");
+                ui.label("P: Add Marker");
+                ui.label("B: Add Background Marker");
+                ui.label("R: Add Region Marker");
+                ui.label("-: Remove Marker Closest to Cursor");
+                ui.label("Delete: Remove All Markers and Temp Fits");
+                ui.separator();
+                ui.label("Fitting");
+                ui.label("G: Fit Background").on_hover_text("Fit a linear background using the background markers");
+                ui.label("F: Fit Gaussians").on_hover_text("Fit gaussians at the peak markers give some region with a linear background");
+                ui.label("S: Store Fit").on_hover_text("Store the current fit as a permanent fit which can be saved and loaded later");
+                ui.separator();
+                ui.label("Plot");
+                ui.label("I: Toggle Stats");
+                ui.label("L: Toggle Log Y");
+            });
+        });
+    }
+
     // Draw the histogram, fit lines, markers, and stats
     fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
         // update the histogram and fit lines with the log setting and draw
@@ -354,6 +377,7 @@ impl Histogram {
         self.line.menu_button(ui);
         self.plot_settings.settings_ui(ui);
         self.fits.fit_context_menu_ui(ui);
+        self.keybinds_ui(ui);
     }
 
     // Renders the histogram using egui_plot

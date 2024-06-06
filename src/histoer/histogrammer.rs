@@ -222,7 +222,8 @@ impl Histogrammer {
         let mut panes = vec![];
 
         for hist in &self.histograms1d {
-            panes.push(Pane::Histogram(hist.clone()));
+            // panes.push(Pane::Histogram(hist.clone()));
+            panes.push(Pane::Histogram(Box::new(hist.clone())));
         }
 
         panes

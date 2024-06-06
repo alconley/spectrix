@@ -1802,29 +1802,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "muc"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "egui_plot",
- "egui_tiles",
- "env_logger",
- "epaint",
- "fnv",
- "geo",
- "log",
- "nalgebra",
- "polars",
- "rfd",
- "serde",
- "serde_json",
- "serde_yaml",
- "varpro",
- "wasm-bindgen-futures",
-]
-
-[[package]]
 name = "multiversion"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1871,6 +1848,29 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "nat"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "egui_plot",
+ "egui_tiles",
+ "env_logger",
+ "epaint",
+ "fnv",
+ "geo",
+ "log",
+ "nalgebra",
+ "polars",
+ "rfd",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "varpro",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

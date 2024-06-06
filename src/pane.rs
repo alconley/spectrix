@@ -5,7 +5,7 @@ use crate::workspacer::Workspacer;
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub enum Pane {
     Workspace(Workspacer),
-    Histogram(Histogram),
+    Histogram(Box<Histogram>),
     Histogram2D(Histogram2D),
 }
 

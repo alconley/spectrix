@@ -118,14 +118,12 @@ impl EguiPlotSettings {
             plot
         };
 
-        let plot = if log_y {
+        if log_y {
             plot.y_grid_spacer(log_axis_spacer)
                 .y_axis_formatter(log_axis_formatter)
         } else {
             plot
-        };
-
-        plot
+        }
     }
 }
 
