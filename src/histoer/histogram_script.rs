@@ -39,11 +39,12 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
         (col("ScintRightTime") - col("ScintLeftTime")).alias("ScintRightTime_ScintLeftTime"),
     ]);
 
-    h.add_fill_hist1d("Cebra0Energy", &lf, "Cebra0Energy", 512, (0.0, 4096.0));
-    h.add_fill_hist1d("Cebra1Energy", &lf, "Cebra1Energy", 512, (0.0, 4096.0));
-    h.add_fill_hist1d("Cebra2Energy", &lf, "Cebra2Energy", 512, (0.0, 4096.0));
-    h.add_fill_hist1d("Cebra3Energy", &lf, "Cebra3Energy", 512, (0.0, 4096.0));
-    h.add_fill_hist1d("Cebra4Energy", &lf, "Cebra4Energy", 512, (0.0, 4096.0));
+    // h.add_fill_hist1d("Cebra0Energy", &lf, "Cebra0Energy", 512, (0.0, 4096.0));
+    // h.add_fill_hist1d("Cebra1Energy", &lf, "Cebra1Energy", 512, (0.0, 4096.0));
+    // h.add_fill_hist1d("Cebra2Energy", &lf, "Cebra2Energy", 512, (0.0, 4096.0));
+    // h.add_fill_hist1d("Cebra3Energy", &lf, "Cebra3Energy", 512, (0.0, 4096.0));
+    // h.add_fill_hist1d("Cebra4Energy", &lf, "Cebra4Energy", 512, (0.0, 4096.0));
+    /*
 
     h.add_fill_hist1d("X1", &lf, "X1", 600, (-300.0, 300.0));
     h.add_fill_hist1d("X2", &lf, "X2", 600, (-300.0, 300.0));
@@ -447,6 +448,7 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
         256,
         (0.0, 4096.0),
     );
+    */
 
     // Both planes histograms
     let lf_bothplanes = lf
@@ -454,8 +456,9 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
         .filter(col("X1").neq(lit(-1e6)))
         .filter(col("X2").neq(lit(-1e6)));
 
-    h.add_fill_hist1d("X1: bothplanes", &lf_bothplanes, "X1", 600, (-300.0, 300.0));
-    h.add_fill_hist1d("X2: bothplanes", &lf_bothplanes, "X2", 600, (-300.0, 300.0));
+    // h.add_fill_hist1d("X1: bothplanes", &lf_bothplanes, "X1", 600, (-300.0, 300.0));
+    // h.add_fill_hist1d("X2: bothplanes", &lf_bothplanes, "X2", 600, (-300.0, 300.0));
+
     h.add_fill_hist1d(
         "Xavg: bothplanes",
         &lf_bothplanes,
@@ -468,12 +471,11 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
         "Theta v Xavg: bothplanes",
         &lf_bothplanes,
         "Xavg",
-        600,
-        (-300.0, 300.0),
         "Theta",
-        300,
-        (0.0, PI / 2.0),
+        (600, 300),
+        ((-300.0, 300.0), (0.0, PI / 2.0)),
     );
+    /*
     // h.add_fill_hist1d("DelayFrontLeftTime_relTo_AnodeFrontTime_bothplanes", &lf_bothplanes, "DelayFrontLeftTime_AnodeFrontTime", 8000, (-4000.0, 4000.0));
     // h.add_fill_hist1d("DelayFrontRightTime_relTo_AnodeFrontTime_bothplanes", &lf_bothplanes, "DelayFrontRightTime_AnodeFrontTime", 8000, (-4000.0, 4000.0));
     // h.add_fill_hist1d("DelayBackLeftTime_relTo_AnodeBackTime_bothplanes", &lf_bothplanes, "DelayBackLeftTime_AnodeBackTime", 8000, (-4000.0, 4000.0));
@@ -603,6 +605,6 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
         12800,
         (-3200.0, 3200.0),
     );
-
+    */
     Ok(h)
 }
