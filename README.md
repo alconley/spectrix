@@ -28,12 +28,14 @@ On Fedora Rawhide you need to run:
 
 `dnf install clang clang-devel clang-tools-extra libxkbcommon-devel pkg-config openssl-devel libxcb-devel gtk3-devel atk fontconfig-devel`
 
-## 1D Histogram 
+## 1D Histogram
 
 ### Fitting
+
 Multiple gaussians can be fitted interactively similar to [hdtv](https://github.com/janmayer/hdtv).
 
-**Keybinds** 
+**Keybinds**
+
 - P: Add Marker
 - B: Add Background Marker
 - R: Add Region Marker
