@@ -19,7 +19,7 @@ impl Default for PlotSettings {
         PlotSettings {
             cursor_position: None,
             egui_settings: EguiPlotSettings::default(),
-            stats_info: true,
+            stats_info: false,
             markers: EguiFitMarkers::new(),
         }
     }

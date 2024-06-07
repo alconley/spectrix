@@ -69,10 +69,10 @@ impl EguiLine {
         EguiLine {
             draw: true,
             name,
-            legend: true,
+            legend: false,
             highlighted: false,
             stroke: Stroke::new(1.0, color),
-            width: 1.0,
+            width: 3.0,
             color,
             reference_fill: false,
             fill: 0.0,

@@ -34,7 +34,7 @@ On Fedora Rawhide you need to run:
 
 Multiple gaussians can be fitted interactively similar to [hdtv](https://github.com/janmayer/hdtv).
 
-**Keybinds**
+Keybinds
 
 - P: Add Marker
 - B: Add Background Marker
