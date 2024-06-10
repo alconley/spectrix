@@ -1,12 +1,14 @@
 use super::colormaps::ColorMap;
 use super::plot_settings::EguiPlotSettings;
+use crate::cutter::egui_polygon::EguiPolygon;
 use fnv::FnvHashMap;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlotSettings {
-    // #[serde(skip)]
-    // cursor_position: Option<egui_plot::PlotPoint>,
+    #[serde(skip)]
+    cursor_position: Option<egui_plot::PlotPoint>,
     egui_settings: EguiPlotSettings,
+    egui_polygon: EguiPolygon,
     stats_info: bool,
     colormap: ColorMap,
     log_norm_colormap: bool,
@@ -15,8 +17,9 @@ pub struct PlotSettings {
 impl Default for PlotSettings {
     fn default() -> Self {
         PlotSettings {
-            // cursor_position: None,
+            cursor_position: None,
             egui_settings: EguiPlotSettings::default(),
+            egui_polygon: EguiPolygon::default(),
             stats_info: false,
             colormap: ColorMap::default(),
             log_norm_colormap: true,
@@ -31,7 +34,7 @@ impl PlotSettings {
             ui.separator();
             ui.checkbox(&mut self.stats_info, "Show Statitics");
             self.egui_settings.menu_button(ui);
-
+            self.egui_polygon.menu_button(ui);
             ui.menu_button("Colormap", |ui| {
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut self.log_norm_colormap, "Log Norm");
@@ -343,9 +346,13 @@ impl Histogram2D {
     }
 
     // Draw the histogram on the plot
-    fn draw(&self, plot_ui: &mut egui_plot::PlotUi, plot_image: egui_plot::PlotImage) {
+    fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi, plot_image: egui_plot::PlotImage) {
         self.show_stats(plot_ui);
         plot_ui.image(plot_image);
+
+        self.plot_settings.egui_polygon.draw(plot_ui);
+
+        self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
     }
 
     // Get the PlotImage from the ui textures
@@ -386,6 +393,9 @@ impl Histogram2D {
         plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
         let heatmap_image = self.get_plot_image_from_texture(ui);
+
+        self.plot_settings.egui_polygon.cursor_position = self.plot_settings.cursor_position;
+        self.plot_settings.egui_polygon.keybinds(ui);
 
         plot.show(ui, |plot_ui| {
             if let Some(image) = heatmap_image {

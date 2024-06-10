@@ -3,9 +3,9 @@ use rfd::FileDialog;
 use std::fs::File;
 use std::io::{Read, Write};
 
-use super::egui_line::EguiLine;
 use super::gaussian::GaussianFitter;
 use super::linear::LinearFitter;
+use crate::egui_plot_stuff::egui_line::EguiLine;
 
 use crate::fitter::background_fitter::BackgroundFitter;
 
@@ -45,7 +45,7 @@ impl Fitter {
             model,
             result: None,
             deconvoluted_lines: Vec::new(),
-            convoluted_line: EguiLine::new("Convoluted".to_string(), egui::Color32::BLUE),
+            convoluted_line: EguiLine::default(),
         }
     }
 
@@ -102,10 +102,14 @@ impl Fitter {
                 let deconvoluted_default_color = egui::Color32::from_rgb(255, 0, 255);
                 if let Some(fit_lines) = &fit.fit_lines {
                     for (i, line) in fit_lines.iter().enumerate() {
-                        let mut fit_line =
-                            EguiLine::new(format!("Peak {}", i), deconvoluted_default_color);
+                        let mut fit_line = EguiLine {
+                            name: format!("Peak {}", i),
+                            color: deconvoluted_default_color,
+                            ..Default::default()
+                        };
+
                         fit_line.points.clone_from(line);
-                        fit_line.legend = false;
+                        fit_line.name_in_legend = false;
                         self.deconvoluted_lines.push(fit_line);
                     }
                 }
@@ -115,9 +119,13 @@ impl Fitter {
                     if let Some((slope, intercept)) = background.get_slope_intercept() {
                         let convoluted_points =
                             fit.convoluted_fit_points_linear_bg(slope, intercept);
-                        let mut line = EguiLine::new("Convoluted".to_string(), egui::Color32::BLUE);
-                        line.points = convoluted_points;
-                        line.legend = false;
+                        let line = EguiLine {
+                            name: "Convoluted".to_string(),
+                            color: egui::Color32::BLUE,
+                            points: convoluted_points,
+                            name_in_legend: false,
+                            ..Default::default()
+                        };
                         self.convoluted_line = line;
                     }
                 }

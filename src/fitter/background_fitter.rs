@@ -1,6 +1,6 @@
-use super::egui_line::EguiLine;
 use super::fit_handler::{FitModel, FitResult};
 use super::linear::LinearFitter;
+use crate::egui_plot_stuff::egui_line::EguiLine;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct BackgroundFitter {
@@ -18,7 +18,7 @@ impl BackgroundFitter {
             y_data,
             model,
             result: None,
-            fit_line: EguiLine::new("Background".to_string(), egui::Color32::GREEN),
+            fit_line: EguiLine::default(),
         }
     }
 
@@ -42,7 +42,9 @@ impl BackgroundFitter {
                     self.fit_line.points = linear_fitter.fit_points.clone().unwrap();
                 }
 
-                self.fit_line.legend = false;
+                self.fit_line.name = "Background".to_string();
+                self.fit_line.color = egui::Color32::GREEN;
+                self.fit_line.name_in_legend = false;
 
                 self.result = Some(FitResult::Linear(linear_fitter));
             }

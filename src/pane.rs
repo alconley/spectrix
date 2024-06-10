@@ -6,7 +6,7 @@ use crate::workspacer::Workspacer;
 pub enum Pane {
     Workspace(Workspacer),
     Histogram(Box<Histogram>),
-    Histogram2D(Histogram2D),
+    Histogram2D(Box<Histogram2D>),
 }
 
 impl Pane {

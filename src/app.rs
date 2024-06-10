@@ -8,13 +8,9 @@ use super::workspacer::Workspacer;
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct NATApp {
     tree: egui_tiles::Tree<Pane>,
-
     workspacer: Workspacer,
     processer: Processer,
-
-    #[serde(skip)] // This how you opt-out of serialization of a field
     behavior: TreeBehavior,
-
     side_panel_open: bool,
 }
 
@@ -54,11 +50,11 @@ impl NATApp {
         Default::default()
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    fn ui(&mut self, ui: &mut egui::Ui) {
         self.tree.ui(&mut self.behavior, ui);
     }
 
-    pub fn add_histograms_to_tree(&mut self) {
+    fn add_histograms_to_tree(&mut self) {
         // let mut panes = self.processer.histogrammer.get_histogram1d_panes();
 
         // panes.push(Pane::Workspace(self.workspacer.clone()));

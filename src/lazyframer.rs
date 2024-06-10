@@ -130,6 +130,11 @@ impl LazyFramer {
         columns
     }
 
+    pub fn add_column(&mut self, expr: Expr) {
+        let lf = self.lazyframe.clone().unwrap().with_column(expr);
+        self.lazyframe = Some(lf);
+    }
+
     pub fn save_lazyframe(&mut self, output_path: &PathBuf) -> Result<(), PolarsError> {
         if let Some(ref lf) = self.lazyframe {
             let mut df = lf.clone().collect()?;

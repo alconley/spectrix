@@ -233,7 +233,7 @@ impl Histogrammer {
         let mut panes = vec![];
 
         for hist in &self.histograms2d {
-            panes.push(Pane::Histogram2D(hist.clone()));
+            panes.push(Pane::Histogram2D(Box::new(hist.clone())));
         }
 
         panes
@@ -269,4 +269,103 @@ impl Histogrammer {
         // Construct the tree with a meaningful title and the root_tab, associating it with the tiles
         egui_tiles::Tree::new("Histogrammer", root_tab, tiles)
     }
+
+    // // Function to display the UI for creating custom histograms
+    // fn display_histogram_ui(&mut self, ui: &mut egui::Ui) {
+    //     ui.heading("Custom Histogram Creator");
+
+    //     ui.separator();
+
+    //     ui.horizontal(|ui| {
+    //         if ui.button("Add 1D Histogram").clicked() {
+    //             self.add_hist1d_dialog(ui);
+    //         }
+
+    //         if ui.button("Add 2D Histogram").clicked() {
+    //             self.add_hist2d_dialog(ui);
+    //         }
+    //     });
+
+    //     ui.separator();
+
+    //     // Display existing histograms
+    //     ui.heading("1D Histograms");
+    //     for hist in &self.histograms1d {
+    //         ui.label(format!("Name: {}, Range: {:?}", hist.name, hist.range));
+    //     }
+
+    //     ui.separator();
+
+    //     ui.heading("2D Histograms");
+    //     for hist in &self.histograms2d {
+    //         ui.label(format!("Name: {}", hist.name));
+    //         }
+    // }
+
+    // fn add_hist1d_dialog(&mut self, ui: &mut egui::Ui) {
+    //     let mut name = String::new();
+    //     let mut bins = 512;
+    //     let mut range = (0.0, 4096.0);
+
+    //     ui.vertical(|ui| {
+    //         ui.label("Add 1D Histogram");
+
+    //         ui.horizontal(|ui| {
+    //             ui.label("Name:");
+    //             ui.text_edit_singleline(&mut name);
+    //         });
+
+    //         ui.horizontal(|ui| {
+    //             ui.label("Bins:");
+    //             ui.add(egui::DragValue::new(&mut bins).speed(1));
+    //         });
+
+    //         ui.horizontal(|ui| {
+    //             ui.label("Range:");
+    //             ui.add(egui::DragValue::new(&mut range.0).speed(1.0));
+    //             ui.add(egui::DragValue::new(&mut range.1).speed(1.0));
+    //         });
+
+    //         if ui.button("Add").clicked() {
+    //             self.add_hist1d(&name, bins, range);
+    //         }
+    //     });
+    // }
+
+    // fn add_hist2d_dialog(&mut self, ui: &mut egui::Ui) {
+    //     let mut name = String::new();
+    //     let mut bins = (512, 512);
+    //     let mut range = ((0.0, 4096.0), (0.0, 4096.0));
+
+    //     ui.vertical(|ui| {
+    //         ui.label("Add 2D Histogram");
+
+    //         ui.horizontal(|ui| {
+    //             ui.label("Name:");
+    //             ui.text_edit_singleline(&mut name);
+    //         });
+
+    //         ui.horizontal(|ui| {
+    //             ui.label("Bins:");
+    //             ui.add(egui::DragValue::new(&mut bins.0).speed(1));
+    //             ui.add(egui::DragValue::new(&mut bins.1).speed(1));
+    //         });
+
+    //         ui.horizontal(|ui| {
+    //             ui.label("Range X:");
+    //             ui.add(egui::DragValue::new(&mut range.0 .0).speed(1.0));
+    //             ui.add(egui::DragValue::new(&mut range.0 .1).speed(1.0));
+    //         });
+
+    //         ui.horizontal(|ui| {
+    //             ui.label("Range Y:");
+    //             ui.add(egui::DragValue::new(&mut range.1 .0).speed(1.0));
+    //             ui.add(egui::DragValue::new(&mut range.1 .1).speed(1.0));
+    //         });
+
+    //         if ui.button("Add").clicked() {
+    //             self.add_hist2d(&name, bins, range);
+    //         }
+    //     });
+    // }
 }

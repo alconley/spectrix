@@ -1,4 +1,4 @@
-use super::cutter::cut_handler::CutHandler;
+// use super::cutter::cut_handler::CutHandler;
 use super::histoer::histogram_script::add_histograms;
 use super::histoer::histogrammer::Histogrammer;
 use super::lazyframer::LazyFramer;
@@ -11,8 +11,7 @@ pub struct Processer {
     pub lazyframer: Option<LazyFramer>,
     pub files: Vec<PathBuf>,
     pub histogrammer: Histogrammer,
-    pub cut_handler: CutHandler,
-    pub selected_histogram: String,
+    // pub cut_handler: CutHandler,
 }
 
 impl Processer {
@@ -21,20 +20,19 @@ impl Processer {
             lazyframer: None,
             files: Vec::new(),
             histogrammer: Histogrammer::new(),
-            cut_handler: CutHandler::new(),
-            selected_histogram: String::new(),
+            // cut_handler: CutHandler::new(),
         }
     }
 
     fn create_lazyframe(&mut self) {
         self.lazyframer = Some(LazyFramer::new(self.files.clone()));
 
-        // Update CutHandler with column names from LazyFramer
-        if let Some(ref lazyframer) = self.lazyframer {
-            let column_names = lazyframer.get_column_names();
-            self.cut_handler.update_column_names(column_names);
-            log::info!("Column names: {:?}", self.cut_handler.column_names.clone());
-        }
+        // // Update CutHandler with column names from LazyFramer
+        // if let Some(ref lazyframer) = self.lazyframer {
+        //     let column_names = lazyframer.get_column_names();
+        //     self.cut_handler.update_column_names(column_names);
+        //     log::info!("Column names: {:?}", self.cut_handler.column_names.clone());
+        // }
     }
 
     fn perform_histogrammer_from_lazyframe(&mut self) {
@@ -61,24 +59,24 @@ impl Processer {
         self.perform_histogrammer_from_lazyframe();
     }
 
-    pub fn filter_lazyframe_with_cuts(&mut self) {
-        // First, check if `self.lazyframer` is Some and get a mutable reference to it
-        if let Some(ref mut lazyframer) = self.lazyframer {
-            // Now you can access `lazyframer.lazyframe` because `lazyframer` is a mutable reference to `LazyFramer`
-            if let Some(ref lazyframe) = lazyframer.lazyframe {
-                match self.cut_handler.filter_lf_with_all_cuts(lazyframe) {
-                    Ok(filtered_lf) => {
-                        // Use the setter method to update the lazyframe
-                        lazyframer.set_lazyframe(filtered_lf);
-                        self.perform_histogrammer_from_lazyframe();
-                    }
-                    Err(e) => {
-                        log::error!("Failed to filter LazyFrame with cuts: {}", e);
-                    }
-                }
-            }
-        }
-    }
+    // pub fn filter_lazyframe_with_cuts(&mut self) {
+    //     // First, check if `self.lazyframer` is Some and get a mutable reference to it
+    //     if let Some(ref mut lazyframer) = self.lazyframer {
+    //         // Now you can access `lazyframer.lazyframe` because `lazyframer` is a mutable reference to `LazyFramer`
+    //         if let Some(ref lazyframe) = lazyframer.lazyframe {
+    //             match self.cut_handler.filter_lf_with_all_cuts(lazyframe) {
+    //                 Ok(filtered_lf) => {
+    //                     // Use the setter method to update the lazyframe
+    //                     lazyframer.set_lazyframe(filtered_lf);
+    //                     self.perform_histogrammer_from_lazyframe();
+    //                 }
+    //                 Err(e) => {
+    //                     log::error!("Failed to filter LazyFrame with cuts: {}", e);
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
     pub fn save_current_lazyframe(&mut self) {
         // First, check if `self.lazyframer` is Some and get a mutable reference to it
@@ -120,18 +118,18 @@ impl Processer {
                     self.save_current_lazyframe();
                 }
 
-                if !self.cut_handler.cuts.is_empty() {
+            //     if !self.cut_handler.cuts.is_empty() {
 
-                    ui.separator();
-                    if ui.button("Filter with Cuts").on_hover_text("CAUTION: The collected lazyframe must fit it memory").clicked() {
-                        self.filter_lazyframe_with_cuts();
-                    }
-                }
+            //         ui.separator();
+            //         if ui.button("Filter with Cuts").on_hover_text("CAUTION: The collected lazyframe must fit it memory").clicked() {
+            //             self.filter_lazyframe_with_cuts();
+            //         }
+            //     }
 
-            } else if !self.cut_handler.cuts.is_empty() {
-                ui.separator();
+            // } else if !self.cut_handler.cuts.is_empty() {
+            //     ui.separator();
 
-                ui.label("Recalculate histograms to filter with cuts");
+            //     ui.label("Recalculate histograms to filter with cuts");
             }
         });
 

@@ -5,6 +5,8 @@ mod app;
 #[cfg(not(target_arch = "wasm32"))]
 mod cutter;
 #[cfg(not(target_arch = "wasm32"))]
+mod egui_plot_stuff;
+#[cfg(not(target_arch = "wasm32"))]
 mod fitter;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod histoer;

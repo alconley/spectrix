@@ -5,6 +5,12 @@ use std::f64::consts::PI;
 pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
     let mut h = Histogrammer::new();
 
+    let fp_bins = 600;
+    let fp_range = (-300.0, 300.0);
+
+    let caen_bins = 512;
+    let caen_range = (0.0, 4096.0);
+
     let lf = lf.with_columns(vec![
         (col("DelayFrontRightEnergy") + col("DelayFrontLeftEnergy") / lit(2.0))
             .alias("DelayFrontAverageEnergy"),
@@ -39,334 +45,333 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
         (col("ScintRightTime") - col("ScintLeftTime")).alias("ScintRightTime_ScintLeftTime"),
     ]);
 
-    h.add_fill_hist1d("Cebra0Energy", &lf, "Cebra0Energy", 512, (0.0, 4096.0));
-    h.add_fill_hist1d("Cebra1Energy", &lf, "Cebra1Energy", 512, (0.0, 4096.0));
-    h.add_fill_hist1d("Cebra2Energy", &lf, "Cebra2Energy", 512, (0.0, 4096.0));
-    h.add_fill_hist1d("Cebra3Energy", &lf, "Cebra3Energy", 512, (0.0, 4096.0));
-    h.add_fill_hist1d("Cebra4Energy", &lf, "Cebra4Energy", 512, (0.0, 4096.0));
-    // /*
+    h.add_fill_hist1d("Cebra0Energy", &lf, "Cebra0Energy", caen_bins, caen_range);
+    h.add_fill_hist1d("Cebra1Energy", &lf, "Cebra1Energy", caen_bins, caen_range);
+    h.add_fill_hist1d("Cebra2Energy", &lf, "Cebra2Energy", caen_bins, caen_range);
+    h.add_fill_hist1d("Cebra3Energy", &lf, "Cebra3Energy", caen_bins, caen_range);
+    h.add_fill_hist1d("Cebra4Energy", &lf, "Cebra4Energy", caen_bins, caen_range);
 
-    h.add_fill_hist1d("X1", &lf, "X1", 600, (-300.0, 300.0));
-    h.add_fill_hist1d("X2", &lf, "X2", 600, (-300.0, 300.0));
+    h.add_fill_hist1d("X1", &lf, "X1", fp_bins, fp_range);
+    h.add_fill_hist1d("X2", &lf, "X2", fp_bins, fp_range);
     h.add_fill_hist2d(
         "X2 v X1",
         &lf,
         "X1",
         "X2",
-        (600, 600),
-        ((-300.0, 300.0), (-300.0, 300.0)),
+        (fp_bins, fp_bins),
+        (fp_range, fp_range),
     );
     h.add_fill_hist2d(
         "DelayBackRight v X1",
         &lf,
         "X1",
         "DelayBackRightEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayBackLeft v X1",
         &lf,
         "X1",
         "DelayBackLeftEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayFrontRight v X1",
         &lf,
         "X1",
         "DelayFrontRightEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayFrontLeft v X1",
         &lf,
         "X1",
         "DelayFrontLeftEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayBackRight v X2",
         &lf,
         "X2",
         "DelayBackRightEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayBackLeft v X2",
         &lf,
         "X2",
         "DelayBackLeftEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayFrontRight v X2",
         &lf,
         "X2",
         "DelayFrontRightEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayFrontLeft v X2",
         &lf,
         "X2",
         "DelayFrontLeftEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayBackRight v Xavg",
         &lf,
         "Xavg",
         "DelayBackRightEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayBackLeft v Xavg",
         &lf,
         "Xavg",
         "DelayBackLeftEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayFrontRight v Xavg",
         &lf,
         "Xavg",
         "DelayFrontRightEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayFrontLeft v Xavg",
         &lf,
         "Xavg",
         "DelayFrontLeftEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayFrontAverage v X1",
         &lf,
         "X1",
         "DelayFrontAverageEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayBackAverage v X1",
         &lf,
         "X1",
         "DelayBackAverageEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayFrontAverage v X2",
         &lf,
         "X2",
         "DelayFrontAverageEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayBackAverage v X2",
         &lf,
         "X2",
         "DelayBackAverageEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayFrontAverage v Xavg",
         &lf,
         "Xavg",
         "DelayFrontAverageEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "DelayBackAverage v Xavg",
         &lf,
         "Xavg",
         "DelayBackAverageEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "AnodeBack v ScintLeft",
         &lf,
         "ScintLeftEnergy",
         "AnodeBackEnergy",
-        (512, 512),
-        ((0.0, 4096.0), (0.0, 4096.0)),
+        (caen_bins, caen_bins),
+        (caen_range, caen_range),
     );
     h.add_fill_hist2d(
         "AnodeFront v ScintLeft",
         &lf,
         "ScintLeftEnergy",
         "AnodeFrontEnergy",
-        (256, 256),
-        ((0.0, 4096.0), (0.0, 4096.0)),
+        (caen_bins, caen_bins),
+        (caen_range, caen_range),
     );
     h.add_fill_hist2d(
         "Cathode v ScintLeft",
         &lf,
         "ScintLeftEnergy",
         "CathodeEnergy",
-        (256, 256),
-        ((0.0, 4096.0), (0.0, 4096.0)),
+        (caen_bins, caen_bins),
+        (caen_range, caen_range),
     );
     h.add_fill_hist2d(
         "AnodeBack v ScintRight",
         &lf,
         "ScintRightEnergy",
         "AnodeBackEnergy",
-        (256, 256),
-        ((0.0, 4096.0), (0.0, 4096.0)),
+        (caen_bins, caen_bins),
+        (caen_range, caen_range),
     );
     h.add_fill_hist2d(
         "AnodeFront v ScintRight",
         &lf,
         "ScintRightEnergy",
         "AnodeFrontEnergy",
-        (256, 256),
-        ((0.0, 4096.0), (0.0, 4096.0)),
+        (caen_bins, caen_bins),
+        (caen_range, caen_range),
     );
     h.add_fill_hist2d(
         "Cathode v ScintRight",
         &lf,
         "ScintRightEnergy",
         "CathodeEnergy",
-        (256, 256),
-        ((0.0, 4096.0), (0.0, 4096.0)),
+        (caen_bins, caen_bins),
+        (caen_range, caen_range),
     );
     h.add_fill_hist2d(
         "ScintLeft v X1",
         &lf,
         "X1",
         "ScintLeftEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "ScintLeft v X2",
         &lf,
         "X2",
         "ScintLeftEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "ScintLeft v Xavg",
         &lf,
         "Xavg",
         "ScintLeftEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "ScintRight v X1",
         &lf,
         "X1",
         "ScintRightEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "ScintRight v X2",
         &lf,
         "X2",
         "ScintRightEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "ScintRight v Xavg",
         &lf,
         "Xavg",
         "ScintRightEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "AnodeBack v X1",
         &lf,
         "X1",
         "AnodeBackEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "AnodeBack v X2",
         &lf,
         "X2",
         "AnodeBackEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "AnodeBack v Xavg",
         &lf,
         "Xavg",
         "AnodeBackEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "AnodeFront v X1",
         &lf,
         "X1",
         "AnodeFrontEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "AnodeFront v X2",
         &lf,
         "X2",
         "AnodeFrontEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "AnodeFront v Xavg",
         &lf,
         "Xavg",
         "AnodeFrontEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "Cathode v X1",
         &lf,
         "X1",
         "CathodeEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "Cathode v X2",
         &lf,
         "X2",
         "CathodeEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
     h.add_fill_hist2d(
         "Cathode v Xavg",
         &lf,
         "Xavg",
         "CathodeEnergy",
-        (600, 256),
-        ((-300.0, 300.0), (0.0, 4096.0)),
+        (fp_bins, caen_bins),
+        (fp_range, caen_range),
     );
 
     // Both planes histograms
@@ -375,15 +380,15 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
         .filter(col("X1").neq(lit(-1e6)))
         .filter(col("X2").neq(lit(-1e6)));
 
-    h.add_fill_hist1d("X1: bothplanes", &lf_bothplanes, "X1", 600, (-300.0, 300.0));
-    h.add_fill_hist1d("X2: bothplanes", &lf_bothplanes, "X2", 600, (-300.0, 300.0));
+    h.add_fill_hist1d("X1: bothplanes", &lf_bothplanes, "X1", fp_bins, fp_range);
+    h.add_fill_hist1d("X2: bothplanes", &lf_bothplanes, "X2", fp_bins, fp_range);
 
     h.add_fill_hist1d(
         "Xavg: bothplanes",
         &lf_bothplanes,
         "Xavg",
-        600,
-        (-300.0, 300.0),
+        fp_bins,
+        fp_range,
     );
 
     h.add_fill_hist2d(
@@ -391,8 +396,8 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
         &lf_bothplanes,
         "Xavg",
         "Theta",
-        (600, 300),
-        ((-300.0, 300.0), (0.0, PI / 2.0)),
+        (fp_bins, 300),
+        (fp_range, (0.0, PI / 2.0)),
     );
     h.add_fill_hist1d(
         "DelayFrontLeftTime_relTo_AnodeFrontTime_bothplanes",
@@ -429,13 +434,7 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
         .filter(col("X1").neq(lit(-1e6)))
         .filter(col("X2").eq(lit(-1e6)));
 
-    h.add_fill_hist1d(
-        "X1: only1plane",
-        &lf_only_x1_plane,
-        "X1",
-        600,
-        (-300.0, 300.0),
-    );
+    h.add_fill_hist1d("X1: only1plane", &lf_only_x1_plane, "X1", fp_bins, fp_range);
     h.add_fill_hist1d(
         "DelayFrontLeftTime_relTo_AnodeFrontTime_noX2",
         &lf_only_x1_plane,
@@ -499,13 +498,7 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
         .filter(col("X2").neq(lit(-1e6)))
         .filter(col("X1").eq(lit(-1e6)));
 
-    h.add_fill_hist1d(
-        "X2: only1plane",
-        &lf_only_x2_plane,
-        "X2",
-        600,
-        (-300.0, 300.0),
-    );
+    h.add_fill_hist1d("X2: only1plane", &lf_only_x2_plane, "X2", fp_bins, fp_range);
     h.add_fill_hist1d(
         "DelayFrontLeftTime_relTo_AnodeFrontTime_noX1",
         &lf_only_x2_plane,
@@ -638,8 +631,8 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
         &lf_time_rel_backanode,
         "Xavg",
         "ScintRightTime_ScintLeftTime",
-        (600, 12800),
-        ((-300.0, 300.0), (-3200.0, 3200.0)),
+        (fp_bins, 12800),
+        (fp_range, (-3200.0, 3200.0)),
     );
 
     Ok(h)

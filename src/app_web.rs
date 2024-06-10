@@ -12,7 +12,7 @@ impl NATApp {
 impl App for NATApp {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label("muc is not supported in the browser yet. Please run it natively.");
+            ui.label("NAT is not supported in the browser yet. Please run it natively.");
         });
     }
 }

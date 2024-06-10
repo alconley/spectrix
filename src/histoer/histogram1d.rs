@@ -1,6 +1,6 @@
+use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::background_fitter::BackgroundFitter;
 use crate::fitter::egui_fit_markers::EguiFitMarkers;
-use crate::fitter::egui_line::EguiLine;
 use crate::fitter::fit_handler::{FitModel, Fits, Fitter};
 
 use super::plot_settings::EguiPlotSettings;
@@ -48,6 +48,7 @@ pub struct Histogram {
     pub fits: Fits,
 }
 
+// new(name.to_string(), egui::Color32::LIGHT_BLUE)
 impl Histogram {
     // Create a new Histogram with specified min, max, and number of bins
     pub fn new(name: &str, number_of_bins: usize, range: (f64, f64)) -> Self {
@@ -56,7 +57,11 @@ impl Histogram {
             bins: vec![0; number_of_bins],
             range,
             bin_width: (range.1 - range.0) / number_of_bins as f64,
-            line: EguiLine::new(name.to_string(), egui::Color32::LIGHT_BLUE),
+            line: EguiLine {
+                name: name.to_string(),
+                color: egui::Color32::LIGHT_BLUE,
+                ..Default::default()
+            },
             plot_settings: PlotSettings::default(),
             fits: Fits::new(),
         }
