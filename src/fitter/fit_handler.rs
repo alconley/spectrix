@@ -29,8 +29,8 @@ pub struct Fitter {
     pub background: Option<BackgroundFitter>,
     pub model: FitModel,
     pub result: Option<FitResult>,
-    pub deconvoluted_lines: Vec<EguiLine>,
-    pub convoluted_line: EguiLine,
+    pub decomposition_lines: Vec<EguiLine>,
+    pub composition_line: EguiLine,
 }
 
 impl Fitter {
@@ -44,8 +44,8 @@ impl Fitter {
             background,
             model,
             result: None,
-            deconvoluted_lines: Vec::new(),
-            convoluted_line: EguiLine::default(),
+            decomposition_lines: Vec::new(),
+            composition_line: EguiLine::default(),
         }
     }
 
@@ -98,35 +98,35 @@ impl Fitter {
 
                 fit.multi_gauss_fit();
 
-                // get the fit_lines and store them in the deconvoluted_lines
-                let deconvoluted_default_color = egui::Color32::from_rgb(255, 0, 255);
+                // get the fit_lines and store them in the decomposition_lines
+                let decomposition_default_color = egui::Color32::from_rgb(255, 0, 255);
                 if let Some(fit_lines) = &fit.fit_lines {
                     for (i, line) in fit_lines.iter().enumerate() {
                         let mut fit_line = EguiLine {
                             name: format!("Peak {}", i),
-                            color: deconvoluted_default_color,
+                            color: decomposition_default_color,
                             ..Default::default()
                         };
 
                         fit_line.points.clone_from(line);
                         fit_line.name_in_legend = false;
-                        self.deconvoluted_lines.push(fit_line);
+                        self.decomposition_lines.push(fit_line);
                     }
                 }
 
-                // calculate the convoluted line
+                // calculate the composition line
                 if let Some(background) = &self.background {
                     if let Some((slope, intercept)) = background.get_slope_intercept() {
-                        let convoluted_points =
-                            fit.convoluted_fit_points_linear_bg(slope, intercept);
+                        let composition_points =
+                            fit.composition_fit_points_linear_bg(slope, intercept);
                         let line = EguiLine {
-                            name: "Convoluted".to_string(),
+                            name: "composition".to_string(),
                             color: egui::Color32::BLUE,
-                            points: convoluted_points,
+                            points: composition_points,
                             name_in_legend: false,
                             ..Default::default()
                         };
-                        self.convoluted_line = line;
+                        self.composition_line = line;
                     }
                 }
 
@@ -159,24 +159,24 @@ impl Fitter {
         }
     }
 
-    pub fn set_convoluted_color(&mut self, color: egui::Color32) {
-        self.convoluted_line.color = color;
+    pub fn set_composition_color(&mut self, color: egui::Color32) {
+        self.composition_line.color = color;
     }
 
-    pub fn set_deconvoluted_color(&mut self, color: egui::Color32) {
-        for line in &mut self.deconvoluted_lines {
+    pub fn set_decomposition_color(&mut self, color: egui::Color32) {
+        for line in &mut self.decomposition_lines {
             line.color = color;
         }
     }
 
-    pub fn show_deconvoluted(&mut self, show: bool) {
-        for line in &mut self.deconvoluted_lines {
+    pub fn show_decomposition(&mut self, show: bool) {
+        for line in &mut self.decomposition_lines {
             line.draw = show;
         }
     }
 
-    pub fn show_convoluted(&mut self, show: bool) {
-        self.convoluted_line.draw = show;
+    pub fn show_composition(&mut self, show: bool) {
+        self.composition_line.draw = show;
     }
 
     pub fn show_background(&mut self, show: bool) {
@@ -186,9 +186,9 @@ impl Fitter {
     }
 
     pub fn set_name(&mut self, name: String) {
-        self.convoluted_line.name = format!("{}-Convoluted", name);
+        self.composition_line.name = format!("{}-composition", name);
 
-        for (i, line) in self.deconvoluted_lines.iter_mut().enumerate() {
+        for (i, line) in self.decomposition_lines.iter_mut().enumerate() {
             line.name = format!("{}-Peak {}", name, i);
         }
 
@@ -202,19 +202,19 @@ impl Fitter {
             background.fit_line.menu_button(ui);
         }
 
-        self.convoluted_line.menu_button(ui);
+        self.composition_line.menu_button(ui);
 
-        for line in &mut self.deconvoluted_lines {
+        for line in &mut self.decomposition_lines {
             line.menu_button(ui);
         }
 
         ui.separator();
     }
 
-    // Draw the background, deconvoluted, and convoluted lines
+    // Draw the background, decomposition, and composition lines
     pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
-        // Draw the deconvoluted lines
-        for line in &self.deconvoluted_lines {
+        // Draw the decomposition lines
+        for line in &self.decomposition_lines {
             line.draw(plot_ui);
         }
 
@@ -223,13 +223,13 @@ impl Fitter {
             background.draw(plot_ui);
         }
 
-        // Draw the convoluted line
-        self.convoluted_line.draw(plot_ui);
+        // Draw the composition line
+        self.composition_line.draw(plot_ui);
     }
 
     // Set the log_y flag for all lines
     pub fn set_log(&mut self, log_y: bool, log_x: bool) {
-        for line in &mut self.deconvoluted_lines {
+        for line in &mut self.decomposition_lines {
             line.log_y = log_y;
             line.log_x = log_x;
         }
@@ -239,15 +239,15 @@ impl Fitter {
             background.fit_line.log_x = log_x;
         }
 
-        self.convoluted_line.log_y = log_y;
-        self.convoluted_line.log_x = log_x;
+        self.composition_line.log_y = log_y;
+        self.composition_line.log_x = log_x;
     }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct FitSettings {
-    pub show_deconvoluted: bool,
-    pub show_convoluted: bool,
+    pub show_decomposition: bool,
+    pub show_composition: bool,
     pub show_background: bool,
     pub show_fit_stats: bool,
     pub fit_stats_height: f32,
@@ -256,8 +256,8 @@ pub struct FitSettings {
 impl Default for FitSettings {
     fn default() -> Self {
         FitSettings {
-            show_deconvoluted: true,
-            show_convoluted: true,
+            show_decomposition: true,
+            show_composition: true,
             show_background: true,
             show_fit_stats: true,
             fit_stats_height: 0.0,
@@ -286,10 +286,10 @@ impl FitSettings {
 
         ui.horizontal(|ui| {
             ui.label("Show Fit Lines: ");
-            ui.checkbox(&mut self.show_deconvoluted, "Deconvoluted")
-                .on_hover_text("Show the deconvoluted peaks");
-            ui.checkbox(&mut self.show_convoluted, "Convoluted")
-                .on_hover_text("Show the convoluted line");
+            ui.checkbox(&mut self.show_decomposition, "Decomposition")
+                .on_hover_text("Show the decomposition peaks");
+            ui.checkbox(&mut self.show_composition, "composition")
+                .on_hover_text("Show the composition line");
             ui.checkbox(&mut self.show_background, "Background")
                 .on_hover_text("Show the background line");
         });
@@ -323,8 +323,8 @@ impl Fits {
     pub fn store_temp_fit(&mut self) {
         if let Some(temp_fit) = &mut self.temp_fit.take() {
             temp_fit.set_background_color(egui::Color32::DARK_GREEN);
-            temp_fit.set_convoluted_color(egui::Color32::DARK_BLUE);
-            temp_fit.set_deconvoluted_color(egui::Color32::from_rgb(150, 0, 255));
+            temp_fit.set_composition_color(egui::Color32::DARK_BLUE);
+            temp_fit.set_decomposition_color(egui::Color32::from_rgb(150, 0, 255));
 
             temp_fit.set_name(format!("Fit {}", self.stored_fits.len()));
 
@@ -357,15 +357,15 @@ impl Fits {
         }
     }
 
-    pub fn set_stored_fits_convoluted_color(&mut self, color: egui::Color32) {
+    pub fn set_stored_fits_composition_color(&mut self, color: egui::Color32) {
         for fit in &mut self.stored_fits {
-            fit.convoluted_line.color = color;
+            fit.composition_line.color = color;
         }
     }
 
-    pub fn set_stored_fits_deconvoluted_color(&mut self, color: egui::Color32) {
+    pub fn set_stored_fits_decomposition_color(&mut self, color: egui::Color32) {
         for fit in &mut self.stored_fits {
-            for line in &mut fit.deconvoluted_lines {
+            for line in &mut fit.decomposition_lines {
                 line.color = color;
             }
         }
@@ -373,14 +373,14 @@ impl Fits {
 
     pub fn update_visibility(&mut self) {
         if let Some(temp_fit) = &mut self.temp_fit {
-            temp_fit.show_deconvoluted(self.settings.show_deconvoluted);
-            temp_fit.show_convoluted(self.settings.show_convoluted);
+            temp_fit.show_decomposition(self.settings.show_decomposition);
+            temp_fit.show_composition(self.settings.show_composition);
             temp_fit.show_background(self.settings.show_background);
         }
 
         for fit in &mut self.stored_fits {
-            fit.show_deconvoluted(self.settings.show_deconvoluted);
-            fit.show_convoluted(self.settings.show_convoluted);
+            fit.show_decomposition(self.settings.show_decomposition);
+            fit.show_composition(self.settings.show_composition);
             fit.show_background(self.settings.show_background);
         }
     }
