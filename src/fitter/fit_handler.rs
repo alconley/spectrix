@@ -102,11 +102,8 @@ impl Fitter {
                 let decomposition_default_color = egui::Color32::from_rgb(255, 0, 255);
                 if let Some(fit_lines) = &fit.fit_lines {
                     for (i, line) in fit_lines.iter().enumerate() {
-                        let mut fit_line = EguiLine {
-                            name: format!("Peak {}", i),
-                            color: decomposition_default_color,
-                            ..Default::default()
-                        };
+                        let mut fit_line = EguiLine::new(decomposition_default_color);
+                        fit_line.name = format!("Peak {}", i);
 
                         fit_line.points.clone_from(line);
                         fit_line.name_in_legend = false;
@@ -119,13 +116,10 @@ impl Fitter {
                     if let Some((slope, intercept)) = background.get_slope_intercept() {
                         let composition_points =
                             fit.composition_fit_points_linear_bg(slope, intercept);
-                        let line = EguiLine {
-                            name: "composition".to_string(),
-                            color: egui::Color32::BLUE,
-                            points: composition_points,
-                            name_in_legend: false,
-                            ..Default::default()
-                        };
+
+                        let mut line = EguiLine::new(egui::Color32::BLUE);
+                        line.name = "Composition".to_string();
+                        line.points = composition_points;
                         self.composition_line = line;
                     }
                 }
@@ -186,7 +180,7 @@ impl Fitter {
     }
 
     pub fn set_name(&mut self, name: String) {
-        self.composition_line.name = format!("{}-composition", name);
+        self.composition_line.name = format!("{}-Composition", name);
 
         for (i, line) in self.decomposition_lines.iter_mut().enumerate() {
             line.name = format!("{}-Peak {}", name, i);
@@ -259,7 +253,7 @@ impl Default for FitSettings {
             show_decomposition: true,
             show_composition: true,
             show_background: true,
-            show_fit_stats: true,
+            show_fit_stats: false,
             fit_stats_height: 0.0,
         }
     }
@@ -288,7 +282,7 @@ impl FitSettings {
             ui.label("Show Fit Lines: ");
             ui.checkbox(&mut self.show_decomposition, "Decomposition")
                 .on_hover_text("Show the decomposition peaks");
-            ui.checkbox(&mut self.show_composition, "composition")
+            ui.checkbox(&mut self.show_composition, "Composition")
                 .on_hover_text("Show the composition line");
             ui.checkbox(&mut self.show_background, "Background")
                 .on_hover_text("Show the background line");

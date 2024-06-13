@@ -1,7 +1,7 @@
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::background_fitter::BackgroundFitter;
-use crate::fitter::egui_fit_markers::EguiFitMarkers;
 use crate::fitter::fit_handler::{FitModel, Fits, Fitter};
+use crate::fitter::fit_markers::EguiFitMarkers;
 
 use super::plot_settings::EguiPlotSettings;
 
@@ -52,16 +52,15 @@ pub struct Histogram {
 impl Histogram {
     // Create a new Histogram with specified min, max, and number of bins
     pub fn new(name: &str, number_of_bins: usize, range: (f64, f64)) -> Self {
+        let mut line = EguiLine::new(egui::Color32::LIGHT_BLUE);
+        line.name = name.to_string();
+
         Histogram {
             name: name.to_string(),
             bins: vec![0; number_of_bins],
             range,
             bin_width: (range.1 - range.0) / number_of_bins as f64,
-            line: EguiLine {
-                name: name.to_string(),
-                color: egui::Color32::LIGHT_BLUE,
-                ..Default::default()
-            },
+            line,
             plot_settings: PlotSettings::default(),
             fits: Fits::new(),
         }
@@ -143,9 +142,10 @@ impl Histogram {
 
     // Sum counts between the region markers
     fn sum_counts_between_region_markers(&self) -> f64 {
-        if self.plot_settings.markers.region_markers.len() == 2 {
-            let start_x = self.plot_settings.markers.region_markers[0];
-            let end_x = self.plot_settings.markers.region_markers[1];
+        let marker_positions = self.plot_settings.markers.get_region_marker_positions();
+        if marker_positions.len() == 2 {
+            let start_x = marker_positions[0];
+            let end_x = marker_positions[1];
             self.get_bin_counts_between(start_x, end_x).iter().sum()
         } else {
             0.0
@@ -223,12 +223,12 @@ impl Histogram {
     fn fit_background(&mut self) {
         self.fits.remove_temp_fits();
 
-        if self.plot_settings.markers.background_markers.len() < 2 {
+        let marker_positions = self.plot_settings.markers.get_background_marker_positions();
+        if marker_positions.len() < 2 {
             log::error!("Need to set at least two background markers to fit the histogram");
             return;
         }
 
-        let marker_positions = self.plot_settings.markers.background_markers.clone();
         let (x_data, y_data): (Vec<f64>, Vec<f64>) = marker_positions
             .iter()
             .filter_map(|&pos| self.get_bin_count_and_center(pos))
@@ -241,9 +241,9 @@ impl Histogram {
         self.fits.temp_background_fit = Some(background_fitter);
     }
 
-    // Fit the gaussians at the peak markers
     fn fit_gaussians(&mut self) {
-        if self.plot_settings.markers.region_markers.len() != 2 {
+        let region_marker_positions = self.plot_settings.markers.get_region_marker_positions();
+        if region_marker_positions.len() != 2 {
             log::error!("Need to set two region markers to fit the histogram");
             return;
         }
@@ -251,14 +251,13 @@ impl Histogram {
         self.plot_settings
             .markers
             .remove_peak_markers_outside_region();
-        let peak_positions = self.plot_settings.markers.peak_markers.clone();
+        let peak_positions = self.plot_settings.markers.get_peak_marker_positions();
 
         if self.fits.temp_background_fit.is_none() {
             if self.plot_settings.markers.background_markers.len() <= 1 {
-                self.plot_settings
-                    .markers
-                    .background_markers
-                    .clone_from(&self.plot_settings.markers.region_markers)
+                for position in region_marker_positions.iter() {
+                    self.plot_settings.markers.add_background_marker(*position);
+                }
             }
             self.fit_background();
         }
@@ -268,10 +267,7 @@ impl Histogram {
             self.fits.temp_background_fit.clone(),
         );
 
-        let (start_x, end_x) = (
-            self.plot_settings.markers.region_markers[0],
-            self.plot_settings.markers.region_markers[1],
-        );
+        let (start_x, end_x) = (region_marker_positions[0], region_marker_positions[1]);
 
         fitter.x_data = self.get_bin_centers_between(start_x, end_x);
         fitter.y_data = self.get_bin_counts_between(start_x, end_x);
@@ -280,7 +276,14 @@ impl Histogram {
 
         fitter.set_name(self.name.clone());
 
-        self.plot_settings.markers.peak_markers = fitter.get_peak_markers();
+        // clear peak markers and add the new peak markers
+        self.plot_settings.markers.clear_peak_markers();
+
+        let peak_values = fitter.get_peak_markers();
+        for peak in peak_values {
+            self.plot_settings.markers.add_peak_marker(peak);
+        }
+
         self.fits.temp_fit = Some(fitter);
     }
 

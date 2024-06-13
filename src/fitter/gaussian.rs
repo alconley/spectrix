@@ -19,14 +19,25 @@ pub struct GaussianParams {
 
 impl GaussianParams {
     // Constructor that also calculates FWHM and area
-    pub fn new(amplitude: Value, mean: Value, sigma: Value) -> Self {
+    pub fn new(amplitude: Value, mean: Value, sigma: Value) -> Result<Self, String> {
+        if sigma.value <= 0.0 {
+            let error_message = "Sigma must be positive.".to_string();
+            // log::error!("{}", error_message);
+            return Err(error_message);
+        }
+
         let fwhm = Self::calculate_fwhm(sigma.value);
         let fwhm_uncertainty = Self::fwhm_uncertainty(sigma.uncertainty);
 
         let area = Self::calculate_area(amplitude.value, sigma.value);
+        if area < 0.0 {
+            let error_message = "Area is negative.".to_string();
+            // log::error!("{}", error_message);
+            return Err(error_message);
+        }
         let area_uncertainty = Self::area_uncertainty(amplitude.clone(), sigma.clone());
 
-        GaussianParams {
+        Ok(GaussianParams {
             amplitude,
             mean,
             sigma,
@@ -38,7 +49,7 @@ impl GaussianParams {
                 value: area,
                 uncertainty: area_uncertainty,
             },
-        }
+        })
     }
 
     // Method to calculate FWHM
@@ -207,85 +218,105 @@ impl GaussianFitter {
         }
 
         // Finalize the model building process
-        let model = builder_proxy.build().expect("Failed to build model");
+        let model = match builder_proxy.build() {
+            Ok(model) => model,
+            Err(e) => {
+                log::error!("Failed to build model: {:?}", e);
+                return;
+            }
+        };
 
         // Extract the parameters
-        let problem = LevMarProblemBuilder::new(model)
+        let problem = match LevMarProblemBuilder::new(model)
             .observations(y_data)
             .build()
-            .expect("Failed to build problem");
-
-        if let Ok((fit_result, fit_statistics)) =
-            LevMarSolver::default().fit_with_statistics(problem)
         {
-            log::info!(
-                "Nonlinear Parameters: {:?}",
-                fit_result.nonlinear_parameters()
-            );
-            log::info!(
-                "nonlinear parameters variance: {:?}",
-                fit_statistics.nonlinear_parameters_variance()
-            );
+            Ok(problem) => problem,
+            Err(e) => {
+                log::error!("Failed to build problem: {:?}", e);
+                return;
+            }
+        };
 
-            log::info!(
-                "Linear Coefficients: {:?}",
-                fit_result.linear_coefficients().unwrap()
-            );
-            log::info!(
-                "linear coefficients variance: {:?}",
-                fit_statistics.linear_coefficients_variance()
-            );
-
-            let nonlinear_parameters = fit_result.nonlinear_parameters();
-            let nonlinear_variances = fit_statistics.nonlinear_parameters_variance();
-
-            let linear_coefficients = fit_result.linear_coefficients().unwrap();
-            let linear_variances = fit_statistics.linear_coefficients_variance();
-
-            let mut params: Vec<GaussianParams> = Vec::new();
-
-            let sigma = nonlinear_parameters[nonlinear_parameters.len() - 1];
-            let sigma_variance = nonlinear_variances[nonlinear_parameters.len() - 1];
-
-            // Clear peak markers and update with the mean of the gaussians
-            self.peak_markers.clear();
-
-            // Assuming the amplitude (c) for each Gaussian comes first in linear_coefficients
-            for (i, &amplitude) in linear_coefficients.iter().enumerate() {
-                let mean = nonlinear_parameters[i];
-                // Update peak markers
-                self.peak_markers.push(mean);
-
-                let mean_variance = nonlinear_variances[i];
-                let amplitude_variance = linear_variances[i];
-
-                // Create a GaussianParams instance which now includes FWHM and area calculations
-                let gaussian_params = GaussianParams::new(
-                    Value {
-                        value: amplitude,
-                        uncertainty: amplitude_variance.sqrt(),
-                    },
-                    Value {
-                        value: mean,
-                        uncertainty: mean_variance.sqrt(),
-                    },
-                    Value {
-                        value: sigma,
-                        uncertainty: sigma_variance.sqrt(),
-                    },
+        match LevMarSolver::default().fit_with_statistics(problem) {
+            Ok((fit_result, fit_statistics)) => {
+                log::info!(
+                    "Nonlinear Parameters: {:?}",
+                    fit_result.nonlinear_parameters()
+                );
+                log::info!(
+                    "nonlinear parameters variance: {:?}",
+                    fit_statistics.nonlinear_parameters_variance()
                 );
 
-                // Log the Gaussian component parameters including FWHM and area
-                log::info!("Peak {}: Amplitude: {:.2} ± {:.2}, Mean: {:.2} ± {:.2}, Std Dev: {:.2} ± {:.2}, FWHM: {:.2} ± {:.2}, Area: {:.2} ± {:.2}",
-                    i, amplitude, amplitude_variance.sqrt(), mean, mean_variance.sqrt(), sigma, sigma_variance.sqrt(),
-                    gaussian_params.fwhm.value, gaussian_params.fwhm.uncertainty, gaussian_params.area.value, gaussian_params.area.uncertainty);
+                log::info!(
+                    "Linear Coefficients: {:?}",
+                    fit_result.linear_coefficients().unwrap()
+                );
+                log::info!(
+                    "linear coefficients variance: {:?}",
+                    fit_statistics.linear_coefficients_variance()
+                );
 
-                params.push(gaussian_params);
+                let nonlinear_parameters = fit_result.nonlinear_parameters();
+                let nonlinear_variances = fit_statistics.nonlinear_parameters_variance();
+
+                let linear_coefficients = fit_result.linear_coefficients().unwrap();
+                let linear_variances = fit_statistics.linear_coefficients_variance();
+
+                let mut params: Vec<GaussianParams> = Vec::new();
+
+                let sigma = nonlinear_parameters[nonlinear_parameters.len() - 1];
+                let sigma_variance = nonlinear_variances[nonlinear_parameters.len() - 1];
+
+                // Clear peak markers and update with the mean of the gaussians
+                self.peak_markers.clear();
+
+                // Assuming the amplitude (c) for each Gaussian comes first in linear_coefficients
+                for (i, &amplitude) in linear_coefficients.iter().enumerate() {
+                    let mean = nonlinear_parameters[i];
+                    // Update peak markers
+                    self.peak_markers.push(mean);
+
+                    let mean_variance = nonlinear_variances[i];
+                    let amplitude_variance = linear_variances[i];
+
+                    // Create a GaussianParams instance which now includes FWHM and area calculations
+                    match GaussianParams::new(
+                        Value {
+                            value: amplitude,
+                            uncertainty: amplitude_variance.sqrt(),
+                        },
+                        Value {
+                            value: mean,
+                            uncertainty: mean_variance.sqrt(),
+                        },
+                        Value {
+                            value: sigma,
+                            uncertainty: sigma_variance.sqrt(),
+                        },
+                    ) {
+                        Ok(gaussian_params) => {
+                            // Log the Gaussian component parameters including FWHM and area
+                            log::info!("Peak {}: Amplitude: {:.2} ± {:.2}, Mean: {:.2} ± {:.2}, Std Dev: {:.2} ± {:.2}, FWHM: {:.2} ± {:.2}, Area: {:.2} ± {:.2}",
+                                i, amplitude, amplitude_variance.sqrt(), mean, mean_variance.sqrt(), sigma, sigma_variance.sqrt(),
+                                gaussian_params.fwhm.value, gaussian_params.fwhm.uncertainty, gaussian_params.area.value, gaussian_params.area.uncertainty);
+
+                            params.push(gaussian_params);
+                        }
+                        Err(e) => {
+                            log::error!("Fit Failed: GaussianParams for peak {}: {}", i, e);
+                            return;
+                        }
+                    }
+                }
+
+                self.fit_params = Some(params);
+                self.get_fit_lines();
             }
-
-            self.fit_params = Some(params);
-
-            self.get_fit_lines();
+            Err(e) => {
+                log::error!("Failed to fit model: {:?}", e);
+            }
         }
     }
 

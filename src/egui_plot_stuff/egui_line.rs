@@ -37,7 +37,7 @@ impl Default for EguiLine {
             name: "Line".to_string(),
             highlighted: false,
             stroke: Stroke::new(1.0, Color32::LIGHT_BLUE),
-            width: 1.0,
+            width: 2.0,
             color: Color32::BLACK,
             reference_fill: false,
             fill: 0.0,
@@ -51,6 +51,15 @@ impl Default for EguiLine {
 }
 
 impl EguiLine {
+    pub fn new(color: Color32) -> Self {
+        let line = EguiLine::default();
+        EguiLine {
+            color,
+            color_rgb: Rgb::from_color32(color),
+            ..line
+        }
+    }
+
     pub fn add_point(&mut self, x: f64, y: f64) {
         self.points.push([x, y]);
     }

@@ -18,7 +18,7 @@ impl BackgroundFitter {
             y_data,
             model,
             result: None,
-            fit_line: EguiLine::default(),
+            fit_line: EguiLine::new(egui::Color32::GREEN),
         }
     }
 
@@ -43,8 +43,6 @@ impl BackgroundFitter {
                 }
 
                 self.fit_line.name = "Background".to_string();
-                self.fit_line.color = egui::Color32::GREEN;
-                self.fit_line.name_in_legend = false;
 
                 self.result = Some(FitResult::Linear(linear_fitter));
             }

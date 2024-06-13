@@ -30,22 +30,27 @@ impl Default for EguiHorizontalLine {
             name_in_legend: false,
             name: "Horizontal Line".to_string(),
             highlighted: false,
-            stroke: Stroke::new(1.0, Color32::LIGHT_BLUE),
-            width: 1.0,
-            color: Color32::BLACK,
+            stroke: Stroke::new(1.0, Color32::BLUE),
+            width: 2.0,
+            color: Color32::BLUE,
             style: Some(LineStyle::Solid),
             style_length: 15.0,
             y_value: 0.0,
-            color_rgb: Rgb::from_color32(Color32::LIGHT_BLUE),
-            stroke_rgb: Rgb::from_color32(Color32::LIGHT_BLUE),
+            color_rgb: Rgb::from_color32(Color32::BLUE),
+            stroke_rgb: Rgb::from_color32(Color32::BLUE),
         }
     }
 }
 
 impl EguiHorizontalLine {
-    pub fn new(y_value: f64) -> Self {
+    pub fn new(y_value: f64, color: Color32) -> Self {
         let line = EguiHorizontalLine::default();
-        EguiHorizontalLine { y_value, ..line }
+        EguiHorizontalLine {
+            y_value,
+            color,
+            color_rgb: Rgb::from_color32(color),
+            ..line
+        }
     }
 
     pub fn draw(&self, plot_ui: &mut PlotUi) {

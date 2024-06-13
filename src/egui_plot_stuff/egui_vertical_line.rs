@@ -1,5 +1,5 @@
 use egui::{Color32, DragValue, Slider, Stroke, Ui};
-use egui_plot::{HLine, LineStyle, PlotUi};
+use egui_plot::{LineStyle, PlotUi, VLine};
 
 use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
 
@@ -28,29 +28,34 @@ impl Default for EguiVerticalLine {
         EguiVerticalLine {
             draw: true,
             name_in_legend: false,
-            name: "Horizontal Line".to_string(),
+            name: "Vertical Line".to_string(),
             highlighted: false,
-            stroke: Stroke::new(1.0, Color32::LIGHT_BLUE),
-            width: 1.0,
-            color: Color32::BLACK,
+            stroke: Stroke::new(1.0, Color32::BLUE),
+            width: 2.0,
+            color: Color32::BLUE,
             style: Some(LineStyle::Solid),
             style_length: 15.0,
             x_value: 0.0,
-            color_rgb: Rgb::from_color32(Color32::LIGHT_BLUE),
-            stroke_rgb: Rgb::from_color32(Color32::LIGHT_BLUE),
+            color_rgb: Rgb::from_color32(Color32::BLUE),
+            stroke_rgb: Rgb::from_color32(Color32::BLUE),
         }
     }
 }
 
 impl EguiVerticalLine {
-    pub fn new(x_value: f64) -> Self {
+    pub fn new(x_value: f64, color: Color32) -> Self {
         let line = EguiVerticalLine::default();
-        EguiVerticalLine { x_value, ..line }
+        EguiVerticalLine {
+            x_value,
+            color,
+            color_rgb: Rgb::from_color32(color),
+            ..line
+        }
     }
 
     pub fn draw(&self, plot_ui: &mut PlotUi) {
         if self.draw {
-            let mut line = HLine::new(self.x_value)
+            let mut line = VLine::new(self.x_value)
                 .highlight(self.highlighted)
                 .stroke(self.stroke)
                 .width(self.width)
@@ -64,7 +69,7 @@ impl EguiVerticalLine {
                 line = line.style(self.style.unwrap());
             }
 
-            plot_ui.hline(line);
+            plot_ui.vline(line);
         }
     }
 
