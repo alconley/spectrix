@@ -25,7 +25,7 @@ impl Default for EguiPoints {
     fn default() -> Self {
         EguiPoints {
             draw: true,
-            name_in_legend: false,
+            name_in_legend: true,
             name: "Points".to_string(),
             points: vec![],
             shape: Some(MarkerShape::Circle),
@@ -41,7 +41,7 @@ impl Default for EguiPoints {
 }
 
 impl EguiPoints {
-    pub fn new(points: Vec<[f64; 2]>, color: Color32) -> Self {
+    pub fn _new(points: Vec<[f64; 2]>, color: Color32) -> Self {
         let line = EguiPoints::default();
         EguiPoints {
             points,
@@ -51,7 +51,7 @@ impl EguiPoints {
         }
     }
 
-    pub fn add_point(&mut self, x: f64, y: f64) {
+    pub fn _add_point(&mut self, x: f64, y: f64) {
         self.points.push([x, y]);
     }
 

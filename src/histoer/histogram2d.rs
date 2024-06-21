@@ -1,6 +1,13 @@
 use super::colormaps::ColorMap;
 use super::plot_settings::EguiPlotSettings;
-use crate::cutter::egui_polygon::EguiPolygon;
+use super::histogram1d::Histogram;
+use crate::egui_plot_stuff::egui_image::EguiImage;
+use crate::egui_plot_stuff::egui_polygon::EguiPolygon;
+use crate::egui_plot_stuff::egui_vertical_line::EguiVerticalLine;
+use crate::egui_plot_stuff::egui_horizontal_line::EguiHorizontalLine;
+
+use egui::viewport::{ViewportBuilder, ViewportId, ViewportClass};
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use fnv::FnvHashMap;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -8,7 +15,10 @@ pub struct PlotSettings {
     #[serde(skip)]
     cursor_position: Option<egui_plot::PlotPoint>,
     egui_settings: EguiPlotSettings,
-    egui_polygon: EguiPolygon,
+    cut_polygons: Vec<EguiPolygon>,
+    y_projection_lines: Vec<EguiVerticalLine>,
+    show_y_projection: bool,
+    x_projection_lines: Vec<EguiHorizontalLine>,
     stats_info: bool,
     colormap: ColorMap,
     log_norm_colormap: bool,
@@ -19,7 +29,10 @@ impl Default for PlotSettings {
         PlotSettings {
             cursor_position: None,
             egui_settings: EguiPlotSettings::default(),
-            egui_polygon: EguiPolygon::default(),
+            cut_polygons: Vec::new(),
+            y_projection_lines: Vec::new(),
+            show_y_projection: false,
+            x_projection_lines: Vec::new(),
             stats_info: false,
             colormap: ColorMap::default(),
             log_norm_colormap: true,
@@ -29,19 +42,74 @@ impl Default for PlotSettings {
 
 impl PlotSettings {
     pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
-        ui.vertical(|ui| {
-            ui.label("Plot Settings:");
-            ui.separator();
-            ui.checkbox(&mut self.stats_info, "Show Statitics");
-            self.egui_settings.menu_button(ui);
-            self.egui_polygon.menu_button(ui);
-            ui.menu_button("Colormap", |ui| {
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.log_norm_colormap, "Log Norm");
-                });
-                self.colormap.color_maps_ui(ui);
+        ui.menu_button("Colormap", |ui| {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.log_norm_colormap, "Log Norm");
             });
+            self.colormap.color_maps_ui(ui);
         });
+
+        ui.separator();
+        ui.checkbox(&mut self.stats_info, "Show Statitics");
+        self.egui_settings.menu_button(ui);
+
+        ui.separator();
+
+        ui.heading("Projections ");
+        ui.horizontal(|ui| {
+            ui.label("Y-Projections");
+            if ui.button("Add Y-Projection").clicked() {
+                self.y_projection_lines.push(EguiVerticalLine::new(0.0, egui::Color32::RED));
+            }
+        });
+
+        for line in self.y_projection_lines.iter_mut() {
+            line.menu_button(ui);
+        }
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.heading("Cuts");
+            if ui.button("Add Cut").clicked() {
+                let name = format!("Cut {}", self.cut_polygons.len() + 1);
+                self.cut_polygons.push(EguiPolygon::new(&name));
+            }
+        });
+
+        let mut index_to_remove = None;
+        for (index, polygon) in self.cut_polygons.iter_mut().enumerate() {
+
+            ui.horizontal(|ui| {
+                if ui.button("🗙").clicked() {
+                    index_to_remove = Some(index);
+                }
+
+                ui.separator();
+
+                polygon.menu_button(ui);
+
+            });
+        }
+
+        if let Some(index) = index_to_remove {
+            self.cut_polygons.remove(index);
+        }
+    }
+
+    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+        for polygon in self.cut_polygons.iter_mut() {
+            polygon.mouse_interactions(plot_ui);
+            polygon.draw(plot_ui);
+        }
+
+        for line in self.y_projection_lines.iter_mut() {
+            line.draw(plot_ui);
+        }
+
+        for line in self.x_projection_lines.iter_mut() {
+            line.draw(plot_ui);
+        }
     }
 }
 
@@ -73,11 +141,10 @@ pub struct Histogram2D {
     pub name: String,
     pub bins: Bins,
     pub range: Range,
-
     pub plot_settings: PlotSettings,
-
+    pub image: EguiImage,
     #[serde(skip)]
-    texture: Option<egui::TextureHandle>,
+    pub y_projection_open: Arc<AtomicBool>,
 }
 
 impl Histogram2D {
@@ -105,29 +172,27 @@ impl Histogram2D {
                 },
             },
             plot_settings: PlotSettings::default(),
-            texture: None,
+            image: EguiImage::heatmap(
+                name.to_string(),
+                [range.0 .0, range.0 .1],
+                [range.1 .0, range.1 .1],
+            ),
+            y_projection_open: Arc::new(AtomicBool::new(false)),
         }
     }
 
     // Add a value to the histogram
     pub fn fill(&mut self, x_value: f64, y_value: f64) {
-        if x_value >= self.range.x.min
-            && x_value < self.range.x.max
-            && y_value >= self.range.y.min
-            && y_value < self.range.y.max
+        if x_value >= self.range.x.min && x_value < self.range.x.max
+            && y_value >= self.range.y.min && y_value < self.range.y.max
         {
             let x_index = ((x_value - self.range.x.min) / self.bins.x_width) as usize;
             let y_index = ((y_value - self.range.y.min) / self.bins.y_width) as usize;
             let count = self.bins.counts.entry((x_index, y_index)).or_insert(0);
             *count += 1;
-
-            // Update min and max counts
-            if *count < self.bins.min_count {
-                self.bins.min_count = *count;
-            }
-            if *count > self.bins.max_count {
-                self.bins.max_count = *count;
-            }
+    
+            self.bins.min_count = self.bins.min_count.min(*count);
+            self.bins.max_count = self.bins.max_count.max(*count);
         }
     }
 
@@ -272,24 +337,17 @@ impl Histogram2D {
     }
 
     // Convert histogram data to a ColorImage
-    fn to_color_image(&self) -> epaint::ColorImage {
-        let width = ((self.range.x.max - self.range.x.min) / self.bins.x_width) as usize;
-        let height = ((self.range.y.max - self.range.y.min) / self.bins.y_width) as usize;
+    fn data_2_image(&self) -> egui::ColorImage {
 
-        // Initialize a vector to hold pixel data
+        let width = ((self.range.x.max - self.range.x.min) / self.bins.x_width) as usize; // number of pixels in x direction
+        let height = ((self.range.y.max - self.range.y.min) / self.bins.y_width) as usize; // number of pixels in y direction
+    
+        // The pixels, row by row, from top to bottom. Each pixel is a Color32.
         let mut pixels = Vec::with_capacity(width * height);
-
-        // Loop through each bin and assign colors based on counts
-        // Loop starts from the top row (y=0) to the bottom row (y=height-1)
+    
         for y in 0..height {
             for x in 0..width {
-                let count = self
-                    .bins
-                    .counts
-                    .get(&(x, height - y - 1))
-                    .cloned()
-                    .unwrap_or(0);
-
+                let count = self.bins.counts.get(&(x, height - y - 1)).cloned().unwrap_or(0);
                 let color = self.plot_settings.colormap.color(
                     count,
                     self.bins.min_count,
@@ -299,92 +357,111 @@ impl Histogram2D {
                 pixels.push(color);
             }
         }
-
+    
         // Create the ColorImage with the specified width and height and pixel data
-        epaint::ColorImage {
+        let image = egui::ColorImage {
             size: [width, height],
             pixels,
+        };
+
+        image
+    }
+    
+    // Recalculate the image and replace the existing texture
+    pub fn calculate_image(&mut self, ui: &mut egui::Ui)  {
+        self.image.texture = None;
+        let color_image = self.data_2_image();
+        self.image.get_texture(ui, color_image);
+    }
+
+    // Extract a y-projection in the given x-range and display it in a new window
+    pub fn y_projection(&self, ui: &mut egui::Ui, x_min: f64, x_max: f64) {
+        // Extract the y-projection data
+        let mut y_bins = vec![0; self.bins.y];
+
+        for ((x_index, y_index), &count) in &self.bins.counts {
+            let x_center = self.range.x.min + (*x_index as f64 + 0.5) * self.bins.x_width;
+            if x_center >= x_min && x_center < x_max {
+                if *y_index < y_bins.len() {
+                    y_bins[*y_index] += count;
+                }
+            }
+        }
+
+        // Create a new Histogram for the y-projection
+        let y_histogram = Arc::new(Mutex::new(Histogram::new(
+            &format!("Y-Projection of {}", self.name),
+            self.bins.y,
+            (self.range.y.min, self.range.y.max),
+        )));
+        {
+            let mut y_histogram = y_histogram.lock().unwrap();
+            y_histogram.bins = y_bins;
+        }
+
+        // Create a unique ViewportId for the new viewport
+        let viewport_id = ViewportId::from_hash_of(format!("Y-Projection-{}", self.name));
+
+        // Create a viewport builder and set the title
+        let viewport_builder = ViewportBuilder::default().with_title("Y-Projection");
+
+        // Show the y-projection in a new window using show_viewport_deferred
+        let y_histogram_clone = Arc::clone(&y_histogram);
+        let open_clone = Arc::clone(&self.y_projection_open);
+        self.y_projection_open.store(true, Ordering::Relaxed);
+        ui.ctx().show_viewport_deferred(viewport_id, viewport_builder, move |ctx, class| {
+            let y_histogram_clone = Arc::clone(&y_histogram_clone);
+            let open_clone = Arc::clone(&open_clone);
+            if let ViewportClass::Embedded = class {
+                egui::Window::new("Y-Projection")
+                    .open(&mut open_clone.load(Ordering::Relaxed))
+                    .show(ctx, move |ui| {
+                        let mut y_histogram = y_histogram_clone.lock().unwrap();
+                        y_histogram.render(ui);
+                        if ui.input(|i| i.viewport().close_requested()) {
+                            open_clone.store(false, Ordering::Relaxed);
+                        }
+                    });
+            } else {
+                egui::CentralPanel::default().show(ctx, move |ui| {
+                    let mut y_histogram = y_histogram_clone.lock().unwrap();
+                    y_histogram.render(ui);
+                    if ctx.input(|i| i.viewport().close_requested()) {
+                        open_clone.store(false, Ordering::Relaxed);
+                    }
+                });
+            }
+        });
+    }
+
+    pub fn y_projection_keybinds(&mut self, ui: &mut egui::Ui) {
+        if ui.input(|i| i.key_pressed(egui::Key::Y)) {
+            // self.plot_settings.show_y_projection = !self.plot_settings.show_y_projection;
+
+            if self.plot_settings.y_projection_lines.len() == 2 {
+                let x_min = self.plot_settings.y_projection_lines[0].x_value;
+                let x_max = self.plot_settings.y_projection_lines[1].x_value;
+                self.y_projection(ui, x_min, x_max);
+            }
         }
     }
 
-    // Convert ColorImage to ImageData (Byte array)
-    fn to_image_data(&self) -> epaint::ImageData {
-        let color_image = self.to_color_image();
-        let width = color_image.size[0];
-        let height = color_image.size[1];
-
-        // Convert Color32 pixels to a flat RGBA byte array
-        let mut rgba_data = Vec::with_capacity(width * height * 4);
-        for pixel in color_image.pixels.iter() {
-            rgba_data.extend_from_slice(&pixel.to_array()); // Assuming Color32 provides a method like `to_array()`
-        }
-
-        epaint::ImageData::Color(
-            epaint::ColorImage::from_rgba_unmultiplied([width, height], &rgba_data).into(),
-        )
-    }
-
-    // Get the center of the image
-    fn get_image_center(&self) -> egui_plot::PlotPoint {
-        egui_plot::PlotPoint::new(
-            (self.range.x.min + self.range.x.max) / 2.0,
-            (self.range.y.min + self.range.y.max) / 2.0,
-        )
-    }
-
-    // Get the size of the image
-    fn get_image_size(&self) -> egui::Vec2 {
-        egui::Vec2::new(
-            (self.range.x.max - self.range.x.min) as f32,
-            (self.range.y.max - self.range.y.min) as f32,
-        )
+    pub fn keybinds(&mut self, ui: &mut egui::Ui) {
+        self.y_projection_keybinds(ui);
     }
 
     // Context menu for the plot (when you right-click on the plot)
     fn context_menu(&mut self, ui: &mut egui::Ui) {
+        self.image.menu_button(ui);
         self.plot_settings.settings_ui(ui);
     }
 
     // Draw the histogram on the plot
     fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi, plot_image: egui_plot::PlotImage) {
         self.show_stats(plot_ui);
-        plot_ui.image(plot_image);
-
-        self.plot_settings.egui_polygon.draw(plot_ui);
-
+        self.image.draw(plot_ui, plot_image);
         self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
-    }
-
-    // Get the PlotImage from the ui textures
-    fn get_plot_image_from_texture(&mut self, ui: &mut egui::Ui) -> Option<egui_plot::PlotImage> {
-        if self.texture.is_none() {
-            let image_data = self.to_image_data();
-            self.texture = Some(ui.ctx().load_texture(
-                self.name.clone(),
-                image_data,
-                egui::TextureOptions {
-                    magnification: egui::TextureFilter::Nearest,
-                    minification: egui::TextureFilter::Nearest,
-                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                },
-            ));
-        }
-
-        if let Some(texture) = &self.texture {
-            Some(
-                egui_plot::PlotImage::new(texture, self.get_image_center(), self.get_image_size())
-                    .name(self.name.clone()),
-            )
-        } else {
-            log::warn!("Failed to get texture for histogram: {}", self.name);
-            None
-        }
-    }
-
-    // Recalculate the image and replace the existing texture
-    pub fn recalculate_image(&mut self, ui: &mut egui::Ui) {
-        self.texture = None;
-        self.get_plot_image_from_texture(ui);
+        self.plot_settings.draw(plot_ui);
     }
 
     // Render the histogram using egui_plot
@@ -392,24 +469,37 @@ impl Histogram2D {
         let mut plot = egui_plot::Plot::new(self.name.clone());
         plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
-        let heatmap_image = self.get_plot_image_from_texture(ui);
+        self.keybinds(ui);
 
-        self.plot_settings.egui_polygon.cursor_position = self.plot_settings.cursor_position;
-        self.plot_settings.egui_polygon.keybinds(ui);
+        if self.image.texture.is_none() {
+            self.calculate_image(ui);
+        }
 
+        if ui.button("Show Y-Projection").clicked() {
+            self.y_projection_open.store(true, Ordering::Relaxed);
+        }
+
+        if self.y_projection_open.load(Ordering::Relaxed) {
+            self.y_projection(ui, 0.0, 10.0); // Adjust x_min and x_max as needed
+        }
+
+        let heatmap_image = self.image.get_plot_image_from_texture(ui);
+    
         plot.show(ui, |plot_ui| {
             if let Some(image) = heatmap_image {
                 self.draw(plot_ui, image);
+            } else {
+                log::error!("Failed to draw image: {}", self.name);
             }
         })
         .response
         .context_menu(|ui| {
             if ui.button("Recalculate Image").clicked() {
-                self.recalculate_image(ui);
+                self.calculate_image(ui);
             }
-
+    
             ui.separator();
-
+    
             self.context_menu(ui);
         });
     }
