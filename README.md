@@ -1,16 +1,8 @@
 # Nuclear Analysis Tool (NAT)
 
-The Nuclear Analysis Tool (NAT) is a comprehensive software designed for nuclear data analysis. It provides functionalities for histogramming, Gaussian fitting, and interactive data visualization using `egui` and `egui_plot` crates.
+The Nuclear Analysis Tool (NAT) is a comprehensive software designed for nuclear data analysis. It provides functionalities for histogramming, Gaussian fitting, and interactive data visualization using crates: `egui`, `egui-tiles`, `egui_plot`, and `polars`
 
-## Features
-
-- Create and manage histograms
-- Fit Gaussian peaks
-- Interactive data visualization
-- Export and import fits
-- Customizable plot settings
-
-### Testing locally
+### Running locally
 
 Make sure you are using the latest version of stable rust by running `rustup update`. Rust is very easy to install on any computer. First, you'll need to install the Rust toolchain (compiler, cargo, etc). Go to the [Rust website](https://www.rust-lang.org/tools/install) and follow the instructions there.
 
@@ -30,6 +22,13 @@ On Fedora Rawhide you need to run:
 
 ## 1D Histogram
 
+### Features
+
+- Very Interactive UI
+- Customizable UI
+- Multiple Gaussian Fitting
+- Rebinning Data
+
 ### Fitting
 
 Multiple gaussians can be fitted interactively similar to [hdtv](https://github.com/janmayer/hdtv).
@@ -48,3 +47,30 @@ Keybinds
 - L: Toggle Log Y
 
 The idea is to put region markers around you peak of intrest. If there are multiple peaks in between the region markers, add the centroid approximately with the peak markers. The background will be calculated with a linear line. To manually select the background data, add the background markers. If no background markers are supplied, background markers will be put at the region markers. The fits can be stored, and then the user can save/load them by right clicking on the plot and going into the fit menu.
+
+#### Future Goals with Fitting
+
+- Allow the user to plot different relationships (like FWHM vs Position, energy calibration, etc.)
+- Fit the background with something other than a linear line
+
+## 2D Histogram
+
+### Features
+
+- Very Interactive UI
+- Customizable UI
+- X and Y Projections
+- Different Colormaps
+- Easy to draw cut/gates
+
+#### Future Goals for 2D histograms
+
+- customizable min/max z value on the colormap
+- Allow filtering the data with a cut/gate
+- Rebinning
+
+## Future Features
+
+- Save/load all the histograms into some python program
+- Command line interface / bashscripting
+- Interface to control the histograms that are calculated in the histogrammer
