@@ -20,6 +20,8 @@ On Fedora Rawhide you need to run:
 
 `dnf install clang clang-devel clang-tools-extra libxkbcommon-devel pkg-config openssl-devel libxcb-devel gtk3-devel atk fontconfig-devel`
 
+Example parquet files are in the example directory if someone wants to test this program.
+
 ## 1D Histogram
 
 ### Features
