@@ -54,7 +54,6 @@ impl Default for EguiImage {
 
 impl EguiImage {
     pub fn heatmap(name: String, range_x: [f64; 2], range_y: [f64; 2]) -> Self {
-
         let image = EguiImage::default();
 
         EguiImage {
@@ -68,7 +67,7 @@ impl EguiImage {
             ..image
         }
     }
-    
+
     // Convert ColorImage to ImageData (Byte array)
     fn to_image_data(&self, color_image: ColorImage) -> ImageData {
         let width = color_image.size[0];
@@ -77,7 +76,7 @@ impl EguiImage {
         for pixel in color_image.pixels.iter() {
             rgba_data.extend_from_slice(&pixel.to_array());
         }
-    
+
         ImageData::Color(ColorImage::from_rgba_unmultiplied([width, height], &rgba_data).into())
     }
 
@@ -91,7 +90,7 @@ impl EguiImage {
         egui::Vec2::new(self.image_width, self.image_height)
     }
 
-    pub fn get_plot_image_from_texture(&mut self, ui: &mut egui::Ui) -> Option<egui_plot::PlotImage> {
+    pub fn get_plot_image_from_texture(&mut self) -> Option<egui_plot::PlotImage> {
         if let Some(texture) = &self.texture {
             Some(PlotImage::new(
                 texture,

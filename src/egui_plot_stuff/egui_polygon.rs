@@ -1,5 +1,5 @@
 use egui::{Color32, DragValue, Slider, Stroke, Ui};
-use egui_plot::{Polygon, LineStyle, PlotPoints, PlotUi};
+use egui_plot::{LineStyle, PlotPoints, PlotUi, Polygon};
 
 use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
 
@@ -65,22 +65,27 @@ impl EguiPolygon {
         }
     }
 
-    pub fn keybinds(&mut self, ui: &mut egui::Ui, cursor_position: Option<egui_plot::PlotPoint>) {
-        if let Some(_cursor_position) = cursor_position {
-            if ui.input(|i| i.key_pressed(egui::Key::C)) {
-                self.draw = !self.draw;
-                self.interactive = !self.interactive;
-                log::info!("{} Polygon -> Draw: {}, Interactive: {}", self.name, self.draw, self.interactive);
-            }
+    // pub fn keybinds(&mut self, ui: &mut egui::Ui, cursor_position: Option<egui_plot::PlotPoint>) {
+    //     if let Some(_cursor_position) = cursor_position {
+    //         if ui.input(|i| i.key_pressed(egui::Key::C)) {
+    //             self.draw = !self.draw;
+    //             self.interactive = !self.interactive;
+    //             log::info!(
+    //                 "{} Polygon -> Draw: {}, Interactive: {}",
+    //                 self.name,
+    //                 self.draw,
+    //                 self.interactive
+    //             );
+    //         }
 
-            if ui.input(|i| i.key_pressed(egui::Key::Delete))
-                || ui.input(|i| i.key_pressed(egui::Key::Backspace))
-            {
-                self.clear_vertices();
-                log::info!("{} Polygon -> Vertices Cleared", self.name);
-            }
-        }
-    }
+    //         if ui.input(|i| i.key_pressed(egui::Key::Delete))
+    //             || ui.input(|i| i.key_pressed(egui::Key::Backspace))
+    //         {
+    //             self.clear_vertices();
+    //             log::info!("{} Polygon -> Vertices Cleared", self.name);
+    //         }
+    //     }
+    // }
 
     pub fn add_vertex(&mut self, x: f64, y: f64) {
         self.vertices.push([x, y]);
@@ -112,12 +117,12 @@ impl EguiPolygon {
             }
 
             plot_ui.polygon(polygon);
-            plot_ui.points(vertices_points); 
+            plot_ui.points(vertices_points);
         }
     }
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
-        ui.menu_button(format!("{}", self.name), |ui| {
+        ui.menu_button(self.name.to_string(), |ui| {
             ui.vertical(|ui| {
                 ui.text_edit_singleline(&mut self.name);
                 ui.checkbox(&mut self.draw, "Draw Polygon");

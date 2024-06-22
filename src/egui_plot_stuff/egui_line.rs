@@ -36,16 +36,16 @@ impl Default for EguiLine {
             log_x: false,
             name: "Line".to_string(),
             highlighted: false,
-            stroke: Stroke::new(1.0, Color32::LIGHT_BLUE),
+            stroke: Stroke::new(1.0, Color32::from_rgb(120, 47, 64)),
             width: 2.0,
-            color: Color32::BLACK,
+            color: Color32::from_rgb(120, 47, 64),
             reference_fill: false,
             fill: 0.0,
             style: Some(LineStyle::Solid),
             style_length: 15.0,
             points: vec![],
-            color_rgb: Rgb::from_color32(Color32::LIGHT_BLUE),
-            stroke_rgb: Rgb::from_color32(Color32::LIGHT_BLUE),
+            color_rgb: Rgb::from_color32(Color32::from_rgb(120, 47, 64)),
+            stroke_rgb: Rgb::from_color32(Color32::from_rgb(120, 47, 64)),
         }
     }
 }

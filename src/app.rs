@@ -50,9 +50,9 @@ impl NATApp {
         Default::default()
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui) {
-        self.tree.ui(&mut self.behavior, ui);
-    }
+    // fn ui(&mut self, ui: &mut egui::Ui) {
+    //     self.tree.ui(&mut self.behavior, ui);
+    // }
 
     fn add_histograms_to_tree(&mut self) {
         // let mut panes = self.processer.histogrammer.get_histogram1d_panes();

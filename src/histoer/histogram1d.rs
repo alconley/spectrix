@@ -12,8 +12,8 @@ pub struct PlotSettings {
     egui_settings: EguiPlotSettings,
     stats_info: bool,
     markers: EguiFitMarkers,
+    rebin_factor: usize,
 }
-
 impl Default for PlotSettings {
     fn default() -> Self {
         PlotSettings {
@@ -21,19 +21,15 @@ impl Default for PlotSettings {
             egui_settings: EguiPlotSettings::default(),
             stats_info: false,
             markers: EguiFitMarkers::new(),
+            rebin_factor: 1,
         }
     }
 }
-
 impl PlotSettings {
     pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
-        ui.vertical(|ui| {
-            ui.label("Plot Settings:");
-            ui.separator();
-            ui.checkbox(&mut self.stats_info, "Show Statitics");
-            self.egui_settings.menu_button(ui);
-            self.markers.menu_button(ui);
-        });
+        ui.checkbox(&mut self.stats_info, "Show Statitics");
+        self.egui_settings.menu_button(ui);
+        self.markers.menu_button(ui);
     }
 }
 
@@ -46,23 +42,23 @@ pub struct Histogram {
     pub line: EguiLine,
     pub plot_settings: PlotSettings,
     pub fits: Fits,
+    pub original_bins: Vec<u32>,
 }
-
-// new(name.to_string(), egui::Color32::LIGHT_BLUE)
 impl Histogram {
     // Create a new Histogram with specified min, max, and number of bins
     pub fn new(name: &str, number_of_bins: usize, range: (f64, f64)) -> Self {
-        let mut line = EguiLine::new(egui::Color32::LIGHT_BLUE);
-        line.name = name.to_string();
-
         Histogram {
             name: name.to_string(),
             bins: vec![0; number_of_bins],
             range,
             bin_width: (range.1 - range.0) / number_of_bins as f64,
-            line,
+            line: EguiLine {
+                name: name.to_string(),
+                ..Default::default()
+            },
             plot_settings: PlotSettings::default(),
             fits: Fits::new(),
+            original_bins: vec![0; number_of_bins],
         }
     }
 
@@ -72,8 +68,42 @@ impl Histogram {
             let index = ((value - self.range.0) / self.bin_width) as usize;
             if index < self.bins.len() {
                 self.bins[index] += 1;
+                self.original_bins[index] += 1;
             }
         }
+    }
+
+    // Rebin the histogram according to the rebin factor
+    fn rebin(&mut self) {
+        let rebin_factor = self.plot_settings.rebin_factor;
+        let new_bin_count = self.original_bins.len() / rebin_factor;
+        let mut new_bins = vec![0; new_bin_count];
+
+        for (i, &count) in self.original_bins.iter().enumerate() {
+            let new_index = i / rebin_factor;
+            new_bins[new_index] += count;
+        }
+
+        self.bins = new_bins;
+        self.bin_width = (self.range.1 - self.range.0) / new_bin_count as f64;
+        self.update_line_points();
+    }
+
+    // Compute the possible rebin factors based on the initial number of bins
+    fn possible_rebin_factors(&self) -> Vec<usize> {
+        let mut factors = vec![];
+        factors.push(1);
+        let mut factor = 1;
+        while self.original_bins.len() % (factor * 2) == 0 {
+            factor *= 2;
+            factors.push(factor);
+        }
+
+        // remove the last factor if it is the same as the number of bins
+        if factors.last() == Some(&self.original_bins.len()) {
+            factors.pop();
+        }
+        factors
     }
 
     // Convert histogram bins to line points
@@ -383,6 +413,28 @@ impl Histogram {
         self.plot_settings.settings_ui(ui);
         self.fits.fit_context_menu_ui(ui);
         self.keybinds_ui(ui);
+
+        ui.separator();
+        ui.heading("Rebin");
+
+        let possible_factors = self.possible_rebin_factors();
+
+        ui.label("Rebin Factor:");
+
+        ui.horizontal_wrapped(|ui| {
+            for &factor in &possible_factors {
+                if ui
+                    .selectable_label(
+                        self.plot_settings.rebin_factor == factor,
+                        format!("{}", factor),
+                    )
+                    .clicked()
+                {
+                    self.plot_settings.rebin_factor = factor;
+                    self.rebin();
+                }
+            }
+        });
     }
 
     // Renders the histogram using egui_plot

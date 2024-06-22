@@ -1,13 +1,10 @@
 use super::colormaps::ColorMap;
-use super::plot_settings::EguiPlotSettings;
 use super::histogram1d::Histogram;
+use super::plot_settings::EguiPlotSettings;
+use crate::egui_plot_stuff::egui_horizontal_line::EguiHorizontalLine;
 use crate::egui_plot_stuff::egui_image::EguiImage;
 use crate::egui_plot_stuff::egui_polygon::EguiPolygon;
 use crate::egui_plot_stuff::egui_vertical_line::EguiVerticalLine;
-use crate::egui_plot_stuff::egui_horizontal_line::EguiHorizontalLine;
-
-use egui::viewport::{ViewportBuilder, ViewportId, ViewportClass};
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use fnv::FnvHashMap;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -16,30 +13,24 @@ pub struct PlotSettings {
     cursor_position: Option<egui_plot::PlotPoint>,
     egui_settings: EguiPlotSettings,
     cut_polygons: Vec<EguiPolygon>,
-    y_projection_lines: Vec<EguiVerticalLine>,
-    show_y_projection: bool,
-    x_projection_lines: Vec<EguiHorizontalLine>,
     stats_info: bool,
     colormap: ColorMap,
     log_norm_colormap: bool,
+    projections: Projections,
 }
-
 impl Default for PlotSettings {
     fn default() -> Self {
         PlotSettings {
             cursor_position: None,
             egui_settings: EguiPlotSettings::default(),
             cut_polygons: Vec::new(),
-            y_projection_lines: Vec::new(),
-            show_y_projection: false,
-            x_projection_lines: Vec::new(),
             stats_info: false,
             colormap: ColorMap::default(),
             log_norm_colormap: true,
+            projections: Projections::default(),
         }
     }
 }
-
 impl PlotSettings {
     pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Colormap", |ui| {
@@ -50,22 +41,13 @@ impl PlotSettings {
         });
 
         ui.separator();
+
         ui.checkbox(&mut self.stats_info, "Show Statitics");
         self.egui_settings.menu_button(ui);
 
         ui.separator();
 
-        ui.heading("Projections ");
-        ui.horizontal(|ui| {
-            ui.label("Y-Projections");
-            if ui.button("Add Y-Projection").clicked() {
-                self.y_projection_lines.push(EguiVerticalLine::new(0.0, egui::Color32::RED));
-            }
-        });
-
-        for line in self.y_projection_lines.iter_mut() {
-            line.menu_button(ui);
-        }
+        self.projections.menu_button(ui);
 
         ui.separator();
 
@@ -79,7 +61,6 @@ impl PlotSettings {
 
         let mut index_to_remove = None;
         for (index, polygon) in self.cut_polygons.iter_mut().enumerate() {
-
             ui.horizontal(|ui| {
                 if ui.button("🗙").clicked() {
                     index_to_remove = Some(index);
@@ -88,7 +69,6 @@ impl PlotSettings {
                 ui.separator();
 
                 polygon.menu_button(ui);
-
             });
         }
 
@@ -103,13 +83,150 @@ impl PlotSettings {
             polygon.draw(plot_ui);
         }
 
-        for line in self.y_projection_lines.iter_mut() {
-            line.draw(plot_ui);
+        self.projections.draw(plot_ui);
+    }
+}
+
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Projections {
+    pub add_y_projection: bool,
+    pub y_projection: Option<Histogram>,
+    pub y_projection_line_1: EguiVerticalLine,
+    pub y_projection_line_2: EguiVerticalLine,
+
+    pub add_x_projection: bool,
+    pub x_projection: Option<Histogram>,
+    pub x_projection_line_1: EguiHorizontalLine,
+    pub x_projection_line_2: EguiHorizontalLine,
+}
+impl Projections {
+    pub fn new() -> Self {
+        Projections {
+            add_y_projection: false,
+            y_projection: None,
+            y_projection_line_1: EguiVerticalLine::default(),
+            y_projection_line_2: EguiVerticalLine::default(),
+
+            add_x_projection: false,
+            x_projection: None,
+            x_projection_line_1: EguiHorizontalLine::default(),
+            x_projection_line_2: EguiHorizontalLine::default(),
+        }
+    }
+
+    fn show_y_projection(&mut self, ui: &mut egui::Ui) {
+        if self.add_y_projection && self.y_projection.is_some() {
+            ui.ctx().show_viewport_immediate(
+                egui::ViewportId::from_hash_of(
+                    self.y_projection.as_ref().unwrap().name.to_string(),
+                ),
+                egui::ViewportBuilder::default()
+                    .with_title(self.y_projection.as_ref().unwrap().name.to_string())
+                    .with_inner_size([600.0, 400.0]),
+                |ctx, class| {
+                    assert!(
+                        class == egui::ViewportClass::Immediate,
+                        "This egui backend doesn't support multiple viewports"
+                    );
+
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        if let Some(histogram) = &mut self.y_projection {
+                            histogram.render(ui);
+                        }
+                    });
+
+                    if ctx.input(|i| i.viewport().close_requested()) {
+                        // Tell parent viewport that we should not show next frame:
+                        self.y_projection = None;
+                    }
+                },
+            );
+        }
+    }
+
+    fn show_x_projection(&mut self, ui: &mut egui::Ui) {
+        if self.add_x_projection && self.x_projection.is_some() {
+            ui.ctx().show_viewport_immediate(
+                egui::ViewportId::from_hash_of(
+                    self.x_projection.as_ref().unwrap().name.to_string(),
+                ),
+                egui::ViewportBuilder::default()
+                    .with_title(self.x_projection.as_ref().unwrap().name.to_string())
+                    .with_inner_size([600.0, 400.0]),
+                |ctx, class| {
+                    assert!(
+                        class == egui::ViewportClass::Immediate,
+                        "This egui backend doesn't support multiple viewports"
+                    );
+
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        if let Some(histogram) = &mut self.x_projection {
+                            histogram.render(ui);
+                        }
+                    });
+
+                    if ctx.input(|i| i.viewport().close_requested()) {
+                        // Tell parent viewport that we should not show next frame:
+                        self.x_projection = None;
+                    }
+                },
+            );
+        }
+    }
+
+    pub fn show(&mut self, ui: &mut egui::Ui) {
+        self.show_y_projection(ui);
+        self.show_x_projection(ui);
+    }
+
+    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+        if self.add_y_projection {
+            self.y_projection_line_1.draw(plot_ui);
+            self.y_projection_line_2.draw(plot_ui);
         }
 
-        for line in self.x_projection_lines.iter_mut() {
-            line.draw(plot_ui);
+        if self.add_x_projection {
+            self.x_projection_line_1.draw(plot_ui);
+            self.x_projection_line_2.draw(plot_ui);
         }
+    }
+
+    pub fn menu_button(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Projections");
+
+        ui.checkbox(&mut self.add_y_projection, "Add Y Projection");
+        ui.horizontal(|ui| {
+            if self.add_y_projection {
+                ui.add(
+                    egui::DragValue::new(&mut self.y_projection_line_1.x_value)
+                        .speed(1.0)
+                        .prefix("X1: "),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut self.y_projection_line_2.x_value)
+                        .speed(1.0)
+                        .prefix("X2: "),
+                );
+            }
+        });
+
+        ui.checkbox(&mut self.add_x_projection, "Add X Projection");
+        ui.horizontal(|ui| {
+            if self.add_x_projection {
+                ui.add(
+                    egui::DragValue::new(&mut self.x_projection_line_1.y_value)
+                        .speed(1.0)
+                        .prefix("Y1: "),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut self.x_projection_line_2.y_value)
+                        .speed(1.0)
+                        .prefix("Y2: "),
+                );
+            }
+        });
+
+        ui.label("Press 'P' to calculate the projections");
     }
 }
 
@@ -143,10 +260,7 @@ pub struct Histogram2D {
     pub range: Range,
     pub plot_settings: PlotSettings,
     pub image: EguiImage,
-    #[serde(skip)]
-    pub y_projection_open: Arc<AtomicBool>,
 }
-
 impl Histogram2D {
     // Create a new 2D Histogram with specified ranges and number of bins for each axis
     pub fn new(name: &str, bins: (usize, usize), range: ((f64, f64), (f64, f64))) -> Self {
@@ -177,20 +291,21 @@ impl Histogram2D {
                 [range.0 .0, range.0 .1],
                 [range.1 .0, range.1 .1],
             ),
-            y_projection_open: Arc::new(AtomicBool::new(false)),
         }
     }
 
     // Add a value to the histogram
     pub fn fill(&mut self, x_value: f64, y_value: f64) {
-        if x_value >= self.range.x.min && x_value < self.range.x.max
-            && y_value >= self.range.y.min && y_value < self.range.y.max
+        if x_value >= self.range.x.min
+            && x_value < self.range.x.max
+            && y_value >= self.range.y.min
+            && y_value < self.range.y.max
         {
             let x_index = ((x_value - self.range.x.min) / self.bins.x_width) as usize;
             let y_index = ((y_value - self.range.y.min) / self.bins.y_width) as usize;
             let count = self.bins.counts.entry((x_index, y_index)).or_insert(0);
             *count += 1;
-    
+
             self.bins.min_count = self.bins.min_count.min(*count);
             self.bins.max_count = self.bins.max_count.max(*count);
         }
@@ -338,16 +453,20 @@ impl Histogram2D {
 
     // Convert histogram data to a ColorImage
     fn data_2_image(&self) -> egui::ColorImage {
-
         let width = ((self.range.x.max - self.range.x.min) / self.bins.x_width) as usize; // number of pixels in x direction
         let height = ((self.range.y.max - self.range.y.min) / self.bins.y_width) as usize; // number of pixels in y direction
-    
+
         // The pixels, row by row, from top to bottom. Each pixel is a Color32.
         let mut pixels = Vec::with_capacity(width * height);
-    
+
         for y in 0..height {
             for x in 0..width {
-                let count = self.bins.counts.get(&(x, height - y - 1)).cloned().unwrap_or(0);
+                let count = self
+                    .bins
+                    .counts
+                    .get(&(x, height - y - 1))
+                    .cloned()
+                    .unwrap_or(0);
                 let color = self.plot_settings.colormap.color(
                     count,
                     self.bins.min_count,
@@ -357,97 +476,89 @@ impl Histogram2D {
                 pixels.push(color);
             }
         }
-    
+
         // Create the ColorImage with the specified width and height and pixel data
-        let image = egui::ColorImage {
+        egui::ColorImage {
             size: [width, height],
             pixels,
-        };
-
-        image
+        }
     }
-    
+
     // Recalculate the image and replace the existing texture
-    pub fn calculate_image(&mut self, ui: &mut egui::Ui)  {
+    pub fn calculate_image(&mut self, ui: &mut egui::Ui) {
         self.image.texture = None;
         let color_image = self.data_2_image();
         self.image.get_texture(ui, color_image);
     }
 
-    // Extract a y-projection in the given x-range and display it in a new window
-    pub fn y_projection(&self, ui: &mut egui::Ui, x_min: f64, x_max: f64) {
+    pub fn y_projection(&mut self, x_min: f64, x_max: f64) -> Histogram {
         // Extract the y-projection data
         let mut y_bins = vec![0; self.bins.y];
 
         for ((x_index, y_index), &count) in &self.bins.counts {
             let x_center = self.range.x.min + (*x_index as f64 + 0.5) * self.bins.x_width;
-            if x_center >= x_min && x_center < x_max {
-                if *y_index < y_bins.len() {
-                    y_bins[*y_index] += count;
-                }
+            if x_center >= x_min && x_center < x_max && *y_index < y_bins.len() {
+                y_bins[*y_index] += count;
             }
         }
 
         // Create a new Histogram for the y-projection
-        let y_histogram = Arc::new(Mutex::new(Histogram::new(
-            &format!("Y-Projection of {}", self.name),
+        let mut y_histogram = Histogram::new(
+            &format!("Y-Projection of {} between {}-{}", self.name, x_min, x_max),
             self.bins.y,
             (self.range.y.min, self.range.y.max),
-        )));
-        {
-            let mut y_histogram = y_histogram.lock().unwrap();
-            y_histogram.bins = y_bins;
-        }
+        );
 
-        // Create a unique ViewportId for the new viewport
-        let viewport_id = ViewportId::from_hash_of(format!("Y-Projection-{}", self.name));
+        // Fill the y-projection histogram
+        y_histogram.bins = y_bins;
 
-        // Create a viewport builder and set the title
-        let viewport_builder = ViewportBuilder::default().with_title("Y-Projection");
-
-        // Show the y-projection in a new window using show_viewport_deferred
-        let y_histogram_clone = Arc::clone(&y_histogram);
-        let open_clone = Arc::clone(&self.y_projection_open);
-        self.y_projection_open.store(true, Ordering::Relaxed);
-        ui.ctx().show_viewport_deferred(viewport_id, viewport_builder, move |ctx, class| {
-            let y_histogram_clone = Arc::clone(&y_histogram_clone);
-            let open_clone = Arc::clone(&open_clone);
-            if let ViewportClass::Embedded = class {
-                egui::Window::new("Y-Projection")
-                    .open(&mut open_clone.load(Ordering::Relaxed))
-                    .show(ctx, move |ui| {
-                        let mut y_histogram = y_histogram_clone.lock().unwrap();
-                        y_histogram.render(ui);
-                        if ui.input(|i| i.viewport().close_requested()) {
-                            open_clone.store(false, Ordering::Relaxed);
-                        }
-                    });
-            } else {
-                egui::CentralPanel::default().show(ctx, move |ui| {
-                    let mut y_histogram = y_histogram_clone.lock().unwrap();
-                    y_histogram.render(ui);
-                    if ctx.input(|i| i.viewport().close_requested()) {
-                        open_clone.store(false, Ordering::Relaxed);
-                    }
-                });
-            }
-        });
+        y_histogram
     }
 
-    pub fn y_projection_keybinds(&mut self, ui: &mut egui::Ui) {
-        if ui.input(|i| i.key_pressed(egui::Key::Y)) {
-            // self.plot_settings.show_y_projection = !self.plot_settings.show_y_projection;
+    pub fn x_projection(&mut self, y_min: f64, y_max: f64) -> Histogram {
+        // Extract the x-projection data
+        let mut x_bins = vec![0; self.bins.x];
 
-            if self.plot_settings.y_projection_lines.len() == 2 {
-                let x_min = self.plot_settings.y_projection_lines[0].x_value;
-                let x_max = self.plot_settings.y_projection_lines[1].x_value;
-                self.y_projection(ui, x_min, x_max);
+        for ((x_index, y_index), &count) in &self.bins.counts {
+            let y_center = self.range.y.min + (*y_index as f64 + 0.5) * self.bins.y_width;
+            if y_center >= y_min && y_center < y_max && *x_index < x_bins.len() {
+                x_bins[*x_index] += count;
             }
         }
+
+        // Create a new Histogram for the x-projection
+        let mut x_histogram = Histogram::new(
+            &format!("X-Projection of {} between {}-{}", self.name, y_min, y_max),
+            self.bins.x,
+            (self.range.x.min, self.range.x.max),
+        );
+
+        // Fill the x-projection histogram
+        x_histogram.bins = x_bins;
+
+        x_histogram
     }
 
     pub fn keybinds(&mut self, ui: &mut egui::Ui) {
-        self.y_projection_keybinds(ui);
+        if let Some(_cursor_position) = self.plot_settings.cursor_position {
+            if ui.input(|i| i.key_pressed(egui::Key::P)) {
+                if self.plot_settings.projections.add_y_projection {
+                    let x1 = self.plot_settings.projections.y_projection_line_1.x_value;
+                    let x2 = self.plot_settings.projections.y_projection_line_2.x_value;
+                    let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) }; // sort the x values
+                    self.plot_settings.projections.y_projection =
+                        Some(self.y_projection(min_x, max_x));
+                }
+
+                if self.plot_settings.projections.add_x_projection {
+                    let y1 = self.plot_settings.projections.x_projection_line_1.y_value;
+                    let y2 = self.plot_settings.projections.x_projection_line_2.y_value;
+                    let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) }; // sort the y values
+                    self.plot_settings.projections.x_projection =
+                        Some(self.x_projection(min_y, max_y));
+                }
+            }
+        }
     }
 
     // Context menu for the plot (when you right-click on the plot)
@@ -457,9 +568,15 @@ impl Histogram2D {
     }
 
     // Draw the histogram on the plot
-    fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi, plot_image: egui_plot::PlotImage) {
+    fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
         self.show_stats(plot_ui);
-        self.image.draw(plot_ui, plot_image);
+
+        let heatmap_image = self.image.get_plot_image_from_texture();
+
+        if let Some(image) = heatmap_image {
+            self.image.draw(plot_ui, image);
+        }
+        // self.image.draw(plot_ui, plot_image);
         self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
         self.plot_settings.draw(plot_ui);
     }
@@ -475,31 +592,19 @@ impl Histogram2D {
             self.calculate_image(ui);
         }
 
-        if ui.button("Show Y-Projection").clicked() {
-            self.y_projection_open.store(true, Ordering::Relaxed);
-        }
+        self.plot_settings.projections.show(ui);
 
-        if self.y_projection_open.load(Ordering::Relaxed) {
-            self.y_projection(ui, 0.0, 10.0); // Adjust x_min and x_max as needed
-        }
-
-        let heatmap_image = self.image.get_plot_image_from_texture(ui);
-    
         plot.show(ui, |plot_ui| {
-            if let Some(image) = heatmap_image {
-                self.draw(plot_ui, image);
-            } else {
-                log::error!("Failed to draw image: {}", self.name);
-            }
+            self.draw(plot_ui);
         })
         .response
         .context_menu(|ui| {
             if ui.button("Recalculate Image").clicked() {
                 self.calculate_image(ui);
             }
-    
+
             ui.separator();
-    
+
             self.context_menu(ui);
         });
     }
