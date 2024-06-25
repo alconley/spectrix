@@ -123,6 +123,7 @@ impl EguiPolygon {
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
         ui.menu_button(self.name.to_string(), |ui| {
+            ui.label(self.name.to_string());
             ui.vertical(|ui| {
                 ui.text_edit_singleline(&mut self.name);
                 ui.checkbox(&mut self.draw, "Draw Polygon");

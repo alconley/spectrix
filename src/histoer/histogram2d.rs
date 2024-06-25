@@ -27,7 +27,7 @@ impl Default for PlotSettings {
             stats_info: false,
             colormap: ColorMap::default(),
             log_norm_colormap: true,
-            projections: Projections::default(),
+            projections: Projections::new(),
         }
     }
 }
@@ -85,6 +85,10 @@ impl PlotSettings {
 
         self.projections.draw(plot_ui);
     }
+
+    pub fn interactive_response(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
+        self.projections.interactive_dragging(plot_response);
+    }
 }
 
 #[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -104,13 +108,25 @@ impl Projections {
         Projections {
             add_y_projection: false,
             y_projection: None,
-            y_projection_line_1: EguiVerticalLine::default(),
-            y_projection_line_2: EguiVerticalLine::default(),
+            y_projection_line_1: EguiVerticalLine {
+                name: "Y Projection Line 1".to_string(),
+                ..EguiVerticalLine::default()
+            },
+            y_projection_line_2: EguiVerticalLine {
+                name: "Y Projection Line 2".to_string(),
+                ..EguiVerticalLine::default()
+            },
 
             add_x_projection: false,
             x_projection: None,
-            x_projection_line_1: EguiHorizontalLine::default(),
-            x_projection_line_2: EguiHorizontalLine::default(),
+            x_projection_line_1: EguiHorizontalLine {
+                name: "X Projection Line 1".to_string(),
+                ..EguiHorizontalLine::default()
+            },
+            x_projection_line_2: EguiHorizontalLine {
+                name: "X Projection Line 2".to_string(),
+                ..EguiHorizontalLine::default()
+            },
         }
     }
 
@@ -188,6 +204,18 @@ impl Projections {
         if self.add_x_projection {
             self.x_projection_line_1.draw(plot_ui);
             self.x_projection_line_2.draw(plot_ui);
+        }
+    }
+
+    pub fn interactive_dragging(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
+        if self.add_y_projection {
+            self.y_projection_line_1.interactive_dragging(plot_response);
+            self.y_projection_line_2.interactive_dragging(plot_response);
+        }
+
+        if self.add_x_projection {
+            self.x_projection_line_1.interactive_dragging(plot_response);
+            self.x_projection_line_2.interactive_dragging(plot_response);
         }
     }
 
@@ -594,18 +622,17 @@ impl Histogram2D {
 
         self.plot_settings.projections.show(ui);
 
-        plot.show(ui, |plot_ui| {
+        let plot_response = plot.show(ui, |plot_ui| {
             self.draw(plot_ui);
-        })
-        .response
-        .context_menu(|ui| {
+        });
+
+        plot_response.response.context_menu(|ui| {
             if ui.button("Recalculate Image").clicked() {
                 self.calculate_image(ui);
             }
-
-            ui.separator();
-
             self.context_menu(ui);
         });
+
+        self.plot_settings.interactive_response(&plot_response);
     }
 }

@@ -31,6 +31,10 @@ impl PlotSettings {
         self.egui_settings.menu_button(ui);
         self.markers.menu_button(ui);
     }
+
+    fn interactive_response(&mut self, response: &egui_plot::PlotResponse<()>) {
+        self.markers.interactive_dragging(response);
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -370,6 +374,7 @@ impl Histogram {
                 ui.label("R: Add Region Marker");
                 ui.label("-: Remove Marker Closest to Cursor");
                 ui.label("Delete: Remove All Markers and Temp Fits");
+                ui.label("Middle: Move marker").on_hover_text("Markers can be dragged to new positions with the middle mouse button when hovered over center point");
                 ui.separator();
                 ui.label("Fitting");
                 ui.label("G: Fit Background").on_hover_text("Fit a linear background using the background markers");
@@ -448,13 +453,15 @@ impl Histogram {
         ui.vertical(|ui| {
             self.fits.fit_stats_ui(ui);
 
-            plot.show(ui, |plot_ui| {
+            let plot_response = plot.show(ui, |plot_ui| {
                 self.draw(plot_ui);
-            })
-            .response
-            .context_menu(|ui| {
+            });
+
+            plot_response.response.context_menu(|ui| {
                 self.context_menu(ui);
             });
+
+            self.plot_settings.interactive_response(&plot_response);
         });
     }
 }

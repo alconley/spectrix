@@ -151,7 +151,13 @@ impl GaussianFitter {
         // if peak_marks is empty, find the max of the y data and use that index of the x data as the initial guess
         if self.peak_markers.is_empty() {
             let max_y = self.y.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-            let max_y_index = self.y.iter().position(|&r| r == max_y).unwrap();
+            let max_y_index = match self.y.iter().position(|&r| r == max_y) {
+                Some(index) => index,
+                None => {
+                    log::error!("Max y value not found in y data");
+                    return vec![];
+                }
+            };
             self.peak_markers.push(self.x[max_y_index]);
         }
 
@@ -251,7 +257,7 @@ impl GaussianFitter {
 
                 log::info!(
                     "Linear Coefficients: {:?}",
-                    fit_result.linear_coefficients().unwrap()
+                    fit_result.linear_coefficients()
                 );
                 log::info!(
                     "linear coefficients variance: {:?}",
@@ -261,7 +267,14 @@ impl GaussianFitter {
                 let nonlinear_parameters = fit_result.nonlinear_parameters();
                 let nonlinear_variances = fit_statistics.nonlinear_parameters_variance();
 
-                let linear_coefficients = fit_result.linear_coefficients().unwrap();
+                let linear_coefficients = match fit_result.linear_coefficients() {
+                    Some(coefficients) => coefficients,
+                    None => {
+                        log::error!("Failed to get linear coefficients");
+                        return;
+                    }
+                };
+
                 let linear_variances = fit_statistics.linear_coefficients_variance();
 
                 let mut params: Vec<GaussianParams> = Vec::new();

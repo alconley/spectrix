@@ -1,5 +1,5 @@
-use egui::{Color32, DragValue, Slider, Stroke, Ui};
-use egui_plot::{LineStyle, PlotUi, VLine};
+use egui::{Color32, DragValue, Id, Slider, Stroke, Ui};
+use egui_plot::{LineStyle, PlotResponse, PlotUi, VLine};
 
 use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
 
@@ -21,6 +21,11 @@ pub struct EguiVerticalLine {
     // Use Rgb struct for custom RGB values
     pub color_rgb: Rgb,
     pub stroke_rgb: Rgb,
+
+    pub interactive_dragging: bool,
+
+    #[serde(skip)]
+    pub is_dragging: bool,
 }
 
 impl Default for EguiVerticalLine {
@@ -38,6 +43,8 @@ impl Default for EguiVerticalLine {
             x_value: 0.0,
             color_rgb: Rgb::from_color32(Color32::BLUE),
             stroke_rgb: Rgb::from_color32(Color32::BLUE),
+            interactive_dragging: true,
+            is_dragging: false,
         }
     }
 }
@@ -70,11 +77,54 @@ impl EguiVerticalLine {
             }
 
             plot_ui.vline(line);
+
+            if self.interactive_dragging {
+                let mid_point_pos: Vec<[f64; 2]> = vec![[
+                    self.x_value,
+                    (plot_ui.plot_bounds().min()[1] + plot_ui.plot_bounds().max()[1]) / 2.0,
+                ]];
+
+                let mid_point = egui_plot::Points::new(mid_point_pos)
+                    .color(self.color)
+                    .highlight(self.highlighted)
+                    .radius(3.0)
+                    .id(Id::new(self.name.clone()));
+
+                plot_ui.points(mid_point);
+            }
+        }
+    }
+
+    pub fn interactive_dragging(&mut self, plot_response: &PlotResponse<()>) {
+        let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
+        if let Some(pointer_pos) = pointer_state.hover_pos() {
+            if let Some(hovered_id) = plot_response.hovered_plot_item {
+                if hovered_id == Id::new(self.name.clone()) {
+                    self.highlighted = true;
+                    if pointer_state.button_pressed(egui::PointerButton::Middle) {
+                        self.is_dragging = true;
+                    }
+                } else {
+                    self.highlighted = false;
+                }
+            } else {
+                self.highlighted = false;
+            }
+
+            if self.is_dragging {
+                self.x_value = plot_response.transform.value_from_position(pointer_pos).x;
+                if pointer_state.button_released(egui::PointerButton::Middle) {
+                    self.is_dragging = false;
+                }
+            }
+        } else if pointer_state.button_released(egui::PointerButton::Middle) {
+            self.is_dragging = false;
         }
     }
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
         ui.menu_button(format!("{} Line", self.name), |ui| {
+            ui.label(self.name.to_string());
             ui.vertical(|ui| {
                 ui.checkbox(&mut self.draw, "Draw Line");
                 ui.add(
@@ -116,6 +166,9 @@ impl EguiVerticalLine {
                             .prefix("Length: "),
                     );
                 });
+
+                ui.checkbox(&mut self.interactive_dragging, "Interactive Dragging")
+                    .on_hover_text("Enable interactive dragging of the line. Make sure to have a unique name for each line and add the function to the response of the plot.");
             });
         });
     }

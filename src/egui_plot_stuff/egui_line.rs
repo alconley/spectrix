@@ -88,7 +88,8 @@ impl EguiLine {
                 .highlight(self.highlighted)
                 .stroke(self.stroke)
                 .width(self.width)
-                .color(self.color);
+                .color(self.color)
+                .id(egui::Id::new(self.name.clone()));
 
             if self.name_in_legend {
                 line = line.name(self.name.clone());
@@ -108,6 +109,7 @@ impl EguiLine {
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
         ui.menu_button(format!("{} Line", self.name), |ui| {
+            ui.label(self.name.to_string());
             ui.vertical(|ui| {
                 ui.checkbox(&mut self.draw, "Draw Line");
                 ui.checkbox(&mut self.name_in_legend, "Name in Legend")

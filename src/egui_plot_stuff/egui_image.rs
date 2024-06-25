@@ -135,6 +135,8 @@ impl EguiImage {
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
         ui.menu_button(format!("{} Image", self.name), |ui| {
+            ui.label(self.name.to_string());
+
             ui.vertical(|ui| {
                 ui.checkbox(&mut self.draw, "Draw");
 

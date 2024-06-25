@@ -130,16 +130,16 @@ impl EguiFitMarkers {
         });
     }
 
-    pub fn draw_all_markers(&self, plot_ui: &mut PlotUi) {
-        for marker in &self.background_markers {
+    pub fn draw_all_markers(&mut self, plot_ui: &mut PlotUi) {
+        for marker in &mut self.background_markers {
             marker.draw(plot_ui);
         }
 
-        for marker in &self.region_markers {
+        for marker in &mut self.region_markers {
             marker.draw(plot_ui);
         }
 
-        for marker in &self.peak_markers {
+        for marker in &mut self.peak_markers {
             marker.draw(plot_ui);
         }
     }
@@ -170,6 +170,20 @@ impl EguiFitMarkers {
                 self.clear_peak_markers();
                 self.clear_region_markers();
             }
+        }
+    }
+
+    pub fn interactive_dragging(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
+        for marker in &mut self.background_markers {
+            marker.interactive_dragging(plot_response);
+        }
+
+        for marker in &mut self.region_markers {
+            marker.interactive_dragging(plot_response);
+        }
+
+        for marker in &mut self.peak_markers {
+            marker.interactive_dragging(plot_response);
         }
     }
 
