@@ -79,7 +79,7 @@ impl PlotSettings {
 
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
         for polygon in self.cut_polygons.iter_mut() {
-            polygon.mouse_interactions(plot_ui);
+            // polygon.mouse_interactions(plot_ui);
             polygon.draw(plot_ui);
         }
 
@@ -88,6 +88,9 @@ impl PlotSettings {
 
     pub fn interactive_response(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
         self.projections.interactive_dragging(plot_response);
+        for polygon in self.cut_polygons.iter_mut() {
+            polygon.handle_interactions(plot_response);
+        }
     }
 }
 

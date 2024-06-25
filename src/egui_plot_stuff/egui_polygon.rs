@@ -1,5 +1,5 @@
-use egui::{Color32, DragValue, Slider, Stroke, Ui};
-use egui_plot::{LineStyle, PlotPoints, PlotUi, Polygon};
+use egui::{Color32, DragValue, Slider, Stroke, Ui, Id};
+use egui_plot::{LineStyle, PlotPoints, PlotUi, Polygon, PlotResponse};
 
 use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
 
@@ -21,7 +21,13 @@ pub struct EguiPolygon {
     pub color_rgb: Rgb,
     pub stroke_rgb: Rgb,
 
-    pub interactive: bool,
+    pub interactive_clicking: bool,
+    pub interactive_dragging: bool,
+
+    #[serde(skip)]
+    pub is_dragging: bool,
+    #[serde(skip)]
+    pub dragged_vertex_index: Option<usize>,
 }
 
 impl Default for EguiPolygon {
@@ -41,7 +47,10 @@ impl Default for EguiPolygon {
             color_rgb: Rgb::from_color32(Color32::RED),
             stroke_rgb: Rgb::from_color32(Color32::RED),
 
-            interactive: false,
+            interactive_clicking: false,
+            interactive_dragging: true,
+            is_dragging: false,
+            dragged_vertex_index: None,
         }
     }
 }
@@ -50,42 +59,68 @@ impl EguiPolygon {
     pub fn new(name: &str) -> Self {
         EguiPolygon {
             name: name.to_string(),
+            interactive_clicking: true,
             ..Default::default()
         }
     }
 
-    pub fn mouse_interactions(&mut self, plot_ui: &PlotUi) {
-        if self.interactive && self.draw {
-            let response = plot_ui.response();
+    pub fn handle_interactions(&mut self, plot_response: &PlotResponse<()>) {
+        let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
+        if self.interactive_clicking && self.draw {
+            if let Some(pointer_pos) = pointer_state.hover_pos() {
+                if plot_response.response.clicked() {
+                    self.add_vertex(pointer_pos.x.into(), pointer_pos.y.into());
+                    // self.dragged_vertex_index = Some(self.vertices.len() - 1);
+                }
+            }
+        }
 
-            if response.clicked() {
-                let pointer_pos = plot_ui.pointer_coordinate().unwrap();
-                self.add_vertex(pointer_pos.x, pointer_pos.y);
+        if self.interactive_dragging && self.draw {
+            let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
+            if let Some(pointer_pos) = pointer_state.hover_pos() {
+                if let Some(hovered_id) = plot_response.hovered_plot_item {
+                    if hovered_id == Id::new(self.name.clone()) {
+                        self.highlighted = true;
+
+                        // Find index of the closest vertex to the pointer
+                        let closest_index = self.vertices.iter()
+                            .enumerate()
+                            .min_by(|(_, a), (_, b)| {
+                                let dist_a = (a[0] - pointer_pos.x as f64).powi(2) + (a[1] - pointer_pos.y as f64).powi(2);
+                                let dist_b = (b[0] - pointer_pos.x as f64).powi(2) + (b[1] - pointer_pos.y as f64).powi(2);
+                                dist_a.partial_cmp(&dist_b).unwrap()
+                            })
+                            .map(|(index, _)| index);
+                        
+                            self.dragged_vertex_index = closest_index;
+
+                        if pointer_state.button_pressed(egui::PointerButton::Middle) {
+                            self.is_dragging = true;
+                        }
+                    } else {
+                        self.highlighted = false;
+                    }
+                } else {
+                    self.highlighted = false;
+                }
+
+                if self.is_dragging {
+                    if let Some(index) = self.dragged_vertex_index {
+                        let plot_pos = plot_response.transform.value_from_position(pointer_pos);
+                        self.vertices[index] = [plot_pos.x, plot_pos.y];
+                    }
+
+                    if pointer_state.button_released(egui::PointerButton::Middle) {
+                        self.is_dragging = false;
+                        self.dragged_vertex_index = None;
+                    }
+                }
+            } else if pointer_state.button_released(egui::PointerButton::Middle) {
+                self.is_dragging = false;
+                self.dragged_vertex_index = None;
             }
         }
     }
-
-    // pub fn keybinds(&mut self, ui: &mut egui::Ui, cursor_position: Option<egui_plot::PlotPoint>) {
-    //     if let Some(_cursor_position) = cursor_position {
-    //         if ui.input(|i| i.key_pressed(egui::Key::C)) {
-    //             self.draw = !self.draw;
-    //             self.interactive = !self.interactive;
-    //             log::info!(
-    //                 "{} Polygon -> Draw: {}, Interactive: {}",
-    //                 self.name,
-    //                 self.draw,
-    //                 self.interactive
-    //             );
-    //         }
-
-    //         if ui.input(|i| i.key_pressed(egui::Key::Delete))
-    //             || ui.input(|i| i.key_pressed(egui::Key::Backspace))
-    //         {
-    //             self.clear_vertices();
-    //             log::info!("{} Polygon -> Vertices Cleared", self.name);
-    //         }
-    //     }
-    // }
 
     pub fn add_vertex(&mut self, x: f64, y: f64) {
         self.vertices.push([x, y]);
@@ -100,7 +135,8 @@ impl EguiPolygon {
             let vertices: PlotPoints = PlotPoints::new(self.vertices.clone());
             let vertices_points = egui_plot::Points::new(self.vertices.clone())
                 .radius(self.vertices_radius)
-                .color(self.stroke.color);
+                .color(self.stroke.color)
+                .id(egui::Id::new(self.name.clone()));
 
             let mut polygon = Polygon::new(vertices)
                 .highlight(self.highlighted)
@@ -123,11 +159,17 @@ impl EguiPolygon {
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
         ui.menu_button(self.name.to_string(), |ui| {
-            ui.label(self.name.to_string());
             ui.vertical(|ui| {
                 ui.text_edit_singleline(&mut self.name);
                 ui.checkbox(&mut self.draw, "Draw Polygon");
-                ui.checkbox(&mut self.interactive, "Interactive");
+                ui.checkbox(
+                    &mut self.interactive_clicking,
+                    "Interactive Adding Vertices",
+                );
+                ui.checkbox(
+                    &mut self.interactive_dragging,
+                    "Interactive Dragging Vertices",
+                );
                 ui.checkbox(&mut self.name_in_legend, "Name in Legend")
                     .on_hover_text("Show in legend");
                 ui.checkbox(&mut self.highlighted, "Highlighted");
