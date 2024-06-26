@@ -92,6 +92,12 @@ impl PlotSettings {
             polygon.handle_interactions(plot_response);
         }
     }
+
+    pub fn keybinds(&mut self, ui: &mut egui::Ui) {
+        if let Some(_cursor_position) = self.cursor_position {
+            self.projections.keybinds(ui);
+        }
+    }
 }
 
 #[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -133,14 +139,28 @@ impl Projections {
         }
     }
 
+    pub fn keybinds(&mut self, ui: &mut egui::Ui) {
+        if ui.input(|i| i.key_pressed(egui::Key::X)) {
+            self.add_x_projection = !self.add_x_projection;
+            if !self.add_x_projection {
+                self.x_projection = None;
+            }
+        }
+
+        if ui.input(|i| i.key_pressed(egui::Key::Y)) {
+            self.add_y_projection = !self.add_y_projection;
+            if !self.add_y_projection {
+                self.y_projection = None;
+            }
+        }
+    }
+
     fn show_y_projection(&mut self, ui: &mut egui::Ui) {
         if self.add_y_projection && self.y_projection.is_some() {
             ui.ctx().show_viewport_immediate(
-                egui::ViewportId::from_hash_of(
-                    self.y_projection.as_ref().unwrap().name.to_string(),
-                ),
+                egui::ViewportId::from_hash_of("Y Projection".to_string()),
                 egui::ViewportBuilder::default()
-                    .with_title(self.y_projection.as_ref().unwrap().name.to_string())
+                    .with_title(self.y_projection.as_ref().unwrap().name.clone())
                     .with_inner_size([600.0, 400.0]),
                 |ctx, class| {
                     assert!(
@@ -157,6 +177,7 @@ impl Projections {
                     if ctx.input(|i| i.viewport().close_requested()) {
                         // Tell parent viewport that we should not show next frame:
                         self.y_projection = None;
+                        self.add_y_projection = false;
                     }
                 },
             );
@@ -166,11 +187,9 @@ impl Projections {
     fn show_x_projection(&mut self, ui: &mut egui::Ui) {
         if self.add_x_projection && self.x_projection.is_some() {
             ui.ctx().show_viewport_immediate(
-                egui::ViewportId::from_hash_of(
-                    self.x_projection.as_ref().unwrap().name.to_string(),
-                ),
+                egui::ViewportId::from_hash_of("X Projection".to_string()),
                 egui::ViewportBuilder::default()
-                    .with_title(self.x_projection.as_ref().unwrap().name.to_string())
+                    .with_title(self.x_projection.as_ref().unwrap().name.clone())
                     .with_inner_size([600.0, 400.0]),
                 |ctx, class| {
                     assert!(
@@ -187,6 +206,7 @@ impl Projections {
                     if ctx.input(|i| i.viewport().close_requested()) {
                         // Tell parent viewport that we should not show next frame:
                         self.x_projection = None;
+                        self.add_x_projection = false;
                     }
                 },
             );
@@ -225,7 +245,7 @@ impl Projections {
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
         ui.heading("Projections");
 
-        ui.checkbox(&mut self.add_y_projection, "Add Y Projection");
+        ui.checkbox(&mut self.add_y_projection, "Add Y Projection").on_hover_text("Keybinds:\nY = Add Y Projection\nMiddle Mouse Button = Drag Line at the center of the plot (cirlce)");
         ui.horizontal(|ui| {
             if self.add_y_projection {
                 ui.add(
@@ -241,7 +261,7 @@ impl Projections {
             }
         });
 
-        ui.checkbox(&mut self.add_x_projection, "Add X Projection");
+        ui.checkbox(&mut self.add_x_projection, "Add X Projection").on_hover_text("Keybinds:\nX = Add X Projection\nMiddle Mouse Button = Drag Line at the center of the plot (cirlce)");
         ui.horizontal(|ui| {
             if self.add_x_projection {
                 ui.add(
@@ -256,8 +276,6 @@ impl Projections {
                 );
             }
         });
-
-        ui.label("Press 'P' to calculate the projections");
     }
 }
 
@@ -516,13 +534,13 @@ impl Histogram2D {
     }
 
     // Recalculate the image and replace the existing texture
-    pub fn calculate_image(&mut self, ui: &mut egui::Ui) {
+    fn calculate_image(&mut self, ui: &mut egui::Ui) {
         self.image.texture = None;
         let color_image = self.data_2_image();
         self.image.get_texture(ui, color_image);
     }
 
-    pub fn y_projection(&mut self, x_min: f64, x_max: f64) -> Histogram {
+    fn y_projection(&self, x_min: f64, x_max: f64) -> Vec<u32> {
         // Extract the y-projection data
         let mut y_bins = vec![0; self.bins.y];
 
@@ -533,20 +551,10 @@ impl Histogram2D {
             }
         }
 
-        // Create a new Histogram for the y-projection
-        let mut y_histogram = Histogram::new(
-            &format!("Y-Projection of {} between {}-{}", self.name, x_min, x_max),
-            self.bins.y,
-            (self.range.y.min, self.range.y.max),
-        );
-
-        // Fill the y-projection histogram
-        y_histogram.bins = y_bins;
-
-        y_histogram
+        y_bins
     }
 
-    pub fn x_projection(&mut self, y_min: f64, y_max: f64) -> Histogram {
+    fn x_projection(&self, y_min: f64, y_max: f64) -> Vec<u32> {
         // Extract the x-projection data
         let mut x_bins = vec![0; self.bins.x];
 
@@ -557,39 +565,115 @@ impl Histogram2D {
             }
         }
 
-        // Create a new Histogram for the x-projection
-        let mut x_histogram = Histogram::new(
-            &format!("X-Projection of {} between {}-{}", self.name, y_min, y_max),
-            self.bins.x,
-            (self.range.x.min, self.range.x.max),
-        );
-
-        // Fill the x-projection histogram
-        x_histogram.bins = x_bins;
-
-        x_histogram
+        x_bins
     }
 
-    pub fn keybinds(&mut self, ui: &mut egui::Ui) {
-        if let Some(_cursor_position) = self.plot_settings.cursor_position {
-            if ui.input(|i| i.key_pressed(egui::Key::P)) {
-                if self.plot_settings.projections.add_y_projection {
-                    let x1 = self.plot_settings.projections.y_projection_line_1.x_value;
-                    let x2 = self.plot_settings.projections.y_projection_line_2.x_value;
-                    let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) }; // sort the x values
-                    self.plot_settings.projections.y_projection =
-                        Some(self.y_projection(min_x, max_x));
-                }
+    fn check_projections(&mut self) {
+        // check to see if the x/y values are the same as the current projection else add a new projection based off the naming scheme
+        // then you dont have to recalculate the bins if the projection is already calculated
 
-                if self.plot_settings.projections.add_x_projection {
-                    let y1 = self.plot_settings.projections.x_projection_line_1.y_value;
-                    let y2 = self.plot_settings.projections.x_projection_line_2.y_value;
-                    let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) }; // sort the y values
-                    self.plot_settings.projections.x_projection =
-                        Some(self.x_projection(min_y, max_y));
+        if self.plot_settings.projections.add_y_projection {
+            let x1 = self.plot_settings.projections.y_projection_line_1.x_value;
+            let x2 = self.plot_settings.projections.y_projection_line_2.x_value;
+            let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) }; // sort the x values
+
+            if self.plot_settings.projections.y_projection.is_some() {
+                //check the name of the current projection and update the bins if different
+                let name = self
+                    .plot_settings
+                    .projections
+                    .y_projection
+                    .as_ref()
+                    .unwrap()
+                    .name
+                    .clone();
+
+                if name != format!("Y-Projection of {}: x={:.2}-{:.2}", self.name, min_x, max_x) {
+                    let bins = self.y_projection(min_x, max_x);
+                    self.plot_settings
+                        .projections
+                        .y_projection
+                        .as_mut()
+                        .unwrap()
+                        .bins = bins;
+                    self.plot_settings
+                        .projections
+                        .y_projection
+                        .as_mut()
+                        .unwrap()
+                        .name =
+                        format!("Y-Projection of {}: x={:.2}-{:.2}", self.name, min_x, max_x);
                 }
+            } else {
+                // create a new histogram and set the bins
+                let mut y_histogram = Histogram::new(
+                    &format!("Y-Projection of {}: x={:.2}-{:.2}", self.name, min_x, max_x),
+                    self.bins.y,
+                    (self.range.y.min, self.range.y.max),
+                );
+                let bins = self.y_projection(min_x, max_x);
+                y_histogram.bins = bins;
+
+                self.plot_settings.projections.y_projection = Some(y_histogram);
+
+                // set the projection range to be the min/max values of the histogram
+                self.plot_settings.projections.y_projection_line_1.x_value = self.range.x.min;
+                self.plot_settings.projections.y_projection_line_2.x_value = self.range.x.max;
             }
         }
+
+        if self.plot_settings.projections.add_x_projection {
+            let y1 = self.plot_settings.projections.x_projection_line_1.y_value;
+            let y2 = self.plot_settings.projections.x_projection_line_2.y_value;
+            let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) }; // sort the y values
+
+            if self.plot_settings.projections.x_projection.is_some() {
+                //check the name of the current projection and update the bins if different
+                let name = self
+                    .plot_settings
+                    .projections
+                    .x_projection
+                    .as_ref()
+                    .unwrap()
+                    .name
+                    .clone();
+
+                if name != format!("X-Projection of {}: y={:.2}-{:.2}", self.name, min_y, max_y) {
+                    let bins = self.x_projection(min_y, max_y);
+                    self.plot_settings
+                        .projections
+                        .x_projection
+                        .as_mut()
+                        .unwrap()
+                        .bins = bins;
+                    self.plot_settings
+                        .projections
+                        .x_projection
+                        .as_mut()
+                        .unwrap()
+                        .name =
+                        format!("X-Projection of {}: y={:.2}-{:.2}", self.name, min_y, max_y);
+                }
+            } else {
+                let mut x_histogram = Histogram::new(
+                    &format!("X-Projection of {}: y={:.2}-{:.2}", self.name, min_y, max_y),
+                    self.bins.x,
+                    (self.range.x.min, self.range.x.max),
+                );
+                let bins = self.x_projection(min_y, max_y);
+                x_histogram.bins = bins;
+
+                self.plot_settings.projections.x_projection = Some(x_histogram);
+
+                // set the projection range to be the min/max values of the histogram
+                self.plot_settings.projections.x_projection_line_1.y_value = self.range.y.min;
+                self.plot_settings.projections.x_projection_line_2.y_value = self.range.y.max;
+            }
+        }
+    }
+
+    fn keybinds(&mut self, ui: &mut egui::Ui) {
+        self.plot_settings.keybinds(ui);
     }
 
     // Context menu for the plot (when you right-click on the plot)
@@ -623,6 +707,7 @@ impl Histogram2D {
             self.calculate_image(ui);
         }
 
+        self.check_projections();
         self.plot_settings.projections.show(ui);
 
         let plot_response = plot.show(ui, |plot_ui| {

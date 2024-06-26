@@ -1,5 +1,5 @@
-use egui::{Color32, DragValue, Slider, Stroke, Ui, Id};
-use egui_plot::{LineStyle, PlotPoints, PlotUi, Polygon, PlotResponse};
+use egui::{Color32, DragValue, Id, Slider, Stroke, Ui};
+use egui_plot::{LineStyle, PlotPoints, PlotResponse, PlotUi, Polygon};
 
 use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
 
@@ -83,16 +83,20 @@ impl EguiPolygon {
                         self.highlighted = true;
 
                         // Find index of the closest vertex to the pointer
-                        let closest_index = self.vertices.iter()
+                        let closest_index = self
+                            .vertices
+                            .iter()
                             .enumerate()
                             .min_by(|(_, a), (_, b)| {
-                                let dist_a = (a[0] - pointer_pos.x as f64).powi(2) + (a[1] - pointer_pos.y as f64).powi(2);
-                                let dist_b = (b[0] - pointer_pos.x as f64).powi(2) + (b[1] - pointer_pos.y as f64).powi(2);
+                                let dist_a = (a[0] - pointer_pos.x as f64).powi(2)
+                                    + (a[1] - pointer_pos.y as f64).powi(2);
+                                let dist_b = (b[0] - pointer_pos.x as f64).powi(2)
+                                    + (b[1] - pointer_pos.y as f64).powi(2);
                                 dist_a.partial_cmp(&dist_b).unwrap()
                             })
                             .map(|(index, _)| index);
-                        
-                            self.dragged_vertex_index = closest_index;
+
+                        self.dragged_vertex_index = closest_index;
 
                         if pointer_state.button_pressed(egui::PointerButton::Middle) {
                             self.is_dragging = true;
