@@ -98,4 +98,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
         self.simplification_options
     }
+
+    // fn tab_title_for_tile(&mut self, tiles: &egui_tiles::Tiles<Pane>, tile_id: egui_tiles::TileId) -> egui::WidgetText {
+
+    // }
 }

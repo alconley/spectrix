@@ -1,5 +1,5 @@
 use egui::{Color32, DragValue, Id, Slider, Stroke, Ui};
-use egui_plot::{LineStyle, PlotPoints, PlotResponse, PlotUi, Polygon};
+use egui_plot::{LineStyle, PlotResponse, PlotUi, Polygon};
 
 use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
 
@@ -16,18 +16,18 @@ pub struct EguiPolygon {
     pub style: Option<LineStyle>,
     pub style_length: f32,
     pub vertices: Vec<[f64; 2]>,
-    pub vertices_radius: f32,
     // Use Rgb struct for custom RGB values
     pub color_rgb: Rgb,
     pub stroke_rgb: Rgb,
 
-    pub interactive_clicking: bool,
-    pub interactive_dragging: bool,
+    temp_vertex: Option<Vec<[f64; 2]>>,
+    interactive_clicking: bool,
+    interactive_dragging: bool,
 
     #[serde(skip)]
-    pub is_dragging: bool,
+    is_dragging: bool,
     #[serde(skip)]
-    pub dragged_vertex_index: Option<usize>,
+    dragged_vertex_index: Option<usize>,
 }
 
 impl Default for EguiPolygon {
@@ -43,10 +43,10 @@ impl Default for EguiPolygon {
             style: Some(LineStyle::Solid),
             style_length: 15.0,
             vertices: vec![],
-            vertices_radius: 5.0,
             color_rgb: Rgb::from_color32(Color32::RED),
             stroke_rgb: Rgb::from_color32(Color32::RED),
 
+            temp_vertex: None,
             interactive_clicking: false,
             interactive_dragging: true,
             is_dragging: false,
@@ -66,63 +66,68 @@ impl EguiPolygon {
 
     pub fn handle_interactions(&mut self, plot_response: &PlotResponse<()>) {
         let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
-        if self.interactive_clicking && self.draw {
-            if let Some(pointer_pos) = pointer_state.hover_pos() {
-                if plot_response.response.clicked() {
-                    self.add_vertex(pointer_pos.x.into(), pointer_pos.y.into());
-                    // self.dragged_vertex_index = Some(self.vertices.len() - 1);
-                }
-            }
-        }
+        if let Some(pointer_pos) = pointer_state.hover_pos() {
+            let x_value = plot_response.transform.value_from_position(pointer_pos).x;
+            let y_value = plot_response.transform.value_from_position(pointer_pos).y;
 
-        if self.interactive_dragging && self.draw {
-            let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
-            if let Some(pointer_pos) = pointer_state.hover_pos() {
+            if self.interactive_clicking && self.draw {
+                self.temp_vertex = Some(vec![[x_value, y_value]]);
+                if plot_response.response.clicked() {
+                    self.add_vertex(x_value, y_value);
+                }
+
+                if plot_response.response.double_clicked() {
+                    self.temp_vertex = None;
+                    self.interactive_clicking = false;
+                }
+            } else {
+                self.temp_vertex = None;
+            }
+
+            if self.interactive_dragging && self.draw {
                 if let Some(hovered_id) = plot_response.hovered_plot_item {
                     if hovered_id == Id::new(self.name.clone()) {
                         self.highlighted = true;
 
-                        // Find index of the closest vertex to the pointer
+                        //find the closest vertex to the pointer
                         let closest_index = self
                             .vertices
                             .iter()
                             .enumerate()
                             .min_by(|(_, a), (_, b)| {
-                                let dist_a = (a[0] - pointer_pos.x as f64).powi(2)
-                                    + (a[1] - pointer_pos.y as f64).powi(2);
-                                let dist_b = (b[0] - pointer_pos.x as f64).powi(2)
-                                    + (b[1] - pointer_pos.y as f64).powi(2);
+                                let dist_a = (a[0] - x_value).powi(2) + (a[1] - y_value).powi(2);
+                                let dist_b = (b[0] - x_value).powi(2) + (b[1] - y_value).powi(2);
                                 dist_a.partial_cmp(&dist_b).unwrap()
                             })
                             .map(|(index, _)| index);
 
-                        self.dragged_vertex_index = closest_index;
+                        log::info!(
+                            "Closest index: {:?}, (x,y)={:?}",
+                            closest_index,
+                            self.vertices[closest_index.unwrap()]
+                        );
 
                         if pointer_state.button_pressed(egui::PointerButton::Middle) {
                             self.is_dragging = true;
+                            self.dragged_vertex_index = closest_index;
                         }
                     } else {
                         self.highlighted = false;
                     }
-                } else {
-                    self.highlighted = false;
                 }
 
                 if self.is_dragging {
                     if let Some(index) = self.dragged_vertex_index {
-                        let plot_pos = plot_response.transform.value_from_position(pointer_pos);
-                        self.vertices[index] = [plot_pos.x, plot_pos.y];
+                        self.vertices[index] = [x_value, y_value];
                     }
-
                     if pointer_state.button_released(egui::PointerButton::Middle) {
                         self.is_dragging = false;
                         self.dragged_vertex_index = None;
                     }
                 }
-            } else if pointer_state.button_released(egui::PointerButton::Middle) {
-                self.is_dragging = false;
-                self.dragged_vertex_index = None;
             }
+        } else if pointer_state.button_released(egui::PointerButton::Middle) {
+            self.is_dragging = false;
         }
     }
 
@@ -134,19 +139,23 @@ impl EguiPolygon {
         self.vertices.clear();
     }
 
-    pub fn draw(&self, plot_ui: &mut PlotUi) {
+    pub fn draw(&mut self, plot_ui: &mut PlotUi) {
         if self.draw {
-            let vertices: PlotPoints = PlotPoints::new(self.vertices.clone());
-            let vertices_points = egui_plot::Points::new(self.vertices.clone())
-                .radius(self.vertices_radius)
-                .color(self.stroke.color)
-                .id(egui::Id::new(self.name.clone()));
+            // draw the temp vertex
+            if let Some(temp_vertex) = &self.temp_vertex {
+                let temp_vertex_points = egui_plot::Points::new(temp_vertex.clone())
+                    .radius(5.0)
+                    .color(self.stroke.color);
 
-            let mut polygon = Polygon::new(vertices)
+                plot_ui.points(temp_vertex_points);
+            }
+
+            let mut polygon = Polygon::new(self.vertices.clone())
                 .highlight(self.highlighted)
                 .stroke(self.stroke)
                 .width(self.width)
-                .fill_color(Color32::TRANSPARENT);
+                .fill_color(Color32::TRANSPARENT)
+                .id(Id::new(self.name.clone()));
 
             if self.name_in_legend {
                 polygon = polygon.name(self.name.clone());
@@ -157,7 +166,17 @@ impl EguiPolygon {
             }
 
             plot_ui.polygon(polygon);
-            plot_ui.points(vertices_points);
+
+            // if the user can drag the vertices, draw the vertices
+            if self.interactive_dragging {
+                let vertices_points = egui_plot::Points::new(self.vertices.clone())
+                    .radius(5.0)
+                    .color(self.stroke.color)
+                    .id(Id::new(self.name.clone()))
+                    .highlight(self.highlighted);
+
+                plot_ui.points(vertices_points);
+            }
         }
     }
 
@@ -177,12 +196,6 @@ impl EguiPolygon {
                 ui.checkbox(&mut self.name_in_legend, "Name in Legend")
                     .on_hover_text("Show in legend");
                 ui.checkbox(&mut self.highlighted, "Highlighted");
-
-                ui.add(
-                    DragValue::new(&mut self.vertices_radius)
-                        .speed(0.1)
-                        .prefix("Vertex Radius: "),
-                );
 
                 ui.add(Slider::new(&mut self.width, 0.0..=10.0).text("Line Width"));
 
