@@ -160,7 +160,7 @@ impl EguiImage {
                     DragValue::new(&mut self.rotate)
                         .prefix("Rotate: ")
                         .suffix("°")
-                        .clamp_range(0.0..=360.0)
+                        .range(0.0..=360.0)
                         .speed(0.1),
                 );
             });

@@ -119,8 +119,8 @@ impl EguiLine {
                 self.color_selection_buttons(ui);
                 ui.add(Slider::new(&mut self.width, 0.0..=10.0).text("Line Width"));
 
-                self.stroke_color_selection_buttons(ui);
-                ui.add(Slider::new(&mut self.stroke.width, 0.0..=10.0).text("Stroke Width"));
+                // self.stroke_color_selection_buttons(ui);
+                // ui.add(Slider::new(&mut self.stroke.width, 0.0..=10.0).text("Stroke Width"));
 
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut self.reference_fill, "Reference Fill")
@@ -162,7 +162,7 @@ impl EguiLine {
                     ui.add(
                         DragValue::new(&mut self.style_length)
                             .speed(1.0)
-                            .clamp_range(0.0..=f32::INFINITY)
+                            .range(0.0..=f32::INFINITY)
                             .prefix("Length: "),
                     );
                 });
@@ -216,17 +216,17 @@ impl EguiLine {
             ui.label("RGB: ");
             ui.add(
                 DragValue::new(&mut self.color_rgb.r)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("R: "),
             );
             ui.add(
                 DragValue::new(&mut self.color_rgb.g)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("G: "),
             );
             ui.add(
                 DragValue::new(&mut self.color_rgb.b)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("B: "),
             );
 
@@ -248,17 +248,17 @@ impl EguiLine {
             ui.label("RGB: ");
             ui.add(
                 DragValue::new(&mut self.stroke_rgb.r)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("R: "),
             );
             ui.add(
                 DragValue::new(&mut self.stroke_rgb.g)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("G: "),
             );
             ui.add(
                 DragValue::new(&mut self.stroke_rgb.b)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("B: "),
             );
 

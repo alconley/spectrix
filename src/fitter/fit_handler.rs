@@ -269,7 +269,7 @@ impl FitSettings {
             ui.add(
                 egui::DragValue::new(&mut self.fit_stats_height)
                     .speed(1.0)
-                    .clamp_range(0.0..=f32::INFINITY)
+                    .range(0.0..=f32::INFINITY)
                     .prefix("Height: ")
                     .suffix(" px"),
             )

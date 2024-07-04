@@ -2,10 +2,8 @@
 
 use nat::NATApp;
 
-use eframe::egui;
-
 #[cfg(not(target_arch = "wasm32"))]
-fn main() -> eframe::Result<()> {
+fn main() -> eframe::Result {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`). windows: $env:RUST_LOG="info"; cargo run
 
     let native_options = eframe::NativeOptions {
@@ -22,7 +20,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "NAT",
         native_options,
-        Box::new(|cc| Box::new(NATApp::new(cc))),
+        Box::new(|cc| Ok(Box::new(NATApp::new(cc)))),
     )
 }
 
@@ -35,13 +33,30 @@ fn main() {
     let web_options = eframe::WebOptions::default();
 
     wasm_bindgen_futures::spawn_local(async {
-        eframe::WebRunner::new()
+        let start_result = eframe::WebRunner::new()
             .start(
-                "NAT", // hardcode it
+                "the_canvas_id",
                 web_options,
-                Box::new(|cc| Box::new(NATApp::new(cc))),
+                Box::new(|cc| Ok(Box::new(NATApp::new(cc)))),
             )
-            .await
-            .expect("failed to start eframe");
+            .await;
+
+        // Remove the loading text and spinner:
+        let loading_text = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id("loading_text"));
+        if let Some(loading_text) = loading_text {
+            match start_result {
+                Ok(_) => {
+                    loading_text.remove();
+                }
+                Err(e) => {
+                    loading_text.set_inner_html(
+                        "<p> The app has crashed. See the developer console for details. </p>",
+                    );
+                    panic!("Failed to start eframe: {e:?}");
+                }
+            }
+        }
     });
 }

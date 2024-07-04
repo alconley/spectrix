@@ -16,25 +16,25 @@ pub struct NATApp {
 
 impl Default for NATApp {
     fn default() -> Self {
-        let mut tiles = egui_tiles::Tiles::default();
+        // let mut tiles = egui_tiles::Tiles::default();
 
         let workspacer = Workspacer::new();
         let processer = Processer::new();
 
         // let mut tabs = vec![];
         // tabs.push(tiles.insert_pane(Pane::Workspace(workspacer.clone())));
-        let tabs = vec![tiles.insert_pane(Pane::Workspace(workspacer.clone()))];
+        // let tabs = vec![tiles.insert_pane(Pane::Workspace(workspacer.clone()))];
 
-        let root = tiles.insert_tab_tile(tabs);
+        // let root = tiles.insert_tab_tile(tabs);
 
-        let tree = egui_tiles::Tree::new("my_tree", root, tiles);
+        let tree = egui_tiles::Tree::empty("Empty tree");
 
         Self {
             tree,
             workspacer,
             processer,
             behavior: Default::default(),
-            side_panel_open: false,
+            side_panel_open: true,
         }
     }
 }
@@ -81,6 +81,21 @@ impl eframe::App for NATApp {
         egui::TopBottomPanel::top("muc_top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.checkbox(&mut self.side_panel_open, "Side Panel");
+            });
+        });
+
+        egui::SidePanel::left("tree")
+            // .max_width(200.0)
+            .show_animated(ctx, self.side_panel_open, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("NAT");
+
+                    egui::global_dark_light_mode_switch(ui);
+
+                    if ui.button("Reset").clicked() {
+                        *self = Default::default();
+                    }
+                });
 
                 ui.separator();
 
@@ -89,52 +104,54 @@ impl eframe::App for NATApp {
                     self.processer
                         .files
                         .clone_from(&self.workspacer.selected_files.borrow());
-                    // self.processer.calculation_ui(ui);
 
                     if ui.button("Calculate Histograms").clicked() {
                         self.processer.calculate_histograms();
                         self.add_histograms_to_tree();
                     }
-                }
-            });
-        });
 
-        egui::SidePanel::left("tree")
-            .max_width(200.0)
-            .show_animated(ctx, self.side_panel_open, |ui| {
-                egui::global_dark_light_mode_buttons(ui);
-
-                ui.separator();
-
-                if ui.button("Reset").clicked() {
-                    *self = Default::default();
-                }
-                self.behavior.ui(ui);
-
-                ui.separator();
-
-                // ui.collapsing("Tree", |ui| {
-                //     ui.style_mut().wrap = Some(false);
-                //     let tree_debug = format!("{:#?}", self.tree);
-                //     ui.monospace(&tree_debug);
-                // });
-
-                ui.separator();
-
-                ui.collapsing("Active tiles", |ui| {
-                    let active = self.tree.active_tiles();
-                    for tile_id in active {
-                        use egui_tiles::Behavior as _;
-                        let name = self.behavior.tab_title_for_tile(&self.tree.tiles, tile_id);
-                        ui.label(format!("{} - {tile_id:?}", name.text()));
+                    if ui.button("Calculate Histograms with Cuts").clicked() {
+                        self.processer.calculate_histograms_with_cuts();
+                        self.add_histograms_to_tree();
                     }
-                });
 
-                ui.separator();
+                    self.processer.ui(ui);
 
-                if let Some(root) = self.tree.root() {
-                    tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
+                    ui.separator();
                 }
+
+                egui::ScrollArea::vertical()
+                    .id_source("LeftPanel")
+                    .show(ui, |ui| {
+                        self.workspacer.workspace_ui(ui);
+
+                        ui.separator();
+
+                        self.behavior.ui(ui);
+
+                        // ui.collapsing("Tree", |ui| {
+                        //     ui.style_mut().wrap = Some(false);
+                        //     let tree_debug = format!("{:#?}", self.tree);
+                        //     ui.monospace(&tree_debug);
+                        // });
+
+                        // ui.separator();
+
+                        // ui.collapsing("Active tiles", |ui| {
+                        //     let active = self.tree.active_tiles();
+                        //     for tile_id in active {
+                        //         use egui_tiles::Behavior as _;
+                        //         let name = self.behavior.tab_title_for_tile(&self.tree.tiles, tile_id);
+                        //         ui.label(format!("{} - {tile_id:?}", name.text()));
+                        //     }
+                        // });
+
+                        ui.separator();
+
+                        if let Some(root) = self.tree.root() {
+                            tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
+                        }
+                    });
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -161,6 +178,15 @@ fn tree_ui(
         return;
     };
 
+    // check to see if the container only has one child
+    // if let egui_tiles::Tile::Container(container) = &mut tile {
+    //     if let Some(child) = container.only_child() {
+    //         tree_ui(ui, behavior, tiles, child);
+
+    //         return;
+    //     }
+    // }
+
     let default_open = false;
     egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
@@ -176,18 +202,18 @@ fn tree_ui(
     .body(|ui| match &mut tile {
         egui_tiles::Tile::Pane(_) => {}
         egui_tiles::Tile::Container(container) => {
-            let mut kind = container.kind();
-            egui::ComboBox::from_label("Kind")
-                .selected_text(format!("{kind:?}"))
-                .show_ui(ui, |ui| {
-                    for typ in egui_tiles::ContainerKind::ALL {
-                        ui.selectable_value(&mut kind, typ, format!("{typ:?}"))
-                            .clicked();
-                    }
-                });
-            if kind != container.kind() {
-                container.set_kind(kind);
-            }
+            //     // let mut kind = container.kind();
+            //     // egui::ComboBox::from_label("Kind")
+            //     //     .selected_text(format!("{kind:?}"))
+            //     //     .show_ui(ui, |ui| {
+            //     //         for typ in egui_tiles::ContainerKind::ALL {
+            //     //             ui.selectable_value(&mut kind, typ, format!("{typ:?}"))
+            //     //                 .clicked();
+            //     //         }
+            //     //     });
+            //     // if kind != container.kind() {
+            //     //     container.set_kind(kind);
+            //     // }
 
             for &child in container.children() {
                 tree_ui(ui, behavior, tiles, child);

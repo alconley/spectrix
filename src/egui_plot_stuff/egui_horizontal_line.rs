@@ -66,7 +66,9 @@ impl EguiHorizontalLine {
                 .highlight(self.highlighted)
                 .stroke(self.stroke)
                 .width(self.width)
-                .color(self.color);
+                .color(self.color)
+                .allow_hover(true)
+                .id(Id::new(self.name.clone()));
 
             if self.name_in_legend {
                 line = line.name(self.name.clone());
@@ -139,8 +141,8 @@ impl EguiHorizontalLine {
                 self.color_selection_buttons(ui);
                 ui.add(Slider::new(&mut self.width, 0.0..=10.0).text("Line Width"));
 
-                self.stroke_color_selection_buttons(ui);
-                ui.add(Slider::new(&mut self.stroke.width, 0.0..=10.0).text("Stroke Width"));
+                // self.stroke_color_selection_buttons(ui);
+                // ui.add(Slider::new(&mut self.stroke.width, 0.0..=10.0).text("Stroke Width"));
 
                 ui.horizontal(|ui| {
                     ui.label("Line Style: ");
@@ -162,7 +164,7 @@ impl EguiHorizontalLine {
                     ui.add(
                         DragValue::new(&mut self.style_length)
                             .speed(1.0)
-                            .clamp_range(0.0..=f32::INFINITY)
+                            .range(0.0..=f32::INFINITY)
                             .prefix("Length: "),
                     );
                 });
@@ -192,17 +194,17 @@ impl EguiHorizontalLine {
             ui.label("RGB: ");
             ui.add(
                 DragValue::new(&mut self.color_rgb.r)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("R: "),
             );
             ui.add(
                 DragValue::new(&mut self.color_rgb.g)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("G: "),
             );
             ui.add(
                 DragValue::new(&mut self.color_rgb.b)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("B: "),
             );
 
@@ -224,17 +226,17 @@ impl EguiHorizontalLine {
             ui.label("RGB: ");
             ui.add(
                 DragValue::new(&mut self.stroke_rgb.r)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("R: "),
             );
             ui.add(
                 DragValue::new(&mut self.stroke_rgb.g)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("G: "),
             );
             ui.add(
                 DragValue::new(&mut self.stroke_rgb.b)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("B: "),
             );
 

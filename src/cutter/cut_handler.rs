@@ -1,76 +1,96 @@
-use super::egui_polygon::EditableEguiPolygon;
-
-use std::collections::HashMap;
-use std::fs::File;
-use std::path::PathBuf;
-
-use egui_plot::PlotUi;
+use super::cuts::Cut;
 use polars::prelude::*;
+
+use std::fs::File;
+use std::io::BufReader;
+use std::path::PathBuf;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct CutHandler {
-    pub cuts: HashMap<String, EditableEguiPolygon>,
-    pub active_cut_id: Option<String>,
-    pub column_names: Vec<String>,
-    pub draw_flag: bool,
-    pub selected_cut: Option<String>,
+    pub cuts: Vec<Cut>,
 }
 
 impl CutHandler {
-    // Creates a new `CutHandler` instance.
-    pub fn new() -> Self {
-        Self {
-            cuts: HashMap::new(),
-            active_cut_id: None,
-            column_names: Vec::new(),
-            draw_flag: true,
-            selected_cut: None,
+    // get a cut with a file dialog
+    pub fn get_cut(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(file_path) = rfd::FileDialog::new()
+            .set_file_name("cut.json") // Suggest a default file name for convenience
+            .add_filter("JSON Files", &["json"]) // Filter for json files
+            .pick_file()
+        {
+            let file = File::open(file_path)?;
+            let reader = BufReader::new(file);
+            let mut cut: Cut = serde_json::from_reader(reader)?;
+            cut.selected = true;
+            self.cuts.push(cut);
         }
+        Ok(())
     }
 
-    // Adds a new cut and makes it the active one
-    pub fn add_new_cut(&mut self) {
-        self.draw_flag = true;
-        let new_id = format!("cut_{}", self.cuts.len() + 1);
-        self.selected_cut = Some(new_id.clone());
-        self.cuts.insert(
-            new_id.clone(),
-            EditableEguiPolygon::new(self.column_names.clone()),
-        );
-        self.active_cut_id = Some(new_id); // Automatically make the new cut active
-    }
-
-    // Method to update the column names
-    pub fn update_column_names(&mut self, column_names: Vec<String>) {
-        // Assuming `CutHandler` has a field to store column names
-        // Update it with the new column names
-        self.column_names = column_names;
-    }
-
-    // Method to draw the active cut
-    pub fn draw_active_cut(&mut self, plot_ui: &mut PlotUi) {
-        if self.draw_flag {
-            if let Some(active_id) = &self.active_cut_id {
-                if let Some(active_cut) = self.cuts.get_mut(active_id) {
-                    active_cut.draw(plot_ui);
+    pub fn cut_ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.heading("Cuts");
+            if ui.button("Get Cut").clicked() {
+                if let Err(e) = self.get_cut() {
+                    log::error!("Error loading cut: {:?}", e);
                 }
             }
+        });
+
+        if self.cuts.is_empty() {
+            ui.label("No cuts loaded");
+        } else {
+            egui::Grid::new("cuts")
+                .striped(true)
+                .num_columns(6)
+                .show(ui, |ui| {
+                    ui.label("Cuts");
+                    ui.label("X Column");
+                    ui.label("Y Column");
+                    ui.label("Polygon");
+                    ui.label("Active");
+                    ui.end_row();
+
+                    let mut index_to_remove = None;
+                    for (index, cut) in self.cuts.iter_mut().enumerate() {
+                        ui.label(format!("Cut {}", index));
+
+                        cut.ui(ui);
+
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut cut.selected, "");
+                            if ui.button("🗙").clicked() {
+                                index_to_remove = Some(index);
+                            }
+                        });
+
+                        ui.end_row();
+                    }
+
+                    if let Some(index) = index_to_remove {
+                        self.cuts.remove(index);
+                    }
+                });
         }
     }
 
-    pub fn filter_lf_with_all_cuts(&mut self, lf: &LazyFrame) -> Result<LazyFrame, PolarsError> {
+    pub fn filter_lf_with_selected_cuts(
+        &mut self,
+        lf: &LazyFrame,
+    ) -> Result<LazyFrame, PolarsError> {
         let mut filtered_lf = lf.clone();
 
         // Iterate through all cuts and apply their respective filters.
-        for cut in self.cuts.values() {
-            // Directly call filter_lf_with_cut on each cut.
-            filtered_lf = cut.filter_lf_with_cut(&filtered_lf)?;
+        for cut in &mut self.cuts {
+            if cut.selected {
+                filtered_lf = cut.filter_lf_with_cut(&filtered_lf)?;
+            }
         }
 
         Ok(filtered_lf)
     }
 
-    pub fn _filter_files_and_save_to_one_file(
+    pub fn filter_files_and_save_to_one_file(
         &mut self,
         file_paths: Vec<PathBuf>,
         output_path: &PathBuf,
@@ -83,7 +103,7 @@ impl CutHandler {
         let lf = LazyFrame::scan_parquet_files(files_arc, args)?;
 
         // Apply filtering logic as before, leading to a filtered LazyFrame
-        let filtered_lf = self.filter_lf_with_all_cuts(&lf)?; // Placeholder for applying cuts
+        let filtered_lf = self.filter_lf_with_selected_cuts(&lf)?; // Placeholder for applying cuts
 
         // Collect the LazyFrame into a DataFrame
         let mut filtered_df = filtered_lf.collect()?;
@@ -143,67 +163,4 @@ impl CutHandler {
         Ok(())
     }
     */
-
-    pub fn cut_handler_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Cutter: ");
-
-            if ui.button("New Cut").clicked() {
-                self.add_new_cut();
-            }
-
-            // only display the cut selection UI if there are cuts
-            if !self.cuts.is_empty() {
-                self.select_cut_ui(ui);
-            }
-
-            self.selected_cut_ui(ui);
-        });
-    }
-
-    pub fn select_cut_ui(&mut self, ui: &mut egui::Ui) {
-        // Start with a separator for visual clarity
-        ui.separator();
-
-        // Label for the combo box to indicate its purpose
-        ui.label("Select Cut:");
-
-        // Initialize a temporary variable for the selected cut ID for the combo box
-        let mut current_selection = self.selected_cut.clone().unwrap_or_default();
-
-        // Create a combo box to list all available cuts
-        egui::ComboBox::from_label("")
-            .selected_text(current_selection.clone())
-            .show_ui(ui, |ui| {
-                // Iterate over all cut IDs in the HashMap and add them as selectable items
-                for cut_id in self.cuts.keys() {
-                    ui.selectable_value(&mut current_selection, cut_id.clone(), cut_id);
-                }
-            });
-
-        // Check if the selection has changed, and update the selected cut ID accordingly
-        if current_selection != self.selected_cut.clone().unwrap_or_default() {
-            self.selected_cut = Some(current_selection);
-        }
-    }
-
-    pub fn selected_cut_ui(&mut self, ui: &mut egui::Ui) {
-        // Display UI for the selected cut
-        if let Some(selected_id) = &self.selected_cut {
-            if let Some(selected_cut) = self.cuts.get_mut(selected_id) {
-                selected_cut.cut_ui(ui); // Display the `cut_ui` of the selected cut
-
-                // check box to draw/edit the cut
-                ui.checkbox(&mut self.draw_flag, "Draw");
-
-                ui.separator();
-
-                // button to remove cut
-                if ui.button("Delete").clicked() {
-                    self.cuts.remove(selected_id);
-                    self.selected_cut = None;
-                }
-            }
-        }
-    }
 }

@@ -20,10 +20,11 @@ pub struct EguiPolygon {
     pub color_rgb: Rgb,
     pub stroke_rgb: Rgb,
 
-    temp_vertex: Option<Vec<[f64; 2]>>,
-    interactive_clicking: bool,
-    interactive_dragging: bool,
+    pub interactive_clicking: bool,
+    pub interactive_dragging: bool,
 
+    #[serde(skip)]
+    temp_vertex: Option<Vec<[f64; 2]>>,
     #[serde(skip)]
     is_dragging: bool,
     #[serde(skip)]
@@ -46,9 +47,9 @@ impl Default for EguiPolygon {
             color_rgb: Rgb::from_color32(Color32::RED),
             stroke_rgb: Rgb::from_color32(Color32::RED),
 
-            temp_vertex: None,
             interactive_clicking: false,
             interactive_dragging: true,
+            temp_vertex: None,
             is_dragging: false,
             dragged_vertex_index: None,
         }
@@ -221,7 +222,7 @@ impl EguiPolygon {
                     ui.add(
                         DragValue::new(&mut self.style_length)
                             .speed(1.0)
-                            .clamp_range(0.0..=f32::INFINITY)
+                            .range(0.0..=f32::INFINITY)
                             .prefix("Length: "),
                     );
                 });
@@ -230,6 +231,20 @@ impl EguiPolygon {
             ui.separator();
             if ui.button("Clear Vertices").clicked() {
                 self.clear_vertices();
+            }
+        });
+    }
+
+    pub fn polygon_info_menu_button(&mut self, ui: &mut Ui) {
+        ui.menu_button(self.name.to_string(), |ui| {
+            ui.text_edit_singleline(&mut self.name);
+
+            ui.label("Vertices (X,Y)");
+            for (index, vertex) in self.vertices.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(format!("Vertex {}", index));
+                    ui.label(format!("({:.2}, {:.2})", vertex[0], vertex[1]));
+                });
             }
         });
     }
@@ -248,17 +263,17 @@ impl EguiPolygon {
             ui.label("RGB: ");
             ui.add(
                 DragValue::new(&mut self.stroke_rgb.r)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("R: "),
             );
             ui.add(
                 DragValue::new(&mut self.stroke_rgb.g)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("G: "),
             );
             ui.add(
                 DragValue::new(&mut self.stroke_rgb.b)
-                    .clamp_range(0..=255)
+                    .range(0..=255)
                     .prefix("B: "),
             );
 

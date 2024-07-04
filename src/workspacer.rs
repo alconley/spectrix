@@ -78,22 +78,29 @@ impl Workspacer {
 
     pub fn select_directory_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui.button("Select Directory").clicked() {
+            let dir_name: String;
+            if let Some(dir) = self.get_directory() {
+                dir_name = format!("{:?}", dir);
+            } else {
+                dir_name = "No Directory is currently selected".to_string();
+            }
+
+            if ui
+                .button("Select Directory")
+                .on_hover_text(dir_name)
+                .clicked()
+            {
                 self.select_directory();
             }
 
-            ui.separator();
-
-            ui.label("Current Directory: ");
-
-            if let Some(dir) = self.get_directory() {
-                ui.label(format!("{:?}", dir));
-
-                if ui.button("↻").clicked() {
+            if let Some(_dir) = self.get_directory() {
+                if ui
+                    .button("↻")
+                    .on_hover_text("Refresh the directory")
+                    .clicked()
+                {
                     self.refresh_files();
                 }
-            } else {
-                ui.label("None");
             }
         });
     }
@@ -101,17 +108,15 @@ impl Workspacer {
     pub fn file_selection_settings_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if ui
-                .button("Select All Files")
+                .button("Select All")
                 .on_hover_text("Select all files in the directory")
                 .clicked()
             {
                 self.select_all_files();
             }
 
-            ui.separator();
-
             if ui
-                .button("Clear Selected Files")
+                .button("Clear")
                 .on_hover_text("Clear all selected files")
                 .clicked()
             {
@@ -121,42 +126,35 @@ impl Workspacer {
     }
 
     pub fn file_selection_ui_in_menu(&mut self, ui: &mut egui::Ui) {
-        ui.label("Parquet Files in Directory:");
+        ui.label(".parquet Files in Directory:");
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            // Use egui's Grid to allow side by side file display
-            egui::Grid::new("file_selection_grid")
-                .num_columns(5)
-                .show(ui, |ui| {
-                    let files = self.files.borrow();
-                    let mut selected_files = self.selected_files.borrow_mut();
+        let files = self.files.borrow();
+        let mut selected_files = self.selected_files.borrow_mut();
 
-                    for (index, file) in files.iter().enumerate() {
-                        let file_stem = file.file_stem().unwrap_or_default().to_string_lossy();
-                        let is_selected = selected_files.contains(file);
+        for file in files.iter() {
+            let file_stem = file.file_stem().unwrap_or_default().to_string_lossy();
+            let is_selected = selected_files.contains(file);
 
-                        let response = ui.selectable_label(is_selected, file_stem);
+            let response = ui.selectable_label(is_selected, file_stem);
 
-                        if response.clicked() {
-                            if is_selected {
-                                selected_files.retain(|f| f != file);
-                            } else {
-                                selected_files.push(file.clone());
-                            }
-                        }
-
-                        // After adding each file, check if it's time to end the row
-                        if (index + 1) % 5 == 0 {
-                            ui.end_row(); // End the current row after every 5 files
-                        }
-                    }
-                });
-        });
+            if response.clicked() {
+                if is_selected {
+                    selected_files.retain(|f| f != file);
+                } else {
+                    selected_files.push(file.clone());
+                }
+            }
+        }
     }
 
     pub fn workspace_ui(&mut self, ui: &mut egui::Ui) {
-        self.select_directory_ui(ui);
-        self.file_selection_settings_ui(ui);
-        self.file_selection_ui_in_menu(ui);
+        egui::ScrollArea::vertical()
+            .id_source("WorkspaceScrollArea")
+            .show(ui, |ui| {
+                ui.heading("Workspace");
+                self.select_directory_ui(ui);
+                self.file_selection_settings_ui(ui);
+                self.file_selection_ui_in_menu(ui);
+            });
     }
 }

@@ -447,21 +447,19 @@ impl Histogram {
         self.update_line_points(); // Ensure line points are updated
         self.interactive(ui); // Handle interactive elements
 
-        let mut plot = egui_plot::Plot::new(self.name.clone());
-        plot = self.plot_settings.egui_settings.apply_to_plot(plot);
+        let plot = egui_plot::Plot::new(self.name.clone());
+        // plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
-        ui.vertical(|ui| {
-            self.fits.fit_stats_ui(ui);
+        self.fits.fit_stats_ui(ui);
 
-            let plot_response = plot.show(ui, |plot_ui| {
-                self.draw(plot_ui);
-            });
-
-            plot_response.response.context_menu(|ui| {
-                self.context_menu(ui);
-            });
-
-            self.plot_settings.interactive_response(&plot_response);
+        let plot_response = plot.show(ui, |plot_ui| {
+            self.draw(plot_ui);
         });
+
+        plot_response.response.context_menu(|ui| {
+            self.context_menu(ui);
+        });
+
+        self.plot_settings.interactive_response(&plot_response);
     }
 }

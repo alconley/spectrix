@@ -3,81 +3,6 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-// struct PolarsLazyFrame {
-//     pub lazyframe: LazyFrame,
-//     pub columns: Vec<String>,
-// }
-
-// impl PolarsLazyFrame {
-//     fn evaluate_column_names(&mut self) {
-//         let lf: LazyFrame = self.lazyframe.clone().limit(1);
-//         let df: DataFrame = lf.collect().unwrap();
-//         let columns: Vec<String> = df
-//             .get_column_names_owned()
-//             .into_iter()
-//             .map(|name| name.to_string())
-//             .collect();
-
-//         self.columns = columns;
-//     }
-
-//     fn get_column_names(&self) -> Vec<String> {
-//         self.columns.clone()
-//     }
-
-//     fn save_lazyframe(&mut self, output_path: &PathBuf) -> Result<(), PolarsError> {
-//         let mut df = self.lazyframe.clone().collect()?;
-
-//         // Open a file in write mode at the specified output path
-//         let file = File::create(output_path)
-//             .map_err(|e| PolarsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-
-//         // Write the filtered DataFrame to a Parquet file
-//         ParquetWriter::new(file)
-//             .set_parallel(true)
-//             .finish(&mut df)?;
-//         Ok(())
-//     }
-
-//     fn filter_lazyframe(&mut self, column: &str, expression: &str, value: f64) {
-
-//         // check to see if the column exists
-//         if !self.columns.contains(&column.to_string()) {
-//             log::error!("Column {} does not exist", column);
-//             return;
-//         }
-
-//         let lf = self.lazyframe.clone();
-//         if expression == "==" {
-//             let filtered_lf = lf.filter(col(column).eq(value));
-//             self.lazyframe = filtered_lf;
-//         } else if expression == "!=" {
-//             let filtered_lf = lf.filter(col(column).neq(value));
-//             self.lazyframe = filtered_lf;
-//         } else if expression == "<" {
-//             let filtered_lf = lf.filter(col(column).lt(value));
-//             self.lazyframe = filtered_lf;
-//         } else if expression == "<=" {
-//             let filtered_lf = lf.filter(col(column).lt_eq(value));
-//             self.lazyframe = filtered_lf;
-//         } else if expression == ">" {
-//             let filtered_lf = lf.filter(col(column).gt(value));
-//             self.lazyframe = filtered_lf;
-//         } else if expression == ">=" {
-//             let filtered_lf = lf.filter(col(column).gt_eq(value));
-//             self.lazyframe = filtered_lf;
-//         } else {
-//             log::error!("Invalid expression: {}", expression);
-//         }
-//     }
-
-//     fn add_column(&mut self, expr: Expr) {
-//         let lf = self.lazyframe.clone()
-//             .with_column(expr);
-//     }
-
-// }
-
 pub struct LazyFramer {
     pub lazyframe: Option<LazyFrame>,
     pub columns: Vec<String>,
@@ -149,5 +74,34 @@ impl LazyFramer {
                 .finish(&mut df)?;
         }
         Ok(())
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        ui.heading("LazyFrame");
+
+        ui.horizontal(|ui| {
+            ui.label("Columns:");
+            ui.separator();
+            ui.label(format!("{:?}", self.columns));
+        });
+
+        if ui.button("Save LazyFrame").clicked() {
+            if let Some(_lf) = &self.lazyframe {
+                let output_path = rfd::FileDialog::new()
+                    .add_filter("Parquet Files", &["parquet"])
+                    .save_file();
+
+                if let Some(output_path) = output_path {
+                    match self.save_lazyframe(&output_path) {
+                        Ok(_) => {
+                            log::info!("Saved LazyFrame to {:?}", output_path);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to save LazyFrame: {}", e);
+                        }
+                    }
+                }
+            }
+        }
     }
 }

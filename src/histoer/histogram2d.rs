@@ -1,10 +1,11 @@
 use super::colormaps::ColorMap;
 use super::histogram1d::Histogram;
 use super::plot_settings::EguiPlotSettings;
+use crate::cutter::cuts::HistogramCuts;
 use crate::egui_plot_stuff::egui_horizontal_line::EguiHorizontalLine;
 use crate::egui_plot_stuff::egui_image::EguiImage;
-use crate::egui_plot_stuff::egui_polygon::EguiPolygon;
 use crate::egui_plot_stuff::egui_vertical_line::EguiVerticalLine;
+
 use fnv::FnvHashMap;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -12,7 +13,7 @@ pub struct PlotSettings {
     #[serde(skip)]
     cursor_position: Option<egui_plot::PlotPoint>,
     egui_settings: EguiPlotSettings,
-    cut_polygons: Vec<EguiPolygon>,
+    pub cuts: HistogramCuts,
     stats_info: bool,
     colormap: ColorMap,
     log_norm_colormap: bool,
@@ -23,7 +24,7 @@ impl Default for PlotSettings {
         PlotSettings {
             cursor_position: None,
             egui_settings: EguiPlotSettings::default(),
-            cut_polygons: Vec::new(),
+            cuts: HistogramCuts::default(),
             stats_info: false,
             colormap: ColorMap::default(),
             log_norm_colormap: true,
@@ -51,53 +52,20 @@ impl PlotSettings {
 
         ui.separator();
 
-        ui.horizontal(|ui| {
-            ui.heading("Cuts");
-            if ui.button("Add Cut").clicked() {
-                let name = format!("Cut {}", self.cut_polygons.len() + 1);
-                self.cut_polygons.push(EguiPolygon::new(&name));
-            }
-        });
-
-        let mut index_to_remove = None;
-        for (index, polygon) in self.cut_polygons.iter_mut().enumerate() {
-            ui.horizontal(|ui| {
-                if ui.button("🗙").clicked() {
-                    index_to_remove = Some(index);
-                }
-
-                ui.separator();
-
-                polygon.menu_button(ui);
-            });
-        }
-
-        if let Some(index) = index_to_remove {
-            self.cut_polygons.remove(index);
-        }
+        self.cuts.menu_button(ui);
     }
 
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
-        for polygon in self.cut_polygons.iter_mut() {
-            // polygon.mouse_interactions(plot_ui);
-            polygon.draw(plot_ui);
-        }
-
+        self.cuts.draw(plot_ui);
         self.projections.draw(plot_ui);
     }
 
     pub fn interactive_response(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
         self.projections.interactive_dragging(plot_response);
-        for polygon in self.cut_polygons.iter_mut() {
-            polygon.handle_interactions(plot_response);
-        }
+        self.cuts.interactive_response(plot_response);
     }
 
-    pub fn keybinds(&mut self, ui: &mut egui::Ui) {
-        if let Some(_cursor_position) = self.cursor_position {
-            self.projections.keybinds(ui);
-        }
-    }
+    // pub fn keybinds(&mut self, ui: &mut egui::Ui) {}
 }
 
 #[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -136,22 +104,6 @@ impl Projections {
                 name: "X Projection Line 2".to_string(),
                 ..EguiHorizontalLine::default()
             },
-        }
-    }
-
-    pub fn keybinds(&mut self, ui: &mut egui::Ui) {
-        if ui.input(|i| i.key_pressed(egui::Key::X)) {
-            self.add_x_projection = !self.add_x_projection;
-            if !self.add_x_projection {
-                self.x_projection = None;
-            }
-        }
-
-        if ui.input(|i| i.key_pressed(egui::Key::Y)) {
-            self.add_y_projection = !self.add_y_projection;
-            if !self.add_y_projection {
-                self.y_projection = None;
-            }
         }
     }
 
@@ -672,9 +624,9 @@ impl Histogram2D {
         }
     }
 
-    fn keybinds(&mut self, ui: &mut egui::Ui) {
-        self.plot_settings.keybinds(ui);
-    }
+    // fn keybinds(&mut self, ui: &mut egui::Ui) {
+    //     self.plot_settings.keybinds(ui);
+    // }
 
     // Context menu for the plot (when you right-click on the plot)
     fn context_menu(&mut self, ui: &mut egui::Ui) {
@@ -698,10 +650,10 @@ impl Histogram2D {
 
     // Render the histogram using egui_plot
     pub fn render(&mut self, ui: &mut egui::Ui) {
-        let mut plot = egui_plot::Plot::new(self.name.clone());
-        plot = self.plot_settings.egui_settings.apply_to_plot(plot);
+        let plot = egui_plot::Plot::new(self.name.clone());
+        // plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
-        self.keybinds(ui);
+        // self.keybinds(ui);
 
         if self.image.texture.is_none() {
             self.calculate_image(ui);

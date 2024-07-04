@@ -218,6 +218,32 @@ impl Histogrammer {
         self.histograms2d.iter().find(|h| h.name == name)
     }
 
+    pub fn get_pane(&self, name: &str) -> Option<Pane> {
+        if let Some(hist) = self.get_histogram1d(name) {
+            return Some(Pane::Histogram(Box::new(hist.clone())));
+        }
+
+        if let Some(hist) = self.get_histogram2d(name) {
+            return Some(Pane::Histogram2D(Box::new(hist.clone())));
+        }
+
+        None
+    }
+
+    pub fn get_panes(&self, histogram_names: Vec<&str>) -> Vec<Pane> {
+        let mut panes = vec![];
+        for name in histogram_names {
+            let pane = self.get_pane(name);
+            if let Some(p) = pane {
+                panes.push(p);
+            } else {
+                log::error!("Failed to get pane for histogram: {}", name);
+            }
+        }
+
+        panes
+    }
+
     pub fn get_histogram1d_panes(&self) -> Vec<Pane> {
         let mut panes = vec![];
 
@@ -247,125 +273,40 @@ impl Histogrammer {
         // Initialize the egui_tiles::Tiles which will manage the Pane layout
         let mut tiles = egui_tiles::Tiles::default();
 
-        // Create a separate tab for 1D and 2D histograms
-        let hist1d_panes: Vec<_> = self
-            .get_histogram1d_panes()
-            .into_iter()
-            .map(|pane| tiles.insert_pane(pane))
-            .collect();
-        let hist2d_panes: Vec<_> = self
-            .get_histogram2d_panes()
-            .into_iter()
-            .map(|pane| tiles.insert_pane(pane))
-            .collect();
+        // // Create a separate tab for 1D and 2D histograms
+        // let hist1d_panes: Vec<_> = self
+        //     .get_histogram1d_panes()
+        //     .into_iter()
+        //     .map(|pane| tiles.insert_pane(pane))
+        //     .collect();
+        // let hist2d_panes: Vec<_> = self
+        //     .get_histogram2d_panes()
+        //     .into_iter()
+        //     .map(|pane| tiles.insert_pane(pane))
+        //     .collect();
 
-        // Insert these pane groups into a tab tile structure
-        let tab1 = tiles.insert_grid_tile(hist1d_panes);
-        let tab2 = tiles.insert_grid_tile(hist2d_panes);
+        // // Insert these pane groups into a tab tile structure
+        // let tab1 = tiles.insert_grid_tile(hist1d_panes);
+        // let tab2 = tiles.insert_grid_tile(hist2d_panes);
 
-        // Collect the tabs into a vector and create the root tab tile
-        let root_tab = tiles.insert_tab_tile(vec![tab1, tab2]);
+        // // Collect the tabs into a vector and create the root tab tile
+        // let root_tab = tiles.insert_tab_tile(vec![tab1, tab2]);
+
+        let mut children = Vec::new();
+        // loop through the tabs and add them to the tiles
+        // for (_tab_name, panes) in &self.tabs {
+        for panes in self.tabs.values() {
+            let tab_panes: Vec<_> = panes
+                .iter()
+                .map(|pane| tiles.insert_pane(pane.clone()))
+                .collect();
+            let tab_tile = tiles.insert_grid_tile(tab_panes);
+            children.push(tab_tile);
+        }
+
+        let root_tab = tiles.insert_tab_tile(children);
 
         // Construct the tree with a meaningful title and the root_tab, associating it with the tiles
         egui_tiles::Tree::new("Histogrammer", root_tab, tiles)
     }
-
-    // // Function to display the UI for creating custom histograms
-    // fn display_histogram_ui(&mut self, ui: &mut egui::Ui) {
-    //     ui.heading("Custom Histogram Creator");
-
-    //     ui.separator();
-
-    //     ui.horizontal(|ui| {
-    //         if ui.button("Add 1D Histogram").clicked() {
-    //             self.add_hist1d_dialog(ui);
-    //         }
-
-    //         if ui.button("Add 2D Histogram").clicked() {
-    //             self.add_hist2d_dialog(ui);
-    //         }
-    //     });
-
-    //     ui.separator();
-
-    //     // Display existing histograms
-    //     ui.heading("1D Histograms");
-    //     for hist in &self.histograms1d {
-    //         ui.label(format!("Name: {}, Range: {:?}", hist.name, hist.range));
-    //     }
-
-    //     ui.separator();
-
-    //     ui.heading("2D Histograms");
-    //     for hist in &self.histograms2d {
-    //         ui.label(format!("Name: {}", hist.name));
-    //         }
-    // }
-
-    // fn add_hist1d_dialog(&mut self, ui: &mut egui::Ui) {
-    //     let mut name = String::new();
-    //     let mut bins = 512;
-    //     let mut range = (0.0, 4096.0);
-
-    //     ui.vertical(|ui| {
-    //         ui.label("Add 1D Histogram");
-
-    //         ui.horizontal(|ui| {
-    //             ui.label("Name:");
-    //             ui.text_edit_singleline(&mut name);
-    //         });
-
-    //         ui.horizontal(|ui| {
-    //             ui.label("Bins:");
-    //             ui.add(egui::DragValue::new(&mut bins).speed(1));
-    //         });
-
-    //         ui.horizontal(|ui| {
-    //             ui.label("Range:");
-    //             ui.add(egui::DragValue::new(&mut range.0).speed(1.0));
-    //             ui.add(egui::DragValue::new(&mut range.1).speed(1.0));
-    //         });
-
-    //         if ui.button("Add").clicked() {
-    //             self.add_hist1d(&name, bins, range);
-    //         }
-    //     });
-    // }
-
-    // fn add_hist2d_dialog(&mut self, ui: &mut egui::Ui) {
-    //     let mut name = String::new();
-    //     let mut bins = (512, 512);
-    //     let mut range = ((0.0, 4096.0), (0.0, 4096.0));
-
-    //     ui.vertical(|ui| {
-    //         ui.label("Add 2D Histogram");
-
-    //         ui.horizontal(|ui| {
-    //             ui.label("Name:");
-    //             ui.text_edit_singleline(&mut name);
-    //         });
-
-    //         ui.horizontal(|ui| {
-    //             ui.label("Bins:");
-    //             ui.add(egui::DragValue::new(&mut bins.0).speed(1));
-    //             ui.add(egui::DragValue::new(&mut bins.1).speed(1));
-    //         });
-
-    //         ui.horizontal(|ui| {
-    //             ui.label("Range X:");
-    //             ui.add(egui::DragValue::new(&mut range.0 .0).speed(1.0));
-    //             ui.add(egui::DragValue::new(&mut range.0 .1).speed(1.0));
-    //         });
-
-    //         ui.horizontal(|ui| {
-    //             ui.label("Range Y:");
-    //             ui.add(egui::DragValue::new(&mut range.1 .0).speed(1.0));
-    //             ui.add(egui::DragValue::new(&mut range.1 .1).speed(1.0));
-    //         });
-
-    //         if ui.button("Add").clicked() {
-    //             self.add_hist2d(&name, bins, range);
-    //         }
-    //     });
-    // }
 }
