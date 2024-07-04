@@ -447,8 +447,8 @@ impl Histogram {
         self.update_line_points(); // Ensure line points are updated
         self.interactive(ui); // Handle interactive elements
 
-        let plot = egui_plot::Plot::new(self.name.clone());
-        // plot = self.plot_settings.egui_settings.apply_to_plot(plot);
+        let mut plot = egui_plot::Plot::new(self.name.clone());
+        plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
         self.fits.fit_stats_ui(ui);
 

@@ -64,11 +64,11 @@ The idea is to put region markers around you peak of intrest. If there are multi
 - X and Y Projections
 - Different Colormaps
 - Easy to draw cut/gates
+- Cut/gate abilities
 
 #### Future Goals for 2D histograms
 
 - customizable min/max z value on the colormap
-- Allow filtering the data with a cut/gate
 - Rebinning
 
 ## Future Features

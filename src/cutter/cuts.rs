@@ -203,8 +203,8 @@ impl HistogramCuts {
 
     fn sycronize_column_names(&mut self) {
         for cut in &mut self.cuts {
-            cut.x_column = self.x_column.clone();
-            cut.y_column = self.y_column.clone();
+            cut.x_column.clone_from(&self.x_column);
+            cut.y_column.clone_from(&self.y_column);
         }
     }
 

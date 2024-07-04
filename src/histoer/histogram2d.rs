@@ -650,8 +650,8 @@ impl Histogram2D {
 
     // Render the histogram using egui_plot
     pub fn render(&mut self, ui: &mut egui::Ui) {
-        let plot = egui_plot::Plot::new(self.name.clone());
-        // plot = self.plot_settings.egui_settings.apply_to_plot(plot);
+        let mut plot = egui_plot::Plot::new(self.name.clone());
+        plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
         // self.keybinds(ui);
 
