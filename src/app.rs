@@ -44,7 +44,7 @@ impl NATApp {
 
     fn add_histograms_to_tree(&mut self) {
         self.tree = self.processer.histogrammer.histogrammer_tree();
-        self.behavior.tile_map = self.processer.histogrammer.tile_map.clone();
+        self.behavior.tile_map.clone_from(&self.processer.histogrammer.tile_map);
     }
 }
 
