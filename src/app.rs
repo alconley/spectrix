@@ -16,16 +16,8 @@ pub struct NATApp {
 
 impl Default for NATApp {
     fn default() -> Self {
-        // let mut tiles = egui_tiles::Tiles::default();
-
         let workspacer = Workspacer::new();
         let processer = Processer::new();
-
-        // let mut tabs = vec![];
-        // tabs.push(tiles.insert_pane(Pane::Workspace(workspacer.clone())));
-        // let tabs = vec![tiles.insert_pane(Pane::Workspace(workspacer.clone()))];
-
-        // let root = tiles.insert_tab_tile(tabs);
 
         let tree = egui_tiles::Tree::empty("Empty tree");
 
@@ -50,24 +42,9 @@ impl NATApp {
         Default::default()
     }
 
-    // fn ui(&mut self, ui: &mut egui::Ui) {
-    //     self.tree.ui(&mut self.behavior, ui);
-    // }
-
     fn add_histograms_to_tree(&mut self) {
-        // let mut panes = self.processer.histogrammer.get_histogram1d_panes();
-
-        // panes.push(Pane::Workspace(self.workspacer.clone()));
-
-        // let tree = egui_tiles::Tree::new_grid("histograms", panes);
-
-        // self.tree = tree;
-
         self.tree = self.processer.histogrammer.histogrammer_tree();
-
-        // let tabs: Vec<TileId> = vec![tiles.insert_pane(Pane { }), tiles.insert_pane(Pane { })];
-
-        // self.tree.tiles.insert_container(container);
+        self.behavior.tile_map = self.processer.histogrammer.tile_map.clone();
     }
 }
 

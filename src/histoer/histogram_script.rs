@@ -81,6 +81,10 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
 
     h.tabs.insert("Particle Identification".to_string(), particle_id_panes);
 
+    let pid_pane = h.get_panes(vec!["AnodeBack v ScintLeft"]);
+    h.tabs.insert("PID".to_string(), pid_pane);
+
+
     //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
     
     // Particle Identification vs Focal plane histograms

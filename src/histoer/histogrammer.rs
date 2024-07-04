@@ -18,6 +18,9 @@ pub struct Histogrammer {
 
     #[serde(skip)]
     pub tabs: HashMap<String, Vec<Pane>>,
+
+    #[serde(skip)]
+    pub tile_map: HashMap<egui_tiles::TileId, String>, // Stores tile_id to tab_name mapping
 }
 
 impl Histogrammer {
@@ -27,6 +30,7 @@ impl Histogrammer {
             histograms1d: Vec::new(),
             histograms2d: Vec::new(),
             tabs: HashMap::new(),
+            tile_map: HashMap::new(),
         }
     }
 
@@ -273,34 +277,16 @@ impl Histogrammer {
         // Initialize the egui_tiles::Tiles which will manage the Pane layout
         let mut tiles = egui_tiles::Tiles::default();
 
-        // // Create a separate tab for 1D and 2D histograms
-        // let hist1d_panes: Vec<_> = self
-        //     .get_histogram1d_panes()
-        //     .into_iter()
-        //     .map(|pane| tiles.insert_pane(pane))
-        //     .collect();
-        // let hist2d_panes: Vec<_> = self
-        //     .get_histogram2d_panes()
-        //     .into_iter()
-        //     .map(|pane| tiles.insert_pane(pane))
-        //     .collect();
-
-        // // Insert these pane groups into a tab tile structure
-        // let tab1 = tiles.insert_grid_tile(hist1d_panes);
-        // let tab2 = tiles.insert_grid_tile(hist2d_panes);
-
-        // // Collect the tabs into a vector and create the root tab tile
-        // let root_tab = tiles.insert_tab_tile(vec![tab1, tab2]);
-
         let mut children = Vec::new();
         // loop through the tabs and add them to the tiles
         // for (_tab_name, panes) in &self.tabs {
-        for panes in self.tabs.values() {
+        for (tab_name, panes) in &self.tabs {
             let tab_panes: Vec<_> = panes
                 .iter()
                 .map(|pane| tiles.insert_pane(pane.clone()))
                 .collect();
             let tab_tile = tiles.insert_grid_tile(tab_panes);
+            self.tile_map.insert(tab_tile, tab_name.clone());
             children.push(tab_tile);
         }
 

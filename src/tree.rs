@@ -1,5 +1,6 @@
 use crate::pane::Pane;
-use egui_tiles::{Tile, TileId, Tiles};
+// use egui_tiles::{Tile, TileId, Tiles};
+use egui_tiles::Tile;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TreeBehavior {
@@ -9,6 +10,8 @@ pub struct TreeBehavior {
     gap_width: f32,
     min_size: f32,
     preview_dragged_panes: bool,
+    #[serde(skip)]
+    pub tile_map: std::collections::HashMap<egui_tiles::TileId, String>,
 }
 
 impl Default for TreeBehavior {
@@ -26,6 +29,7 @@ impl Default for TreeBehavior {
             gap_width: 2.0,
             min_size: 50.0,
             preview_dragged_panes: true,
+            tile_map: std::collections::HashMap::new(),
         }
     }
 }
@@ -77,6 +81,14 @@ impl TreeBehavior {
                 });
         });
     }
+
+    pub fn set_tile_tab_mapping(&mut self, tile_id: egui_tiles::TileId, tab_name: String) {
+        self.tile_map.insert(tile_id, tab_name);
+    }
+
+    pub fn get_tab_name(&self, tile_id: &egui_tiles::TileId) -> Option<&String> {
+        self.tile_map.get(tile_id)
+    }
 }
 
 impl egui_tiles::Behavior<Pane> for TreeBehavior {
@@ -126,6 +138,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
         self.preview_dragged_panes
     }
 
+    /*
     fn is_tab_closable(&self, _tiles: &Tiles<Pane>, _tile_id: TileId) -> bool {
         true
     }
@@ -155,8 +168,21 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
         // Proceed to removing the tab
         true
     }
+    */
 
-    // fn tab_title_for_tile(&mut self, tiles: &egui_tiles::Tiles<Pane>, tile_id: egui_tiles::TileId) -> egui::WidgetText {
-
-    // }
+    fn tab_title_for_tile(
+        &mut self,
+        tiles: &egui_tiles::Tiles<Pane>,
+        tile_id: egui_tiles::TileId,
+    ) -> egui::WidgetText {
+        if let Some(tab_name) = self.get_tab_name(&tile_id) {
+            tab_name.clone().into()
+        } else {
+            match tiles.get(tile_id) {
+                Some(Tile::Pane(pane)) => self.tab_title_for_pane(pane),
+                Some(Tile::Container(_container)) => "Container".into(),
+                _ => "Unknown".into(),
+            }
+        }
+    }
 }
