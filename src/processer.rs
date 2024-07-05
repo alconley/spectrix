@@ -2,30 +2,32 @@ use super::cutter::cut_handler::CutHandler;
 use super::histoer::histogram_script::add_histograms;
 use super::histoer::histogrammer::Histogrammer;
 use super::lazyframer::LazyFramer;
-
-use std::path::PathBuf;
+use super::workspacer::Workspacer;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Processer {
+    pub workspacer: Workspacer,
     #[serde(skip)]
     pub lazyframer: Option<LazyFramer>,
-    pub files: Vec<PathBuf>,
-    pub histogrammer: Histogrammer,
     pub cut_handler: CutHandler,
+    pub histogrammer: Histogrammer,
+    #[serde(skip)]
+    pub is_ready: bool,
 }
 
 impl Processer {
     pub fn new() -> Self {
         Self {
+            workspacer: Workspacer::default(),
             lazyframer: None,
-            files: Vec::new(),
-            histogrammer: Histogrammer::new(),
             cut_handler: CutHandler::default(),
+            histogrammer: Histogrammer::new(),
+            is_ready: false,
         }
     }
 
     fn create_lazyframe(&mut self) {
-        self.lazyframer = Some(LazyFramer::new(self.files.clone()));
+        self.lazyframer = Some(LazyFramer::new(self.workspacer.selected_files.clone()));
     }
 
     fn perform_histogrammer_from_lazyframe(&mut self) {
@@ -50,6 +52,7 @@ impl Processer {
     pub fn calculate_histograms(&mut self) {
         self.create_lazyframe();
         self.perform_histogrammer_from_lazyframe();
+        self.is_ready = true;
     }
 
     pub fn calculate_histograms_with_cuts(&mut self) {
@@ -60,6 +63,7 @@ impl Processer {
                     Ok(filtered_lf) => {
                         lazyframer.set_lazyframe(filtered_lf);
                         self.perform_histogrammer_from_lazyframe();
+                        self.is_ready = true;
                     }
                     Err(e) => {
                         log::error!("Failed to filter LazyFrame with cuts: {}", e);
@@ -68,7 +72,7 @@ impl Processer {
             }
         }
 
-        self.perform_histogrammer_from_lazyframe();
+        // self.perform_histogrammer_from_lazyframe();
     }
 
     pub fn save_current_lazyframe(&mut self) {
@@ -89,12 +93,28 @@ impl Processer {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        // if let Some(lazyframer) = &mut self.lazyframer {
-        //     lazyframer.ui(ui);
-        // }
+        if !self.workspacer.selected_files.is_empty() {
+            // Properly clone the shared state for processing
 
-        ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button("Calculate Histograms").clicked() {
+                    self.calculate_histograms();
+                }
+
+                if !self.cut_handler.cuts.is_empty() && ui.button("with Cuts").clicked() {
+                    self.calculate_histograms_with_cuts();
+                }
+            });
+
+            ui.separator();
+        }
+
+        self.workspacer.workspace_ui(ui);
 
         self.cut_handler.cut_ui(ui);
+
+        if let Some(lazyframer) = &mut self.lazyframer {
+            lazyframer.ui(ui);
+        }
     }
 }

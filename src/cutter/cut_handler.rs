@@ -72,6 +72,8 @@ impl CutHandler {
                     }
                 });
         }
+
+        ui.separator();
     }
 
     pub fn filter_lf_with_selected_cuts(

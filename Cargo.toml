@@ -10,8 +10,8 @@ all-features = true
 targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
 
 [dependencies]
-egui = "0.28"
-eframe = { version = "0.28", default-features = false, features = [
+egui = "0.28.1"
+eframe = { version = "0.28.1", default-features = false, features = [
     "default_fonts", # Embed the default egui fonts.
     "glow",          # Use the glow rendering backend. Alternative: "wgpu".
     "persistence",   # Enable restoring app state when restarting the app.
@@ -21,9 +21,9 @@ log = "0.4"
 # You only need serde if you want app persistence:
 serde = { version = "1", features = ["derive"] }
 
-egui_plot = {version = "0.28", features = ["serde"] }
+egui_plot = {version = "0.28.1", features = ["serde"] }
 egui_tiles = "0.9.0"
-epaint = "0.28"
+epaint = "0.28.1"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

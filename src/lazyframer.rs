@@ -42,7 +42,6 @@ impl LazyFramer {
         self.columns.clone()
     }
 
-    // Adjusted signature to match context
     pub fn get_column_names_from_lazyframe(lazyframe: &LazyFrame) -> Vec<String> {
         let lf: LazyFrame = lazyframe.clone().limit(1);
         let df: DataFrame = lf.collect().unwrap();
@@ -79,12 +78,6 @@ impl LazyFramer {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("LazyFrame");
 
-        ui.horizontal(|ui| {
-            ui.label("Columns:");
-            ui.separator();
-            ui.label(format!("{:?}", self.columns));
-        });
-
         if ui.button("Save LazyFrame").clicked() {
             if let Some(_lf) = &self.lazyframe {
                 let output_path = rfd::FileDialog::new()
@@ -103,5 +96,26 @@ impl LazyFramer {
                 }
             }
         }
+
+        ui.label("Columns:");
+        if self.columns.is_empty() {
+            ui.label("No columns");
+            if let Some(lf) = &self.lazyframe {
+                if ui.button("Get Columns").clicked() {
+                    self.columns = Self::get_column_names_from_lazyframe(lf);
+                }
+            }
+        } else {
+            egui::ScrollArea::vertical()
+                .max_height(100.0)
+                .id_source("LazyframerColumnNameScrollArea")
+                .show(ui, |ui| {
+                    for column in &self.columns {
+                        ui.label(column);
+                    }
+                });
+        }
+
+        ui.separator();
     }
 }

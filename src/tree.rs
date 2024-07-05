@@ -10,7 +10,6 @@ pub struct TreeBehavior {
     gap_width: f32,
     min_size: f32,
     preview_dragged_panes: bool,
-    #[serde(skip)]
     pub tile_map: std::collections::HashMap<egui_tiles::TileId, String>,
 }
 
@@ -80,6 +79,8 @@ impl TreeBehavior {
                     ui.end_row();
                 });
         });
+
+        ui.separator();
     }
 
     pub fn set_tile_tab_mapping(&mut self, tile_id: egui_tiles::TileId, tab_name: String) {
@@ -103,7 +104,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
         match pane {
-            Pane::Workspace(_workspace) => "Workspace".into(),
             Pane::Histogram(hist) => hist.name.clone().into(),
             Pane::Histogram2D(hist) => hist.name.clone().into(),
         }

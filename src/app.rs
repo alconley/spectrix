@@ -1,14 +1,11 @@
 use super::pane::Pane;
-use super::tree::TreeBehavior;
-
 use super::processer::Processer;
-use super::workspacer::Workspacer;
+use super::tree::TreeBehavior;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct NATApp {
     tree: egui_tiles::Tree<Pane>,
-    workspacer: Workspacer,
     processer: Processer,
     behavior: TreeBehavior,
     side_panel_open: bool,
@@ -16,15 +13,11 @@ pub struct NATApp {
 
 impl Default for NATApp {
     fn default() -> Self {
-        let workspacer = Workspacer::new();
-        let processer = Processer::new();
-
         let tree = egui_tiles::Tree::empty("Empty tree");
 
         Self {
             tree,
-            workspacer,
-            processer,
+            processer: Processer::new(),
             behavior: Default::default(),
             side_panel_open: true,
         }
@@ -42,9 +35,11 @@ impl NATApp {
         Default::default()
     }
 
-    fn add_histograms_to_tree(&mut self) {
+    fn add_histograms_to_tree_from_processer(&mut self) {
         self.tree = self.processer.histogrammer.histogrammer_tree();
-        self.behavior.tile_map.clone_from(&self.processer.histogrammer.tile_map);
+        self.behavior
+            .tile_map
+            .clone_from(&self.processer.histogrammer.tile_map);
     }
 }
 
@@ -76,34 +71,17 @@ impl eframe::App for NATApp {
 
                 ui.separator();
 
-                if !self.workspacer.selected_files.borrow().is_empty() {
-                    // Properly clone the shared state for processing
-                    self.processer
-                        .files
-                        .clone_from(&self.workspacer.selected_files.borrow());
+                self.processer.ui(ui);
 
-                    if ui.button("Calculate Histograms").clicked() {
-                        self.processer.calculate_histograms();
-                        self.add_histograms_to_tree();
-                    }
-
-                    if ui.button("Calculate Histograms with Cuts").clicked() {
-                        self.processer.calculate_histograms_with_cuts();
-                        self.add_histograms_to_tree();
-                    }
-
-                    self.processer.ui(ui);
-
-                    ui.separator();
+                // check to see if processer.is_ready -> get the tree from the histogrammer
+                if self.processer.is_ready {
+                    self.add_histograms_to_tree_from_processer();
+                    self.processer.is_ready = false;
                 }
 
                 egui::ScrollArea::vertical()
                     .id_source("LeftPanel")
                     .show(ui, |ui| {
-                        self.workspacer.workspace_ui(ui);
-
-                        ui.separator();
-
                         self.behavior.ui(ui);
 
                         // ui.collapsing("Tree", |ui| {
@@ -122,8 +100,6 @@ impl eframe::App for NATApp {
                         //         ui.label(format!("{} - {tile_id:?}", name.text()));
                         //     }
                         // });
-
-                        ui.separator();
 
                         if let Some(root) = self.tree.root() {
                             tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);

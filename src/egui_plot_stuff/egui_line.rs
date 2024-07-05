@@ -117,6 +117,7 @@ impl EguiLine {
                 ui.checkbox(&mut self.highlighted, "Highlighted");
 
                 self.color_selection_buttons(ui);
+                // ui.color_edit_button_srgba(&mut self.color); // add this when the bug is fixed
                 ui.add(Slider::new(&mut self.width, 0.0..=10.0).text("Line Width"));
 
                 // self.stroke_color_selection_buttons(ui);
