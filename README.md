@@ -29,6 +29,7 @@ Example parquet files are in the example directory if someone wants to test this
 - Very Interactive UI
 - Customizable UI
 - Multiple Gaussian Fitting
+- Different Background Models
 - Rebinning Data
 
 ### Fitting
@@ -53,7 +54,6 @@ The idea is to put region markers around you peak of intrest. If there are multi
 #### Future Goals with Fitting
 
 - Allow the user to plot different relationships (like FWHM vs Position, energy calibration, etc.)
-- Fit the background with something other than a linear line
 
 ## 2D Histogram
 

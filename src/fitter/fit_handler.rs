@@ -159,8 +159,8 @@ impl Fitter {
             FitModel::Polynomial(degree) => {
                 // Perform Polynomial fit
                 let mut fit = PolynomialFitter::new(*degree);
-                fit.x_data = self.x_data.clone();
-                fit.y_data = y_data_corrected.clone();
+                fit.x_data.clone_from(&self.x_data);
+                fit.y_data.clone_from(&y_data_corrected);
                 fit.fit();
 
                 self.result = Some(FitResult::Polynomial(fit));
@@ -169,8 +169,8 @@ impl Fitter {
             FitModel::Exponential(initial_b_guess) => {
                 // Perform Exponential fit
                 let mut fit = ExponentialFitter::new(*initial_b_guess);
-                fit.x_data = self.x_data.clone();
-                fit.y_data = y_data_corrected.clone();
+                fit.x_data.clone_from(&self.x_data);
+                fit.y_data.clone_from(&y_data_corrected);
                 fit.fit();
 
                 self.result = Some(FitResult::Exponential(fit));

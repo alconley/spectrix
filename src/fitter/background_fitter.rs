@@ -32,13 +32,15 @@ impl BackgroundFitter {
             FitModel::Polynomial(degree) => {
                 log::info!("Fitting polynomial of degree {}", degree);
                 let mut polynomial_fitter = PolynomialFitter::new(degree);
-                polynomial_fitter.x_data = self.x_data.clone();
-                polynomial_fitter.y_data = self.y_data.clone();
+                polynomial_fitter.x_data.clone_from(&self.x_data);
+                polynomial_fitter.y_data.clone_from(&self.y_data);
                 polynomial_fitter.fit();
 
                 // Update the fit line
                 if polynomial_fitter.coefficients.is_some() {
-                    self.fit_line.points = polynomial_fitter.fit_line.points.clone();
+                    self.fit_line
+                        .points
+                        .clone_from(&polynomial_fitter.fit_line.points);
                 }
 
                 self.fit_line.name = "Background".to_string();
@@ -52,13 +54,15 @@ impl BackgroundFitter {
                     initial_b_guess
                 );
                 let mut exponential_fitter = ExponentialFitter::new(initial_b_guess);
-                exponential_fitter.x_data = self.x_data.clone();
-                exponential_fitter.y_data = self.y_data.clone();
+                exponential_fitter.x_data.clone_from(&self.x_data);
+                exponential_fitter.y_data.clone_from(&self.y_data);
                 exponential_fitter.fit();
 
                 // Update the fit line
                 if exponential_fitter.coefficients.is_some() {
-                    self.fit_line.points = exponential_fitter.fit_line.points.clone();
+                    self.fit_line
+                        .points
+                        .clone_from(&exponential_fitter.fit_line.points);
                 }
 
                 self.fit_line.name = "Background".to_string();
