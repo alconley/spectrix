@@ -152,7 +152,7 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
     h.tabs.insert("Delay Lines v Focal Plane".to_string(), delay_lines_panes);
 
     //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
-
+    /* 
     // Delay timing relative to anodes histograms
 
     h.add_fill_hist1d("DelayFrontLeftTime-AnodeFrontTime: bothplanes", &lf_bothplanes, "DelayFrontLeftTime_AnodeFrontTime", 8000, (-4000.0, 4000.0));
@@ -211,7 +211,7 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
     let delay_timing_panes = h.get_panes(delay_timing_panes_names);
 
     h.tabs.insert("Delay Timing".to_string(), delay_timing_panes);
-
+    */
     //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
 
     // CeBrA plots
@@ -276,7 +276,7 @@ pub fn add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
     h.add_hist1d("CeBrA Time to Scint Shifted with TCut", 100, (-50.0, 50.0));
     h.add_hist2d("CeBrA Gain Matched vs Xavg with TCut", (600,512), ((-300.0, 300.0),(0.0, 4096.0)));
     
-    for i in 0..9 {
+    for i in 0..1 {
         // Raw CeBrA Histograms
         h.add_fill_hist1d(&format!("Cebra{}Energy", i), &lf, &format!("Cebra{}Energy", i), 512, (0.0, 4096.0));
         h.add_fill_hist2d(&format!("Cebra{}Energy v Xavg", i), &lf, "Xavg", &format!("Cebra{}Energy", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));

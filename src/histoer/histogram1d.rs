@@ -136,15 +136,6 @@ impl Histogram {
         Some(bin_index)
     }
 
-    // Get the bin centers for the histogram
-    fn _get_bin_centers(&self) -> Vec<f64> {
-        self.bins
-            .iter()
-            .enumerate()
-            .map(|(index, _)| self.range.0 + (index as f64 * self.bin_width) + self.bin_width * 0.5)
-            .collect()
-    }
-
     // Get the bin centers between the start and end x values (inclusive)
     fn get_bin_centers_between(&self, start_x: f64, end_x: f64) -> Vec<f64> {
         let start_bin = self.get_bin(start_x).unwrap_or(0);
@@ -268,7 +259,9 @@ impl Histogram {
             .filter_map(|&pos| self.get_bin_count_and_center(pos))
             .unzip();
 
-        let mut background_fitter = BackgroundFitter::new(x_data, y_data, FitModel::Linear);
+        // let mut background_fitter = BackgroundFitter::new(x_data, y_data, FitModel::Linear);
+        let mut background_fitter =
+            BackgroundFitter::new(x_data, y_data, self.fits.settings.background_model.clone());
         background_fitter.fit();
 
         background_fitter.fit_line.name = format!("{} Temp Background", self.name);

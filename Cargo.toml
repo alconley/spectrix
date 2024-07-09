@@ -38,6 +38,7 @@ geo = "0.27.0"
 fnv = "1.0.7"
 varpro = "0.8.0"
 nalgebra = "0.32.4"
+compute = "0.2.3"
 
 # web:
 [target.'cfg(target_arch = "wasm32")'.dependencies]

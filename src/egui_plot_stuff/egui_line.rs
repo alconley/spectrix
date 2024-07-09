@@ -60,6 +60,10 @@ impl EguiLine {
         }
     }
 
+    pub fn clear_points(&mut self) {
+        self.points.clear();
+    }
+
     pub fn add_point(&mut self, x: f64, y: f64) {
         self.points.push([x, y]);
     }

@@ -348,7 +348,8 @@ impl GaussianFitter {
         }
     }
 
-    pub fn composition_fit_points_linear_bg(&self, slope: f64, intercept: f64) -> Vec<[f64; 2]> {
+    pub fn composition_fit_points_polynomial(&self, coef: Vec<f64>) -> Vec<[f64; 2]> {
+        // coef = [c0, c1, c2, ...] c0 + c1*x + c2*x^2 + ...
         let num_points = 3000;
         let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
         let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
@@ -365,7 +366,34 @@ impl GaussianFitter {
                             .exp()
                     })
                 });
-                let y_background = slope * x + intercept;
+                let y_background = coef
+                    .iter()
+                    .enumerate()
+                    .fold(0.0, |sum, (j, c)| sum + c * x.powi(j as i32));
+                let y_total = y_gauss + y_background;
+                [x, y_total]
+            })
+            .collect()
+    }
+
+    pub fn composition_fit_points_exponential(&self, a: f64, b: f64) -> Vec<[f64; 2]> {
+        let num_points = 3000;
+        let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let step = (max_x - min_x) / num_points as f64;
+
+        (0..=num_points)
+            .map(|i| {
+                let x = min_x + step * i as f64;
+                let y_gauss = self.fit_params.as_ref().map_or(0.0, |params| {
+                    params.iter().fold(0.0, |sum, param| {
+                        sum + param.amplitude.value
+                            * (-((x - param.mean.value).powi(2))
+                                / (2.0 * param.sigma.value.powi(2)))
+                            .exp()
+                    })
+                });
+                let y_background = a * (-x / b).exp();
                 let y_total = y_gauss + y_background;
                 [x, y_total]
             })

@@ -3,22 +3,26 @@ use rfd::FileDialog;
 use std::fs::File;
 use std::io::{Read, Write};
 
+use super::exponential::ExponentialFitter;
 use super::gaussian::GaussianFitter;
-use super::linear::LinearFitter;
+use super::polynomial::PolynomialFitter;
+
 use crate::egui_plot_stuff::egui_line::EguiLine;
 
 use crate::fitter::background_fitter::BackgroundFitter;
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
 pub enum FitModel {
     Gaussian(Vec<f64>), // put the initial peak locations in here
-    Linear,
+    Polynomial(usize),  // the degree of the polynomial: 1 for linear, 2 for quadratic, etc.
+    Exponential(f64),   // the initial guess for the exponential decay constant
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum FitResult {
     Gaussian(GaussianFitter),
-    Linear(LinearFitter),
+    Polynomial(PolynomialFitter),
+    Exponential(ExponentialFitter),
 }
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Fitter {
@@ -51,14 +55,14 @@ impl Fitter {
 
     fn subtract_background(&self) -> Vec<f64> {
         if let Some(bg_fitter) = &self.background {
-            if let Some(bg_result) = bg_fitter.get_background(&self.x_data) {
-                self.y_data
-                    .iter()
-                    .zip(bg_result.iter())
-                    .map(|(y, bg)| y - bg)
-                    .collect()
-            } else {
-                self.y_data.clone()
+            match &bg_fitter.result {
+                Some(FitResult::Polynomial(fitter)) => {
+                    fitter.subtract_background(self.x_data.clone(), self.y_data.clone())
+                }
+                Some(FitResult::Exponential(fitter)) => {
+                    fitter.subtract_background(self.x_data.clone(), self.y_data.clone())
+                }
+                _ => self.y_data.clone(),
             }
         } else {
             self.y_data.clone()
@@ -113,27 +117,63 @@ impl Fitter {
 
                 // calculate the composition line
                 if let Some(background) = &self.background {
-                    if let Some((slope, intercept)) = background.get_slope_intercept() {
-                        let composition_points =
-                            fit.composition_fit_points_linear_bg(slope, intercept);
-
-                        let mut line = EguiLine::new(egui::Color32::BLUE);
-                        line.name = "Composition".to_string();
-                        line.points = composition_points;
-                        self.composition_line = line;
+                    match &background.result {
+                        Some(FitResult::Polynomial(fitter)) => {
+                            if let Some(coef) = &fitter.coefficients {
+                                let composition_points =
+                                    fit.composition_fit_points_polynomial(coef.clone());
+                                let mut line = EguiLine::new(egui::Color32::BLUE);
+                                line.name = "Composition".to_string();
+                                line.points = composition_points;
+                                self.composition_line = line;
+                            }
+                        }
+                        Some(FitResult::Exponential(fitter)) => {
+                            if let Some(coef) = &fitter.coefficients {
+                                let a = coef.a.value;
+                                let b = coef.b.value;
+                                let composition_points =
+                                    fit.composition_fit_points_exponential(a, b);
+                                let mut line = EguiLine::new(egui::Color32::BLUE);
+                                line.name = "Composition".to_string();
+                                line.points = composition_points;
+                                self.composition_line = line;
+                            }
+                        }
+                        _ => {}
                     }
+                    // if let Some((slope, intercept)) = background.get_slope_intercept() {
+                    //     let composition_points =
+                    //         fit.composition_fit_points_linear_bg(slope, intercept);
+
+                    // let mut line = EguiLine::new(egui::Color32::BLUE);
+                    // line.name = "Composition".to_string();
+                    // line.points = composition_points;
+                    // self.composition_line = line;
+                    // }
                 }
 
                 self.result = Some(FitResult::Gaussian(fit));
             }
 
-            FitModel::Linear => {
-                // Perform Linear fit
-                let mut fit = LinearFitter::new(self.x_data.clone(), y_data_corrected);
+            FitModel::Polynomial(degree) => {
+                // Perform Polynomial fit
+                let mut fit = PolynomialFitter::new(*degree);
+                fit.x_data = self.x_data.clone();
+                fit.y_data = y_data_corrected.clone();
+                fit.fit();
 
-                fit.perform_linear_fit();
+                self.result = Some(FitResult::Polynomial(fit));
+            }
 
-                self.result = Some(FitResult::Linear(fit));
+            FitModel::Exponential(initial_b_guess) => {
+                // Perform Exponential fit
+                let mut fit = ExponentialFitter::new(*initial_b_guess);
+                fit.x_data = self.x_data.clone();
+                fit.y_data = y_data_corrected.clone();
+                fit.fit();
+
+                self.result = Some(FitResult::Exponential(fit));
             }
         }
     }
@@ -142,7 +182,8 @@ impl Fitter {
         if let Some(fit) = &self.result {
             match fit {
                 FitResult::Gaussian(fit) => fit.fit_params_ui(ui),
-                FitResult::Linear(fit) => fit.fit_params_ui(ui),
+                FitResult::Polynomial(fit) => fit.fit_params_ui(ui),
+                FitResult::Exponential(fit) => fit.fit_params_ui(ui),
             }
         }
     }
@@ -245,6 +286,9 @@ pub struct FitSettings {
     pub show_background: bool,
     pub show_fit_stats: bool,
     pub fit_stats_height: f32,
+    pub background_model: FitModel,
+    pub background_poly_degree: usize,
+    pub background_single_exp_initial_guess: f64,
 }
 
 impl Default for FitSettings {
@@ -255,6 +299,9 @@ impl Default for FitSettings {
             show_background: true,
             show_fit_stats: false,
             fit_stats_height: 0.0,
+            background_model: FitModel::Polynomial(1),
+            background_poly_degree: 1,
+            background_single_exp_initial_guess: 200.0,
         }
     }
 }
@@ -286,6 +333,39 @@ impl FitSettings {
                 .on_hover_text("Show the composition line");
             ui.checkbox(&mut self.show_background, "Background")
                 .on_hover_text("Show the background line");
+        });
+
+        ui.separator();
+
+        ui.label("Background Fit Models");
+        ui.horizontal(|ui| {
+            ui.label("Polynomial: ");
+            ui.radio_value(
+                &mut self.background_model,
+                FitModel::Polynomial(1),
+                "Linear",
+            );
+            ui.radio_value(
+                &mut self.background_model,
+                FitModel::Polynomial(2),
+                "Quadratic",
+            );
+            ui.radio_value(&mut self.background_model, FitModel::Polynomial(3), "Cubic");
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Exponential: ");
+            ui.radio_value(
+                &mut self.background_model,
+                FitModel::Exponential(self.background_single_exp_initial_guess),
+                "Single",
+            );
+
+            ui.add(
+                egui::DragValue::new(&mut self.background_single_exp_initial_guess)
+                    .speed(10)
+                    .prefix("b: "),
+            );
         });
     }
 }
@@ -506,6 +586,8 @@ impl Fits {
 
     pub fn fit_stats_ui(&mut self, ui: &mut egui::Ui) {
         if self.settings.show_fit_stats {
+            ui.separator();
+
             egui::ScrollArea::vertical()
                 .max_height(self.settings.fit_stats_height)
                 .show(ui, |ui| {
@@ -518,8 +600,6 @@ impl Fits {
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.vertical(|ui| {
                 ui.label("Fit Lines");
-
-                ui.separator();
 
                 if let Some(temp_fit) = &mut self.temp_fit {
                     temp_fit.lines_ui(ui);
@@ -539,8 +619,6 @@ impl Fits {
             ui.separator();
 
             self.settings.menu_ui(ui);
-
-            ui.separator();
 
             egui::ScrollArea::vertical()
                 .max_height(300.0)

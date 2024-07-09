@@ -67,6 +67,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "alea"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5906476585661c802d50736a92abb1fc6159648d3a9983a26c9aab33bb19346"
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -137,6 +143,12 @@ checksum = "cab112f0a86d568ea0e627cc1d6be74a1e9cd55214684db5561995f6dad897c6"
 dependencies = [
  "num-traits",
 ]
+
+[[package]]
+name = "approx_eq"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3f9eb837c6a783fbf002e3e5cc7925a3aa6893d6d42f9169517528983777590"
 
 [[package]]
 name = "arboard"
@@ -522,6 +534,20 @@ dependencies = [
  "strum",
  "strum_macros 0.26.2",
  "unicode-width",
+]
+
+[[package]]
+name = "compute"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72713e8bc28db4ca41a32f0f30b9cdbff982cef6c90e2ee88507a03f54bae3dc"
+dependencies = [
+ "alea",
+ "approx_eq",
+ "impl_ops",
+ "reverse",
+ "serde",
+ "serde_derive",
 ]
 
 [[package]]
@@ -1503,6 +1529,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "impl_ops"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90f97a5f38dd3ccfbe7aa80f4a0c00930f21b922c74195be0201c51028f22dcf"
+
+[[package]]
 name = "indexmap"
 version = "2.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1832,6 +1864,7 @@ dependencies = [
 name = "nat"
 version = "0.2.0"
 dependencies = [
+ "compute",
  "eframe",
  "egui",
  "egui_plot",
@@ -2803,6 +2836,12 @@ name = "regex-syntax"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08c74e62047bb2de4ff487b251e4a92e24f48745648451635cec7d591162d9f"
+
+[[package]]
+name = "reverse"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d19e32bd4a190de7401fe7c754756f64ad7e668a0bc6d190632278012c4ba12"
 
 [[package]]
 name = "rfd"
