@@ -232,6 +232,8 @@ impl GaussianFitter {
             }
         };
 
+        // fit_info.parameter_names = model.parameter_names().to_vec();
+
         // Extract the parameters
         let problem = match LevMarProblemBuilder::new(model)
             .observations(y_data)
@@ -246,24 +248,6 @@ impl GaussianFitter {
 
         match LevMarSolver::default().fit_with_statistics(problem) {
             Ok((fit_result, fit_statistics)) => {
-                log::info!(
-                    "Nonlinear Parameters: {:?}",
-                    fit_result.nonlinear_parameters()
-                );
-                log::info!(
-                    "nonlinear parameters variance: {:?}",
-                    fit_statistics.nonlinear_parameters_variance()
-                );
-
-                log::info!(
-                    "Linear Coefficients: {:?}",
-                    fit_result.linear_coefficients()
-                );
-                log::info!(
-                    "linear coefficients variance: {:?}",
-                    fit_statistics.linear_coefficients_variance()
-                );
-
                 let nonlinear_parameters = fit_result.nonlinear_parameters();
                 let nonlinear_variances = fit_statistics.nonlinear_parameters_variance();
 
@@ -394,6 +378,36 @@ impl GaussianFitter {
                     })
                 });
                 let y_background = a * (-x / b).exp();
+                let y_total = y_gauss + y_background;
+                [x, y_total]
+            })
+            .collect()
+    }
+
+    pub fn composition_fit_points_double_exponential(
+        &self,
+        a: f64,
+        b: f64,
+        c: f64,
+        d: f64,
+    ) -> Vec<[f64; 2]> {
+        let num_points = 3000;
+        let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let step = (max_x - min_x) / num_points as f64;
+
+        (0..=num_points)
+            .map(|i| {
+                let x = min_x + step * i as f64;
+                let y_gauss = self.fit_params.as_ref().map_or(0.0, |params| {
+                    params.iter().fold(0.0, |sum, param| {
+                        sum + param.amplitude.value
+                            * (-((x - param.mean.value).powi(2))
+                                / (2.0 * param.sigma.value.powi(2)))
+                            .exp()
+                    })
+                });
+                let y_background = a * (-x / b).exp() + c * (-x / d).exp();
                 let y_total = y_gauss + y_background;
                 [x, y_total]
             })

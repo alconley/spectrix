@@ -1,6 +1,7 @@
 pub mod background_fitter;
-pub mod exponential;
 pub mod fit_handler;
 pub mod fit_markers;
+pub mod fit_settings;
 pub mod gaussian;
-pub mod polynomial;
+pub mod main_fitter;
+pub mod models;

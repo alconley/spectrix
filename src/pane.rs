@@ -9,23 +9,40 @@ pub enum Pane {
 
 impl Pane {
     pub fn ui(&mut self, ui: &mut egui::Ui) -> egui_tiles::UiResponse {
-        match self {
-            Pane::Histogram(hist) => {
-                hist.render(ui);
+        let hist_name = match self {
+            Pane::Histogram(hist) => hist.name.clone(),
+            Pane::Histogram2D(hist) => hist.name.clone(),
+        };
+
+        let button = egui::Button::new(hist_name)
+            .min_size(egui::Vec2::new(ui.available_width(), 0.0))
+            .small()
+            .frame(false);
+
+        if ui.add(button.sense(egui::Sense::drag())).drag_started() {
+            match self {
+                Pane::Histogram(hist) => {
+                    hist.render(ui);
+                }
+
+                Pane::Histogram2D(hist) => {
+                    hist.render(ui);
+                }
             }
 
-            Pane::Histogram2D(hist) => {
-                hist.render(ui);
+            egui_tiles::UiResponse::DragStarted
+        } else {
+            match self {
+                Pane::Histogram(hist) => {
+                    hist.render(ui);
+                }
+
+                Pane::Histogram2D(hist) => {
+                    hist.render(ui);
+                }
             }
+
+            egui_tiles::UiResponse::None
         }
-        // if ui
-        //     .add(egui::Button::new("").sense(egui::Sense::drag()))
-        //     .drag_started()
-        // {
-        //     egui_tiles::UiResponse::DragStarted
-        // } else {
-        //     egui_tiles::UiResponse::None
-        // }
-        egui_tiles::UiResponse::None
     }
 }

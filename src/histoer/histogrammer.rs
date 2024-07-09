@@ -16,10 +16,10 @@ pub struct Histogrammer {
     pub histograms1d: Vec<Histogram>,
     pub histograms2d: Vec<Histogram2D>,
 
-    #[serde(skip)]
+    // #[serde(skip)]
     pub tabs: HashMap<String, Vec<Pane>>,
 
-    #[serde(skip)]
+    // #[serde(skip)]
     pub tile_map: HashMap<egui_tiles::TileId, String>, // Stores tile_id to tab_name mapping
 }
 

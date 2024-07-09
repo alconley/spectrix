@@ -21,7 +21,7 @@ impl Default for TreeBehavior {
                 prune_empty_containers: true,
                 prune_single_child_tabs: true,
                 prune_single_child_containers: true,
-                all_panes_must_have_tabs: true,
+                all_panes_must_have_tabs: false,
                 join_nested_linear_containers: true,
             },
             tab_bar_height: 24.0,
@@ -121,11 +121,11 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
     }
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
-        let mut options = self.simplification_options;
+        let options = self.simplification_options;
 
-        if !options.all_panes_must_have_tabs {
-            options.all_panes_must_have_tabs = true;
-        }
+        // if !options.all_panes_must_have_tabs {
+        //     options.all_panes_must_have_tabs = true;
+        // }
 
         options
     }

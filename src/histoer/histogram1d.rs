@@ -1,7 +1,8 @@
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::background_fitter::BackgroundFitter;
-use crate::fitter::fit_handler::{FitModel, Fits, Fitter};
+use crate::fitter::fit_handler::Fits;
 use crate::fitter::fit_markers::EguiFitMarkers;
+use crate::fitter::main_fitter::{FitModel, Fitter};
 
 use super::plot_settings::EguiPlotSettings;
 
@@ -244,7 +245,6 @@ impl Histogram {
         }
     }
 
-    // Fit the background with a linear line using the background markers
     fn fit_background(&mut self) {
         self.fits.remove_temp_fits();
 

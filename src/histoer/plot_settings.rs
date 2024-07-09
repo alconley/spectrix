@@ -15,6 +15,7 @@ pub struct EguiPlotSettings {
     pub show_grid: bool,
     pub sharp_grid_lines: bool,
     pub show_background: bool,
+    pub allow_double_click_reset: bool,
 }
 
 impl Default for EguiPlotSettings {
@@ -35,6 +36,7 @@ impl Default for EguiPlotSettings {
             show_grid: true,
             sharp_grid_lines: true,
             show_background: true,
+            allow_double_click_reset: true,
         }
     }
 }
@@ -58,6 +60,10 @@ impl EguiPlotSettings {
                 ui.checkbox(&mut self.show_grid, "Show Grid");
                 ui.checkbox(&mut self.sharp_grid_lines, "Sharp Grid Lines");
                 ui.checkbox(&mut self.show_background, "Show Background");
+                ui.checkbox(
+                    &mut self.allow_double_click_reset,
+                    "Allow Double Click to Reset",
+                );
 
                 ui.separator();
 
@@ -87,6 +93,7 @@ impl EguiPlotSettings {
             .sharp_grid_lines(self.sharp_grid_lines)
             .show_background(self.show_background)
             .auto_bounds(egui::Vec2b::new(true, true))
+            .allow_double_click_reset(self.allow_double_click_reset)
             .label_formatter(move |name, value| {
                 let x = if log_x {
                     10.0f64.powf(value.x)

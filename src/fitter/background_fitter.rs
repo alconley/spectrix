@@ -1,7 +1,9 @@
-use super::fit_handler::{FitModel, FitResult};
 use crate::egui_plot_stuff::egui_line::EguiLine;
-use crate::fitter::exponential::ExponentialFitter;
-use crate::fitter::polynomial::PolynomialFitter;
+
+use super::main_fitter::{FitModel, FitResult};
+use super::models::double_exponential::DoubleExponentialFitter;
+use super::models::exponential::ExponentialFitter;
+use super::models::polynomial::PolynomialFitter;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct BackgroundFitter {
@@ -68,6 +70,41 @@ impl BackgroundFitter {
                 self.fit_line.name = "Background".to_string();
 
                 self.result = Some(FitResult::Exponential(exponential_fitter));
+            }
+
+            FitModel::DoubleExponential(initial_b_guess, initial_d_guess) => {
+                log::info!(
+                    "Fitting double exponential with initial b guess {} and initial d guess {}",
+                    initial_b_guess,
+                    initial_d_guess
+                );
+                let mut double_exponential_fitter =
+                    DoubleExponentialFitter::new(initial_b_guess, initial_d_guess);
+                double_exponential_fitter.x_data.clone_from(&self.x_data);
+                double_exponential_fitter.y_data.clone_from(&self.y_data);
+                double_exponential_fitter.fit();
+
+                // Update the fit line
+                if double_exponential_fitter.coefficients.is_some() {
+                    self.fit_line
+                        .points
+                        .clone_from(&double_exponential_fitter.fit_line.points);
+
+                    self.fit_line.name = "Background".to_string();
+
+                    self.result = Some(FitResult::DoubleExponential(double_exponential_fitter));
+                }
+            }
+        }
+    }
+
+    pub fn fitter_stats(&self, ui: &mut egui::Ui) {
+        if let Some(fit) = &self.result {
+            match fit {
+                FitResult::Gaussian(fit) => fit.fit_params_ui(ui),
+                FitResult::Polynomial(fit) => fit.fit_params_ui(ui),
+                FitResult::Exponential(fit) => fit.fit_params_ui(ui),
+                FitResult::DoubleExponential(fit) => fit.fit_params_ui(ui),
             }
         }
     }
