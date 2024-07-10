@@ -121,13 +121,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
     }
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
-        let options = self.simplification_options;
-
-        // if !options.all_panes_must_have_tabs {
-        //     options.all_panes_must_have_tabs = true;
-        // }
-
-        options
+        self.simplification_options
     }
 
     fn min_size(&self) -> f32 {

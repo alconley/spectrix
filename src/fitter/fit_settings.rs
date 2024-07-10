@@ -7,6 +7,8 @@ pub struct FitSettings {
     pub show_background: bool,
     pub show_fit_stats: bool,
     pub fit_stats_height: f32,
+    pub free_stddev: bool,
+    pub free_position: bool,
     pub background_model: FitModel,
     pub background_poly_degree: usize,
     pub background_single_exp_initial_guess: f64,
@@ -21,6 +23,8 @@ impl Default for FitSettings {
             show_background: true,
             show_fit_stats: false,
             fit_stats_height: 0.0,
+            free_stddev: false,
+            free_position: true,
             background_model: FitModel::Polynomial(1),
             background_poly_degree: 1,
             background_single_exp_initial_guess: 200.0,
@@ -60,7 +64,17 @@ impl FitSettings {
 
         ui.separator();
 
-        ui.label("Background Fit Models");
+        ui.heading("Gaussian Fit Settings");
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.free_stddev, "Free Standard Deviation")
+                .on_hover_text("Allow the standard deviation of the Gaussian to be free");
+            ui.checkbox(&mut self.free_position, "Free Position")
+                .on_hover_text("Allow the position of the Gaussian to be free");
+        });
+
+        ui.separator();
+
+        ui.heading("Background Fit Models");
         ui.label("Polynomial");
         ui.horizontal(|ui| {
             ui.radio_value(

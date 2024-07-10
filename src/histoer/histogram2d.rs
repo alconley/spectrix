@@ -55,16 +55,11 @@ impl PlotSettings {
         self.cuts.menu_button(ui);
 
         // if any cuts are active temp disable double clicking to reset
-        if self
+        self.egui_settings.allow_double_click_reset = !self
             .cuts
             .cuts
             .iter()
-            .any(|cut| cut.polygon.interactive_clicking)
-        {
-            self.egui_settings.allow_double_click_reset = false;
-        } else {
-            self.egui_settings.allow_double_click_reset = true;
-        }
+            .any(|cut| cut.polygon.interactive_clicking);
     }
 
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {

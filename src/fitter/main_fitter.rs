@@ -1,6 +1,6 @@
-use super::gaussian::GaussianFitter;
 use super::models::double_exponential::DoubleExponentialFitter;
 use super::models::exponential::ExponentialFitter;
+use super::models::gaussian::GaussianFitter;
 use super::models::polynomial::PolynomialFitter;
 
 use crate::egui_plot_stuff::egui_line::EguiLine;
@@ -9,7 +9,7 @@ use crate::fitter::background_fitter::BackgroundFitter;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
 pub enum FitModel {
-    Gaussian(Vec<f64>),          // put the initial peak locations in here
+    Gaussian(Vec<f64>, bool, bool), // put the initial peak locations in here, free sigma, free position
     Polynomial(usize), // the degree of the polynomial: 1 for linear, 2 for quadratic, etc.
     Exponential(f64),  // the initial guess for the exponential decay constant
     DoubleExponential(f64, f64), // the initial guess for the exponential decay constants
@@ -73,7 +73,7 @@ impl Fitter {
     pub fn get_peak_markers(&self) -> Vec<f64> {
         if let Some(FitResult::Gaussian(fit)) = &self.result {
             fit.peak_markers.clone()
-        } else if let FitModel::Gaussian(peak_markers) = &self.model {
+        } else if let FitModel::Gaussian(peak_markers, _, _) = &self.model {
             peak_markers.clone()
         } else {
             Vec::new()
@@ -93,12 +93,14 @@ impl Fitter {
 
         // Perform the fit based on the model
         match &self.model {
-            FitModel::Gaussian(peak_markers) => {
+            FitModel::Gaussian(peak_markers, free_stddev, free_position) => {
                 // Perform Gaussian fit
                 let mut fit = GaussianFitter::new(
                     self.x_data.clone(),
                     y_data_corrected,
                     peak_markers.clone(),
+                    *free_stddev,
+                    *free_position,
                 );
 
                 fit.multi_gauss_fit();

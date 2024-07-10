@@ -27,7 +27,7 @@ impl BackgroundFitter {
 
     pub fn fit(&mut self) {
         match self.model {
-            FitModel::Gaussian(_) => {
+            FitModel::Gaussian(_, _, _) => {
                 log::error!("Gaussian background fitting not implemented");
             }
 

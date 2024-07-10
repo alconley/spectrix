@@ -290,7 +290,11 @@ impl Histogram {
         }
 
         let mut fitter = Fitter::new(
-            FitModel::Gaussian(peak_positions),
+            FitModel::Gaussian(
+                peak_positions,
+                self.fits.settings.free_stddev,
+                self.fits.settings.free_position,
+            ),
             self.fits.temp_background_fit.clone(),
         );
 
