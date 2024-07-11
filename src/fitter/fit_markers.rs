@@ -29,12 +29,13 @@ impl EguiFitMarkers {
         marker.name = format!("Region Marker (x={:.2})", x);
 
         self.region_markers.push(marker);
+
         self.region_markers
             .sort_by(|a, b| a.x_value.partial_cmp(&b.x_value).unwrap());
     }
 
     pub fn add_peak_marker(&mut self, x: f64) {
-        let mut marker = EguiVerticalLine::new(x, egui::Color32::from_rgb(255, 0, 255));
+        let mut marker = EguiVerticalLine::new(x, egui::Color32::from_rgb(225, 0, 255));
 
         marker.name = format!("Peak Marker (x={:.2})", x);
 
@@ -44,7 +45,7 @@ impl EguiFitMarkers {
     }
 
     pub fn add_background_marker(&mut self, x: f64) {
-        let mut marker = EguiVerticalLine::new(x, egui::Color32::GREEN);
+        let mut marker = EguiVerticalLine::new(x, egui::Color32::from_rgb(0, 200, 0));
 
         marker.name = format!("Background Marker (x={:.2})", x);
 
@@ -189,46 +190,46 @@ impl EguiFitMarkers {
 
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Markers", |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut self.manual_marker_position)
-                            .speed(1.0)
-                            .prefix("Marker Position: "),
-                    );
+            ui.vertical_centered(|ui| {
+                ui.add(
+                    egui::DragValue::new(&mut self.manual_marker_position)
+                        .speed(1.0)
+                        .prefix("Marker Position: "),
+                );
 
-                    ui.horizontal(|ui| {
-                        if ui.button("Peak").clicked() {
-                            self.add_peak_marker(self.manual_marker_position);
-                        }
-
-                        ui.separator();
-
-                        if ui.button("Background").clicked() {
-                            self.add_background_marker(self.manual_marker_position);
-                        }
-
-                        ui.separator();
-
-                        if ui.button("Region").clicked() {
-                            if self.region_markers.len() > 1 {
-                                self.clear_region_markers();
-                            }
-                            self.add_region_marker(self.manual_marker_position);
-                        }
-                    });
+                ui.horizontal(|ui| {
+                    if ui.button("Peak").clicked() {
+                        self.add_peak_marker(self.manual_marker_position);
+                    }
 
                     ui.separator();
 
-                    if ui.button("Clear all markers").clicked() {
-                        self.clear_background_markers();
-                        self.clear_peak_markers();
-                        self.clear_region_markers();
+                    if ui.button("Background").clicked() {
+                        self.add_background_marker(self.manual_marker_position);
+                    }
+
+                    ui.separator();
+
+                    if ui.button("Region").clicked() {
+                        if self.region_markers.len() > 1 {
+                            self.clear_region_markers();
+                        }
+                        self.add_region_marker(self.manual_marker_position);
                     }
                 });
 
                 ui.separator();
 
+                if ui.button("Clear all markers").clicked() {
+                    self.clear_background_markers();
+                    self.clear_peak_markers();
+                    self.clear_region_markers();
+                }
+            });
+
+            ui.separator();
+
+            egui::ScrollArea::vertical().show(ui, |ui| {
                 for marker in &mut self.region_markers {
                     marker.menu_button(ui);
                 }

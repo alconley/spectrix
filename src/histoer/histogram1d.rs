@@ -28,8 +28,8 @@ impl Default for PlotSettings {
 }
 impl PlotSettings {
     pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
-        ui.checkbox(&mut self.stats_info, "Show Statitics");
         self.egui_settings.menu_button(ui);
+        ui.checkbox(&mut self.stats_info, "Show Statitics");
         self.markers.menu_button(ui);
     }
 
@@ -294,6 +294,7 @@ impl Histogram {
                 peak_positions,
                 self.fits.settings.free_stddev,
                 self.fits.settings.free_position,
+                self.bin_width,
             ),
             self.fits.temp_background_fit.clone(),
         );

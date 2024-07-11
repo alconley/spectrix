@@ -19,11 +19,16 @@ pub struct GaussianParams {
 
 impl GaussianParams {
     // Constructor that also calculates FWHM and area
-    pub fn new(amplitude: Value, mean: Value, sigma: Value) -> Result<Self, String> {
+    pub fn new(
+        amplitude: Value,
+        mean: Value,
+        sigma: Value,
+        bin_width: f64,
+    ) -> Result<Self, String> {
         let fwhm = Self::calculate_fwhm(sigma.value);
         let fwhm_uncertainty = Self::fwhm_uncertainty(sigma.uncertainty);
 
-        let area = Self::calculate_area(amplitude.value, sigma.value);
+        let area = Self::calculate_area(amplitude.value, sigma.value, bin_width);
         if area < 0.0 {
             let error_message = "Area is negative.".to_string();
             return Err(error_message);
@@ -56,8 +61,8 @@ impl GaussianParams {
     }
 
     // Method to calculate area
-    fn calculate_area(amplitude: f64, sigma: f64) -> f64 {
-        amplitude * sigma * (2.0 * std::f64::consts::PI).sqrt()
+    fn calculate_area(amplitude: f64, sigma: f64, bin_width: f64) -> f64 {
+        amplitude * sigma * (2.0 * std::f64::consts::PI).sqrt() / bin_width
     }
 
     // Method to calculate area uncertainty
@@ -109,6 +114,7 @@ pub struct GaussianFitter {
     pub fit_lines: Option<Vec<Vec<[f64; 2]>>>,
     pub free_stddev: bool, // false = fit all the gaussians with the same sigma
     pub free_position: bool, // false = fix the position of the gaussians to the peak_markers
+    pub bin_width: f64,
 }
 
 impl GaussianFitter {
@@ -118,6 +124,7 @@ impl GaussianFitter {
         peak_markers: Vec<f64>,
         free_stddev: bool,
         free_position: bool,
+        bin_width: f64,
     ) -> Self {
         Self {
             x,
@@ -127,6 +134,7 @@ impl GaussianFitter {
             fit_lines: None,
             free_stddev,
             free_position,
+            bin_width,
         }
     }
 
@@ -315,6 +323,7 @@ impl GaussianFitter {
                             value: sigma,
                             uncertainty: sigma_variance.sqrt(),
                         },
+                        self.bin_width,
                     ) {
                         Ok(gaussian_params) => {
                             // Log the Gaussian component parameters including FWHM and area
@@ -443,6 +452,7 @@ impl GaussianFitter {
                             value: sigma,
                             uncertainty: sigma_variance.sqrt(),
                         },
+                        self.bin_width,
                     ) {
                         Ok(gaussian_params) => {
                             // Log the Gaussian component parameters including FWHM and area
@@ -596,6 +606,7 @@ impl GaussianFitter {
                             value: sigma,
                             uncertainty: sigma_variance.sqrt(),
                         },
+                        self.bin_width,
                     ) {
                         Ok(gaussian_params) => {
                             // Log the Gaussian component parameters including FWHM and area
@@ -761,6 +772,7 @@ impl GaussianFitter {
                             value: sigma,
                             uncertainty: sigma_variance.sqrt(),
                         },
+                        self.bin_width,
                     ) {
                         Ok(gaussian_params) => {
                             // Log the Gaussian component parameters including FWHM and area

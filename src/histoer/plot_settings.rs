@@ -43,7 +43,7 @@ impl Default for EguiPlotSettings {
 
 impl EguiPlotSettings {
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("egui Plot Settings", |ui| {
+        ui.menu_button("Plot Maniupulation Settings", |ui| {
             ui.vertical(|ui| {
                 ui.checkbox(&mut self.legend, "Legend");
                 ui.checkbox(&mut self.log_x, "Log X");
