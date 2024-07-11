@@ -50,13 +50,13 @@ impl eframe::App for NATApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("muc_top_panel").show(ctx, |ui| {
+        egui::TopBottomPanel::top("nat_top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.checkbox(&mut self.side_panel_open, "Side Panel");
             });
         });
 
-        egui::SidePanel::left("tree")
+        egui::SidePanel::left("nat_left_panel")
             // .max_width(200.0)
             .show_animated(ctx, self.side_panel_open, |ui| {
                 ui.horizontal(|ui| {

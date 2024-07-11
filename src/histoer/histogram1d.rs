@@ -1,10 +1,10 @@
+use super::peak_finder::PeakFindingSettings;
+use super::plot_settings::EguiPlotSettings;
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::background_fitter::BackgroundFitter;
 use crate::fitter::fit_handler::Fits;
 use crate::fitter::fit_markers::EguiFitMarkers;
 use crate::fitter::main_fitter::{FitModel, Fitter};
-
-use super::plot_settings::EguiPlotSettings;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlotSettings {
@@ -14,6 +14,7 @@ pub struct PlotSettings {
     stats_info: bool,
     markers: EguiFitMarkers,
     rebin_factor: usize,
+    find_peaks_settings: PeakFindingSettings,
 }
 impl Default for PlotSettings {
     fn default() -> Self {
@@ -23,14 +24,16 @@ impl Default for PlotSettings {
             stats_info: false,
             markers: EguiFitMarkers::new(),
             rebin_factor: 1,
+            find_peaks_settings: PeakFindingSettings::default(),
         }
     }
 }
 impl PlotSettings {
     pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
         self.egui_settings.menu_button(ui);
-        ui.checkbox(&mut self.stats_info, "Show Statitics");
+        ui.checkbox(&mut self.stats_info, "Show Statistics");
         self.markers.menu_button(ui);
+        self.find_peaks_settings.menu_button(ui);
     }
 
     fn interactive_response(&mut self, response: &egui_plot::PlotResponse<()>) {
@@ -319,6 +322,38 @@ impl Histogram {
         self.fits.temp_fit = Some(fitter);
     }
 
+    // Add a function to find peaks
+    pub fn find_peaks(&mut self) {
+        // clear the peak markers
+        self.plot_settings.markers.clear_peak_markers();
+
+        // if there are region markers
+        let region_marker_positions = self.plot_settings.markers.get_region_marker_positions();
+        let y_data: Vec<f64> = if region_marker_positions.len() == 2 {
+            let (start_x, end_x) = (region_marker_positions[0], region_marker_positions[1]);
+            self.get_bin_counts_between(start_x, end_x)
+        } else {
+            self.bins.iter().map(|&count| count as f64).collect()
+        };
+
+        // let y_data: Vec<f64> = self.bins.iter().map(|&count| count as f64).collect();
+
+        let peaks = self.plot_settings.find_peaks_settings.find_peaks(y_data);
+
+        // Add peak markers at detected peaks
+        for peak in &peaks {
+            let peak_position = if region_marker_positions.len() == 2 {
+                // If there are region markers, adjust the peak position relative to the region
+                let (start_x, _end_x) = (region_marker_positions[0], region_marker_positions[1]);
+                start_x + (peak.middle_position() as f64) * self.bin_width
+            } else {
+                // If no region markers, use the global position
+                self.range.0 + (peak.middle_position() as f64) * self.bin_width
+            };
+            self.plot_settings.markers.add_peak_marker(peak_position);
+        }
+    }
+
     // Handles the interactive elements of the histogram
     fn interactive(&mut self, ui: &mut egui::Ui) {
         self.plot_settings.markers.cursor_position = self.plot_settings.cursor_position;
@@ -438,6 +473,13 @@ impl Histogram {
                 }
             }
         });
+
+        // Add find peaks button
+        ui.separator();
+        ui.heading("Find Peaks");
+        if ui.button("Detect Peaks").clicked() {
+            self.find_peaks();
+        }
     }
 
     // Renders the histogram using egui_plot

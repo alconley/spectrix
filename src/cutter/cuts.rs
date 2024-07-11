@@ -1,4 +1,6 @@
 use geo::Contains;
+use indicatif::ProgressBar;
+use indicatif::ProgressStyle;
 use polars::prelude::*;
 use std::fs::File;
 use std::io::{BufReader, Write};
@@ -86,7 +88,7 @@ impl Cut {
 
         // check to see if the column exists
         let check_lf = current_lf.clone().limit(1);
-        let df = check_lf.collect().unwrap();
+        let df = check_lf.collect()?;
         let columns: Vec<String> = df
             .get_column_names_owned()
             .into_iter()
@@ -147,17 +149,30 @@ impl Cut {
         let rows = ndarray_mask_creation_df.shape()[0];
         let mut boolean_chunked_builder = BooleanChunkedBuilder::new("mask", rows);
 
+        let pb = ProgressBar::new(rows as u64);
+        let style = ProgressStyle::default_bar()
+            .template(&format!(
+                "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
+                self.polygon.name
+            ))
+            .expect("Failed to create progress style");
+        pb.set_style(style.progress_chars("#>-"));
+        pb.set_message("Creating boolean mask");
+
         for i in 0..rows {
             let x_value = ndarray_mask_creation_df[[i, 0]];
             let y_value = ndarray_mask_creation_df[[i, 1]];
             let point = self.is_inside(x_value, y_value);
             boolean_chunked_builder.append_value(point);
+            pb.inc(1);
         }
 
         let boolean_chunked_series = boolean_chunked_builder.finish();
         let df = current_lf.clone().collect()?;
 
         let filtered_lf = df.filter(&boolean_chunked_series)?.lazy();
+
+        pb.finish_with_message("Filtering complete");
 
         Ok(filtered_lf)
     }

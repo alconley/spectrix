@@ -33,7 +33,7 @@ impl Processer {
     fn perform_histogrammer_from_lazyframe(&mut self) {
         if let Some(lazyframer) = &self.lazyframer {
             if let Some(lf) = &lazyframer.lazyframe {
-                match add_histograms(lf.clone()) {
+                match add_histograms(lf.clone(), self.histogrammer.show_progress) {
                     Ok(h) => {
                         self.histogrammer = h;
                     }
@@ -104,6 +104,8 @@ impl Processer {
                 if !self.cut_handler.cuts.is_empty() && ui.button("with Cuts").clicked() {
                     self.calculate_histograms_with_cuts();
                 }
+
+                ui.checkbox(&mut self.histogrammer.show_progress, "Show Progress").on_hover_text("Show progress of each histogram filling. Note: ~80% slower but provides info...");
             });
 
             ui.separator();

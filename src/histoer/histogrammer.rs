@@ -1,96 +1,98 @@
-use rfd::FileDialog;
-use serde_json; // or use serde_yaml for YAML serialization
-use std::fs::File;
-
-use polars::prelude::*;
-
 use super::histogram1d::Histogram;
 use super::histogram2d::Histogram2D;
-
 use crate::pane::Pane;
-
+use indicatif::ProgressBar;
+use indicatif::ProgressStyle;
+use polars::prelude::*;
+use rfd::FileDialog;
+use serde_json; // or use serde_yaml for YAML serialization
 use std::collections::HashMap;
+use std::fs::File;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Histogrammer {
     pub histograms1d: Vec<Histogram>,
     pub histograms2d: Vec<Histogram2D>,
-
-    // #[serde(skip)]
     pub tabs: HashMap<String, Vec<Pane>>,
-
-    // #[serde(skip)]
     pub tile_map: HashMap<egui_tiles::TileId, String>, // Stores tile_id to tab_name mapping
+    pub show_progress: bool,
 }
 
 impl Histogrammer {
-    // Creates a new instance of Histogrammer.
     pub fn new() -> Self {
         Self {
             histograms1d: Vec::new(),
             histograms2d: Vec::new(),
             tabs: HashMap::new(),
             tile_map: HashMap::new(),
+            show_progress: true,
         }
     }
 
-    // Adds a new 1D histogram to the histogram list.
     pub fn add_hist1d(&mut self, name: &str, bins: usize, range: (f64, f64)) {
         let hist: Histogram = Histogram::new(name, bins, range); // Create a new histogram.
         self.histograms1d.push(hist); // Store it in the vector.
     }
 
-    // Fills a 1D histogram with data from a polars dataframe/column.
     pub fn fill_hist1d(&mut self, name: &str, lf: &LazyFrame, column_name: &str) -> bool {
-        // find the histogram by name
         let hist: &mut Histogram = match self.histograms1d.iter_mut().find(|h| h.name == name) {
             Some(h) => h,
             None => return false, // Return false if the histogram doesn't exist.
         };
 
-        // Attempt to collect the LazyFrame into a DataFrame
         let df_result = lf
             .clone()
             .filter(col(column_name).neq(lit(-1e6))) // Filter out the -1e6 values.
             .select([col(column_name)])
             .collect();
 
-        // Handle the Result before proceeding
         match df_result {
             Ok(df) => {
-                // Now that we have a DataFrame, we can attempt to convert it to an ndarray
                 let ndarray_df_result = df.to_ndarray::<Float64Type>(IndexOrder::Fortran);
 
                 match ndarray_df_result {
                     Ok(ndarray_df) => {
-                        // You now have the ndarray and can proceed with your logic
                         let shape = ndarray_df.shape();
                         let rows = shape[0];
 
-                        // Iterating through the ndarray and filling the histogram
-                        for i in 0..rows {
-                            let value = ndarray_df[[i, 0]];
-                            hist.fill(value);
+                        if self.show_progress {
+                            let pb = ProgressBar::new(rows as u64);
+                            let style = ProgressStyle::default_bar()
+                                .template(&format!(
+                                    "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
+                                    name
+                                ))
+                                .expect("Failed to create progress style");
+                            pb.set_style(style.progress_chars("#>-"));
+
+                            for i in 0..rows {
+                                let value = ndarray_df[[i, 0]];
+                                hist.fill(value);
+                                pb.inc(1);
+                            }
+                            pb.finish_with_message("1D Histogram filling complete");
+                        } else {
+                            for i in 0..rows {
+                                let value = ndarray_df[[i, 0]];
+                                hist.fill(value);
+                            }
                         }
 
                         true
                     }
                     Err(e) => {
-                        // Handle the error, for example, log it or return an error
                         log::error!("Failed to convert DataFrame to ndarray: {}", e);
                         false
                     }
                 }
             }
             Err(e) => {
-                // Handle the error, for example, log it or return an error
                 log::error!("Failed to collect LazyFrame: {}", e);
                 false
             }
         }
     }
 
-    // Adds and fills a 1D histogram with data from a Polars LazyFrame.
     pub fn add_fill_hist1d(
         &mut self,
         name: &str,
@@ -103,7 +105,6 @@ impl Histogrammer {
         self.fill_hist1d(name, lf, column_name); // Fill it with data.
     }
 
-    // Adds a new 2D histogram to the histogram list.
     pub fn add_hist2d(
         &mut self,
         name: &str,
@@ -114,7 +115,6 @@ impl Histogrammer {
         self.histograms2d.push(hist); // Store it in the vector.
     }
 
-    // Fills a 2D histogram with x and y data.
     pub fn fill_hist2d(
         &mut self,
         name: &str,
@@ -122,13 +122,11 @@ impl Histogrammer {
         x_column_name: &str,
         y_column_name: &str,
     ) -> bool {
-        // find the histogram by name
         let hist: &mut Histogram2D = match self.histograms2d.iter_mut().find(|h| h.name == name) {
             Some(h) => h,
             None => return false, // Return false if the histogram doesn't exist.
         };
 
-        // Attempt to collect the LazyFrame into a DataFrame
         let df_result = lf
             .clone()
             .select([col(x_column_name), col(y_column_name)])
@@ -136,44 +134,55 @@ impl Histogrammer {
             .filter(col(y_column_name).neq(lit(-1e6)))
             .collect();
 
-        // Handle the Result before proceeding
         match df_result {
             Ok(df) => {
-                // Now that we have a DataFrame, we can attempt to convert it to an ndarray
                 let ndarray_df_result = df.to_ndarray::<Float64Type>(IndexOrder::Fortran);
 
                 match ndarray_df_result {
                     Ok(ndarray_df) => {
-                        // You now have the ndarray and can proceed with your logic
                         let shape = ndarray_df.shape();
                         let rows = shape[0];
 
-                        // Iterating through the ndarray rows and filling the 2D histogram
-                        for i in 0..rows {
-                            let x_value = ndarray_df[[i, 0]];
-                            let y_value = ndarray_df[[i, 1]];
+                        if self.show_progress {
+                            let pb = ProgressBar::new(rows as u64);
+                            let style = ProgressStyle::default_bar()
+                                .template(&format!(
+                                    "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
+                                    name
+                                ))
+                                .expect("Failed to create progress style");
+                            pb.set_style(style.progress_chars("#>-"));
 
-                            hist.fill(x_value, y_value);
+                            for i in 0..rows {
+                                let x_value = ndarray_df[[i, 0]];
+                                let y_value = ndarray_df[[i, 1]];
+                                hist.fill(x_value, y_value);
+                                pb.inc(1);
+                            }
+                            pb.finish_with_message("2D Histogram filling complete");
+                        } else {
+                            for i in 0..rows {
+                                let x_value = ndarray_df[[i, 0]];
+                                let y_value = ndarray_df[[i, 1]];
+                                hist.fill(x_value, y_value);
+                            }
                         }
 
                         true
                     }
                     Err(e) => {
-                        // Handle the error, for example, log it or return an error
                         log::error!("Failed to convert DataFrame to ndarray: {}", e);
                         false
                     }
                 }
             }
             Err(e) => {
-                // Handle the error, for example, log it or return an error
                 log::error!("Failed to collect LazyFrame: {}", e);
                 false
             }
         }
     }
 
-    // Adds and fills a 2D histogram with data from Polars LazyFrame columns.
     pub fn add_fill_hist2d(
         &mut self,
         name: &str,
@@ -252,7 +261,6 @@ impl Histogrammer {
         let mut panes = vec![];
 
         for hist in &self.histograms1d {
-            // panes.push(Pane::Histogram(hist.clone()));
             panes.push(Pane::Histogram(Box::new(hist.clone())));
         }
 
@@ -274,12 +282,9 @@ impl Histogrammer {
     }
 
     pub fn histogrammer_tree(&mut self) -> egui_tiles::Tree<Pane> {
-        // Initialize the egui_tiles::Tiles which will manage the Pane layout
         let mut tiles = egui_tiles::Tiles::default();
 
         let mut children = Vec::new();
-        // loop through the tabs and add them to the tiles
-        // for (_tab_name, panes) in &self.tabs {
         for (tab_name, panes) in &self.tabs {
             let tab_panes: Vec<_> = panes
                 .iter()
@@ -291,8 +296,6 @@ impl Histogrammer {
         }
 
         let root_tab = tiles.insert_tab_tile(children);
-
-        // Construct the tree with a meaningful title and the root_tab, associating it with the tiles
         egui_tiles::Tree::new("Histogrammer", root_tab, tiles)
     }
 }
