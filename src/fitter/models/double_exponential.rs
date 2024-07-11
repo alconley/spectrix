@@ -34,6 +34,7 @@ impl DoubleExponentialFitter {
     pub fn new(initial_b_guess: f64, initial_d_guess: f64) -> Self {
         let mut fit_line = EguiLine::new(egui::Color32::GREEN);
         fit_line.name = "Double Exponential Fit".to_string();
+        fit_line.width = 1.0;
 
         DoubleExponentialFitter {
             x_data: Vec::new(),

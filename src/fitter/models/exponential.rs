@@ -31,6 +31,7 @@ impl ExponentialFitter {
     pub fn new(initial_b_guess: f64) -> Self {
         let mut fit_line = EguiLine::new(egui::Color32::GREEN);
         fit_line.name = "Exponential Fit".to_string();
+        fit_line.width = 1.0;
 
         ExponentialFitter {
             x_data: Vec::new(),

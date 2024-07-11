@@ -115,6 +115,7 @@ impl Fitter {
 
                         fit_line.points.clone_from(line);
                         fit_line.name_in_legend = false;
+                        fit_line.width = 1.0;
                         self.decomposition_lines.push(fit_line);
                     }
                 }
@@ -129,6 +130,7 @@ impl Fitter {
                                 let mut line = EguiLine::new(egui::Color32::BLUE);
                                 line.name = "Composition".to_string();
                                 line.points = composition_points;
+                                line.width = 1.0;
                                 self.composition_line = line;
                             }
                         }
@@ -141,6 +143,7 @@ impl Fitter {
                                 let mut line = EguiLine::new(egui::Color32::BLUE);
                                 line.name = "Composition".to_string();
                                 line.points = composition_points;
+                                line.width = 1.0;
                                 self.composition_line = line;
                             }
                         }
@@ -155,6 +158,7 @@ impl Fitter {
                                 let mut line = EguiLine::new(egui::Color32::BLUE);
                                 line.name = "Composition".to_string();
                                 line.points = composition_points;
+                                line.width = 1.0;
                                 self.composition_line = line;
                             }
                         }

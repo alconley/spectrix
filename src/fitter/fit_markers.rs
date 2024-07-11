@@ -25,7 +25,7 @@ impl EguiFitMarkers {
         }
 
         let mut marker = EguiVerticalLine::new(x, egui::Color32::BLUE);
-
+        marker.width = 0.5;
         marker.name = format!("Region Marker (x={:.2})", x);
 
         self.region_markers.push(marker);
@@ -37,6 +37,7 @@ impl EguiFitMarkers {
     pub fn add_peak_marker(&mut self, x: f64) {
         let mut marker = EguiVerticalLine::new(x, egui::Color32::from_rgb(225, 0, 255));
 
+        marker.width = 0.5;
         marker.name = format!("Peak Marker (x={:.2})", x);
 
         self.peak_markers.push(marker);
@@ -47,6 +48,7 @@ impl EguiFitMarkers {
     pub fn add_background_marker(&mut self, x: f64) {
         let mut marker = EguiVerticalLine::new(x, egui::Color32::from_rgb(0, 200, 0));
 
+        marker.width = 0.5;
         marker.name = format!("Background Marker (x={:.2})", x);
 
         self.background_markers.push(marker);

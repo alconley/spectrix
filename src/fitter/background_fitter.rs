@@ -112,4 +112,21 @@ impl BackgroundFitter {
     pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
         self.fit_line.draw(plot_ui);
     }
+
+    pub fn subtract_background(&self, x_data: Vec<f64>, y_data: Vec<f64>) -> Vec<f64> {
+        if let Some(fit) = &self.result {
+            match fit {
+                FitResult::Polynomial(fitter) => fitter.subtract_background(x_data, y_data),
+                FitResult::Exponential(fitter) => fitter.subtract_background(x_data, y_data),
+                FitResult::DoubleExponential(fitter) => fitter.subtract_background(x_data, y_data),
+                _ => {
+                    log::error!("Gaussian background fitting not implemented");
+                    vec![0.0; x_data.len()]
+                }
+            }
+        } else {
+            log::error!("No fit result available for background subtraction");
+            vec![0.0; x_data.len()]
+        }
+    }
 }
