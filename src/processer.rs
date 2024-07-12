@@ -3,6 +3,7 @@ use super::histoer::histogram_script::add_histograms;
 use super::histoer::histogrammer::Histogrammer;
 use super::lazyframer::LazyFramer;
 use super::workspacer::Workspacer;
+use super::histoer::sps::HistogramScript;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Processer {
@@ -13,6 +14,7 @@ pub struct Processer {
     pub histogrammer: Histogrammer,
     #[serde(skip)]
     pub is_ready: bool,
+    pub histogram_script: HistogramScript,
 }
 
 impl Processer {
@@ -23,6 +25,7 @@ impl Processer {
             cut_handler: CutHandler::default(),
             histogrammer: Histogrammer::new(),
             is_ready: false,
+            histogram_script: HistogramScript::new(),
         }
     }
 
@@ -33,7 +36,7 @@ impl Processer {
     fn perform_histogrammer_from_lazyframe(&mut self) {
         if let Some(lazyframer) = &self.lazyframer {
             if let Some(lf) = &lazyframer.lazyframe {
-                match add_histograms(lf.clone(), self.histogrammer.show_progress) {
+                match self.histogram_script.add_histograms(lf.clone(), self.histogrammer.show_progress) {
                     Ok(h) => {
                         self.histogrammer = h;
                     }
@@ -71,8 +74,6 @@ impl Processer {
                 }
             }
         }
-
-        // self.perform_histogrammer_from_lazyframe();
     }
 
     pub fn save_current_lazyframe(&mut self) {
@@ -118,5 +119,7 @@ impl Processer {
         if let Some(lazyframer) = &mut self.lazyframer {
             lazyframer.ui(ui);
         }
+
+        self.histogram_script.ui(ui);
     }
 }

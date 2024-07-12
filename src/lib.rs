@@ -18,7 +18,6 @@ pub mod processer;
 pub mod workspacer;
 #[cfg(not(target_arch = "wasm32"))]
 pub use app::NATApp;
-
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pane;
 #[cfg(not(target_arch = "wasm32"))]

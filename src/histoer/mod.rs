@@ -5,3 +5,4 @@ pub mod histogram_script;
 pub mod histogrammer;
 pub mod peak_finder;
 pub mod plot_settings;
+pub mod sps;
