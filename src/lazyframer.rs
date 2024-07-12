@@ -64,8 +64,15 @@ impl LazyFramer {
             let mut df = lf.clone().collect()?;
 
             // Open a file in write mode at the specified output path
-            let file = File::create(output_path)
-                .map_err(|e| PolarsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            // polars 0.36
+            // let file = File::create(output_path)
+            //     .map_err(|e| PolarsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+
+            // Open a file in write mode at the specified output path
+            let file = File::create(output_path).map_err(|e| PolarsError::IO {
+                error: Arc::new(e),
+                msg: None,
+            })?;
 
             // Write the filtered DataFrame to a Parquet file
             ParquetWriter::new(file)

@@ -341,15 +341,20 @@ impl Histogram {
 
             // Extract the y data from the temp background fit
             if let Some(temp_background) = &self.fits.temp_background_fit {
-                // Get the x and y data between the min and max background markers
-                let (start_x, end_x) = (
-                    background_marker_positions[0],
-                    background_marker_positions[background_marker_positions.len() - 1],
-                );
+                // if there are region markers, use the data between them
+                let (start_x, end_x) = if region_marker_positions.len() == 2 {
+                    peaks_found_with_region = true;
+                    (region_marker_positions[0], region_marker_positions[1])
+                } else {
+                    peaks_found_with_background = true;
+                    (
+                        background_marker_positions[0],
+                        background_marker_positions[background_marker_positions.len() - 1],
+                    )
+                };
+
                 let x_data = self.get_bin_centers_between(start_x, end_x);
                 let y_data = self.get_bin_counts_between(start_x, end_x);
-
-                peaks_found_with_background = true;
 
                 // Put the data in the background fitter to subtract the background
                 temp_background.subtract_background(x_data, y_data)
@@ -496,8 +501,18 @@ impl Histogram {
     fn context_menu(&mut self, ui: &mut egui::Ui) {
         self.line.menu_button(ui);
         self.plot_settings.settings_ui(ui);
-        self.fits.fit_context_menu_ui(ui);
         self.keybinds_ui(ui);
+
+        self.fits.fit_context_menu_ui(ui);
+
+        // Add find peaks button
+        ui.separator();
+        ui.heading("Find Peaks");
+        if ui.button("Detect Peaks")
+            .on_hover_text("Takes the settings (adjust below) and finds peaks in the spectrum\nIf there are background markers, it will fit a background before it finds the peaks in between the min and max values. Likewise for region markers.\nKeybind: o").clicked() {
+            self.find_peaks();
+        }
+        self.plot_settings.find_peaks_settings.menu_button(ui);
 
         ui.separator();
         ui.heading("Rebin");
@@ -520,15 +535,6 @@ impl Histogram {
                 }
             }
         });
-
-        // Add find peaks button
-        ui.separator();
-        ui.heading("Find Peaks");
-        if ui.button("Detect Peaks")
-            .on_hover_text("Takes the settings (adjust below) and finds peaks in the spectrum\nIf there are background markers, it will fit a background before it finds the peaks in between the min and max values. Likewise for region markers.\nKeybind: o").clicked() {
-            self.find_peaks();
-        }
-        self.plot_settings.find_peaks_settings.menu_button(ui);
     }
 
     // Renders the histogram using egui_plot
