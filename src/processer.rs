@@ -1,9 +1,9 @@
 use super::cutter::cut_handler::CutHandler;
-use super::histoer::histogram_script::add_histograms;
+// use super::histoer::histogram_script::add_histograms;
+use super::histoer::histogram_scripter::HistogramScript;
 use super::histoer::histogrammer::Histogrammer;
 use super::lazyframer::LazyFramer;
 use super::workspacer::Workspacer;
-use super::histoer::sps::HistogramScript;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Processer {
@@ -36,7 +36,7 @@ impl Processer {
     fn perform_histogrammer_from_lazyframe(&mut self) {
         if let Some(lazyframer) = &self.lazyframer {
             if let Some(lf) = &lazyframer.lazyframe {
-                match self.histogram_script.add_histograms(lf.clone(), self.histogrammer.show_progress) {
+                match self.histogram_script.add_histograms(lf.clone()) {
                     Ok(h) => {
                         self.histogrammer = h;
                     }
@@ -105,8 +105,6 @@ impl Processer {
                 if !self.cut_handler.cuts.is_empty() && ui.button("with Cuts").clicked() {
                     self.calculate_histograms_with_cuts();
                 }
-
-                ui.checkbox(&mut self.histogrammer.show_progress, "Show Progress").on_hover_text("Show progress of each histogram filling. Note: ~80% slower but provides info...");
             });
 
             ui.separator();
@@ -119,7 +117,9 @@ impl Processer {
         if let Some(lazyframer) = &mut self.lazyframer {
             lazyframer.ui(ui);
         }
+    }
 
+    pub fn histogram_script_ui(&mut self, ui: &mut egui::Ui) {
         self.histogram_script.ui(ui);
     }
 }

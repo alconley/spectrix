@@ -25,7 +25,7 @@ impl Histogrammer {
             histograms2d: Vec::new(),
             tabs: HashMap::new(),
             tile_map: HashMap::new(),
-            show_progress: true,
+            show_progress: false,
         }
     }
 
