@@ -1,16 +1,16 @@
-use super::histogrammer::Histogrammer;
+use crate::histoer::histogrammer::Histogrammer;
 
 use polars::prelude::*;
 use std::f64::consts::PI;
 
 #[rustfmt::skip]
 #[allow(clippy::all)]
-pub fn add_histograms(lf: LazyFrame, show_progress: bool) -> Result<Histogrammer, PolarsError> {
+pub fn manual_add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
 
     let start = std::time::Instant::now();
 
     let mut h = Histogrammer::new();
-    h.show_progress = show_progress;
+    h.show_progress = true;
 
     // Declare all the lazyframes that will be used
     let lf = lf.with_columns(vec![
@@ -221,7 +221,7 @@ pub fn add_histograms(lf: LazyFrame, show_progress: bool) -> Result<Histogrammer
     */
     //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
 
-    // /*
+    /*
     // CeBrA plots
     // declare the gain matched energy columns, and time to scint left columns
 
@@ -339,7 +339,7 @@ pub fn add_histograms(lf: LazyFrame, show_progress: bool) -> Result<Histogrammer
     let cebra_panes = h.get_panes(cebra_panes_names);
     h.tabs.insert("CeBrA".to_string(), cebra_panes);
 
-    // */
+    */
 
     let duration = start.elapsed();
     println!("Time taken for histograms to be filled: {:?}", duration);

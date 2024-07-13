@@ -39,9 +39,12 @@ impl TreeBehavior {
             egui::Grid::new("behavior_ui")
                 .num_columns(2)
                 .show(ui, |ui| {
-                    // ui.label("All panes must have tabs:");
-                    // ui.checkbox(&mut self.simplification_options.all_panes_must_have_tabs, "");
-                    // ui.end_row();
+                    ui.label("All panes must have tabs:");
+                    ui.checkbox(
+                        &mut self.simplification_options.all_panes_must_have_tabs,
+                        "",
+                    );
+                    ui.end_row();
 
                     ui.label("Join nested containers:");
                     ui.checkbox(

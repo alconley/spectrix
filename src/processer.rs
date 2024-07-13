@@ -1,9 +1,9 @@
 use super::cutter::cut_handler::CutHandler;
 // use super::histoer::histogram_script::add_histograms;
-use super::histoer::histogram_scripter::HistogramScript;
 use super::histoer::histogrammer::Histogrammer;
 use super::lazyframer::LazyFramer;
 use super::workspacer::Workspacer;
+use crate::histogram_scripter::histogram_script::HistogramScript;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Processer {
@@ -13,7 +13,7 @@ pub struct Processer {
     pub cut_handler: CutHandler,
     pub histogrammer: Histogrammer,
     #[serde(skip)]
-    pub is_ready: bool,
+    pub is_tree_ready: bool,
     pub histogram_script: HistogramScript,
 }
 
@@ -24,9 +24,15 @@ impl Processer {
             lazyframer: None,
             cut_handler: CutHandler::default(),
             histogrammer: Histogrammer::new(),
-            is_ready: false,
+            is_tree_ready: false,
             histogram_script: HistogramScript::new(),
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.lazyframer = None;
+        self.histogrammer = Histogrammer::new();
+        self.is_tree_ready = false;
     }
 
     fn create_lazyframe(&mut self) {
@@ -55,7 +61,7 @@ impl Processer {
     pub fn calculate_histograms(&mut self) {
         self.create_lazyframe();
         self.perform_histogrammer_from_lazyframe();
-        self.is_ready = true;
+        self.is_tree_ready = true;
     }
 
     pub fn calculate_histograms_with_cuts(&mut self) {
@@ -66,7 +72,7 @@ impl Processer {
                     Ok(filtered_lf) => {
                         lazyframer.set_lazyframe(filtered_lf);
                         self.perform_histogrammer_from_lazyframe();
-                        self.is_ready = true;
+                        self.is_tree_ready = true;
                     }
                     Err(e) => {
                         log::error!("Failed to filter LazyFrame with cuts: {}", e);
