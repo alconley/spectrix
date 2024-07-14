@@ -1,34 +1,55 @@
-#[derive(Default, serde::Deserialize, serde::Serialize)]
+use crate::histoer::histogrammer::Histogrammer;
+
+#[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct GridConfig {
     pub name: String,
-    pub histograms: Vec<String>,
-    pub selected_histogram: String,
+    pub histogram_names: Vec<String>,
 }
 
 impl GridConfig {
-    pub fn ui(&mut self, ui: &mut egui::Ui, histo_keys: &[String]) {
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.group(|ui| {
             ui.horizontal(|ui| {
-                ui.label("Name:");
+                ui.label("Container Name:");
                 ui.text_edit_singleline(&mut self.name);
             });
 
             ui.separator();
 
-            ui.label("Histograms:");
-            for name in &self.histograms {
-                ui.label(name);
-            }
+            let mut to_remove: Option<usize> = None;
 
-            ui.separator();
+            egui::ScrollArea::horizontal()
+                .id_source(format!("{}-histogram_names-horizontal_scroll", self.name))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        for (index, name) in &mut self.histogram_names.iter_mut().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.label(name.clone());
 
-            egui::ComboBox::from_label("Histogram")
-                .selected_text(&self.selected_histogram)
-                .show_ui(ui, |ui| {
-                    for key in histo_keys {
-                        ui.selectable_value(&mut self.selected_histogram, key.clone(), key);
-                    }
+                                // Remove button
+                                if ui.button("X").clicked() {
+                                    to_remove = Some(index);
+                                }
+                            });
+                        }
+
+                        if let Some(index) = to_remove {
+                            self.histogram_names.remove(index);
+                        }
+                    });
                 });
         });
+    }
+
+    pub fn insert_grid_into_histogrammer(&self, histogrammer: &mut Histogrammer) {
+        let names = self
+            .histogram_names
+            .iter()
+            .map(|name| name.as_str())
+            .collect::<Vec<&str>>();
+
+        let panes = histogrammer.get_panes(names);
+
+        histogrammer.tabs.insert(self.name.to_string(), panes);
     }
 }

@@ -1,6 +1,7 @@
 use super::configure_auxillary_detectors::AuxillaryDetectors;
 use super::configure_histograms::{Histo1dConfig, Histo2dConfig, HistoConfig};
 use super::configure_lazyframes::{LazyFrameInfo, LazyFrames};
+use super::histogram_grid::GridConfig;
 use super::manual_histogram_script::manual_add_histograms;
 
 use crate::histoer::histogrammer::Histogrammer;
@@ -10,7 +11,7 @@ use polars::prelude::*;
 pub struct HistogramScript {
     pub lazyframe_info: LazyFrameInfo,
     pub histograms: Vec<HistoConfig>,
-
+    pub grids: Vec<GridConfig>,
     pub manual_histogram_script: bool,
 
     pub add_auxillary_detectors: bool,
@@ -24,6 +25,7 @@ impl HistogramScript {
         Self {
             lazyframe_info: LazyFrameInfo::default(),
             histograms: Vec::new(),
+            grids: Vec::new(),
             add_auxillary_detectors: false,
             auxillary_detectors: None,
             manual_histogram_script: false,
@@ -66,7 +68,15 @@ impl HistogramScript {
         self.histograms.push(HistoConfig::Histo2d(config));
     }
 
+    fn remove_histogram_from_grids(&mut self, hist_name: &str) {
+        for grid in &mut self.grids {
+            grid.histogram_names.retain(|name| name != hist_name);
+        }
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        let max_height = ui.min_rect().height();
+
         ui.checkbox(&mut self.manual_histogram_script, "Manual Histogram Script");
         if self.manual_histogram_script {
             ui.label("Manual Histogram Script Enabled");
@@ -113,25 +123,63 @@ impl HistogramScript {
 
             let mut to_remove: Option<usize> = None;
 
+            ui.heading("Histograms");
             egui::ScrollArea::vertical()
                 .id_source("HistogramScriptScrollArea")
+                .max_height(max_height * 0.7)
                 .show(ui, |ui| {
                     egui::Grid::new("Histogram Config")
                         .striped(true)
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                ui.label("Name                                        ");
+                                ui.label("Name                                             ");
                             });
                             ui.label("LazyFrame");
                             ui.label("Column");
                             ui.label("Bins");
                             ui.label("Range");
                             ui.label("");
+                            ui.label("Grids");
                             ui.label("");
                             ui.end_row();
                             for (i, config) in &mut self.histograms.iter_mut().enumerate() {
+                                let old_name = config.name();
                                 config.ui(ui, self.lazyframe_info.clone());
+                                let new_name = config.name();
+                                if old_name != new_name {
+                                    for grid in &mut self.grids {
+                                        for name in &mut grid.histogram_names {
+                                            if name == &old_name {
+                                                *name = new_name.clone();
+                                            }
+                                        }
+                                    }
+                                }
 
+                                ui.horizontal(|ui| {
+                                    egui::ComboBox::from_id_source(format!("{}-Grid Selection", i))
+                                        .selected_text("Grid Selection")
+                                        .show_ui(ui, |ui| {
+                                            for (j, grid) in self.grids.iter_mut().enumerate() {
+                                                let button_text = format!("{}", j);
+                                                let checked =
+                                                    grid.histogram_names.contains(&config.name());
+                                                if ui
+                                                    .selectable_label(checked, button_text)
+                                                    .clicked()
+                                                {
+                                                    if checked {
+                                                        grid.histogram_names
+                                                            .retain(|name| name != &config.name());
+                                                    } else {
+                                                        config.add_to_grid(grid);
+                                                    }
+                                                }
+                                            }
+                                        });
+                                });
+
+                                // Remove button
                                 if ui.button("X").clicked() {
                                     to_remove = Some(i);
                                 }
@@ -141,8 +189,39 @@ impl HistogramScript {
                 });
 
             if let Some(index) = to_remove {
-                self.histograms.remove(index);
+                let removed_hist = self.histograms.remove(index);
+                self.remove_histogram_from_grids(&removed_hist.name());
             }
+
+            ui.separator();
+
+            let mut grid_to_remove: Option<usize> = None;
+
+            ui.horizontal(|ui| {
+                ui.heading("Grids");
+                if ui.button("Add Grid").clicked() {
+                    self.grids.push(GridConfig::default());
+                }
+            });
+
+            egui::ScrollArea::vertical()
+                .id_source("HistogramGridScrollArea")
+                .max_height(max_height * 0.5)
+                .show(ui, |ui| {
+                    for (index, grid) in &mut self.grids.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("Grid {}", index));
+                            if ui.button("X").clicked() {
+                                grid_to_remove = Some(index);
+                            }
+                        });
+                        grid.ui(ui);
+                    }
+
+                    if let Some(index) = grid_to_remove {
+                        self.grids.remove(index);
+                    }
+                });
         }
     }
 
@@ -177,7 +256,7 @@ impl HistogramScript {
             // add auxillary detectors lfs to the lazyframes
             if self.add_auxillary_detectors {
                 if let Some(auxillary_detectors) = &self.auxillary_detectors {
-                    let aux_filtered_lfs = auxillary_detectors.time_filterd_lazyframes(lf.clone());
+                    let aux_filtered_lfs = auxillary_detectors.filterd_lazyframes(lf.clone());
                     for (name, lf) in aux_filtered_lfs {
                         lazyframes.lfs.insert(name, lf);
                     }
@@ -218,10 +297,25 @@ impl HistogramScript {
                 self.progress = (i as f32 + 1.0) / total_histograms;
             }
 
-            let hist_names = self.get_hist_names();
-            let pane_names: Vec<&str> = hist_names.iter().map(|s| s.as_str()).collect();
-            let panes = histogrammer.get_panes(pane_names);
-            histogrammer.tabs.insert("All".to_string(), panes);
+            // insert histograms into grids
+            for grid in &self.grids {
+                grid.insert_grid_into_histogrammer(&mut histogrammer);
+            }
+
+            // if a histogram is not in a grid, add it to its own tab
+            for hist in &self.histograms {
+                let name = hist.name();
+                if !self
+                    .grids
+                    .iter()
+                    .any(|grid| grid.histogram_names.contains(&name))
+                {
+                    let pane = histogrammer.get_pane(&name);
+                    if let Some(pane) = pane {
+                        histogrammer.tabs.insert(name, vec![pane]);
+                    }
+                }
+            }
 
             Ok(histogrammer)
         }

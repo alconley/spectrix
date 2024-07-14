@@ -51,7 +51,7 @@ impl AuxillaryDetectors {
     pub fn get_column_names(&self) -> Vec<String> {
         let mut columns = vec![];
         for cebra in &self.cebra {
-            columns.extend(cebra.columns());
+            columns.extend(cebra.column_names());
         }
 
         columns
@@ -60,7 +60,10 @@ impl AuxillaryDetectors {
     pub fn get_lf_names(&self) -> Vec<String> {
         let mut lfs = vec![];
         for cebra in &self.cebra {
-            lfs.push(format!("Cebra{}TimeCut", cebra.number));
+            let names = cebra.lazyframe_names();
+            for name in names {
+                lfs.push(name);
+            }
         }
 
         lfs
@@ -75,12 +78,16 @@ impl AuxillaryDetectors {
         lazyframe
     }
 
-    pub fn time_filterd_lazyframes(&self, lazyframe: LazyFrame) -> HashMap<String, LazyFrame> {
+    pub fn filterd_lazyframes(&self, lazyframe: LazyFrame) -> HashMap<String, LazyFrame> {
         let mut lfs = HashMap::new();
         for cebra in &self.cebra {
             lfs.insert(
                 format!("Cebra{}TimeCut", cebra.number),
                 cebra.time_filterd_lazyframe(lazyframe.clone()),
+            );
+            lfs.insert(
+                format!("Cebra{}ValidEnergy", cebra.number),
+                cebra.valid_energy_lazyframe(lazyframe.clone()),
             );
         }
 
@@ -180,7 +187,7 @@ impl CeBr3 {
         self.timecuts.ui(ui);
     }
 
-    pub fn columns(&self) -> Vec<String> {
+    pub fn column_names(&self) -> Vec<String> {
         vec![
             format!("Cebra{}Energy", self.number),
             format!("Cebra{}Short", self.number),
@@ -189,6 +196,13 @@ impl CeBr3 {
             format!("Cebra{}Time_toScint_Shifted", self.number),
             format!("Cebra{}EnergyGainMatched", self.number),
             format!("Cebra{}EnergyCalibrated", self.number),
+        ]
+    }
+
+    pub fn lazyframe_names(&self) -> Vec<String> {
+        vec![
+            format!("Cebra{}TimeCut", self.number),
+            format!("Cebra{}ValidEnergy", self.number),
         ]
     }
 
@@ -233,6 +247,16 @@ impl CeBr3 {
             .filter(col(&column).lt_eq(lit(self.timecuts.max)));
 
         cebr3_time_filtered_lf
+    }
+
+    #[allow(clippy::all)]
+    pub fn valid_energy_lazyframe(&self, lazyframe: LazyFrame) -> LazyFrame {
+        // time cut column name
+        let column = format!("Cebra{}Energy", self.number);
+
+        let filtered_lf = lazyframe.clone().filter(col(&column).gt(lit(0.0)));
+
+        filtered_lf
     }
 
     #[allow(clippy::all)]

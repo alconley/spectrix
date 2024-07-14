@@ -112,13 +112,12 @@ impl eframe::App for NATApp {
                     });
             });
 
-        egui::SidePanel::right("nat_right_panel").show_animated(
-            ctx,
-            self.right_side_panel_open,
-            |ui| {
+        egui::SidePanel::right("nat_right_panel")
+            .max_width(750.0)
+            .resizable(false)
+            .show_animated(ctx, self.right_side_panel_open, |ui| {
                 self.processer.histogram_script_ui(ui);
-            },
-        );
+            });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             self.tree.ui(&mut self.behavior, ui);
