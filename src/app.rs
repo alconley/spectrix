@@ -113,7 +113,7 @@ impl eframe::App for NATApp {
             });
 
         egui::SidePanel::right("nat_right_panel")
-            .max_width(750.0)
+            .max_width(800.0)
             .resizable(false)
             .show_animated(ctx, self.right_side_panel_open, |ui| {
                 self.processer.histogram_script_ui(ui);

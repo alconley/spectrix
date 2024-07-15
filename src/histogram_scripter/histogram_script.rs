@@ -150,7 +150,7 @@ impl HistogramScript {
                                     for grid in &mut self.grids {
                                         for name in &mut grid.histogram_names {
                                             if name == &old_name {
-                                                *name = new_name.clone();
+                                                name.clone_from(&new_name)
                                             }
                                         }
                                     }
@@ -269,27 +269,31 @@ impl HistogramScript {
             for (i, hist) in self.histograms.iter_mut().enumerate() {
                 match hist {
                     HistoConfig::Histo1d(config) => {
-                        if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
-                            let name = config.name.clone();
-                            let column = config.column.clone();
-                            let bins = config.bins;
-                            let range = config.range;
-                            histogrammer.add_fill_hist1d(&name, lf, &column, bins, range);
-                        } else {
-                            log::error!("LazyFrame not found: {}", config.lazyframe);
+                        if config.calculate {
+                            if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
+                                let name = config.name.clone();
+                                let column = config.column.clone();
+                                let bins = config.bins;
+                                let range = config.range;
+                                histogrammer.add_fill_hist1d(&name, lf, &column, bins, range);
+                            } else {
+                                log::error!("LazyFrame not found: {}", config.lazyframe);
+                            }
                         }
                     }
                     HistoConfig::Histo2d(config) => {
-                        if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
-                            let name = config.name.clone();
-                            let x_column = config.x_column.clone();
-                            let y_column = config.y_column.clone();
-                            let bins = config.bins;
-                            let range = config.range;
-                            histogrammer
-                                .add_fill_hist2d(&name, lf, &x_column, &y_column, bins, range);
-                        } else {
-                            log::error!("LazyFrame not found: {}", config.lazyframe);
+                        if config.calculate {
+                            if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
+                                let name = config.name.clone();
+                                let x_column = config.x_column.clone();
+                                let y_column = config.y_column.clone();
+                                let bins = config.bins;
+                                let range = config.range;
+                                histogrammer
+                                    .add_fill_hist2d(&name, lf, &x_column, &y_column, bins, range);
+                            } else {
+                                log::error!("LazyFrame not found: {}", config.lazyframe);
+                            }
                         }
                     }
                 }
