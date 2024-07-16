@@ -11,6 +11,8 @@ mod fitter;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod histoer;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod histogram_scripter;
+#[cfg(not(target_arch = "wasm32"))]
 mod lazyframer;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod processer;
@@ -18,7 +20,6 @@ pub mod processer;
 pub mod workspacer;
 #[cfg(not(target_arch = "wasm32"))]
 pub use app::NATApp;
-
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pane;
 #[cfg(not(target_arch = "wasm32"))]

@@ -1,8 +1,9 @@
 use super::cutter::cut_handler::CutHandler;
-use super::histoer::histogram_script::add_histograms;
+// use super::histoer::histogram_script::add_histograms;
 use super::histoer::histogrammer::Histogrammer;
 use super::lazyframer::LazyFramer;
 use super::workspacer::Workspacer;
+use crate::histogram_scripter::histogram_script::HistogramScript;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Processer {
@@ -12,7 +13,8 @@ pub struct Processer {
     pub cut_handler: CutHandler,
     pub histogrammer: Histogrammer,
     #[serde(skip)]
-    pub is_ready: bool,
+    pub is_tree_ready: bool,
+    pub histogram_script: HistogramScript,
 }
 
 impl Processer {
@@ -22,8 +24,15 @@ impl Processer {
             lazyframer: None,
             cut_handler: CutHandler::default(),
             histogrammer: Histogrammer::new(),
-            is_ready: false,
+            is_tree_ready: false,
+            histogram_script: HistogramScript::new(),
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.lazyframer = None;
+        self.histogrammer = Histogrammer::new();
+        self.is_tree_ready = false;
     }
 
     fn create_lazyframe(&mut self) {
@@ -33,7 +42,7 @@ impl Processer {
     fn perform_histogrammer_from_lazyframe(&mut self) {
         if let Some(lazyframer) = &self.lazyframer {
             if let Some(lf) = &lazyframer.lazyframe {
-                match add_histograms(lf.clone(), self.histogrammer.show_progress) {
+                match self.histogram_script.add_histograms(lf.clone()) {
                     Ok(h) => {
                         self.histogrammer = h;
                     }
@@ -52,7 +61,7 @@ impl Processer {
     pub fn calculate_histograms(&mut self) {
         self.create_lazyframe();
         self.perform_histogrammer_from_lazyframe();
-        self.is_ready = true;
+        self.is_tree_ready = true;
     }
 
     pub fn calculate_histograms_with_cuts(&mut self) {
@@ -63,7 +72,7 @@ impl Processer {
                     Ok(filtered_lf) => {
                         lazyframer.set_lazyframe(filtered_lf);
                         self.perform_histogrammer_from_lazyframe();
-                        self.is_ready = true;
+                        self.is_tree_ready = true;
                     }
                     Err(e) => {
                         log::error!("Failed to filter LazyFrame with cuts: {}", e);
@@ -71,8 +80,6 @@ impl Processer {
                 }
             }
         }
-
-        // self.perform_histogrammer_from_lazyframe();
     }
 
     pub fn save_current_lazyframe(&mut self) {
@@ -104,8 +111,6 @@ impl Processer {
                 if !self.cut_handler.cuts.is_empty() && ui.button("with Cuts").clicked() {
                     self.calculate_histograms_with_cuts();
                 }
-
-                ui.checkbox(&mut self.histogrammer.show_progress, "Show Progress").on_hover_text("Show progress of each histogram filling. Note: ~80% slower but provides info...");
             });
 
             ui.separator();
@@ -118,5 +123,9 @@ impl Processer {
         if let Some(lazyframer) = &mut self.lazyframer {
             lazyframer.ui(ui);
         }
+    }
+
+    pub fn histogram_script_ui(&mut self, ui: &mut egui::Ui) {
+        self.histogram_script.ui(ui);
     }
 }

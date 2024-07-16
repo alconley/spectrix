@@ -8,7 +8,8 @@ pub struct NATApp {
     tree: egui_tiles::Tree<Pane>,
     processer: Processer,
     behavior: TreeBehavior,
-    side_panel_open: bool,
+    left_side_panel_open: bool,
+    right_side_panel_open: bool,
 }
 
 impl Default for NATApp {
@@ -19,7 +20,8 @@ impl Default for NATApp {
             tree,
             processer: Processer::new(),
             behavior: Default::default(),
-            side_panel_open: true,
+            left_side_panel_open: true,
+            right_side_panel_open: true,
         }
     }
 }
@@ -52,20 +54,23 @@ impl eframe::App for NATApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("nat_top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                ui.checkbox(&mut self.side_panel_open, "Side Panel");
+                ui.label("Show: ");
+                ui.checkbox(&mut self.left_side_panel_open, "Info Panel");
+                ui.checkbox(&mut self.right_side_panel_open, "Histogram Script");
             });
         });
 
         egui::SidePanel::left("nat_left_panel")
             // .max_width(200.0)
-            .show_animated(ctx, self.side_panel_open, |ui| {
+            .show_animated(ctx, self.left_side_panel_open, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading("NAT");
 
                     egui::global_dark_light_mode_switch(ui);
 
                     if ui.button("Reset").clicked() {
-                        *self = Default::default();
+                        self.tree = egui_tiles::Tree::empty("Empty tree");
+                        self.processer.reset();
                     }
                 });
 
@@ -73,10 +78,10 @@ impl eframe::App for NATApp {
 
                 self.processer.ui(ui);
 
-                // check to see if processer.is_ready -> get the tree from the histogrammer
-                if self.processer.is_ready {
+                // check to see if processer.is_tree_ready -> get the tree from the histogrammer
+                if self.processer.is_tree_ready {
                     self.add_histograms_to_tree_from_processer();
-                    self.processer.is_ready = false;
+                    self.processer.is_tree_ready = false;
                 }
 
                 egui::ScrollArea::vertical()
@@ -105,6 +110,13 @@ impl eframe::App for NATApp {
                             tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
                         }
                     });
+            });
+
+        egui::SidePanel::right("nat_right_panel")
+            .max_width(800.0)
+            .resizable(false)
+            .show_animated(ctx, self.right_side_panel_open, |ui| {
+                self.processer.histogram_script_ui(ui);
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
