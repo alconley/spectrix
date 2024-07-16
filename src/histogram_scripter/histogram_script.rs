@@ -1,7 +1,7 @@
 use super::configure_auxillary_detectors::AuxillaryDetectors;
-use super::configure_histograms::{Histo1dConfig, Histo2dConfig, HistoConfig};
 use super::configure_lazyframes::{LazyFrameInfo, LazyFrames};
 use super::histogram_grid::GridConfig;
+use super::histogram_ui_elements::{Histo1dConfig, Histo2dConfig, HistoConfig};
 use super::manual_histogram_script::manual_add_histograms;
 
 use crate::histoer::histogrammer::Histogrammer;
@@ -126,7 +126,7 @@ impl HistogramScript {
             ui.heading("Histograms");
             egui::ScrollArea::vertical()
                 .id_source("HistogramScriptScrollArea")
-                .max_height(max_height * 0.7)
+                .max_height(max_height * 0.6)
                 .show(ui, |ui| {
                     egui::Grid::new("Histogram Config")
                         .striped(true)

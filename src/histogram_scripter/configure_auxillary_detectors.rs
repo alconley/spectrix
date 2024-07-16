@@ -1,7 +1,7 @@
 use polars::prelude::*;
 use std::collections::HashMap;
 
-use super::configure_histograms::{Histo1dConfig, Histo2dConfig, HistoConfig};
+use super::histogram_ui_elements::{Histo1dConfig, Histo2dConfig, HistoConfig};
 
 // This with be an example with CeBrA
 #[derive(Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -23,16 +23,14 @@ impl AuxillaryDetectors {
             egui::Grid::new("cebra_grid").striped(true).show(ui, |ui| {
                 ui.label("Number");
                 ui.label("Gain Match").on_hover_text("y = a*x^2 + b*x + c");
-                ui.label("Energy Calibration")
-                    .on_hover_text("y = a*x^2 + b*x + c");
+                ui.label("Energy Calibration").on_hover_text(
+                    "y = a*x^2 + b*x + c. They values are based of the gain matched energy.",
+                );
                 ui.label("Time Cuts").on_hover_text("min, max, centroid");
                 ui.end_row();
 
                 for (index, cebra) in self.cebra.iter_mut().enumerate() {
-                    ui.label(cebra.number.to_string());
-                    cebra.gain_match.ui(ui);
-                    cebra.energy_calibration.ui(ui);
-                    cebra.timecuts.ui(ui);
+                    cebra.ui(ui);
 
                     if ui.button("X").clicked() {
                         to_remove = Some(index);
@@ -182,6 +180,12 @@ impl CeBr3 {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        // drag value for the number
+        ui.add(
+            egui::DragValue::new(&mut self.number)
+                .speed(1.0)
+                .range(0..=8),
+        );
         self.gain_match.ui(ui);
         self.energy_calibration.ui(ui);
         self.timecuts.ui(ui);
