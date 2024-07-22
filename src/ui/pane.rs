@@ -1,5 +1,5 @@
-use super::histoer::histogram1d::Histogram;
-use super::histoer::histogram2d::Histogram2D;
+use crate::histoer::histogram1d::Histogram;
+use crate::histoer::histogram2d::Histogram2D;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub enum Pane {

@@ -1,6 +1,6 @@
 use super::histogram1d::Histogram;
 use super::histogram2d::Histogram2D;
-use crate::pane::Pane;
+use crate::ui::pane::Pane;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use polars::prelude::*;

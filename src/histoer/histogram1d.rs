@@ -15,6 +15,7 @@ pub struct PlotSettings {
     markers: EguiFitMarkers,
     rebin_factor: usize,
     find_peaks_settings: PeakFindingSettings,
+    // scaling_factor: f64,
 }
 impl Default for PlotSettings {
     fn default() -> Self {
@@ -25,6 +26,7 @@ impl Default for PlotSettings {
             markers: EguiFitMarkers::new(),
             rebin_factor: 1,
             find_peaks_settings: PeakFindingSettings::default(),
+            // scaling_factor: 1.0,
         }
     }
 }
@@ -33,6 +35,13 @@ impl PlotSettings {
         self.egui_settings.menu_button(ui);
         ui.checkbox(&mut self.stats_info, "Show Statistics");
         self.markers.menu_button(ui);
+
+        // ui.add(
+        //     egui::DragValue::new(&mut self.scaling_factor)
+        //         .speed(1.0)
+        //         .range(0.0..=f64::INFINITY)
+        //         .prefix("Scale Factor: "),
+        // );
     }
 
     fn interactive_response(&mut self, response: &egui_plot::PlotResponse<()>) {
@@ -115,6 +124,8 @@ impl Histogram {
 
     // Convert histogram bins to line points
     fn update_line_points(&mut self) {
+        // let scale = self.plot_settings.scaling_factor;
+        let scale = 1.0;
         self.line.points = self
             .bins
             .iter()
@@ -122,7 +133,7 @@ impl Histogram {
             .flat_map(|(index, &count)| {
                 let start = self.range.0 + index as f64 * self.bin_width;
                 let end = start + self.bin_width;
-                let y_value = count as f64;
+                let y_value = count as f64 * scale; // Apply scaling factor
                 vec![[start, y_value], [end, y_value]]
             })
             .collect();
@@ -507,7 +518,7 @@ impl Histogram {
 
         // Add find peaks button
         ui.separator();
-        ui.heading("Find Peaks");
+        ui.heading("Peak Finder");
         if ui.button("Detect Peaks")
             .on_hover_text("Takes the settings (adjust below) and finds peaks in the spectrum\nIf there are background markers, it will fit a background before it finds the peaks in between the min and max values. Likewise for region markers.\nKeybind: o").clicked() {
             self.find_peaks();

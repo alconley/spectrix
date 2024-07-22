@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use nat::NATApp;
+use nat::ui::NATApp;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {

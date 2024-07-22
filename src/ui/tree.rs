@@ -1,4 +1,4 @@
-use crate::pane::Pane;
+use super::pane::Pane;
 // use egui_tiles::{Tile, TileId, Tiles};
 use egui_tiles::Tile;
 

@@ -1,8 +1,7 @@
-use super::cutter::cut_handler::CutHandler;
-// use super::histoer::histogram_script::add_histograms;
-use super::histoer::histogrammer::Histogrammer;
 use super::lazyframer::LazyFramer;
 use super::workspacer::Workspacer;
+use crate::cutter::cut_handler::CutHandler;
+use crate::histoer::histogrammer::Histogrammer;
 use crate::histogram_scripter::histogram_script::HistogramScript;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
