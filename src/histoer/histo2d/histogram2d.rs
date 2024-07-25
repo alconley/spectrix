@@ -11,6 +11,7 @@ pub struct Histogram2D {
     pub range: Range,
     pub plot_settings: PlotSettings,
     pub image: EguiImage,
+    pub backup_bins: Option<Bins>,
 }
 
 impl Histogram2D {
@@ -43,6 +44,7 @@ impl Histogram2D {
                 [range.0 .0, range.0 .1],
                 [range.1 .0, range.1 .1],
             ),
+            backup_bins: None,
         }
     }
 
@@ -125,12 +127,6 @@ impl Histogram2D {
         self.image.texture = None;
         let color_image = self.data_2_image();
         self.image.get_texture(ui, color_image);
-    }
-
-    // Context menu for the plot (when you right-click on the plot)
-    fn context_menu(&mut self, ui: &mut egui::Ui) {
-        self.image.menu_button(ui);
-        self.plot_settings.settings_ui(ui, self.bins.max_count);
     }
 
     // Draw the histogram on the plot

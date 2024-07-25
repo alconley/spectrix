@@ -14,6 +14,8 @@ pub struct PlotSettings {
     pub colormap: ColorMap,
     pub colormap_options: ColormapOptions,
     pub projections: Projections,
+    pub rebin_x_factor: usize,
+    pub rebin_y_factor: usize,
     #[serde(skip)]
     pub recalculate_image: bool,
 }
@@ -27,6 +29,8 @@ impl Default for PlotSettings {
             colormap: ColorMap::default(),
             colormap_options: ColormapOptions::default(),
             projections: Projections::new(),
+            rebin_x_factor: 1,
+            rebin_y_factor: 1,
             recalculate_image: false,
         }
     }

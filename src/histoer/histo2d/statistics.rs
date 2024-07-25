@@ -2,7 +2,7 @@ use super::histogram2d::Histogram2D;
 
 impl Histogram2D {
     // Calculate statistics for a given range (Integral, Mean X, Stdev X, Mean Y, Stdev Y)
-    pub fn stats(
+    pub fn get_statistics(
         &self,
         start_x: f64,
         end_x: f64,
@@ -100,7 +100,7 @@ impl Histogram2D {
         let plot_min_y = plot_ui.plot_bounds().min()[1];
         let plot_max_y = plot_ui.plot_bounds().max()[1];
 
-        let stats = self.stats(plot_min_x, plot_max_x, plot_min_y, plot_max_y);
+        let stats = self.get_statistics(plot_min_x, plot_max_x, plot_min_y, plot_max_y);
 
         let stats_entries = [
             format!("Integral: {}", stats.0),

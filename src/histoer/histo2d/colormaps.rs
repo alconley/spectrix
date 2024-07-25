@@ -17,6 +17,7 @@ pub struct ColormapOptions {
     log_norm: bool,
     reverse: bool,
     custom_display_range: bool,
+    remove: bool,
     display_min: u64,
     display_max: u64,
 }
@@ -27,6 +28,7 @@ impl Default for ColormapOptions {
             log_norm: true,
             reverse: false,
             custom_display_range: false,
+            remove: false,
             display_min: 0,
             display_max: u64::MAX,
         }
@@ -68,7 +70,7 @@ impl ColormapOptions {
                         egui::widgets::DragValue::new(&mut self.display_min)
                             .speed(1)
                             .prefix("Min:")
-                            .range(min_z_range..=max_z_range),
+                            .range(min_z_range..=self.display_max),
                     )
                     .changed()
                 {
@@ -86,6 +88,14 @@ impl ColormapOptions {
                     *recalculate_image = true;
                 };
             });
+
+            if ui
+                .checkbox(&mut self.remove, "Remove")
+                .on_hover_text("Remove bins below/above the display range")
+                .changed()
+            {
+                *recalculate_image = true;
+            };
         }
     }
 }
@@ -160,6 +170,18 @@ impl ColorMap {
         } else {
             (min, max)
         };
+
+        if options.custom_display_range {
+            if options.remove && value < display_min {
+                // Recolor values below the display range
+                return egui::Color32::from_rgba_unmultiplied(0, 0, 0, 0);
+            }
+
+            if options.remove && value > display_max {
+                // Recolor values above the display range
+                return egui::Color32::from_rgba_unmultiplied(255, 255, 255, 255);
+            }
+        }
 
         // Reverse RGB values while keeping scalar values the same
         let color_data = if options.reverse {

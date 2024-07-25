@@ -112,6 +112,7 @@ Keybinds (cursor must be in the plot):
 - X and Y Projections
 - Different Colormaps with that can be reversed, log norm, and adjustable Z range
 - Easy to draw cut/gates
+- Rebinning
 
 ### Cutting/Gating Data
 
@@ -142,10 +143,6 @@ Another useful feature of the 2D histogram is the ability to project data along 
 3. **View and Use the Projection**: The projection will generate a 1D histogram based on the selected range. This 1D histogram can be used for further analysis, such as fitting peaks.
 
 ![projection example](assets/projection_example.gif)
-
-#### Future Goals for 2D histograms
-
-- Rebinning
 
 ## Future Features
 
