@@ -110,7 +110,7 @@ Keybinds (cursor must be in the plot):
 
 - Very Interactive UI
 - X and Y Projections
-- Different Colormaps
+- Different Colormaps with that can be reversed, log norm, and adjustable Z range
 - Easy to draw cut/gates
 
 ### Cutting/Gating Data
@@ -144,8 +144,6 @@ Another useful feature of the 2D histogram is the ability to project data along 
 ![projection example](assets/projection_example.gif)
 
 #### Future Goals for 2D histograms
-
-- Customizable min/max z value on the colormap
 
 - Rebinning
 
