@@ -62,12 +62,13 @@ impl ColormapOptions {
         if self.custom_display_range {
             ui.horizontal(|ui| {
                 ui.label("Z ");
+                let min_z_range = if self.log_norm { 1 } else { 0 };
                 if ui
                     .add(
                         egui::widgets::DragValue::new(&mut self.display_min)
                             .speed(1)
                             .prefix("Min:")
-                            .range(0..=max_z_range),
+                            .range(min_z_range..=max_z_range),
                     )
                     .changed()
                 {
@@ -78,7 +79,7 @@ impl ColormapOptions {
                         egui::widgets::DragValue::new(&mut self.display_max)
                             .speed(1)
                             .prefix("Max:")
-                            .range(0..=max_z_range),
+                            .range(min_z_range..=max_z_range),
                     )
                     .changed()
                 {
@@ -154,14 +155,11 @@ impl ColorMap {
         }
 
         // Handle display range options
-        if options.custom_display_range {
-            if value < options.display_min {
-                return egui::Color32::from_rgba_unmultiplied(0, 0, 0, 0);
-            }
-            if value > options.display_max {
-                return egui::Color32::from_rgba_unmultiplied(0, 0, 0, 0);
-            }
-        }
+        let (display_min, display_max) = if options.custom_display_range {
+            (options.display_min, options.display_max)
+        } else {
+            (min, max)
+        };
 
         // Reverse RGB values while keeping scalar values the same
         let color_data = if options.reverse {
@@ -182,10 +180,10 @@ impl ColorMap {
         };
 
         // Convert min and max to f64 for calculations
-        let (min_f64, max_f64) = (min as f64, max as f64);
+        let (min_f64, max_f64) = (display_min as f64, display_max as f64);
 
         // Handle case where min == max to avoid division by zero
-        let normalized: f64 = if max > min {
+        let normalized: f64 = if max_f64 > min_f64 {
             let value_f64 = value as f64;
             if options.log_norm {
                 // Use logarithmic scale
