@@ -1,5 +1,5 @@
-use super::histogram1d::Histogram;
-use super::histogram2d::Histogram2D;
+use super::histo1d::histogram1d::Histogram;
+use super::histo2d::histogram2d::Histogram2D;
 use crate::ui::pane::Pane;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;

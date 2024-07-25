@@ -1,6 +1,3 @@
-pub mod colormaps;
-pub mod histogram1d;
-pub mod histogram2d;
+pub mod histo1d;
+pub mod histo2d;
 pub mod histogrammer;
-pub mod peak_finder;
-pub mod plot_settings;

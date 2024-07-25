@@ -2,7 +2,7 @@ use crate::egui_plot_stuff::egui_vertical_line::EguiVerticalLine;
 use egui_plot::{PlotPoint, PlotUi};
 
 #[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EguiFitMarkers {
+pub struct FitMarkers {
     pub region_markers: Vec<EguiVerticalLine>,
     pub peak_markers: Vec<EguiVerticalLine>,
     pub background_markers: Vec<EguiVerticalLine>,
@@ -14,7 +14,7 @@ pub struct EguiFitMarkers {
     pub manual_marker_position: f64,
 }
 
-impl EguiFitMarkers {
+impl FitMarkers {
     pub fn new() -> Self {
         Self::default()
     }
@@ -144,35 +144,6 @@ impl EguiFitMarkers {
 
         for marker in &mut self.peak_markers {
             marker.draw(plot_ui);
-        }
-    }
-
-    pub fn interactive_markers(&mut self, ui: &mut egui::Ui) {
-        if let Some(cursor_position) = self.cursor_position {
-            if ui.input(|i| i.key_pressed(egui::Key::P)) {
-                self.add_peak_marker(cursor_position.x);
-            }
-
-            if ui.input(|i| i.key_pressed(egui::Key::B)) {
-                self.add_background_marker(cursor_position.x);
-            }
-
-            if ui.input(|i| i.key_pressed(egui::Key::R)) {
-                if self.region_markers.len() >= 2 {
-                    self.clear_region_markers();
-                }
-                self.add_region_marker(cursor_position.x);
-            }
-
-            if ui.input(|i| i.key_pressed(egui::Key::Minus)) {
-                self.delete_closest_marker();
-            }
-
-            if ui.input(|i| i.key_pressed(egui::Key::Delete)) {
-                self.clear_background_markers();
-                self.clear_peak_markers();
-                self.clear_region_markers();
-            }
         }
     }
 

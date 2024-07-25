@@ -1,4 +1,4 @@
-#[derive(PartialEq, Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(PartialEq, Debug, Copy, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub enum ColorMap {
     #[default]
     Viridis,
@@ -12,38 +12,118 @@ pub enum ColorMap {
     ExtendedKindlmann,
 }
 
+#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ColormapOptions {
+    log_norm: bool,
+    reverse: bool,
+    custom_display_range: bool,
+    display_min: u64,
+    display_max: u64,
+}
+
+impl Default for ColormapOptions {
+    fn default() -> Self {
+        ColormapOptions {
+            log_norm: true,
+            reverse: false,
+            custom_display_range: false,
+            display_min: 0,
+            display_max: u64::MAX,
+        }
+    }
+}
+
+impl ColormapOptions {
+    pub fn ui(&mut self, ui: &mut egui::Ui, recalculate_image: &mut bool, max_z_range: u64) {
+        if ui
+            .checkbox(&mut self.log_norm, "Log Z")
+            .on_hover_text("Log the Z values. 0 bins will become transparent")
+            .changed()
+        {
+            *recalculate_image = true;
+        };
+        if ui
+            .checkbox(&mut self.reverse, "Reverse")
+            .on_hover_text("Reverse the color map intensity values")
+            .changed()
+        {
+            *recalculate_image = true;
+        };
+        if ui
+            .checkbox(&mut self.custom_display_range, "Custom Z Range")
+            .on_hover_text(
+                "Strictly for visualization purposes. Projections will not be updated...",
+            )
+            .changed()
+        {
+            *recalculate_image = true;
+        };
+
+        if self.custom_display_range {
+            ui.horizontal(|ui| {
+                ui.label("Z ");
+                if ui
+                    .add(
+                        egui::widgets::DragValue::new(&mut self.display_min)
+                            .speed(1)
+                            .prefix("Min:")
+                            .range(0..=max_z_range),
+                    )
+                    .changed()
+                {
+                    *recalculate_image = true;
+                };
+                if ui
+                    .add(
+                        egui::widgets::DragValue::new(&mut self.display_max)
+                            .speed(1)
+                            .prefix("Max:")
+                            .range(0..=max_z_range),
+                    )
+                    .changed()
+                {
+                    *recalculate_image = true;
+                };
+            });
+        }
+    }
+}
+
 impl ColorMap {
     pub fn color(
         &self,
-        count: u32,
-        min_count: u32,
-        max_count: u32,
-        log_norm: bool,
+        count: u64,
+        min_count: u64,
+        max_count: u64,
+        options: ColormapOptions,
     ) -> egui::Color32 {
         match self {
-            ColorMap::Viridis => Self::colormap(viridis(), count, min_count, max_count, log_norm),
-            ColorMap::Fast => Self::colormap(fast(), count, min_count, max_count, log_norm),
+            ColorMap::Viridis => Self::colormap(viridis(), count, min_count, max_count, options),
+            ColorMap::Fast => Self::colormap(fast(), count, min_count, max_count, options),
             ColorMap::SmoothCoolWarm => {
-                Self::colormap(smooth_cool_warm(), count, min_count, max_count, log_norm)
+                Self::colormap(smooth_cool_warm(), count, min_count, max_count, options)
             }
             ColorMap::BentCoolWarm => {
-                Self::colormap(bent_cool_warm(), count, min_count, max_count, log_norm)
+                Self::colormap(bent_cool_warm(), count, min_count, max_count, options)
             }
-            ColorMap::Plasma => Self::colormap(plasma(), count, min_count, max_count, log_norm),
+            ColorMap::Plasma => Self::colormap(plasma(), count, min_count, max_count, options),
             ColorMap::Blackbody => {
-                Self::colormap(blackbody(), count, min_count, max_count, log_norm)
+                Self::colormap(blackbody(), count, min_count, max_count, options)
             }
-            ColorMap::Inferno => Self::colormap(inferno(), count, min_count, max_count, log_norm),
+            ColorMap::Inferno => Self::colormap(inferno(), count, min_count, max_count, options),
             ColorMap::Kindlmann => {
-                Self::colormap(kindlmann(), count, min_count, max_count, log_norm)
+                Self::colormap(kindlmann(), count, min_count, max_count, options)
             }
             ColorMap::ExtendedKindlmann => {
-                Self::colormap(extended_kindlmann(), count, min_count, max_count, log_norm)
+                Self::colormap(extended_kindlmann(), count, min_count, max_count, options)
             }
         }
     }
 
-    pub fn color_maps_ui(&mut self, ui: &mut egui::Ui) {
+    pub fn color_maps_ui(&mut self, ui: &mut egui::Ui, recalculate_image: &mut bool) {
+        // check to see if the colormap has changed
+        let new_colormap = *self;
+
         ui.vertical(|ui| {
             ui.radio_value(self, ColorMap::Viridis, "Viridis");
             ui.radio_value(self, ColorMap::Fast, "Fast");
@@ -55,19 +135,51 @@ impl ColorMap {
             ui.radio_value(self, ColorMap::Kindlmann, "Kindlmann");
             ui.radio_value(self, ColorMap::ExtendedKindlmann, "Extended Kindlmann");
         });
+
+        if new_colormap != *self {
+            *recalculate_image = true;
+        }
     }
 
     fn colormap(
         color_data: Vec<(f32, i32, i32, i32)>,
-        value: u32,
-        min: u32,
-        max: u32,
-        log_norm: bool,
+        value: u64,
+        min: u64,
+        max: u64,
+        options: ColormapOptions,
     ) -> egui::Color32 {
-        if value == 0 && log_norm {
+        if value == 0 && options.log_norm {
             // Return transparent color for zero values
             return egui::Color32::from_rgba_unmultiplied(0, 0, 0, 0);
         }
+
+        // Handle display range options
+        if options.custom_display_range {
+            if value < options.display_min {
+                return egui::Color32::from_rgba_unmultiplied(0, 0, 0, 0);
+            }
+            if value > options.display_max {
+                return egui::Color32::from_rgba_unmultiplied(0, 0, 0, 0);
+            }
+        }
+
+        // Reverse RGB values while keeping scalar values the same
+        let color_data = if options.reverse {
+            let mut reversed_rgb = color_data
+                .iter()
+                .map(|&(_s, r, g, b)| (r, g, b))
+                .collect::<Vec<_>>();
+            reversed_rgb.reverse();
+            color_data
+                .iter()
+                .enumerate()
+                .map(|(i, &(s, _, _, _))| {
+                    (s, reversed_rgb[i].0, reversed_rgb[i].1, reversed_rgb[i].2)
+                })
+                .collect::<Vec<_>>()
+        } else {
+            color_data
+        };
 
         // Convert min and max to f64 for calculations
         let (min_f64, max_f64) = (min as f64, max as f64);
@@ -75,7 +187,7 @@ impl ColorMap {
         // Handle case where min == max to avoid division by zero
         let normalized: f64 = if max > min {
             let value_f64 = value as f64;
-            if log_norm {
+            if options.log_norm {
                 // Use logarithmic scale
                 (value_f64.log10() - min_f64.log10()) / (max_f64.log10() - min_f64.log10())
             } else {

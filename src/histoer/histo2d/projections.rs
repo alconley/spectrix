@@ -1,0 +1,303 @@
+use crate::egui_plot_stuff::egui_horizontal_line::EguiHorizontalLine;
+use crate::egui_plot_stuff::egui_vertical_line::EguiVerticalLine;
+use crate::histoer::histo1d::histogram1d::Histogram;
+
+use super::histogram2d::Histogram2D;
+
+impl Histogram2D {
+    pub fn y_projection(&self, x_min: f64, x_max: f64) -> Vec<u64> {
+        // Extract the y-projection data
+        let mut y_bins = vec![0; self.bins.y];
+
+        for ((x_index, y_index), &count) in &self.bins.counts {
+            let x_center = self.range.x.min + (*x_index as f64 + 0.5) * self.bins.x_width;
+            if x_center >= x_min && x_center < x_max && *y_index < y_bins.len() {
+                y_bins[*y_index] += count;
+            }
+        }
+
+        y_bins
+    }
+
+    pub fn x_projection(&self, y_min: f64, y_max: f64) -> Vec<u64> {
+        // Extract the x-projection data
+        let mut x_bins = vec![0; self.bins.x];
+
+        for ((x_index, y_index), &count) in &self.bins.counts {
+            let y_center = self.range.y.min + (*y_index as f64 + 0.5) * self.bins.y_width;
+            if y_center >= y_min && y_center < y_max && *x_index < x_bins.len() {
+                x_bins[*x_index] += count;
+            }
+        }
+
+        x_bins
+    }
+
+    pub fn check_projections(&mut self) {
+        // check to see if the x/y values are the same as the current projection else add a new projection based off the naming scheme
+        // then you dont have to recalculate the bins if the projection is already calculated
+
+        if self.plot_settings.projections.add_y_projection {
+            let x1 = self.plot_settings.projections.y_projection_line_1.x_value;
+            let x2 = self.plot_settings.projections.y_projection_line_2.x_value;
+            let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) }; // sort the x values
+
+            if self.plot_settings.projections.y_projection.is_some() {
+                //check the name of the current projection and update the bins if different
+                let name = self
+                    .plot_settings
+                    .projections
+                    .y_projection
+                    .as_ref()
+                    .unwrap()
+                    .name
+                    .clone();
+
+                if name != format!("Y-Projection of {}: x={:.2}-{:.2}", self.name, min_x, max_x) {
+                    let bins = self.y_projection(min_x, max_x);
+                    self.plot_settings
+                        .projections
+                        .y_projection
+                        .as_mut()
+                        .unwrap()
+                        .bins = bins;
+                    self.plot_settings
+                        .projections
+                        .y_projection
+                        .as_mut()
+                        .unwrap()
+                        .name =
+                        format!("Y-Projection of {}: x={:.2}-{:.2}", self.name, min_x, max_x);
+                }
+            } else {
+                // create a new histogram and set the bins
+                let mut y_histogram = Histogram::new(
+                    &format!("Y-Projection of {}: x={:.2}-{:.2}", self.name, min_x, max_x),
+                    self.bins.y,
+                    (self.range.y.min, self.range.y.max),
+                );
+                let bins = self.y_projection(min_x, max_x);
+                y_histogram.bins = bins;
+
+                self.plot_settings.projections.y_projection = Some(y_histogram);
+
+                // set the projection range to be the min/max values of the histogram
+                self.plot_settings.projections.y_projection_line_1.x_value = self.range.x.min;
+                self.plot_settings.projections.y_projection_line_2.x_value = self.range.x.max;
+            }
+        }
+
+        if self.plot_settings.projections.add_x_projection {
+            let y1 = self.plot_settings.projections.x_projection_line_1.y_value;
+            let y2 = self.plot_settings.projections.x_projection_line_2.y_value;
+            let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) }; // sort the y values
+
+            if self.plot_settings.projections.x_projection.is_some() {
+                //check the name of the current projection and update the bins if different
+                let name = self
+                    .plot_settings
+                    .projections
+                    .x_projection
+                    .as_ref()
+                    .unwrap()
+                    .name
+                    .clone();
+
+                if name != format!("X-Projection of {}: y={:.2}-{:.2}", self.name, min_y, max_y) {
+                    let bins = self.x_projection(min_y, max_y);
+                    self.plot_settings
+                        .projections
+                        .x_projection
+                        .as_mut()
+                        .unwrap()
+                        .bins = bins;
+                    self.plot_settings
+                        .projections
+                        .x_projection
+                        .as_mut()
+                        .unwrap()
+                        .name =
+                        format!("X-Projection of {}: y={:.2}-{:.2}", self.name, min_y, max_y);
+                }
+            } else {
+                let mut x_histogram = Histogram::new(
+                    &format!("X-Projection of {}: y={:.2}-{:.2}", self.name, min_y, max_y),
+                    self.bins.x,
+                    (self.range.x.min, self.range.x.max),
+                );
+                let bins = self.x_projection(min_y, max_y);
+                x_histogram.bins = bins;
+
+                self.plot_settings.projections.x_projection = Some(x_histogram);
+
+                // set the projection range to be the min/max values of the histogram
+                self.plot_settings.projections.x_projection_line_1.y_value = self.range.y.min;
+                self.plot_settings.projections.x_projection_line_2.y_value = self.range.y.max;
+            }
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Projections {
+    pub add_y_projection: bool,
+    pub y_projection: Option<Histogram>,
+    pub y_projection_line_1: EguiVerticalLine,
+    pub y_projection_line_2: EguiVerticalLine,
+
+    pub add_x_projection: bool,
+    pub x_projection: Option<Histogram>,
+    pub x_projection_line_1: EguiHorizontalLine,
+    pub x_projection_line_2: EguiHorizontalLine,
+}
+impl Projections {
+    pub fn new() -> Self {
+        Projections {
+            add_y_projection: false,
+            y_projection: None,
+            y_projection_line_1: EguiVerticalLine {
+                name: "Y Projection Line 1".to_string(),
+                ..EguiVerticalLine::default()
+            },
+            y_projection_line_2: EguiVerticalLine {
+                name: "Y Projection Line 2".to_string(),
+                ..EguiVerticalLine::default()
+            },
+
+            add_x_projection: false,
+            x_projection: None,
+            x_projection_line_1: EguiHorizontalLine {
+                name: "X Projection Line 1".to_string(),
+                ..EguiHorizontalLine::default()
+            },
+            x_projection_line_2: EguiHorizontalLine {
+                name: "X Projection Line 2".to_string(),
+                ..EguiHorizontalLine::default()
+            },
+        }
+    }
+
+    fn show_y_projection(&mut self, ui: &mut egui::Ui) {
+        if self.add_y_projection && self.y_projection.is_some() {
+            ui.ctx().show_viewport_immediate(
+                egui::ViewportId::from_hash_of("Y Projection".to_string()),
+                egui::ViewportBuilder::default()
+                    .with_title(self.y_projection.as_ref().unwrap().name.clone())
+                    .with_inner_size([600.0, 400.0]),
+                |ctx, class| {
+                    assert!(
+                        class == egui::ViewportClass::Immediate,
+                        "This egui backend doesn't support multiple viewports"
+                    );
+
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        if let Some(histogram) = &mut self.y_projection {
+                            histogram.render(ui);
+                        }
+                    });
+
+                    if ctx.input(|i| i.viewport().close_requested()) {
+                        // Tell parent viewport that we should not show next frame:
+                        self.y_projection = None;
+                        self.add_y_projection = false;
+                    }
+                },
+            );
+        }
+    }
+
+    fn show_x_projection(&mut self, ui: &mut egui::Ui) {
+        if self.add_x_projection && self.x_projection.is_some() {
+            ui.ctx().show_viewport_immediate(
+                egui::ViewportId::from_hash_of("X Projection".to_string()),
+                egui::ViewportBuilder::default()
+                    .with_title(self.x_projection.as_ref().unwrap().name.clone())
+                    .with_inner_size([600.0, 400.0]),
+                |ctx, class| {
+                    assert!(
+                        class == egui::ViewportClass::Immediate,
+                        "This egui backend doesn't support multiple viewports"
+                    );
+
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        if let Some(histogram) = &mut self.x_projection {
+                            histogram.render(ui);
+                        }
+                    });
+
+                    if ctx.input(|i| i.viewport().close_requested()) {
+                        // Tell parent viewport that we should not show next frame:
+                        self.x_projection = None;
+                        self.add_x_projection = false;
+                    }
+                },
+            );
+        }
+    }
+
+    pub fn show(&mut self, ui: &mut egui::Ui) {
+        self.show_y_projection(ui);
+        self.show_x_projection(ui);
+    }
+
+    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+        if self.add_y_projection {
+            self.y_projection_line_1.draw(plot_ui);
+            self.y_projection_line_2.draw(plot_ui);
+        }
+
+        if self.add_x_projection {
+            self.x_projection_line_1.draw(plot_ui);
+            self.x_projection_line_2.draw(plot_ui);
+        }
+    }
+
+    pub fn interactive_dragging(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
+        if self.add_y_projection {
+            self.y_projection_line_1.interactive_dragging(plot_response);
+            self.y_projection_line_2.interactive_dragging(plot_response);
+        }
+
+        if self.add_x_projection {
+            self.x_projection_line_1.interactive_dragging(plot_response);
+            self.x_projection_line_2.interactive_dragging(plot_response);
+        }
+    }
+
+    pub fn menu_button(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Projections");
+
+        ui.checkbox(&mut self.add_y_projection, "Add Y Projection").on_hover_text("Keybinds:\nY = Add Y Projection\nMiddle Mouse Button = Drag Line at the center of the plot (cirlce)");
+
+        if self.add_y_projection {
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::DragValue::new(&mut self.y_projection_line_1.x_value)
+                        .speed(1.0)
+                        .prefix("X1: "),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut self.y_projection_line_2.x_value)
+                        .speed(1.0)
+                        .prefix("X2: "),
+                );
+            });
+        }
+
+        ui.checkbox(&mut self.add_x_projection, "Add X Projection").on_hover_text("Keybinds:\nX = Add X Projection\nMiddle Mouse Button = Drag Line at the center of the plot (cirlce)");
+        if self.add_x_projection {
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::DragValue::new(&mut self.x_projection_line_1.y_value)
+                        .speed(1.0)
+                        .prefix("Y1: "),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut self.x_projection_line_2.y_value)
+                        .speed(1.0)
+                        .prefix("Y2: "),
+                );
+            });
+        }
+    }
+}
