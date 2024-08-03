@@ -127,31 +127,38 @@ pub fn manual_add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError>
 
     // Delay lines vs Focal plane histograms
 
-    h.add_fill_hist2d("DelayBackRight v X1", &lf, "X1", "DelayBackRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-    h.add_fill_hist2d("DelayBackLeft v X1", &lf, "X1", "DelayBackLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+    // h.add_fill_hist2d("DelayBackRight v X1", &lf, "X1", "DelayBackRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+    // h.add_fill_hist2d("DelayBackLeft v X1", &lf, "X1", "DelayBackLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
     h.add_fill_hist2d("DelayFrontRight v X1", &lf, "X1", "DelayFrontRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
     h.add_fill_hist2d("DelayFrontLeft v X1", &lf, "X1", "DelayFrontLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
     h.add_fill_hist2d("DelayBackRight v X2", &lf, "X2", "DelayBackRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
     h.add_fill_hist2d("DelayBackLeft v X2", &lf, "X2", "DelayBackLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-    h.add_fill_hist2d("DelayFrontRight v X2", &lf, "X2", "DelayFrontRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-    h.add_fill_hist2d("DelayFrontLeft v X2", &lf, "X2", "DelayFrontLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+    // h.add_fill_hist2d("DelayFrontRight v X2", &lf, "X2", "DelayFrontRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+    // h.add_fill_hist2d("DelayFrontLeft v X2", &lf, "X2", "DelayFrontLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
     h.add_fill_hist2d("DelayBackRight v Xavg", &lf, "Xavg", "DelayBackRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
     h.add_fill_hist2d("DelayBackLeft v Xavg", &lf, "Xavg", "DelayBackLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
     h.add_fill_hist2d("DelayFrontRight v Xavg", &lf, "Xavg", "DelayFrontRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
     h.add_fill_hist2d("DelayFrontLeft v Xavg", &lf, "Xavg", "DelayFrontLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-    h.add_fill_hist2d("DelayFrontAverage v X1", &lf, "X1", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-    h.add_fill_hist2d("DelayBackAverage v X1", &lf, "X1", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-    h.add_fill_hist2d("DelayFrontAverage v X2", &lf, "X2", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-    h.add_fill_hist2d("DelayBackAverage v X2", &lf, "X2", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-    h.add_fill_hist2d("DelayFrontAverage v Xavg", &lf, "Xavg", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-    h.add_fill_hist2d("DelayBackAverage v Xavg", &lf, "Xavg", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+    // h.add_fill_hist2d("DelayFrontAverage v X1", &lf, "X1", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+    // h.add_fill_hist2d("DelayBackAverage v X1", &lf, "X1", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+    // h.add_fill_hist2d("DelayFrontAverage v X2", &lf, "X2", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+    // h.add_fill_hist2d("DelayBackAverage v X2", &lf, "X2", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+    // h.add_fill_hist2d("DelayFrontAverage v Xavg", &lf, "Xavg", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+    // h.add_fill_hist2d("DelayBackAverage v Xavg", &lf, "Xavg", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
     
+    // let delay_lines_panes_names = vec![
+    //     "DelayBackRight v X1", "DelayBackLeft v X1", "DelayFrontRight v X1", "DelayFrontLeft v X1",
+    //     "DelayBackRight v X2", "DelayBackLeft v X2", "DelayFrontRight v X2", "DelayFrontLeft v X2",
+    //     "DelayBackRight v Xavg", "DelayBackLeft v Xavg", "DelayFrontRight v Xavg", "DelayFrontLeft v Xavg",
+    //     "DelayFrontAverage v X1", "DelayBackAverage v X1", "DelayFrontAverage v X2", "DelayBackAverage v X2",
+    //     "DelayFrontAverage v Xavg", "DelayBackAverage v Xavg"
+    // ];
+
     let delay_lines_panes_names = vec![
-        "DelayBackRight v X1", "DelayBackLeft v X1", "DelayFrontRight v X1", "DelayFrontLeft v X1",
-        "DelayBackRight v X2", "DelayBackLeft v X2", "DelayFrontRight v X2", "DelayFrontLeft v X2",
-        "DelayBackRight v Xavg", "DelayBackLeft v Xavg", "DelayFrontRight v Xavg", "DelayFrontLeft v Xavg",
-        "DelayFrontAverage v X1", "DelayBackAverage v X1", "DelayFrontAverage v X2", "DelayBackAverage v X2",
-        "DelayFrontAverage v Xavg", "DelayBackAverage v Xavg"
+        "DelayFrontRight v X1", "DelayFrontLeft v X1",
+        "DelayBackRight v X2", "DelayBackLeft v X2",
+        "DelayBackRight v Xavg", "DelayBackLeft v Xavg", 
+        "DelayFrontRight v Xavg", "DelayFrontLeft v Xavg",
     ];
 
     let delay_lines_panes = h.get_panes(delay_lines_panes_names);
