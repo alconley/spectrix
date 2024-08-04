@@ -137,10 +137,11 @@ impl Histogram2D {
         let current_y_min = plot_bounds.min()[1];
         let current_y_max = plot_bounds.max()[1];
 
-        if current_x_min == 0.0
-            && current_x_max == 1.0
-            && current_y_min == 0.0
-            && current_y_max == 1.0
+        if current_x_min == -1.0
+            || current_x_min == 0.0
+                && current_x_max == 1.0
+                && current_y_min == 0.0
+                && current_y_max == 1.0
         {
             let default_bounds = egui_plot::PlotBounds::from_min_max(
                 [self.range.x.min, self.range.y.min],

@@ -7,7 +7,8 @@ use serde_json; // or use serde_yaml for YAML serialization
 use std::collections::HashMap;
 use std::fs::File;
 
-use std::sync::{Arc, Mutex};
+use indicatif::ProgressBar;
+use indicatif::ProgressStyle;
 
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct Histogrammer {
@@ -15,8 +16,6 @@ pub struct Histogrammer {
     pub histograms2d: Vec<Histogram2D>,
     pub tabs: HashMap<String, Vec<Pane>>,
     pub tile_map: HashMap<egui_tiles::TileId, String>, // Stores tile_id to tab_name mapping
-    #[serde(skip)]
-    pub progress: Arc<Mutex<(f32, String)>>,
 }
 
 impl Histogrammer {
@@ -26,7 +25,6 @@ impl Histogrammer {
             histograms2d: Vec::new(),
             tabs: HashMap::new(),
             tile_map: HashMap::new(),
-            progress: Arc::new(Mutex::new((0.0, "".to_string()))),
         }
     }
 
@@ -67,17 +65,23 @@ impl Histogrammer {
                         let shape = ndarray_df.shape();
                         let rows = shape[0];
 
-                        self.progress.lock().unwrap().0 = 0.0;
-                        self.progress.lock().unwrap().1 = format!("Filling {}", name);
+                        let pb = ProgressBar::new(rows as u64);
+                        let style = ProgressStyle::default_bar()
+                            .template(&format!(
+                                "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
+                                name
+                            ))
+                            .expect("Failed to create progress style");
+                        pb.set_style(style.progress_chars("#>-"));
 
                         for i in 0..rows {
                             let value = ndarray_df[[i, 0]];
                             hist.fill(value);
 
-                            // Update the progress bar.
-                            let progress = (i as f32) / (rows as f32);
-                            self.progress.lock().unwrap().0 = progress;
+                            pb.inc(1);
                         }
+
+                        pb.finish();
 
                         true
                     }
@@ -152,18 +156,24 @@ impl Histogrammer {
                         let shape = ndarray_df.shape();
                         let rows = shape[0];
 
-                        self.progress.lock().unwrap().0 = 0.0;
-                        self.progress.lock().unwrap().1 = format!("Filling {}", name);
+                        let pb = ProgressBar::new(rows as u64);
+                        let style = ProgressStyle::default_bar()
+                            .template(&format!(
+                                "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
+                                name
+                            ))
+                            .expect("Failed to create progress style");
+                        pb.set_style(style.progress_chars("#>-"));
 
                         for i in 0..rows {
                             let x_value = ndarray_df[[i, 0]];
                             let y_value = ndarray_df[[i, 1]];
                             hist.fill(x_value, y_value);
 
-                            // Update the progress bar.
-                            let progress = (i as f32) / (rows as f32);
-                            self.progress.lock().unwrap().0 = progress;
+                            pb.inc(1);
                         }
+
+                        pb.finish();
 
                         true
                     }
