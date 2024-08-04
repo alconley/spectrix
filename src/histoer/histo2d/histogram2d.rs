@@ -129,6 +129,45 @@ impl Histogram2D {
         self.image.get_texture(ui, color_image);
     }
 
+    fn limit_scrolling(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+        let plot_bounds = plot_ui.plot_bounds();
+
+        let current_x_min = plot_bounds.min()[0];
+        let current_x_max = plot_bounds.max()[0];
+        let current_y_min = plot_bounds.min()[1];
+        let current_y_max = plot_bounds.max()[1];
+
+        if current_x_min == 0.0
+            && current_x_max == 1.0
+            && current_y_min == 0.0
+            && current_y_max == 1.0
+        {
+            let default_bounds = egui_plot::PlotBounds::from_min_max(
+                [self.range.x.min, self.range.y.min],
+                [self.range.x.max, self.range.y.max],
+            );
+
+            plot_ui.set_plot_bounds(default_bounds);
+            return;
+        }
+
+        // Clamping bounds only for scrolling
+        let new_x_min = current_x_min.max(self.range.x.min);
+        let new_x_max = current_x_max.min(self.range.x.max);
+        let new_y_min = current_y_min.max(self.range.y.min);
+        let new_y_max = current_y_max.min(self.range.y.max);
+
+        if new_x_min != current_x_min
+            || new_x_max != current_x_max
+            || new_y_min != current_y_min
+            || new_y_max != current_y_max
+        {
+            let clamped_bounds =
+                egui_plot::PlotBounds::from_min_max([new_x_min, new_y_min], [new_x_max, new_y_max]);
+            plot_ui.set_plot_bounds(clamped_bounds);
+        }
+    }
+
     // Draw the histogram on the plot
     fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
         self.show_stats(plot_ui);
@@ -138,9 +177,13 @@ impl Histogram2D {
         if let Some(image) = heatmap_image {
             self.image.draw(plot_ui, image);
         }
-        // self.image.draw(plot_ui, plot_image);
+
         self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
         self.plot_settings.draw(plot_ui);
+
+        if self.plot_settings.egui_settings.limit_scrolling {
+            self.limit_scrolling(plot_ui);
+        }
     }
 
     // Render the histogram using egui_plot

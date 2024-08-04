@@ -1,6 +1,5 @@
 use super::pane::Pane;
-// use egui_tiles::{Tile, TileId, Tiles};
-use egui_tiles::Tile;
+use egui_tiles::{Tile, TileId, Tiles};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TreeBehavior {
@@ -135,12 +134,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
         self.preview_dragged_panes
     }
 
-    /*
+    // /*
     fn is_tab_closable(&self, _tiles: &Tiles<Pane>, _tile_id: TileId) -> bool {
         true
     }
 
     fn on_tab_close(&mut self, tiles: &mut Tiles<Pane>, tile_id: TileId) -> bool {
+        tiles.set_visible(tile_id, false);
         if let Some(tile) = tiles.get(tile_id) {
             match tile {
                 Tile::Pane(pane) => {
@@ -162,11 +162,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
             }
         }
 
-        // Proceed to removing the tab
-        true
-    }
-    */
+        // Proceed to removing the tab, this will remove the tile from the tree
+        // true
 
+        // Prevent the tab from being removed
+        false
+    }
+    // */
     fn tab_title_for_tile(
         &mut self,
         tiles: &egui_tiles::Tiles<Pane>,

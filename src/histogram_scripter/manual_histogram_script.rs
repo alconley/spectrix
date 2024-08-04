@@ -5,12 +5,9 @@ use std::f64::consts::PI;
 
 #[rustfmt::skip]
 #[allow(clippy::all)]
-pub fn manual_add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
+pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
     let start = std::time::Instant::now();
-
-    let mut h = Histogrammer::new();
-    h.show_progress = true;
 
     // Declare all the lazyframes that will be used
     let lf = lf.with_columns(vec![
@@ -87,10 +84,6 @@ pub fn manual_add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError>
     let particle_id_panes = h.get_panes(particle_id_panes_names);
 
     h.tabs.insert("Particle Identification".to_string(), particle_id_panes);
-
-    let pid_pane = h.get_panes(vec!["AnodeBack v ScintLeft"]);
-    h.tabs.insert("PID".to_string(), pid_pane);
-
 
     //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
     
@@ -351,5 +344,4 @@ pub fn manual_add_histograms(lf: LazyFrame) -> Result<Histogrammer, PolarsError>
     let duration = start.elapsed();
     println!("Time taken for histograms to be filled: {:?}", duration);
 
-    Ok(h)
 }

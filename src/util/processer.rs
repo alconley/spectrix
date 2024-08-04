@@ -41,14 +41,10 @@ impl Processer {
     fn perform_histogrammer_from_lazyframe(&mut self) {
         if let Some(lazyframer) = &self.lazyframer {
             if let Some(lf) = &lazyframer.lazyframe {
-                match self.histogram_script.add_histograms(lf.clone()) {
-                    Ok(h) => {
-                        self.histogrammer = h;
-                    }
-                    Err(e) => {
-                        log::error!("Failed to create histograms: {}", e);
-                    }
-                }
+                self.histogrammer.reset();
+
+                self.histogram_script
+                    .add_histograms(&mut self.histogrammer, lf.clone());
             } else {
                 log::error!("LazyFrame is not loaded");
             }

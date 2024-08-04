@@ -196,6 +196,49 @@ impl Histogram {
         } else {
             self.plot_settings.cursor_position = None;
         }
+
+        if self.plot_settings.egui_settings.limit_scrolling {
+            self.limit_scrolling(plot_ui);
+        }
+    }
+
+    pub fn limit_scrolling(&self, plot_ui: &mut egui_plot::PlotUi) {
+        let plot_bounds = plot_ui.plot_bounds();
+
+        let current_x_min = plot_bounds.min()[0];
+        let current_x_max = plot_bounds.max()[0];
+        let current_y_min = plot_bounds.min()[1];
+        let current_y_max = plot_bounds.max()[1];
+
+        let y_max = self.bins.iter().max().cloned().unwrap_or(0) as f64;
+
+        if current_x_min == -1.0
+            && current_x_max == 1.0
+            && current_y_min == 0.0
+            && current_y_max == 1.0
+        {
+            let default_bounds =
+                egui_plot::PlotBounds::from_min_max([self.range.0, 0.0], [self.range.1, y_max]);
+
+            plot_ui.set_plot_bounds(default_bounds);
+            return;
+        }
+
+        // Clamping bounds only for scrolling
+        let new_x_min = current_x_min.max(self.range.0);
+        let new_x_max = current_x_max.min(self.range.1);
+        let new_y_min = current_y_min.max(0.0);
+        let new_y_max = current_y_max.min(y_max);
+
+        if new_x_min != current_x_min
+            || new_x_max != current_x_max
+            || new_y_min != current_y_min
+            || new_y_max != current_y_max
+        {
+            let clamped_bounds =
+                egui_plot::PlotBounds::from_min_max([new_x_min, new_y_min], [new_x_max, new_y_max]);
+            plot_ui.set_plot_bounds(clamped_bounds);
+        }
     }
 
     // Renders the histogram using egui_plot

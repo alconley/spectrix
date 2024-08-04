@@ -225,15 +225,9 @@ impl HistogramScript {
         }
     }
 
-    pub fn add_histograms(&mut self, lf: LazyFrame) -> Result<Histogrammer, PolarsError> {
+    pub fn add_histograms(&mut self, h: &mut Histogrammer, lf: LazyFrame) {
         if self.manual_histogram_script {
-            match manual_add_histograms(lf.clone()) {
-                Ok(h) => Ok(h),
-                Err(e) => {
-                    log::error!("Failed to create histograms: {}", e);
-                    Err(e)
-                }
-            }
+            manual_add_histograms(h, lf);
         } else {
             self.progress = 0.0;
 
@@ -263,7 +257,7 @@ impl HistogramScript {
                 }
             }
 
-            let mut histogrammer = Histogrammer::new();
+            // let mut histogrammer = Histogrammer::new();
 
             let total_histograms = self.histograms.len() as f32;
             for (i, hist) in self.histograms.iter_mut().enumerate() {
@@ -275,7 +269,7 @@ impl HistogramScript {
                                 let column = config.column.clone();
                                 let bins = config.bins;
                                 let range = config.range;
-                                histogrammer.add_fill_hist1d(&name, lf, &column, bins, range);
+                                h.add_fill_hist1d(&name, lf, &column, bins, range);
                             } else {
                                 log::error!("LazyFrame not found: {}", config.lazyframe);
                             }
@@ -289,8 +283,7 @@ impl HistogramScript {
                                 let y_column = config.y_column.clone();
                                 let bins = config.bins;
                                 let range = config.range;
-                                histogrammer
-                                    .add_fill_hist2d(&name, lf, &x_column, &y_column, bins, range);
+                                h.add_fill_hist2d(&name, lf, &x_column, &y_column, bins, range);
                             } else {
                                 log::error!("LazyFrame not found: {}", config.lazyframe);
                             }
@@ -303,7 +296,7 @@ impl HistogramScript {
 
             // insert histograms into grids
             for grid in &self.grids {
-                grid.insert_grid_into_histogrammer(&mut histogrammer);
+                grid.insert_grid_into_histogrammer(h);
             }
 
             // if a histogram is not in a grid, add it to its own tab
@@ -314,14 +307,12 @@ impl HistogramScript {
                     .iter()
                     .any(|grid| grid.histogram_names.contains(&name))
                 {
-                    let pane = histogrammer.get_pane(&name);
+                    let pane = h.get_pane(&name);
                     if let Some(pane) = pane {
-                        histogrammer.tabs.insert(name, vec![pane]);
+                        h.tabs.insert(name, vec![pane]);
                     }
                 }
             }
-
-            Ok(histogrammer)
         }
     }
 }

@@ -16,6 +16,7 @@ pub struct EguiPlotSettings {
     pub sharp_grid_lines: bool,
     pub show_background: bool,
     pub allow_double_click_reset: bool,
+    pub limit_scrolling: bool,
 }
 
 impl Default for EguiPlotSettings {
@@ -37,6 +38,7 @@ impl Default for EguiPlotSettings {
             sharp_grid_lines: true,
             show_background: true,
             allow_double_click_reset: true,
+            limit_scrolling: true,
         }
     }
 }
@@ -64,6 +66,7 @@ impl EguiPlotSettings {
                     &mut self.allow_double_click_reset,
                     "Allow Double Click to Reset",
                 );
+                ui.checkbox(&mut self.limit_scrolling, "Limit Scrolling"); // custom setting
 
                 ui.separator();
 

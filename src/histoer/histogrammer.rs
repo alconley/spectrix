@@ -1,21 +1,22 @@
 use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use crate::ui::pane::Pane;
-use indicatif::ProgressBar;
-use indicatif::ProgressStyle;
 use polars::prelude::*;
 use rfd::FileDialog;
 use serde_json; // or use serde_yaml for YAML serialization
 use std::collections::HashMap;
 use std::fs::File;
 
-#[derive(Default, serde::Deserialize, serde::Serialize)]
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct Histogrammer {
     pub histograms1d: Vec<Histogram>,
     pub histograms2d: Vec<Histogram2D>,
     pub tabs: HashMap<String, Vec<Pane>>,
     pub tile_map: HashMap<egui_tiles::TileId, String>, // Stores tile_id to tab_name mapping
-    pub show_progress: bool,
+    #[serde(skip)]
+    pub progress: Arc<Mutex<(f32, String)>>,
 }
 
 impl Histogrammer {
@@ -25,8 +26,15 @@ impl Histogrammer {
             histograms2d: Vec::new(),
             tabs: HashMap::new(),
             tile_map: HashMap::new(),
-            show_progress: false,
+            progress: Arc::new(Mutex::new((0.0, "".to_string()))),
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.histograms1d.clear();
+        self.histograms2d.clear();
+        self.tabs.clear();
+        self.tile_map.clear();
     }
 
     pub fn add_hist1d(&mut self, name: &str, bins: usize, range: (f64, f64)) {
@@ -40,10 +48,14 @@ impl Histogrammer {
             None => return false, // Return false if the histogram doesn't exist.
         };
 
+        // filter out values greator than or less than the range
+        let hist_range = hist.range;
+
         let df_result = lf
             .clone()
-            .filter(col(column_name).neq(lit(-1e6))) // Filter out the -1e6 values.
             .select([col(column_name)])
+            .filter(col(column_name).gt(hist_range.0))
+            .filter(col(column_name).lt(hist_range.1))
             .collect();
 
         match df_result {
@@ -55,27 +67,16 @@ impl Histogrammer {
                         let shape = ndarray_df.shape();
                         let rows = shape[0];
 
-                        if self.show_progress {
-                            let pb = ProgressBar::new(rows as u64);
-                            let style = ProgressStyle::default_bar()
-                                .template(&format!(
-                                    "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
-                                    name
-                                ))
-                                .expect("Failed to create progress style");
-                            pb.set_style(style.progress_chars("#>-"));
+                        self.progress.lock().unwrap().0 = 0.0;
+                        self.progress.lock().unwrap().1 = format!("Filling {}", name);
 
-                            for i in 0..rows {
-                                let value = ndarray_df[[i, 0]];
-                                hist.fill(value);
-                                pb.inc(1);
-                            }
-                            pb.finish_with_message("1D Histogram filling complete");
-                        } else {
-                            for i in 0..rows {
-                                let value = ndarray_df[[i, 0]];
-                                hist.fill(value);
-                            }
+                        for i in 0..rows {
+                            let value = ndarray_df[[i, 0]];
+                            hist.fill(value);
+
+                            // Update the progress bar.
+                            let progress = (i as f32) / (rows as f32);
+                            self.progress.lock().unwrap().0 = progress;
                         }
 
                         true
@@ -127,11 +128,19 @@ impl Histogrammer {
             None => return false, // Return false if the histogram doesn't exist.
         };
 
+        hist.plot_settings.cuts.x_column = x_column_name.to_string();
+        hist.plot_settings.cuts.y_column = y_column_name.to_string();
+
+        // filter out values greator than or less than the range
+        let hist_range = hist.range.clone();
+
         let df_result = lf
             .clone()
             .select([col(x_column_name), col(y_column_name)])
-            .filter(col(x_column_name).neq(lit(-1e6)))
-            .filter(col(y_column_name).neq(lit(-1e6)))
+            .filter(col(x_column_name).lt(lit(hist_range.x.max)))
+            .filter(col(x_column_name).gt(lit(hist_range.x.min)))
+            .filter(col(y_column_name).lt(lit(hist_range.y.max)))
+            .filter(col(y_column_name).gt(lit(hist_range.y.min)))
             .collect();
 
         match df_result {
@@ -143,29 +152,17 @@ impl Histogrammer {
                         let shape = ndarray_df.shape();
                         let rows = shape[0];
 
-                        if self.show_progress {
-                            let pb = ProgressBar::new(rows as u64);
-                            let style = ProgressStyle::default_bar()
-                                .template(&format!(
-                                    "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
-                                    name
-                                ))
-                                .expect("Failed to create progress style");
-                            pb.set_style(style.progress_chars("#>-"));
+                        self.progress.lock().unwrap().0 = 0.0;
+                        self.progress.lock().unwrap().1 = format!("Filling {}", name);
 
-                            for i in 0..rows {
-                                let x_value = ndarray_df[[i, 0]];
-                                let y_value = ndarray_df[[i, 1]];
-                                hist.fill(x_value, y_value);
-                                pb.inc(1);
-                            }
-                            pb.finish_with_message("2D Histogram filling complete");
-                        } else {
-                            for i in 0..rows {
-                                let x_value = ndarray_df[[i, 0]];
-                                let y_value = ndarray_df[[i, 1]];
-                                hist.fill(x_value, y_value);
-                            }
+                        for i in 0..rows {
+                            let x_value = ndarray_df[[i, 0]];
+                            let y_value = ndarray_df[[i, 1]];
+                            hist.fill(x_value, y_value);
+
+                            // Update the progress bar.
+                            let progress = (i as f32) / (rows as f32);
+                            self.progress.lock().unwrap().0 = progress;
                         }
 
                         true
