@@ -38,7 +38,7 @@ impl Default for EguiPlotSettings {
             sharp_grid_lines: true,
             show_background: true,
             allow_double_click_reset: true,
-            limit_scrolling: true,
+            limit_scrolling: false,
         }
     }
 }
