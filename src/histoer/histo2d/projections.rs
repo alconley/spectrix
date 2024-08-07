@@ -177,61 +177,68 @@ impl Projections {
         }
     }
 
+    // this pops out a new window with the y projection
+
+    // fn show_y_projection(&mut self, ui: &mut egui::Ui) {
+    //     if self.add_y_projection && self.y_projection.is_some() {
+    //         ui.ctx().show_viewport_immediate(
+    //             egui::ViewportId::from_hash_of("Y Projection".to_string()),
+    //             egui::ViewportBuilder::default()
+    //                 .with_title(self.y_projection.as_ref().unwrap().name.clone())
+    //                 .with_inner_size([600.0, 400.0]),
+    //             |ctx, class| {
+    //                 assert!(
+    //                     class == egui::ViewportClass::Immediate,
+    //                     "This egui backend doesn't support multiple viewports"
+    //                 );
+
+    //                 egui::CentralPanel::default().show(ctx, |ui| {
+    //                     if let Some(histogram) = &mut self.y_projection {
+    //                         histogram.render(ui);
+    //                     }
+    //                 });
+
+    //                 if ctx.input(|i| i.viewport().close_requested()) {
+    //                     // Tell parent viewport that we should not show next frame:
+    //                     self.y_projection = None;
+    //                     self.add_y_projection = false;
+    //                 }
+    //             },
+    //         );
+    //     }
+    // }
+
     fn show_y_projection(&mut self, ui: &mut egui::Ui) {
         if self.add_y_projection && self.y_projection.is_some() {
-            ui.ctx().show_viewport_immediate(
-                egui::ViewportId::from_hash_of("Y Projection".to_string()),
-                egui::ViewportBuilder::default()
-                    .with_title(self.y_projection.as_ref().unwrap().name.clone())
-                    .with_inner_size([600.0, 400.0]),
-                |ctx, class| {
-                    assert!(
-                        class == egui::ViewportClass::Immediate,
-                        "This egui backend doesn't support multiple viewports"
-                    );
-
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        if let Some(histogram) = &mut self.y_projection {
-                            histogram.render(ui);
-                        }
-                    });
-
-                    if ctx.input(|i| i.viewport().close_requested()) {
-                        // Tell parent viewport that we should not show next frame:
-                        self.y_projection = None;
-                        self.add_y_projection = false;
-                    }
-                },
-            );
+            let name = if let Some(histogram) = &self.y_projection {
+                let name = histogram.name.clone();
+                name.split(':').collect::<Vec<&str>>()[0].to_string()
+            } else {
+                "Y-Projection".to_string()
+            };
+            let ctx = ui.ctx().clone();
+            egui::Window::new(name).show(&ctx, |ui| {
+                if let Some(histogram) = &mut self.y_projection {
+                    histogram.render(ui);
+                }
+            });
         }
     }
 
     fn show_x_projection(&mut self, ui: &mut egui::Ui) {
         if self.add_x_projection && self.x_projection.is_some() {
-            ui.ctx().show_viewport_immediate(
-                egui::ViewportId::from_hash_of("X Projection".to_string()),
-                egui::ViewportBuilder::default()
-                    .with_title(self.x_projection.as_ref().unwrap().name.clone())
-                    .with_inner_size([600.0, 400.0]),
-                |ctx, class| {
-                    assert!(
-                        class == egui::ViewportClass::Immediate,
-                        "This egui backend doesn't support multiple viewports"
-                    );
-
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        if let Some(histogram) = &mut self.x_projection {
-                            histogram.render(ui);
-                        }
-                    });
-
-                    if ctx.input(|i| i.viewport().close_requested()) {
-                        // Tell parent viewport that we should not show next frame:
-                        self.x_projection = None;
-                        self.add_x_projection = false;
-                    }
-                },
-            );
+            let name = if let Some(histogram) = &self.y_projection {
+                let name = histogram.name.clone();
+                name.split(':').collect::<Vec<&str>>()[0].to_string()
+            } else {
+                "X-Projection".to_string()
+            };
+            let ctx = ui.ctx().clone();
+            egui::Window::new(name).show(&ctx, |ui| {
+                if let Some(histogram) = &mut self.x_projection {
+                    histogram.render(ui);
+                }
+            });
         }
     }
 
