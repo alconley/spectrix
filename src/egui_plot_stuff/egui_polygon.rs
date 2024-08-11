@@ -1,5 +1,6 @@
 use egui::{Color32, DragValue, Id, Slider, Stroke, Ui};
 use egui_plot::{LineStyle, PlotResponse, PlotUi, Polygon};
+use geo::Contains;
 
 use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
 
@@ -63,6 +64,18 @@ impl EguiPolygon {
             interactive_clicking: true,
             ..Default::default()
         }
+    }
+
+    fn to_geo_polygon(&self) -> geo::Polygon<f64> {
+        let exterior_coords: Vec<_> = self.vertices.iter().map(|&[x, y]| (x, y)).collect();
+        let exterior_line_string = geo::LineString::from(exterior_coords);
+        geo::Polygon::new(exterior_line_string, vec![])
+    }
+
+    pub fn is_inside(&self, x: f64, y: f64) -> bool {
+        let point = geo::Point::new(x, y);
+        let polygon = self.to_geo_polygon();
+        polygon.contains(&point)
     }
 
     pub fn handle_interactions(&mut self, plot_response: &PlotResponse<()>) {

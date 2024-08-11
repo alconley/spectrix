@@ -41,55 +41,51 @@ impl Histogrammer {
     }
 
     pub fn fill_hist1d(&mut self, name: &str, lf: &LazyFrame, column_name: &str) -> bool {
-        let hist: &mut Histogram = match self.histograms1d.iter_mut().find(|h| h.name == name) {
+        // Find the histogram by name
+        let hist = match self.histograms1d.iter_mut().find(|h| h.name == name) {
             Some(h) => h,
-            None => return false, // Return false if the histogram doesn't exist.
+            None => return false,
         };
 
-        // filter out values greator than or less than the range
+        // Define the range filter
         let hist_range = hist.range;
+        let filter_expr = col(column_name)
+            .gt(lit(hist_range.0))
+            .and(col(column_name).lt(lit(hist_range.1)));
 
-        let df_result = lf
+        // Collect the values in the column
+        match lf
             .clone()
             .select([col(column_name)])
-            .filter(col(column_name).gt(hist_range.0))
-            .filter(col(column_name).lt(hist_range.1))
-            .collect();
-
-        match df_result {
+            .filter(filter_expr)
+            .collect()
+        {
             Ok(df) => {
-                let ndarray_df_result = df.to_ndarray::<Float64Type>(IndexOrder::Fortran);
+                let series = df.column(column_name).unwrap();
+                let values = series.f64().unwrap();
 
-                match ndarray_df_result {
-                    Ok(ndarray_df) => {
-                        let shape = ndarray_df.shape();
-                        let rows = shape[0];
+                // Initialize progress bar
+                let pb = ProgressBar::new(values.len() as u64);
+                pb.set_style(
+                    ProgressStyle::default_bar()
+                        .template(&format!(
+                            "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
+                            name
+                        ))
+                        .expect("Failed to create progress style")
+                        .progress_chars("#>-"),
+                );
 
-                        let pb = ProgressBar::new(rows as u64);
-                        let style = ProgressStyle::default_bar()
-                            .template(&format!(
-                                "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
-                                name
-                            ))
-                            .expect("Failed to create progress style");
-                        pb.set_style(style.progress_chars("#>-"));
-
-                        for i in 0..rows {
-                            let value = ndarray_df[[i, 0]];
-                            hist.fill(value);
-
-                            pb.inc(1);
-                        }
-
-                        pb.finish();
-
-                        true
+                // Fill histogram
+                for value in values {
+                    if let Some(v) = value {
+                        hist.fill(v);
                     }
-                    Err(e) => {
-                        log::error!("Failed to convert DataFrame to ndarray: {}", e);
-                        false
-                    }
+                    pb.inc(1);
                 }
+
+                pb.finish();
+                true
             }
             Err(e) => {
                 log::error!("Failed to collect LazyFrame: {}", e);
@@ -127,7 +123,7 @@ impl Histogrammer {
         x_column_name: &str,
         y_column_name: &str,
     ) -> bool {
-        let hist: &mut Histogram2D = match self.histograms2d.iter_mut().find(|h| h.name == name) {
+        let hist = match self.histograms2d.iter_mut().find(|h| h.name == name) {
             Some(h) => h,
             None => return false, // Return false if the histogram doesn't exist.
         };
@@ -135,53 +131,50 @@ impl Histogrammer {
         hist.plot_settings.cuts.x_column = x_column_name.to_string();
         hist.plot_settings.cuts.y_column = y_column_name.to_string();
 
-        // filter out values greator than or less than the range
+        // Define the range filters for both dimensions
         let hist_range = hist.range.clone();
+        let filter_expr = col(x_column_name)
+            .gt(lit(hist_range.x.min))
+            .and(col(x_column_name).lt(lit(hist_range.x.max)))
+            .and(col(y_column_name).gt(lit(hist_range.y.min)))
+            .and(col(y_column_name).lt(lit(hist_range.y.max)));
 
-        let df_result = lf
+        // Collect the filtered DataFrame
+        match lf
             .clone()
             .select([col(x_column_name), col(y_column_name)])
-            .filter(col(x_column_name).lt(lit(hist_range.x.max)))
-            .filter(col(x_column_name).gt(lit(hist_range.x.min)))
-            .filter(col(y_column_name).lt(lit(hist_range.y.max)))
-            .filter(col(y_column_name).gt(lit(hist_range.y.min)))
-            .collect();
-
-        match df_result {
+            .filter(filter_expr)
+            .collect()
+        {
             Ok(df) => {
-                let ndarray_df_result = df.to_ndarray::<Float64Type>(IndexOrder::Fortran);
+                let x_values = df.column(x_column_name).unwrap().f64().unwrap();
+                let y_values = df.column(y_column_name).unwrap().f64().unwrap();
+                let total_values = x_values.len() as f32;
 
-                match ndarray_df_result {
-                    Ok(ndarray_df) => {
-                        let shape = ndarray_df.shape();
-                        let rows = shape[0];
+                // Initialize progress bar
+                let pb = ProgressBar::new(total_values as u64);
+                pb.set_style(
+                    ProgressStyle::default_bar()
+                        .template(&format!(
+                            "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
+                            name
+                        ))
+                        .expect("Failed to create progress style")
+                        .progress_chars("#>-"),
+                );
 
-                        let pb = ProgressBar::new(rows as u64);
-                        let style = ProgressStyle::default_bar()
-                            .template(&format!(
-                                "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
-                                name
-                            ))
-                            .expect("Failed to create progress style");
-                        pb.set_style(style.progress_chars("#>-"));
-
-                        for i in 0..rows {
-                            let x_value = ndarray_df[[i, 0]];
-                            let y_value = ndarray_df[[i, 1]];
-                            hist.fill(x_value, y_value);
-
-                            pb.inc(1);
-                        }
-
-                        pb.finish();
-
-                        true
+                // Efficiently fill the 2D histogram
+                for (x_value, y_value) in x_values.into_iter().zip(y_values) {
+                    if let (Some(x), Some(y)) = (x_value, y_value) {
+                        hist.fill(x, y);
                     }
-                    Err(e) => {
-                        log::error!("Failed to convert DataFrame to ndarray: {}", e);
-                        false
-                    }
+
+                    pb.inc(1);
                 }
+
+                pb.finish();
+
+                true
             }
             Err(e) => {
                 log::error!("Failed to collect LazyFrame: {}", e);
