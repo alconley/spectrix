@@ -1,6 +1,6 @@
-# Nuclear Analysis Tool (NAT)
+# general Nuclear Analysis Tool (gNAT)
 
-The Nuclear Analysis Tool (NAT) is a comprehensive software designed for nuclear data analysis. It provides functionalities for histogramming, Gaussian fitting, and interactive data visualization using crates: `egui`, `egui-tiles`, `egui_plot`, and `polars`
+The general Nuclear Analysis Tool (gNAT) is a comprehensive software designed for nuclear data analysis. It provides functionalities for histogramming, Gaussian fitting, and interactive data visualization of 1D and 2D histograms using crates: `egui`, `egui-tiles`, `egui_plot`, and `polars`
 
 ### Running locally
 
@@ -8,7 +8,7 @@ Make sure you are using the latest version of stable rust by running `rustup upd
 
 Then clone the respository
 
-`git clone https://github.com/alconley/NAT.git`
+`git clone https://github.com/alconley/gNAT.git`
 
 `cargo run --release`
 
@@ -22,7 +22,7 @@ On Fedora Rawhide you need to run:
 
 ## File Format
 
-For version 1.0, this program reads in `.parquet` files using the [Polars](https://docs.rs/polars/latest/polars/) crate. Personally, the .parquet files that I use are from [cebra_sps_eventbuilder](https://github.com/alconley/cebra_sps_eventbuilder).
+For version 1.0, this program reads in `.parquet` files using the [Polars](https://docs.rs/polars/latest/polars/) crate. Personally, the .parquet files that I use are from [Eventbuilder](https://github.com/alconley/Eventbuilder).
 
 ### About Parquet
 

@@ -4,7 +4,7 @@ use crate::util::processer::Processer;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
-pub struct NATApp {
+pub struct GNATApp {
     tree: egui_tiles::Tree<Pane>,
     processer: Processer,
     behavior: TreeBehavior,
@@ -12,7 +12,7 @@ pub struct NATApp {
     right_side_panel_open: bool,
 }
 
-impl Default for NATApp {
+impl Default for GNATApp {
     fn default() -> Self {
         let tree = egui_tiles::Tree::empty("Empty tree");
 
@@ -26,7 +26,7 @@ impl Default for NATApp {
     }
 }
 
-impl NATApp {
+impl GNATApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
@@ -45,7 +45,7 @@ impl NATApp {
     }
 }
 
-impl eframe::App for NATApp {
+impl eframe::App for GNATApp {
     /// Called by the frame work to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);

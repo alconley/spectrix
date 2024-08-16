@@ -1,7 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod app;
 #[cfg(not(target_arch = "wasm32"))]
-pub use app::NATApp;
+pub use app::GNATApp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pane;
 #[cfg(not(target_arch = "wasm32"))]

@@ -45,6 +45,17 @@ impl Histogram {
         }
     }
 
+    pub fn set_counts(&mut self, counts: Vec<u64>) {
+        self.bins = counts;
+    }
+
+    // Get the bin edges
+    pub fn get_bin_edges(&self) -> Vec<f64> {
+        (0..=self.bins.len())
+            .map(|i| self.range.0 + i as f64 * self.bin_width)
+            .collect()
+    }
+
     // Convert histogram bins to line points
     pub fn update_line_points(&mut self) {
         self.line.points = self
