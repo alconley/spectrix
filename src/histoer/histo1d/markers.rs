@@ -19,6 +19,12 @@ impl FitMarkers {
         Self::default()
     }
 
+    pub fn is_dragging(&self) -> bool {
+        self.region_markers.iter().any(|m| m.is_dragging)
+            || self.peak_markers.iter().any(|m| m.is_dragging)
+            || self.background_markers.iter().any(|m| m.is_dragging)
+    }
+
     pub fn add_region_marker(&mut self, x: f64) {
         if self.region_markers.len() >= 2 {
             self.clear_region_markers();
@@ -193,11 +199,27 @@ impl FitMarkers {
 
                 ui.separator();
 
-                if ui.button("Clear all markers").clicked() {
-                    self.clear_background_markers();
-                    self.clear_peak_markers();
-                    self.clear_region_markers();
-                }
+                ui.horizontal(|ui| {
+                    ui.label("Clear");
+
+                    if ui.button("All").clicked() {
+                        self.clear_background_markers();
+                        self.clear_peak_markers();
+                        self.clear_region_markers();
+                    }
+
+                    if ui.button("Region").clicked() {
+                        self.clear_region_markers();
+                    }
+
+                    if ui.button("Peaks").clicked() {
+                        self.clear_peak_markers();
+                    }
+
+                    if ui.button("Background").clicked() {
+                        self.clear_background_markers();
+                    }
+                });
             });
 
             ui.separator();

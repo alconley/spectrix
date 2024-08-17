@@ -179,8 +179,17 @@ impl Histogram2D {
             self.image.draw(plot_ui, image);
         }
 
-        self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
+        if plot_ui.response().hovered() {
+            self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
+            self.plot_settings.egui_settings.limit_scrolling = true;
+        } else {
+            self.plot_settings.cursor_position = None;
+        }
+
         self.plot_settings.draw(plot_ui);
+
+        self.plot_settings.egui_settings.allow_drag = !(self.plot_settings.cuts.is_dragging()
+            || self.plot_settings.projections.is_dragging());
 
         if self.plot_settings.egui_settings.limit_scrolling {
             self.limit_scrolling(plot_ui);

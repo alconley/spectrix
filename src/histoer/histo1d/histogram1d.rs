@@ -201,9 +201,17 @@ impl Histogram {
         self.show_stats(plot_ui);
 
         self.plot_settings.markers.draw_all_markers(plot_ui);
+        // Check if markers are being dragged
+        if self.plot_settings.markers.is_dragging() {
+            // Disable dragging if a marker is being dragged
+            self.plot_settings.egui_settings.allow_drag = false;
+        } else {
+            self.plot_settings.egui_settings.allow_drag = true;
+        }
 
         if plot_ui.response().hovered() {
             self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
+            self.plot_settings.egui_settings.limit_scrolling = true;
         } else {
             self.plot_settings.cursor_position = None;
         }

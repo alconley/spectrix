@@ -89,7 +89,7 @@ impl EguiHorizontalLine {
                 let mid_point = egui_plot::Points::new(mid_point_pos)
                     .color(self.color)
                     .highlight(self.highlighted)
-                    .radius(1.0)
+                    .radius(3.0)
                     .id(Id::new(self.name.clone()));
 
                 plot_ui.points(mid_point);
@@ -103,7 +103,7 @@ impl EguiHorizontalLine {
             if let Some(hovered_id) = plot_response.hovered_plot_item {
                 if hovered_id == Id::new(self.name.clone()) {
                     self.highlighted = true;
-                    if pointer_state.button_pressed(egui::PointerButton::Middle) {
+                    if pointer_state.button_pressed(egui::PointerButton::Primary) {
                         self.is_dragging = true;
                     }
                 } else {
@@ -115,11 +115,11 @@ impl EguiHorizontalLine {
 
             if self.is_dragging {
                 self.y_value = plot_response.transform.value_from_position(pointer_pos).y;
-                if pointer_state.button_released(egui::PointerButton::Middle) {
+                if pointer_state.button_released(egui::PointerButton::Primary) {
                     self.is_dragging = false;
                 }
             }
-        } else if pointer_state.button_released(egui::PointerButton::Middle) {
+        } else if pointer_state.button_released(egui::PointerButton::Primary) {
             self.is_dragging = false;
         }
     }

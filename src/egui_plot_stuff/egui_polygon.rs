@@ -27,7 +27,7 @@ pub struct EguiPolygon {
     #[serde(skip)]
     temp_vertex: Option<Vec<[f64; 2]>>,
     #[serde(skip)]
-    is_dragging: bool,
+    pub is_dragging: bool,
     #[serde(skip)]
     dragged_vertex_index: Option<usize>,
 }
@@ -121,7 +121,7 @@ impl EguiPolygon {
                             self.vertices[closest_index.unwrap()]
                         );
 
-                        if pointer_state.button_pressed(egui::PointerButton::Middle) {
+                        if pointer_state.button_pressed(egui::PointerButton::Primary) {
                             self.is_dragging = true;
                             self.dragged_vertex_index = closest_index;
                         }
@@ -134,13 +134,13 @@ impl EguiPolygon {
                     if let Some(index) = self.dragged_vertex_index {
                         self.vertices[index] = [x_value, y_value];
                     }
-                    if pointer_state.button_released(egui::PointerButton::Middle) {
+                    if pointer_state.button_released(egui::PointerButton::Primary) {
                         self.is_dragging = false;
                         self.dragged_vertex_index = None;
                     }
                 }
             }
-        } else if pointer_state.button_released(egui::PointerButton::Middle) {
+        } else if pointer_state.button_released(egui::PointerButton::Primary) {
             self.is_dragging = false;
         }
     }

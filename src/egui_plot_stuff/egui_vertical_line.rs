@@ -103,7 +103,7 @@ impl EguiVerticalLine {
             if let Some(hovered_id) = plot_response.hovered_plot_item {
                 if hovered_id == Id::new(self.name.clone()) {
                     self.highlighted = true;
-                    if pointer_state.button_pressed(egui::PointerButton::Middle) {
+                    if pointer_state.button_pressed(egui::PointerButton::Primary) {
                         self.is_dragging = true;
                     }
                 } else {
@@ -115,11 +115,11 @@ impl EguiVerticalLine {
 
             if self.is_dragging {
                 self.x_value = plot_response.transform.value_from_position(pointer_pos).x;
-                if pointer_state.button_released(egui::PointerButton::Middle) {
+                if pointer_state.button_released(egui::PointerButton::Primary) {
                     self.is_dragging = false;
                 }
             }
-        } else if pointer_state.button_released(egui::PointerButton::Middle) {
+        } else if pointer_state.button_released(egui::PointerButton::Primary) {
             self.is_dragging = false;
         }
     }

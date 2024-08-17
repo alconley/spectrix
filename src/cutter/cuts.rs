@@ -222,6 +222,15 @@ impl HistogramCuts {
         self.cuts.push(new_cut);
     }
 
+    pub fn is_dragging(&self) -> bool {
+        for cut in &self.cuts {
+            if cut.polygon.is_dragging {
+                return true;
+            }
+        }
+        false
+    }
+
     fn sycronize_column_names(&mut self) {
         for cut in &mut self.cuts {
             cut.x_column.clone_from(&self.x_column);
