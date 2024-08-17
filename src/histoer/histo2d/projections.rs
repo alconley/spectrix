@@ -227,7 +227,7 @@ impl Projections {
 
     fn show_x_projection(&mut self, ui: &mut egui::Ui) {
         if self.add_x_projection && self.x_projection.is_some() {
-            let name = if let Some(histogram) = &self.y_projection {
+            let name = if let Some(histogram) = &self.x_projection {
                 let name = histogram.name.clone();
                 name.split(':').collect::<Vec<&str>>()[0].to_string()
             } else {
@@ -292,6 +292,7 @@ impl Projections {
         }
 
         ui.checkbox(&mut self.add_x_projection, "Add X Projection").on_hover_text("Keybinds:\nX = Add X Projection\nMiddle Mouse Button = Drag Line at the center of the plot (cirlce)");
+
         if self.add_x_projection {
             ui.horizontal(|ui| {
                 ui.add(

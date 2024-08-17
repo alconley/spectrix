@@ -60,11 +60,12 @@ impl eframe::App for GNATApp {
             });
         });
 
-        egui::SidePanel::left("nat_left_panel")
-            // .max_width(200.0)
-            .show_animated(ctx, self.left_side_panel_open, |ui| {
+        egui::SidePanel::left("nat_left_panel").show_animated(
+            ctx,
+            self.left_side_panel_open,
+            |ui| {
                 ui.horizontal(|ui| {
-                    ui.heading("NAT");
+                    ui.heading("gNAT");
 
                     egui::global_dark_light_mode_switch(ui);
 
@@ -110,14 +111,16 @@ impl eframe::App for GNATApp {
                             tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
                         }
                     });
-            });
+            },
+        );
 
-        egui::SidePanel::right("nat_right_panel")
-            .max_width(800.0)
-            .resizable(false)
-            .show_animated(ctx, self.right_side_panel_open, |ui| {
+        egui::SidePanel::right("nat_right_panel").show_animated(
+            ctx,
+            self.right_side_panel_open,
+            |ui| {
                 self.processer.histogram_script_ui(ui);
-            });
+            },
+        );
 
         egui::CentralPanel::default().show(ctx, |ui| {
             self.tree.ui(&mut self.behavior, ui);

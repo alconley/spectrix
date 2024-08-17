@@ -59,25 +59,32 @@ impl LazyFramer {
         self.lazyframe = Some(lf);
     }
 
-    pub fn save_lazyframe(&mut self, output_path: &PathBuf) -> Result<(), PolarsError> {
+    pub fn save_lazyframe(&mut self, output_path: &PathBuf, scan: bool) -> Result<(), PolarsError> {
         if let Some(ref lf) = self.lazyframe {
-            let mut df = lf.clone().collect()?;
+            if scan {
+                // use sink parquet to save the LazyFrame to a single file
+                // this ensures you can save the lazyframe to a single file even if it is larger than memory
+                let options = ParquetWriteOptions::default();
 
-            // Open a file in write mode at the specified output path
-            // polars 0.36
-            // let file = File::create(output_path)
-            //     .map_err(|e| PolarsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+                lf.clone().sink_parquet(output_path, options)?;
+            } else {
+                // use collect to save the LazyFrame to a single file
+                // this will load the entire LazyFrame into memory
+                let mut df = lf.clone().collect()?;
 
-            // Open a file in write mode at the specified output path
-            let file = File::create(output_path).map_err(|e| PolarsError::IO {
-                error: Arc::new(e),
-                msg: None,
-            })?;
+                // Open a file in write mode at the specified output path
+                let file = File::create(output_path).map_err(|e| PolarsError::IO {
+                    error: Arc::new(e),
+                    msg: None,
+                })?;
 
-            // Write the filtered DataFrame to a Parquet file
-            ParquetWriter::new(file)
-                .set_parallel(true)
-                .finish(&mut df)?;
+                // Write the filtered DataFrame to a Parquet file
+                ParquetWriter::new(file)
+                    .set_parallel(true)
+                    .finish(&mut df)?;
+            }
+        } else {
+            log::error!("LazyFrame is not loaded");
         }
         Ok(())
     }
@@ -85,14 +92,14 @@ impl LazyFramer {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("LazyFrame");
 
-        if ui.button("Save LazyFrame").clicked() {
+        if ui.button("Save Current LazyFrame").clicked() {
             if let Some(_lf) = &self.lazyframe {
                 let output_path = rfd::FileDialog::new()
                     .add_filter("Parquet Files", &["parquet"])
                     .save_file();
 
                 if let Some(output_path) = output_path {
-                    match self.save_lazyframe(&output_path) {
+                    match self.save_lazyframe(&output_path, true) {
                         Ok(_) => {
                             log::info!("Saved LazyFrame to {:?}", output_path);
                         }

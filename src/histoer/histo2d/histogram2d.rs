@@ -214,6 +214,8 @@ impl Histogram2D {
         });
 
         self.plot_settings.interactive_response(&plot_response);
+
+        self.keybinds(ui);
     }
 }
 

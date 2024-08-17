@@ -14,6 +14,8 @@ pub struct Processer {
     #[serde(skip)]
     pub is_tree_ready: bool,
     pub histogram_script: HistogramScript,
+    pub save_with_scanning: bool,
+    pub suffix: String,
 }
 
 impl Processer {
@@ -25,6 +27,8 @@ impl Processer {
             histogrammer: Histogrammer::new(),
             is_tree_ready: false,
             histogram_script: HistogramScript::new(),
+            save_with_scanning: true,
+            suffix: "filtered".to_string(),
         }
     }
 
@@ -77,20 +81,111 @@ impl Processer {
         }
     }
 
-    pub fn save_current_lazyframe(&mut self) {
+    // save the selected files to a single file
+    pub fn save_selected_files_to_single_file(&mut self) {
+        let scan = self.save_with_scanning;
         if let Some(output_path) = rfd::FileDialog::new()
-            .set_title("Collect Lazyframe and save the DataFrame to a single file")
+            .set_title("Save the selected files to a single file")
             .add_filter("Parquet file", &["parquet"])
             .save_file()
         {
-            if let Some(lazyframer) = &mut self.lazyframer {
-                match lazyframer.save_lazyframe(&output_path) {
-                    Ok(_) => println!("LazyFrame saved successfully."),
-                    Err(e) => log::error!("Failed to save LazyFrame: {}", e),
+            match self
+                .workspacer
+                .save_selected_files_to_single_file(&output_path, scan)
+            {
+                Ok(_) => println!("Selected files saved successfully."),
+                Err(e) => log::error!("Failed to save selected files: {}", e),
+            }
+        }
+    }
+
+    // filter the files with the selected cuts and save to a single file
+    pub fn save_filtered_files_to_single_file(&mut self) {
+        let scan = self.save_with_scanning;
+
+        if let Some(output_path) = rfd::FileDialog::new()
+            .set_title("Filter the files with the selected cuts and save to a single file")
+            .add_filter("Parquet file", &["parquet"])
+            .save_file()
+        {
+            match self.workspacer.save_filtered_files_to_single_file(
+                &output_path,
+                &mut self.cut_handler,
+                scan,
+            ) {
+                Ok(_) => println!("Filtered files saved successfully."),
+                Err(e) => log::error!("Failed to save filtered files: {}", e),
+            }
+        }
+    }
+
+    pub fn save_filtered_files_individually(&mut self, suffix: &str) {
+        let scan = self.save_with_scanning;
+
+        if let Some(output_dir) = rfd::FileDialog::new()
+            .set_title("Select Output Directory to Save Filtered Files Individually")
+            .pick_folder()
+        {
+            if !suffix.is_empty() {
+                match self.workspacer.save_individually_filtered_files(
+                    &output_dir,
+                    &mut self.cut_handler,
+                    suffix,
+                    scan,
+                ) {
+                    Ok(_) => println!("Filtered files saved individually."),
+                    Err(e) => log::error!("Failed to save filtered files individually: {}", e),
                 }
             } else {
-                log::error!("No LazyFrame loaded to save.");
+                log::error!("No suffix provided, operation canceled.");
             }
+        } else {
+            log::error!("No output directory selected, operation canceled.");
+        }
+    }
+
+    pub fn saving_ui(&mut self, ui: &mut egui::Ui) {
+        if !self.workspacer.selected_files.is_empty() {
+            ui.heading("Parquet Writer");
+
+            ui.checkbox(&mut self.save_with_scanning, "Save with Scanning")
+                .on_hover_text(
+                    "This can save files that are larger than memory at the cost of being slower.",
+                );
+
+            egui::Grid::new("parquet_writer_grid")
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.label("");
+                    ui.label("Single File");
+                    ui.label("Individually");
+                    ui.end_row();
+
+                    ui.label("Non-Filtered");
+
+                    if ui.button("Save").clicked() {
+                        self.save_selected_files_to_single_file();
+                    }
+
+                    ui.end_row();
+
+                    if !self.cut_handler.cuts.is_empty() {
+                        ui.label("Cut Filtered");
+
+                        if ui.button("Save").clicked() {
+                            self.save_filtered_files_to_single_file();
+                        }
+
+                        if ui.button("Save").clicked() {
+                            self.save_filtered_files_individually(&self.suffix.clone());
+                        }
+
+                        ui.text_edit_singleline(&mut self.suffix);
+                    }
+                    ui.end_row();
+                });
+
+            ui.separator();
         }
     }
 
@@ -114,6 +209,8 @@ impl Processer {
         self.workspacer.workspace_ui(ui);
 
         self.cut_handler.cut_ui(ui);
+
+        self.saving_ui(ui);
 
         if let Some(lazyframer) = &mut self.lazyframer {
             lazyframer.ui(ui);

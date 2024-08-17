@@ -5,8 +5,6 @@ use polars::prelude::*;
 use std::fs::File;
 use std::io::{BufReader, Write};
 
-use std::time::Instant;
-
 use crate::egui_plot_stuff::egui_polygon::EguiPolygon;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -83,10 +81,6 @@ impl Cut {
     }
 
     pub fn filter_lf_with_cut(&self, lf: &LazyFrame) -> Result<LazyFrame, PolarsError> {
-        eprintln!("\nFiltering with cut {}", self.polygon.name);
-
-        let start = Instant::now();
-
         let x_column = self.x_column.clone(); // Clone the column names to avoid borrowing `self`
         let y_column = self.y_column.clone();
         let polygon = self.polygon.clone(); // Clone the polygon or other data needed
@@ -154,14 +148,12 @@ impl Cut {
         pb.set_style(
             ProgressStyle::default_bar()
                 .template(&format!(
-                    "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
+                    "Filtering with {} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
                     self.polygon.name
                 ))
                 .expect("Failed to create progress style")
                 .progress_chars("#>-"),
         );
-
-        pb.set_message("Creating mask");
 
         for (x_value, y_value) in x_values.into_iter().zip(y_values) {
             let inside = match (x_value, y_value) {
@@ -171,7 +163,7 @@ impl Cut {
             mask.push(inside);
             pb.inc(1); // Increment the progress bar
         }
-        pb.finish_with_message("Mask creation complete");
+        pb.finish();
 
         // Create a boolean column from the mask
         let mask_series = BooleanChunked::from_slice("mask", &mask).into_series();
@@ -187,9 +179,6 @@ impl Cut {
 
         let final_filtered_lf = final_filtered_lf.filter(col("mask").eq(lit(true)));
         let final_filtered_lf = final_filtered_lf.drop(["mask"]);
-
-        let duration = start.elapsed();
-        eprintln!("Filtering took {:?}\n", duration);
 
         Ok(final_filtered_lf)
     }
@@ -290,101 +279,3 @@ impl HistogramCuts {
         }
     }
 }
-
-// // this creates a boolean mask for the DataFrame, however it is realitively slow since the you have to collect the whole lazyframe
-// pub fn filter_lf_with_cut(&self, lf: &LazyFrame) -> Result<LazyFrame, PolarsError> {
-//     let x_column = &self.x_column;
-//     let y_column = &self.y_column;
-
-//     let current_lf = lf.clone();
-
-//     // check to see if the column exists
-//     let check_lf = current_lf.clone().limit(1);
-//     let df = check_lf.collect()?;
-//     let columns: Vec<String> = df
-//         .get_column_names_owned()
-//         .into_iter()
-//         .map(|name| name.to_string())
-//         .collect();
-
-//     if !columns.contains(&x_column.to_string()) {
-//         log::error!("Column {} does not exist", x_column);
-//         return Err(PolarsError::ColumnNotFound(x_column.to_string().into()));
-//     }
-
-//     if !columns.contains(&y_column.to_string()) {
-//         log::error!("Column {} does not exist", y_column);
-//         return Err(PolarsError::ColumnNotFound(y_column.to_string().into()));
-//     }
-
-//     // get the min and max values for the x and y data points in the cuts
-//     let x_min = self
-//         .polygon
-//         .vertices
-//         .iter()
-//         .map(|&[x, _]| x)
-//         .fold(f64::INFINITY, |a, b| a.min(b));
-//     let x_max = self
-//         .polygon
-//         .vertices
-//         .iter()
-//         .map(|&[x, _]| x)
-//         .fold(f64::NEG_INFINITY, |a, b| a.max(b));
-//     let y_min = self
-//         .polygon
-//         .vertices
-//         .iter()
-//         .map(|&[_, y]| y)
-//         .fold(f64::INFINITY, |a, b| a.min(b));
-//     let y_max = self
-//         .polygon
-//         .vertices
-//         .iter()
-//         .map(|&[_, y]| y)
-//         .fold(f64::NEG_INFINITY, |a, b| a.max(b));
-
-//     let current_lf = current_lf
-//         .filter(col(x_column).gt_eq(lit(x_min)))
-//         .filter(col(x_column).lt_eq(lit(x_max)))
-//         .filter(col(y_column).gt_eq(lit(y_min)))
-//         .filter(col(y_column).lt_eq(lit(y_max)))
-//         .filter(col(x_column).neq(lit(-1e6)))
-//         .filter(col(y_column).neq(lit(-1e6)));
-
-//     let mask_creation_df = current_lf
-//         .clone()
-//         .select([col(x_column), col(y_column)])
-//         .collect()?;
-
-//     let ndarray_mask_creation_df =
-//         mask_creation_df.to_ndarray::<Float64Type>(IndexOrder::Fortran)?;
-//     let rows = ndarray_mask_creation_df.shape()[0];
-//     let mut boolean_chunked_builder = BooleanChunkedBuilder::new("mask", rows);
-
-//     let pb = ProgressBar::new(rows as u64);
-//     let style = ProgressStyle::default_bar()
-//         .template(&format!(
-//             "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
-//             self.polygon.name
-//         ))
-//         .expect("Failed to create progress style");
-//     pb.set_style(style.progress_chars("#>-"));
-//     pb.set_message("Creating boolean mask");
-
-//     for i in 0..rows {
-//         let x_value = ndarray_mask_creation_df[[i, 0]];
-//         let y_value = ndarray_mask_creation_df[[i, 1]];
-//         let point = self.is_inside(x_value, y_value);
-//         boolean_chunked_builder.append_value(point);
-//         pb.inc(1);
-//     }
-
-//     let boolean_chunked_series = boolean_chunked_builder.finish();
-//     let df = current_lf.clone().collect()?;
-
-//     let filtered_lf = df.filter(&boolean_chunked_series)?.lazy();
-
-//     pb.finish_with_message("Filtering complete");
-
-//     Ok(filtered_lf)
-// }

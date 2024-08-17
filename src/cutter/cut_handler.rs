@@ -111,11 +111,6 @@ impl CutHandler {
         let mut filtered_df = filtered_lf.collect()?;
 
         // Open a file in write mode at the specified output path
-        // polars 0.36
-        // let file = File::create(output_path)
-        //     .map_err(|e| PolarsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-
-        // Open a file in write mode at the specified output path
         let file = File::create(output_path).map_err(|e| PolarsError::IO {
             error: Arc::new(e),
             msg: None,
@@ -128,48 +123,4 @@ impl CutHandler {
 
         Ok(())
     }
-
-    /*
-    pub fn _filter_files_and_save_separately(
-        &mut self,
-        file_paths: Vec<PathBuf>,
-        output_dir: &PathBuf,
-        custom_text: &str,
-    ) -> Result<(), PolarsError> {
-        for file_path in file_paths.iter() {
-            let args = ScanArgsParquet::default();
-
-            let file_arc: Arc<PathBuf> = Arc::from(file_path.clone());
-
-            // Construct a LazyFrame for each file
-            let lf = LazyFrame::scan_parquet(file_arc.as_ref(), args.clone())?;
-
-            // Apply filtering logic as before, leading to a filtered LazyFrame
-            let filtered_lf = self.filter_lf_with_all_cuts(&lf)?; // Placeholder for applying cuts
-
-            // Collect the LazyFrame into a DataFrame
-            let mut filtered_df = filtered_lf.collect()?;
-
-            // Generate a new output file name by appending custom text to the original file name
-            let original_file_name = file_path.file_stem().unwrap_or(OsStr::new("default"));
-            let new_file_name = format!(
-                "{}_{}.parquet",
-                original_file_name.to_string_lossy(),
-                custom_text
-            );
-            let output_file_path = output_dir.join(new_file_name);
-
-            // Open a file in write mode at the newly specified output path
-            let file = File::create(&output_file_path)
-                .map_err(|e| PolarsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-
-            // Write the filtered DataFrame to a new Parquet file
-            ParquetWriter::new(file)
-                .set_parallel(true)
-                .finish(&mut filtered_df)?;
-        }
-
-        Ok(())
-    }
-    */
 }
