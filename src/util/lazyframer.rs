@@ -90,46 +90,39 @@ impl LazyFramer {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("LazyFrame");
+        ui.collapsing("LazyFrame", |ui| {
+            if ui.button("Save Current LazyFrame").clicked() {
+                if let Some(_lf) = &self.lazyframe {
+                    let output_path = rfd::FileDialog::new()
+                        .add_filter("Parquet Files", &["parquet"])
+                        .save_file();
 
-        if ui.button("Save Current LazyFrame").clicked() {
-            if let Some(_lf) = &self.lazyframe {
-                let output_path = rfd::FileDialog::new()
-                    .add_filter("Parquet Files", &["parquet"])
-                    .save_file();
-
-                if let Some(output_path) = output_path {
-                    match self.save_lazyframe(&output_path, true) {
-                        Ok(_) => {
-                            log::info!("Saved LazyFrame to {:?}", output_path);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to save LazyFrame: {}", e);
+                    if let Some(output_path) = output_path {
+                        match self.save_lazyframe(&output_path, true) {
+                            Ok(_) => {
+                                log::info!("Saved LazyFrame to {:?}", output_path);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to save LazyFrame: {}", e);
+                            }
                         }
                     }
                 }
             }
-        }
 
-        ui.label("Columns:");
-        if self.columns.is_empty() {
-            ui.label("No columns");
-            if let Some(lf) = &self.lazyframe {
-                if ui.button("Get Columns").clicked() {
-                    self.columns = Self::get_column_names_from_lazyframe(lf);
+            ui.label("Columns:");
+            if self.columns.is_empty() {
+                ui.label("No columns");
+                if let Some(lf) = &self.lazyframe {
+                    if ui.button("Get Columns").clicked() {
+                        self.columns = Self::get_column_names_from_lazyframe(lf);
+                    }
+                }
+            } else {
+                for column in &self.columns {
+                    ui.label(column);
                 }
             }
-        } else {
-            egui::ScrollArea::vertical()
-                .max_height(100.0)
-                .id_source("LazyframerColumnNameScrollArea")
-                .show(ui, |ui| {
-                    for column in &self.columns {
-                        ui.label(column);
-                    }
-                });
-        }
-
-        ui.separator();
+        });
     }
 }

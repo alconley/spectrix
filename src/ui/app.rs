@@ -75,37 +75,22 @@ impl eframe::App for GNATApp {
                     }
                 });
 
-                ui.separator();
-
-                self.processer.ui(ui);
-
-                // check to see if processer.is_tree_ready -> get the tree from the histogrammer
-                if self.processer.is_tree_ready {
-                    self.add_histograms_to_tree_from_processer();
-                    self.processer.is_tree_ready = false;
-                }
-
                 egui::ScrollArea::vertical()
                     .id_source("LeftPanel")
                     .show(ui, |ui| {
+                        ui.separator();
+
+                        self.processer.ui(ui);
+
+                        // check to see if processer.is_tree_ready -> get the tree from the histogrammer
+                        if self.processer.is_tree_ready {
+                            self.add_histograms_to_tree_from_processer();
+                            self.processer.is_tree_ready = false;
+                        }
+
                         self.behavior.ui(ui);
 
-                        // ui.collapsing("Tree", |ui| {
-                        //     ui.style_mut().wrap = Some(false);
-                        //     let tree_debug = format!("{:#?}", self.tree);
-                        //     ui.monospace(&tree_debug);
-                        // });
-
-                        // ui.separator();
-
-                        // ui.collapsing("Active tiles", |ui| {
-                        //     let active = self.tree.active_tiles();
-                        //     for tile_id in active {
-                        //         use egui_tiles::Behavior as _;
-                        //         let name = self.behavior.tab_title_for_tile(&self.tree.tiles, tile_id);
-                        //         ui.label(format!("{} - {tile_id:?}", name.text()));
-                        //     }
-                        // });
+                        ui.separator();
 
                         if let Some(root) = self.tree.root() {
                             tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
@@ -146,20 +131,10 @@ fn tree_ui(
         return;
     };
 
-    // check to see if the container only has one child
-    // if let egui_tiles::Tile::Container(container) = &mut tile {
-    //     if let Some(child) = container.only_child() {
-    //         tree_ui(ui, behavior, tiles, child);
-
-    //         return;
-    //     }
-    // }
-
-    let default_open = false;
     egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
         egui::Id::new((tile_id, "tree")),
-        default_open,
+        false,
     )
     .show_header(ui, |ui| {
         ui.label(text);
@@ -170,19 +145,6 @@ fn tree_ui(
     .body(|ui| match &mut tile {
         egui_tiles::Tile::Pane(_) => {}
         egui_tiles::Tile::Container(container) => {
-            //     // let mut kind = container.kind();
-            //     // egui::ComboBox::from_label("Kind")
-            //     //     .selected_text(format!("{kind:?}"))
-            //     //     .show_ui(ui, |ui| {
-            //     //         for typ in egui_tiles::ContainerKind::ALL {
-            //     //             ui.selectable_value(&mut kind, typ, format!("{typ:?}"))
-            //     //                 .clicked();
-            //     //         }
-            //     //     });
-            //     // if kind != container.kind() {
-            //     //     container.set_kind(kind);
-            //     // }
-
             for &child in container.children() {
                 tree_ui(ui, behavior, tiles, child);
             }

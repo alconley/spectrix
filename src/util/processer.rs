@@ -45,7 +45,7 @@ impl Processer {
     fn perform_histogrammer_from_lazyframe(&mut self) {
         if let Some(lazyframer) = &self.lazyframer {
             if let Some(lf) = &lazyframer.lazyframe {
-                self.histogrammer.reset();
+                // self.histogrammer.reset();
 
                 self.histogram_script
                     .add_histograms(&mut self.histogrammer, lf.clone());
@@ -145,9 +145,7 @@ impl Processer {
     }
 
     pub fn saving_ui(&mut self, ui: &mut egui::Ui) {
-        if !self.workspacer.selected_files.is_empty() {
-            ui.heading("Parquet Writer");
-
+        ui.collapsing("Parquet Writer", |ui| {
             ui.checkbox(&mut self.save_with_scanning, "Save with Scanning")
                 .on_hover_text(
                     "This can save files that are larger than memory at the cost of being slower.",
@@ -159,61 +157,100 @@ impl Processer {
                     ui.label("");
                     ui.label("Single File");
                     ui.label("Individually");
+                    ui.label("Suffix     ");
                     ui.end_row();
 
                     ui.label("Non-Filtered");
 
-                    if ui.button("Save").clicked() {
+                    if ui
+                        .add_enabled(
+                            self.workspacer.selected_files.len() > 1,
+                            egui::Button::new("Save"),
+                        )
+                        .clicked()
+                    {
                         self.save_selected_files_to_single_file();
                     }
 
                     ui.end_row();
 
-                    if !self.cut_handler.cuts.is_empty() {
-                        ui.label("Cut Filtered");
+                    ui.label("Cut Filtered");
 
-                        if ui.button("Save").clicked() {
-                            self.save_filtered_files_to_single_file();
-                        }
-
-                        if ui.button("Save").clicked() {
-                            self.save_filtered_files_individually(&self.suffix.clone());
-                        }
-
-                        ui.text_edit_singleline(&mut self.suffix);
+                    if ui
+                        .add_enabled(
+                            self.cut_handler.cuts_are_selected()
+                                && !self.workspacer.selected_files.is_empty(),
+                            egui::Button::new("Save"),
+                        )
+                        .on_disabled_hover_text("No cuts selected.")
+                        .clicked()
+                    {
+                        self.save_filtered_files_to_single_file();
                     }
+
+                    if ui
+                        .add_enabled(
+                            self.cut_handler.cuts_are_selected()
+                                && !self.workspacer.selected_files.is_empty(),
+                            egui::Button::new("Save"),
+                        )
+                        .on_disabled_hover_text("No cuts selected.")
+                        .clicked()
+                    {
+                        self.save_filtered_files_individually(&self.suffix.clone());
+                    }
+
+                    ui.text_edit_singleline(&mut self.suffix);
+
                     ui.end_row();
                 });
-
-            ui.separator();
-        }
+        });
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        if !self.workspacer.selected_files.is_empty() {
-            // Properly clone the shared state for processing
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    !self.workspacer.selected_files.is_empty(),
+                    egui::Button::new("Calculate Histograms"),
+                )
+                .on_disabled_hover_text("No files selected.")
+                .clicked()
+            {
+                self.calculate_histograms();
+            }
 
-            ui.horizontal(|ui| {
-                if ui.button("Calculate Histograms").clicked() {
-                    self.calculate_histograms();
-                }
+            if ui
+                .add_enabled(
+                    !self.workspacer.selected_files.is_empty()
+                        && self.cut_handler.cuts_are_selected(),
+                    egui::Button::new("with Cuts"),
+                )
+                .on_disabled_hover_text("No files selected or cuts selected.")
+                .clicked()
+            {
+                self.calculate_histograms_with_cuts();
+            }
+        });
 
-                if !self.cut_handler.cuts.is_empty() && ui.button("with Cuts").clicked() {
-                    self.calculate_histograms_with_cuts();
-                }
-            });
-
-            ui.separator();
-        }
+        ui.separator();
 
         self.workspacer.workspace_ui(ui);
 
+        ui.separator();
+
         self.cut_handler.cut_ui(ui);
+
+        ui.separator();
 
         self.saving_ui(ui);
 
+        ui.separator();
+
         if let Some(lazyframer) = &mut self.lazyframer {
             lazyframer.ui(ui);
+
+            ui.separator();
         }
     }
 

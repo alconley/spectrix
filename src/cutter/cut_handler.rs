@@ -27,53 +27,54 @@ impl CutHandler {
         Ok(())
     }
 
+    pub fn cuts_are_selected(&self) -> bool {
+        self.cuts.iter().any(|cut| cut.selected)
+    }
+
     pub fn cut_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.heading("Cuts");
+        ui.collapsing("Cuts", |ui| {
             if ui.button("Get Cut").clicked() {
                 if let Err(e) = self.get_cut() {
                     log::error!("Error loading cut: {:?}", e);
                 }
             }
-        });
 
-        if self.cuts.is_empty() {
-            ui.label("No cuts loaded");
-        } else {
-            egui::Grid::new("cuts")
-                .striped(true)
-                .num_columns(6)
-                .show(ui, |ui| {
-                    ui.label("Cuts");
-                    ui.label("X Column");
-                    ui.label("Y Column");
-                    ui.label("Polygon");
-                    ui.label("Active");
-                    ui.end_row();
-
-                    let mut index_to_remove = None;
-                    for (index, cut) in self.cuts.iter_mut().enumerate() {
-                        ui.label(format!("Cut {}", index));
-
-                        cut.ui(ui);
-
-                        ui.horizontal(|ui| {
-                            ui.checkbox(&mut cut.selected, "");
-                            if ui.button("🗙").clicked() {
-                                index_to_remove = Some(index);
-                            }
-                        });
-
+            if self.cuts.is_empty() {
+                ui.label("No cuts loaded");
+            } else {
+                egui::Grid::new("cuts")
+                    .striped(true)
+                    .num_columns(6)
+                    .show(ui, |ui| {
+                        ui.label("Cuts");
+                        ui.label("X Column\t\t\t\t\t");
+                        ui.label("Y Column\t\t\t\t\t");
+                        ui.label("Polygon");
+                        ui.label("Active");
                         ui.end_row();
-                    }
 
-                    if let Some(index) = index_to_remove {
-                        self.cuts.remove(index);
-                    }
-                });
-        }
+                        let mut index_to_remove = None;
+                        for (index, cut) in self.cuts.iter_mut().enumerate() {
+                            ui.label(format!("Cut {}", index));
 
-        ui.separator();
+                            cut.ui(ui);
+
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut cut.selected, "");
+                                if ui.button("🗙").clicked() {
+                                    index_to_remove = Some(index);
+                                }
+                            });
+
+                            ui.end_row();
+                        }
+
+                        if let Some(index) = index_to_remove {
+                            self.cuts.remove(index);
+                        }
+                    });
+            }
+        });
     }
 
     pub fn filter_lf_with_selected_cuts(

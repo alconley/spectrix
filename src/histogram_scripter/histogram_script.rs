@@ -229,6 +229,7 @@ impl HistogramScript {
         if self.manual_histogram_script {
             manual_add_histograms(h, lf);
         } else {
+            h.reset();
             self.progress = 0.0;
 
             let mut lazyframes = LazyFrames::new();
@@ -256,8 +257,6 @@ impl HistogramScript {
                     }
                 }
             }
-
-            // let mut histogrammer = Histogrammer::new();
 
             let total_histograms = self.histograms.len() as f32;
             for (i, hist) in self.histograms.iter_mut().enumerate() {

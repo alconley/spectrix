@@ -34,6 +34,11 @@ impl Histogram {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.bins = vec![0; self.bins.len()];
+        self.original_bins = vec![0; self.original_bins.len()];
+    }
+
     // Add a value to the histogram
     pub fn fill(&mut self, value: f64) {
         if value >= self.range.0 && value < self.range.1 {

@@ -392,33 +392,28 @@ impl Workspacer {
         let files = &mut self.files;
         let selected_files = &mut self.selected_files;
 
-        for file in files.iter() {
-            let file_stem = file.file_stem().unwrap_or_default().to_string_lossy();
-            let is_selected = selected_files.contains(file);
+        ui.horizontal_wrapped(|ui| {
+            for file in files.iter() {
+                let file_stem = file.file_stem().unwrap_or_default().to_string_lossy();
+                let is_selected = selected_files.contains(file);
 
-            let response = ui.selectable_label(is_selected, file_stem);
-            if response.clicked() {
-                if is_selected {
-                    selected_files.retain(|f| f != file);
-                } else {
-                    selected_files.push(file.clone());
+                let response = ui.selectable_label(is_selected, file_stem);
+                if response.clicked() {
+                    if is_selected {
+                        selected_files.retain(|f| f != file);
+                    } else {
+                        selected_files.push(file.clone());
+                    }
                 }
             }
-        }
+        });
     }
 
     pub fn workspace_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Workspace");
-        self.select_directory_ui(ui);
-        self.file_selection_settings_ui(ui);
-
-        egui::ScrollArea::vertical()
-            .id_source("WorkspaceScrollArea")
-            .max_height(200.0)
-            .show(ui, |ui| {
-                self.file_selection_ui(ui);
-            });
-
-        ui.separator();
+        ui.collapsing("Workspace", |ui| {
+            self.select_directory_ui(ui);
+            self.file_selection_settings_ui(ui);
+            self.file_selection_ui(ui);
+        });
     }
 }

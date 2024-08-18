@@ -81,8 +81,6 @@ impl TreeBehavior {
                     ui.end_row();
                 });
         });
-
-        ui.separator();
     }
 
     pub fn set_tile_tab_mapping(&mut self, tile_id: egui_tiles::TileId, tab_name: String) {

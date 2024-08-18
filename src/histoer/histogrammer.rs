@@ -36,8 +36,16 @@ impl Histogrammer {
     }
 
     pub fn add_hist1d(&mut self, name: &str, bins: usize, range: (f64, f64)) {
-        let hist: Histogram = Histogram::new(name, bins, range); // Create a new histogram.
-        self.histograms1d.push(hist); // Store it in the vector.
+        // check to see if the histogram already exists
+        // if the histogram already exists with the same bins and range, reset it. Else create a new one
+        if let Some(hist) = self.histograms1d.iter_mut().find(|h| h.name == name) {
+            if hist.bins.len() == bins && hist.range == range {
+                hist.reset();
+            }
+        } else {
+            let hist: Histogram = Histogram::new(name, bins, range); // Create a new histogram.
+            self.histograms1d.push(hist); // Store it in the vector.
+        }
     }
 
     pub fn fill_hist1d(&mut self, name: &str, lf: &LazyFrame, column_name: &str) -> bool {
@@ -112,8 +120,20 @@ impl Histogrammer {
         bins: (usize, usize),
         range: ((f64, f64), (f64, f64)),
     ) {
-        let hist: Histogram2D = Histogram2D::new(name, bins, range); // Create a new 2D histogram.
-        self.histograms2d.push(hist); // Store it in the vector.
+        if let Some(hist) = self.histograms2d.iter_mut().find(|h| h.name == name) {
+            if hist.bins.x == bins.0
+                && hist.bins.y == bins.1
+                && hist.range.x.min == range.0 .0
+                && hist.range.x.max == range.0 .1
+                && hist.range.y.min == range.1 .0
+                && hist.range.y.max == range.1 .1
+            {
+                hist.reset();
+            }
+        } else {
+            let hist: Histogram2D = Histogram2D::new(name, bins, range); // Create a new 2D histogram.
+            self.histograms2d.push(hist); // Store it in the vector.
+        }
     }
 
     pub fn fill_hist2d(

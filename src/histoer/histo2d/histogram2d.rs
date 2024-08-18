@@ -48,6 +48,12 @@ impl Histogram2D {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.bins.counts.clear();
+        self.bins.min_count = u64::MAX;
+        self.bins.max_count = u64::MIN;
+    }
+
     // Add a value to the histogram
     pub fn fill(&mut self, x_value: f64, y_value: f64) {
         if x_value >= self.range.x.min
