@@ -104,10 +104,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
         match pane {
-            // Pane::Histogram(hist) => hist.name.clone().into(),
             Pane::Histogram(hist) => hist.lock().unwrap().name.clone().into(),
             Pane::Histogram2D(hist) => hist.lock().unwrap().name.clone().into(),
-            // Pane::Histogram2D(hist) => hist.name.clone().into(),
         }
     }
 

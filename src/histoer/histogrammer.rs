@@ -319,6 +319,9 @@ impl Histogrammer {
             let x_column_name = x_column_name.to_string();
             let y_column_name = y_column_name.to_string();
 
+            hist.lock().unwrap().plot_settings.cuts.x_column = x_column_name.clone();
+            hist.lock().unwrap().plot_settings.cuts.y_column = y_column_name.clone();
+
             log::info!(
                 "Starting to fill 2D histogram '{}' with data from columns '{}' and '{}'",
                 name,

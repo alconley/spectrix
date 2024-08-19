@@ -1,5 +1,4 @@
 use super::configure_lazyframes::LazyFrameInfo;
-use super::histogram_grid::GridConfig;
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub enum HistoConfig {
@@ -30,21 +29,6 @@ impl HistoConfig {
         match self {
             HistoConfig::Histo1d(config) => config.name.clone(),
             HistoConfig::Histo2d(config) => config.name.clone(),
-        }
-    }
-
-    pub fn add_to_grid(&mut self, grid: &mut GridConfig) {
-        match self {
-            HistoConfig::Histo1d(config) => {
-                if !grid.histogram_names.contains(&config.name) {
-                    grid.histogram_names.push(config.name.clone());
-                }
-            }
-            HistoConfig::Histo2d(config) => {
-                if !grid.histogram_names.contains(&config.name) {
-                    grid.histogram_names.push(config.name.clone());
-                }
-            }
         }
     }
 }

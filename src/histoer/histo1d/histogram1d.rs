@@ -11,6 +11,8 @@ pub struct Histogram {
     pub name: String,
     pub bins: Vec<u64>,
     pub range: (f64, f64),
+    pub overflow: u32,
+    pub underflow: u32,
     pub bin_width: f64,
     pub line: EguiLine,
     pub plot_settings: PlotSettings,
@@ -25,6 +27,8 @@ impl Histogram {
             name: name.to_string(),
             bins: vec![0; number_of_bins],
             range,
+            overflow: 0,
+            underflow: 0,
             bin_width: (range.1 - range.0) / number_of_bins as f64,
             line: EguiLine {
                 name: name.to_string(),
@@ -39,6 +43,8 @@ impl Histogram {
     pub fn reset(&mut self) {
         self.bins = vec![0; self.bins.len()];
         self.original_bins = vec![0; self.original_bins.len()];
+        self.overflow = 0;
+        self.underflow = 0;
     }
 
     // Add a value to the histogram
@@ -49,20 +55,16 @@ impl Histogram {
                 self.bins[index] += 1;
                 self.original_bins[index] += 1;
             }
+        } else if value >= self.range.1 {
+            self.overflow += 1;
+        } else {
+            self.underflow += 1;
         }
         // Update progress
         self.plot_settings.progress = Some(current_step as f32 / total_steps as f32);
     }
 
     pub fn auto_axis_lims(&mut self, plot_ui: &mut egui_plot::PlotUi) {
-        // let y_max = self.bins.iter().max().cloned().unwrap_or(0) as f64;
-        // let x_max = self.range.1;
-        // let x_min = self.range.0;
-
-        // let default_bounds =
-        //     egui_plot::PlotBounds::from_min_max([x_min, 0.0], [x_max, y_max]);
-
-        // plot_ui.set_plot_bounds(default_bounds);
         plot_ui.set_auto_bounds(Vec2b::new(true, true));
     }
 
