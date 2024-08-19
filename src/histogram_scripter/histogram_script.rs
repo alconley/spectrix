@@ -28,7 +28,7 @@ impl HistogramScript {
             grids: Vec::new(),
             add_auxillary_detectors: false,
             auxillary_detectors: None,
-            manual_histogram_script: false,
+            manual_histogram_script: true,
             progress: 0.0,
         }
     }

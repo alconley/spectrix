@@ -11,6 +11,9 @@ pub struct PlotSettings {
     pub markers: FitMarkers,
     pub rebin_factor: usize,
     pub find_peaks_settings: PeakFindingSettings,
+
+    #[serde(skip)] // Skip serialization for progress
+    pub progress: Option<f32>, // Optional progress tracking
 }
 impl Default for PlotSettings {
     fn default() -> Self {
@@ -21,6 +24,7 @@ impl Default for PlotSettings {
             markers: FitMarkers::new(),
             rebin_factor: 1,
             find_peaks_settings: PeakFindingSettings::default(),
+            progress: None,
         }
     }
 }
@@ -33,5 +37,16 @@ impl PlotSettings {
 
     pub fn interactive_response(&mut self, response: &egui_plot::PlotResponse<()>) {
         self.markers.interactive_dragging(response);
+    }
+
+    pub fn progress_ui(&mut self, ui: &mut egui::Ui) {
+        if let Some(progress) = self.progress {
+            ui.add(
+                egui::ProgressBar::new(progress)
+                    .show_percentage()
+                    .animate(true)
+                    .text(format!("{:.0}%", progress * 100.0)),
+            );
+        }
     }
 }

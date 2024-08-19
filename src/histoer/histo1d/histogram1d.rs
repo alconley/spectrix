@@ -1,3 +1,5 @@
+use egui::Vec2b;
+
 use super::plot_settings::PlotSettings;
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::background_fitter::BackgroundFitter;
@@ -40,7 +42,7 @@ impl Histogram {
     }
 
     // Add a value to the histogram
-    pub fn fill(&mut self, value: f64) {
+    pub fn fill(&mut self, value: f64, current_step: usize, total_steps: usize) {
         if value >= self.range.0 && value < self.range.1 {
             let index = ((value - self.range.0) / self.bin_width) as usize;
             if index < self.bins.len() {
@@ -48,6 +50,20 @@ impl Histogram {
                 self.original_bins[index] += 1;
             }
         }
+        // Update progress
+        self.plot_settings.progress = Some(current_step as f32 / total_steps as f32);
+    }
+
+    pub fn auto_axis_lims(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+        // let y_max = self.bins.iter().max().cloned().unwrap_or(0) as f64;
+        // let x_max = self.range.1;
+        // let x_min = self.range.0;
+
+        // let default_bounds =
+        //     egui_plot::PlotBounds::from_min_max([x_min, 0.0], [x_max, y_max]);
+
+        // plot_ui.set_plot_bounds(default_bounds);
+        plot_ui.set_auto_bounds(Vec2b::new(true, true));
     }
 
     pub fn set_counts(&mut self, counts: Vec<u64>) {
@@ -267,6 +283,9 @@ impl Histogram {
 
     // Renders the histogram using egui_plot
     pub fn render(&mut self, ui: &mut egui::Ui) {
+        // Display progress bar while hist is being filled
+        self.plot_settings.progress_ui(ui);
+
         self.update_line_points(); // Ensure line points are updated for projections
         self.keybinds(ui); // Handle interactive elements
 
@@ -277,6 +296,11 @@ impl Histogram {
 
         let plot_response = plot.show(ui, |plot_ui| {
             self.draw(plot_ui);
+
+            // if progress is updating, turn on the auto bounds
+            if self.plot_settings.progress.is_some() {
+                plot_ui.set_auto_bounds(Vec2b::new(true, true));
+            }
         });
 
         plot_response.response.context_menu(|ui| {

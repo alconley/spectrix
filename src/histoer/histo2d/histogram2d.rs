@@ -52,10 +52,11 @@ impl Histogram2D {
         self.bins.counts.clear();
         self.bins.min_count = u64::MAX;
         self.bins.max_count = u64::MIN;
+        self.plot_settings.recalculate_image = true;
     }
 
-    // Add a value to the histogram
-    pub fn fill(&mut self, x_value: f64, y_value: f64) {
+    // Add a value to the histogram with progress tracking
+    pub fn fill(&mut self, x_value: f64, y_value: f64, current_step: usize, total_steps: usize) {
         if x_value >= self.range.x.min
             && x_value < self.range.x.max
             && y_value >= self.range.y.min
@@ -68,6 +69,14 @@ impl Histogram2D {
 
             self.bins.min_count = self.bins.min_count.min(*count);
             self.bins.max_count = self.bins.max_count.max(*count);
+        }
+
+        // Update progress if it's being tracked
+        self.plot_settings.progress = Some(current_step as f32 / total_steps as f32);
+
+        // only recalculate the image every 10% of the total steps
+        if current_step % (total_steps / 10) == 0 {
+            self.plot_settings.recalculate_image = true;
         }
     }
 
@@ -204,6 +213,9 @@ impl Histogram2D {
 
     // Render the histogram using egui_plot
     pub fn render(&mut self, ui: &mut egui::Ui) {
+        // add the progress bar if it's being tracked
+        self.plot_settings.progress_ui(ui);
+
         // Recalculate the image if the settings have changed, like the colormap
         if self.plot_settings.recalculate_image {
             self.calculate_image(ui);

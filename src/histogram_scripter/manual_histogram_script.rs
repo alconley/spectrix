@@ -7,8 +7,6 @@ use std::f64::consts::PI;
 #[allow(clippy::all)]
 pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
-    let start = std::time::Instant::now();
-
     // Declare all the lazyframes that will be used
     let lf = lf.with_columns(vec![
         (col("DelayFrontRightEnergy") + col("DelayFrontLeftEnergy") / lit(2.0)).alias("DelayFrontAverageEnergy"),
@@ -52,8 +50,8 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
     h.add_fill_hist1d("X2: bothplanes", &lf_bothplanes, "X2", 600, (-300.0, 300.0), fp_grid);
     h.add_fill_hist2d("X2 v X1", &lf, "X1", "X2", (600, 600), ((-300.0, 300.0), (-300.0, 300.0)), fp_grid);
     h.add_fill_hist1d("Xavg: bothplanes", &lf_bothplanes, "Xavg", 600, (-300.0, 300.0), fp_grid);
-    h.add_fill_hist2d("Theta v Xavg: bothplanes", &lf_bothplanes, "Xavg", "Theta", (600, 300), ((-300.0, 300.0), (0.0, PI / 2.0)), fp_grid);
-    h.add_fill_hist1d("XavgEnergyCalibrated", &lf, "XavgEnergyCalibrated", 4096, (0.0, 16384.0), fp_grid);
+    h.add_fill_hist2d("Theta v Xavg: bothplanes", &lf_bothplanes, "Xavg", "Theta", (600, 300), ((-300.0, 300.0), (0.0, PI)), fp_grid);
+    // h.add_fill_hist1d("XavgEnergyCalibrated", &lf, "XavgEnergyCalibrated", 4096, (0.0, 16384.0), fp_grid);
 
     // // // ....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
 
@@ -68,9 +66,9 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
     h.add_fill_hist2d("AnodeFront v ScintRight", &lf, "ScintRightEnergy", "AnodeFrontEnergy", (512, 512), ((0.0, 4096.0), (0.0, 4096.0)), pid_grid);
     h.add_fill_hist2d("Cathode v ScintRight", &lf, "ScintRightEnergy", "CathodeEnergy", (512, 512), ((0.0, 4096.0), (0.0, 4096.0)), pid_grid);
     
-    // //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
+    // // //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
 
-    // Particle Identification vs Focal plane histograms
+    // // Particle Identification vs Focal plane histograms
 
     let pid_v_fp_grid = Some(h.create_grid("Particle Identification v Focal Plane".to_string()));
 
@@ -90,9 +88,9 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
     h.add_fill_hist2d("Cathode v X2", &lf, "X2", "CathodeEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), pid_v_fp_grid);
     h.add_fill_hist2d("Cathode v Xavg", &lf, "Xavg", "CathodeEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), pid_v_fp_grid);
 
-    // //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
+    // // // //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
 
-    // Delay lines vs Focal plane histograms
+    // // Delay lines vs Focal plane histograms
 
     let de_v_fp_grid = Some(h.create_grid("Delay Lines v Focal Plane".to_string()));
 
@@ -297,8 +295,4 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
     h.tabs.insert("CeBrA".to_string(), cebra_panes);
 
     */
-
-    let duration = start.elapsed();
-    println!("Time taken for histograms to be filled: {:?}", duration);
-
 }

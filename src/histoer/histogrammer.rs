@@ -2,12 +2,11 @@ use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
 use super::tree::TreeBehavior;
-use polars::prelude::*;
-
 use egui_tiles::TileId;
+use polars::prelude::*;
+use std::thread::JoinHandle;
 
-use indicatif::ProgressBar;
-use indicatif::ProgressStyle;
+use std::sync::{Arc, Mutex};
 
 pub enum ContainerType {
     Grid,
@@ -20,6 +19,8 @@ pub enum ContainerType {
 pub struct Histogrammer {
     pub tree: egui_tiles::Tree<Pane>,
     pub behavior: TreeBehavior,
+    #[serde(skip)]
+    pub handles: Vec<JoinHandle<()>>, // Multiple thread handles
 }
 
 impl Default for Histogrammer {
@@ -27,13 +28,42 @@ impl Default for Histogrammer {
         Self {
             tree: egui_tiles::Tree::empty("Empty tree"),
             behavior: Default::default(),
+            handles: vec![],
         }
     }
 }
 
 impl Histogrammer {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        // Check and join finished threads
+        self.check_and_join_finished_threads();
+
         self.tree.ui(&mut self.behavior, ui);
+    }
+
+    pub fn check_and_join_finished_threads(&mut self) {
+        // Only proceed if there are threads to check
+        if self.handles.is_empty() {
+            return;
+        }
+
+        let mut finished_indices = Vec::new();
+
+        // First, identify all the threads that have finished
+        for (i, handle) in self.handles.iter().enumerate() {
+            if handle.is_finished() {
+                finished_indices.push(i);
+            }
+        }
+
+        // Then, remove and join the finished threads
+        for &i in finished_indices.iter().rev() {
+            let handle = self.handles.swap_remove(i);
+            match handle.join() {
+                Ok(_) => log::info!("A thread completed successfully."),
+                Err(e) => log::error!("A thread encountered an error: {:?}", e),
+            }
+        }
     }
 
     pub fn side_panel_ui(&mut self, ui: &mut egui::Ui) {
@@ -90,19 +120,21 @@ impl Histogrammer {
     pub fn add_hist1d(&mut self, name: &str, bins: usize, range: (f64, f64), grid: Option<TileId>) {
         let mut pane_id_to_update = None;
 
+        // Search for an existing histogram with the same name to update
         for (id, tile) in self.tree.tiles.iter_mut() {
             if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                if hist.name == name {
-                    hist.reset();
+                if hist.lock().unwrap().name == name {
+                    hist.lock().unwrap().reset();
                     pane_id_to_update = Some(*id);
                     break;
                 }
             }
         }
 
+        // If no existing histogram was found, create a new one
         if pane_id_to_update.is_none() {
             let hist = Histogram::new(name, bins, range);
-            let pane = Pane::Histogram(Box::new(hist));
+            let pane = Pane::Histogram(Arc::new(Mutex::new(Box::new(hist))));
             let pane_id = self.tree.tiles.insert_pane(pane);
 
             if let Some(grid_id) = grid {
@@ -126,55 +158,76 @@ impl Histogrammer {
     }
 
     pub fn fill_hist1d(&mut self, name: &str, lf: &LazyFrame, column_name: &str) -> bool {
-        // Find the histogram pane by name and fill it
-        if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) = self
-            .tree
-            .tiles
-            .iter_mut()
-            .find(|(_id, tile)| matches!(tile, egui_tiles::Tile::Pane(Pane::Histogram(_))))
+        if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
+            self.tree.tiles.iter_mut().find(|(_id, tile)| {
+                if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+                    hist.lock().unwrap().name == name
+                } else {
+                    false
+                }
+            })
         {
-            let hist_range = hist.range;
+            let hist = Arc::clone(hist); // Clone the Arc to share ownership
+            let hist_range = hist.lock().unwrap().range; // Access the range safely
             let filter_expr = col(column_name)
                 .gt(lit(hist_range.0))
                 .and(col(column_name).lt(lit(hist_range.1)));
 
-            match lf
-                .clone()
-                .select([col(column_name)])
-                .filter(filter_expr)
-                .collect()
-            {
-                Ok(df) => {
-                    let series = df.column(column_name).unwrap();
+            let lf = lf.clone();
+            let name = name.to_string();
+            let column_name = column_name.to_string();
+
+            log::info!(
+                "Starting to fill histogram '{}' with data from column '{}'",
+                name,
+                column_name
+            );
+
+            // Spawn a new thread for the filling operation
+            let handle = std::thread::spawn(move || {
+                log::info!("Thread started for filling histogram '{}'", name);
+
+                if let Ok(df) = lf
+                    .select([col(&column_name)])
+                    .filter(filter_expr.clone()) // Clone for logging purposes
+                    .collect()
+                {
+                    log::info!("Data collected for histogram '{}'", name);
+
+                    let series = df.column(&column_name).unwrap();
                     let values = series.f64().unwrap();
-                    let pb = ProgressBar::new(values.len() as u64);
-                    pb.set_style(
-                        ProgressStyle::default_bar()
-                            .template(&format!(
-                                "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
-                                name
-                            ))
-                            .expect("Failed to create progress style")
-                            .progress_chars("#>-"),
+                    let total_steps = values.len();
+
+                    log::info!(
+                        "Histogram '{}' will be filled with {} values from column '{}'",
+                        name,
+                        total_steps,
+                        column_name
                     );
 
-                    for value in values {
+                    for (i, value) in values.iter().enumerate() {
                         if let Some(v) = value {
-                            hist.fill(v);
+                            let mut hist = hist.lock().unwrap(); // Lock the mutex to access the correct Histogram
+                            hist.fill(v, i, total_steps); // Pass the progress to the fill method
                         }
-                        pb.inc(1);
                     }
 
-                    pb.finish();
-                    return true;
+                    log::info!("Completed filling histogram '{}'", name);
+
+                    // Optionally: Set progress to None or trigger any final updates here
+                    hist.lock().unwrap().plot_settings.progress = None;
+                } else {
+                    log::error!("Failed to collect LazyFrame for histogram '{}'", name);
                 }
-                Err(e) => {
-                    log::error!("Failed to collect LazyFrame: {}", e);
-                    return false;
-                }
-            }
+            });
+
+            // Store the thread handle in the vector
+            self.handles.push(handle);
+
+            return true;
         }
 
+        log::error!("Histogram '{}' not found in the tree", name);
         false
     }
 
@@ -200,24 +253,23 @@ impl Histogrammer {
     ) {
         let mut pane_id_to_update = None;
 
-        // Check if the histogram already exists in the tree
+        // Search for an existing histogram with the same name to update
         for (id, tile) in self.tree.tiles.iter_mut() {
             if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                if hist.name == name {
-                    hist.reset();
+                if hist.lock().unwrap().name == name {
+                    hist.lock().unwrap().reset();
                     pane_id_to_update = Some(*id);
                     break;
                 }
             }
         }
 
-        // If the histogram doesn't exist, create a new one
+        // If no existing histogram was found, create a new one
         if pane_id_to_update.is_none() {
             let hist = Histogram2D::new(name, bins, range);
-            let pane = Pane::Histogram2D(Box::new(hist));
+            let pane = Pane::Histogram2D(Arc::new(Mutex::new(Box::new(hist))));
             let pane_id = self.tree.tiles.insert_pane(pane);
 
-            // Add the pane to the specified grid or create a new grid if no grid_id is provided
             if let Some(grid_id) = grid {
                 if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Grid(grid))) =
                     self.tree.tiles.get_mut(grid_id)
@@ -226,17 +278,14 @@ impl Histogrammer {
                 } else {
                     log::error!("Invalid grid ID provided");
                 }
-            } else {
-                // If no grid is specified, create a new grid or set as root
-                if self.tree.is_empty() {
-                    self.tree.root = Some(pane_id);
-                } else if let Some(root_id) = self.tree.root {
-                    let new_grid = egui_tiles::Grid::new(vec![root_id, pane_id]);
-                    let new_root_id = self.tree.tiles.insert_new(egui_tiles::Tile::Container(
-                        egui_tiles::Container::Grid(new_grid),
-                    ));
-                    self.tree.root = Some(new_root_id);
-                }
+            } else if self.tree.is_empty() {
+                self.tree.root = Some(pane_id);
+            } else if let Some(root_id) = self.tree.root {
+                let new_grid = egui_tiles::Grid::new(vec![root_id, pane_id]);
+                let new_root_id = self.tree.tiles.insert_new(egui_tiles::Tile::Container(
+                    egui_tiles::Container::Grid(new_grid),
+                ));
+                self.tree.root = Some(new_root_id);
             }
         }
     }
@@ -248,54 +297,82 @@ impl Histogrammer {
         x_column_name: &str,
         y_column_name: &str,
     ) -> bool {
-        // Find the 2D histogram pane by name and fill it
-        if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) = self
-            .tree
-            .tiles
-            .iter_mut()
-            .find(|(_id, tile)| matches!(tile, egui_tiles::Tile::Pane(Pane::Histogram2D(_))))
+        if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
+            self.tree.tiles.iter_mut().find(|(_id, tile)| {
+                if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
+                    hist.lock().unwrap().name == name
+                } else {
+                    false
+                }
+            })
         {
-            let hist_range = hist.range.clone();
+            let hist = Arc::clone(hist); // Clone the Arc to share ownership
+            let hist_range = hist.lock().unwrap().range.clone(); // Access the range safely
             let filter_expr = col(x_column_name)
                 .gt(lit(hist_range.x.min))
                 .and(col(x_column_name).lt(lit(hist_range.x.max)))
                 .and(col(y_column_name).gt(lit(hist_range.y.min)))
                 .and(col(y_column_name).lt(lit(hist_range.y.max)));
-            match lf
-                .clone()
-                .select([col(x_column_name), col(y_column_name)])
-                .filter(filter_expr)
-                .collect()
-            {
-                Ok(df) => {
-                    let x_values = df.column(x_column_name).unwrap().f64().unwrap();
-                    let y_values = df.column(y_column_name).unwrap().f64().unwrap();
-                    let pb = ProgressBar::new(x_values.len() as u64);
-                    pb.set_style(
-                        ProgressStyle::default_bar()
-                            .template(&format!(
-                                "{} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
-                                name
-                            ))
-                            .expect("Failed to create progress style")
-                            .progress_chars("#>-"),
+
+            let lf = lf.clone();
+            let name = name.to_string();
+            let x_column_name = x_column_name.to_string();
+            let y_column_name = y_column_name.to_string();
+
+            log::info!(
+                "Starting to fill 2D histogram '{}' with data from columns '{}' and '{}'",
+                name,
+                x_column_name,
+                y_column_name
+            );
+
+            // Spawn a new thread for the filling operation
+            let handle = std::thread::spawn(move || {
+                log::info!("Thread started for filling 2D histogram '{}'", name);
+
+                if let Ok(df) = lf
+                    .select([col(&x_column_name), col(&y_column_name)])
+                    .filter(filter_expr.clone()) // Clone for logging purposes
+                    .collect()
+                {
+                    log::info!("Data collected for 2D histogram '{}'", name);
+
+                    let x_values = df.column(&x_column_name).unwrap().f64().unwrap();
+                    let y_values = df.column(&y_column_name).unwrap().f64().unwrap();
+                    let total_steps = x_values.len();
+
+                    log::info!(
+                        "2D Histogram '{}' will be filled with {} value pairs from columns '{}' and '{}'",
+                        name,
+                        total_steps,
+                        x_column_name,
+                        y_column_name
                     );
-                    for (x_value, y_value) in x_values.into_iter().zip(y_values) {
+
+                    for (i, (x_value, y_value)) in x_values.iter().zip(y_values.iter()).enumerate()
+                    {
                         if let (Some(x), Some(y)) = (x_value, y_value) {
-                            hist.fill(x, y);
+                            let mut hist = hist.lock().unwrap(); // Lock the mutex to access the correct Histogram2D
+                            hist.fill(x, y, i, total_steps); // Pass the progress to the fill method
                         }
-                        pb.inc(1);
                     }
-                    pb.finish();
-                    return true;
+
+                    log::info!("Completed filling 2D histogram '{}'", name);
+
+                    // Optionally: Set progress to None or trigger any final updates here
+                    hist.lock().unwrap().plot_settings.progress = None;
+                } else {
+                    log::error!("Failed to collect LazyFrame for 2D histogram '{}'", name);
                 }
-                Err(e) => {
-                    log::error!("Failed to collect LazyFrame: {}", e);
-                    return false;
-                }
-            }
+            });
+
+            // Store the thread handle in the vector
+            self.handles.push(handle);
+
+            return true;
         }
 
+        log::error!("2D Histogram '{}' not found in the tree", name);
         false
     }
 

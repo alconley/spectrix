@@ -42,8 +42,6 @@ impl Processer {
     fn perform_histogrammer_from_lazyframe(&mut self) {
         if let Some(lazyframer) = &self.lazyframer {
             if let Some(lf) = &lazyframer.lazyframe {
-                // self.histogrammer.reset();
-
                 self.histogram_script
                     .add_histograms(&mut self.histogrammer, lf.clone());
             } else {
