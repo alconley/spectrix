@@ -1,4 +1,4 @@
-use crate::histoer::histogrammer::Histogrammer;
+// use crate::histoer::histogrammer::Histogrammer;
 
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct GridConfig {
@@ -41,15 +41,15 @@ impl GridConfig {
         });
     }
 
-    pub fn insert_grid_into_histogrammer(&self, histogrammer: &mut Histogrammer) {
-        let names = self
-            .histogram_names
-            .iter()
-            .map(|name| name.as_str())
-            .collect::<Vec<&str>>();
+    // pub fn insert_grid_into_histogrammer(&self, histogrammer: &mut Histogrammer) {
+    //     let names = self
+    //         .histogram_names
+    //         .iter()
+    //         .map(|name| name.as_str())
+    //         .collect::<Vec<&str>>();
 
-        let panes = histogrammer.get_panes(names);
+    //     // let panes = histogrammer.get_panes(names);
 
-        histogrammer.tabs.insert(self.name.to_string(), panes);
-    }
+    //     // histogrammer.tabs.insert(self.name.to_string(), panes);
+    // }
 }

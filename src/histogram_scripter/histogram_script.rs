@@ -229,89 +229,89 @@ impl HistogramScript {
         if self.manual_histogram_script {
             manual_add_histograms(h, lf);
         } else {
-            h.reset();
-            self.progress = 0.0;
+            //     // h.reset();
+            //     self.progress = 0.0;
 
-            let mut lazyframes = LazyFrames::new();
+            //     let mut lazyframes = LazyFrames::new();
 
-            let mut lf = lf;
-            // add the main extra columns to the raw lazyframe
-            lf = lazyframes.add_columns_to_lazyframe(&lf);
+            //     let mut lf = lf;
+            //     // add the main extra columns to the raw lazyframe
+            //     lf = lazyframes.add_columns_to_lazyframe(&lf);
 
-            // add auxillary detectors columns to the raw lazyframe
-            if self.add_auxillary_detectors {
-                if let Some(auxillary_detectors) = &self.auxillary_detectors {
-                    lf = auxillary_detectors.add_columns_to_lazyframe(&lf);
-                }
-            }
+            //     // add auxillary detectors columns to the raw lazyframe
+            //     if self.add_auxillary_detectors {
+            //         if let Some(auxillary_detectors) = &self.auxillary_detectors {
+            //             lf = auxillary_detectors.add_columns_to_lazyframe(&lf);
+            //         }
+            //     }
 
-            // add the main lfs to the lazyframes
-            lazyframes.lfs = lazyframes.filtered_lfs(lf.clone());
+            //     // add the main lfs to the lazyframes
+            //     lazyframes.lfs = lazyframes.filtered_lfs(lf.clone());
 
-            // add auxillary detectors lfs to the lazyframes
-            if self.add_auxillary_detectors {
-                if let Some(auxillary_detectors) = &self.auxillary_detectors {
-                    let aux_filtered_lfs = auxillary_detectors.filterd_lazyframes(lf.clone());
-                    for (name, lf) in aux_filtered_lfs {
-                        lazyframes.lfs.insert(name, lf);
-                    }
-                }
-            }
+            //     // add auxillary detectors lfs to the lazyframes
+            //     if self.add_auxillary_detectors {
+            //         if let Some(auxillary_detectors) = &self.auxillary_detectors {
+            //             let aux_filtered_lfs = auxillary_detectors.filterd_lazyframes(lf.clone());
+            //             for (name, lf) in aux_filtered_lfs {
+            //                 lazyframes.lfs.insert(name, lf);
+            //             }
+            //         }
+            //     }
 
-            let total_histograms = self.histograms.len() as f32;
-            for (i, hist) in self.histograms.iter_mut().enumerate() {
-                match hist {
-                    HistoConfig::Histo1d(config) => {
-                        if config.calculate {
-                            if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
-                                let name = config.name.clone();
-                                let column = config.column.clone();
-                                let bins = config.bins;
-                                let range = config.range;
-                                h.add_fill_hist1d(&name, lf, &column, bins, range);
-                            } else {
-                                log::error!("LazyFrame not found: {}", config.lazyframe);
-                            }
-                        }
-                    }
-                    HistoConfig::Histo2d(config) => {
-                        if config.calculate {
-                            if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
-                                let name = config.name.clone();
-                                let x_column = config.x_column.clone();
-                                let y_column = config.y_column.clone();
-                                let bins = config.bins;
-                                let range = config.range;
-                                h.add_fill_hist2d(&name, lf, &x_column, &y_column, bins, range);
-                            } else {
-                                log::error!("LazyFrame not found: {}", config.lazyframe);
-                            }
-                        }
-                    }
-                }
-                // Update progress
-                self.progress = (i as f32 + 1.0) / total_histograms;
-            }
+            //     let total_histograms = self.histograms.len() as f32;
+            //     for (i, hist) in self.histograms.iter_mut().enumerate() {
+            //         match hist {
+            //             HistoConfig::Histo1d(config) => {
+            //                 if config.calculate {
+            //                     if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
+            //                         let name = config.name.clone();
+            //                         let column = config.column.clone();
+            //                         let bins = config.bins;
+            //                         let range = config.range;
+            //                         // h.add_fill_hist1d(&name, lf, &column, bins, range);
+            //                     } else {
+            //                         log::error!("LazyFrame not found: {}", config.lazyframe);
+            //                     }
+            //                 }
+            //             }
+            //             HistoConfig::Histo2d(config) => {
+            //                 if config.calculate {
+            //                     if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
+            //                         let name = config.name.clone();
+            //                         let x_column = config.x_column.clone();
+            //                         let y_column = config.y_column.clone();
+            //                         let bins = config.bins;
+            //                         let range = config.range;
+            //                         // h.add_fill_hist2d(&name, lf, &x_column, &y_column, bins, range);
+            //                     } else {
+            //                         log::error!("LazyFrame not found: {}", config.lazyframe);
+            //                     }
+            //                 }
+            //             }
+            //         }
+            //         // Update progress
+            //         self.progress = (i as f32 + 1.0) / total_histograms;
+            //     }
 
-            // insert histograms into grids
-            for grid in &self.grids {
-                grid.insert_grid_into_histogrammer(h);
-            }
+            //     // insert histograms into grids
+            //     for grid in &self.grids {
+            //         grid.insert_grid_into_histogrammer(h);
+            //     }
 
-            // if a histogram is not in a grid, add it to its own tab
-            for hist in &self.histograms {
-                let name = hist.name();
-                if !self
-                    .grids
-                    .iter()
-                    .any(|grid| grid.histogram_names.contains(&name))
-                {
-                    let pane = h.get_pane(&name);
-                    if let Some(pane) = pane {
-                        h.tabs.insert(name, vec![pane]);
-                    }
-                }
-            }
+            //     // if a histogram is not in a grid, add it to its own tab
+            //     for hist in &self.histograms {
+            //         let name = hist.name();
+            //         if !self
+            //             .grids
+            //             .iter()
+            //             .any(|grid| grid.histogram_names.contains(&name))
+            //         {
+            //             // let pane = h.get_pane(&name);
+            //             // if let Some(pane) = pane {
+            //             //     // h.tabs.insert(name, vec![pane]);
+            //             // }
+            //         }
+            //     }
         }
     }
 }

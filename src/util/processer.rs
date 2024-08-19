@@ -12,7 +12,6 @@ pub struct Processer {
     pub cut_handler: CutHandler,
     pub histogrammer: Histogrammer,
     #[serde(skip)]
-    pub is_tree_ready: bool,
     pub histogram_script: HistogramScript,
     pub save_with_scanning: bool,
     pub suffix: String,
@@ -24,8 +23,7 @@ impl Processer {
             workspacer: Workspacer::default(),
             lazyframer: None,
             cut_handler: CutHandler::default(),
-            histogrammer: Histogrammer::new(),
-            is_tree_ready: false,
+            histogrammer: Histogrammer::default(),
             histogram_script: HistogramScript::new(),
             save_with_scanning: true,
             suffix: "filtered".to_string(),
@@ -34,8 +32,7 @@ impl Processer {
 
     pub fn reset(&mut self) {
         self.lazyframer = None;
-        self.histogrammer = Histogrammer::new();
-        self.is_tree_ready = false;
+        self.histogrammer = Histogrammer::default();
     }
 
     fn create_lazyframe(&mut self) {
@@ -60,7 +57,6 @@ impl Processer {
     pub fn calculate_histograms(&mut self) {
         self.create_lazyframe();
         self.perform_histogrammer_from_lazyframe();
-        self.is_tree_ready = true;
     }
 
     pub fn calculate_histograms_with_cuts(&mut self) {
@@ -71,7 +67,6 @@ impl Processer {
                     Ok(filtered_lf) => {
                         lazyframer.set_lazyframe(filtered_lf);
                         self.perform_histogrammer_from_lazyframe();
-                        self.is_tree_ready = true;
                     }
                     Err(e) => {
                         log::error!("Failed to filter LazyFrame with cuts: {}", e);
@@ -252,6 +247,8 @@ impl Processer {
 
             ui.separator();
         }
+
+        self.histogrammer.side_panel_ui(ui);
     }
 
     pub fn histogram_script_ui(&mut self, ui: &mut egui::Ui) {
