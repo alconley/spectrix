@@ -1,3 +1,5 @@
+use egui::Vec2b;
+
 use super::plot_settings::PlotSettings;
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::background_fitter::BackgroundFitter;
@@ -9,6 +11,8 @@ pub struct Histogram {
     pub name: String,
     pub bins: Vec<u64>,
     pub range: (f64, f64),
+    pub overflow: u32,
+    pub underflow: u32,
     pub bin_width: f64,
     pub line: EguiLine,
     pub plot_settings: PlotSettings,
@@ -23,6 +27,8 @@ impl Histogram {
             name: name.to_string(),
             bins: vec![0; number_of_bins],
             range,
+            overflow: 0,
+            underflow: 0,
             bin_width: (range.1 - range.0) / number_of_bins as f64,
             line: EguiLine {
                 name: name.to_string(),
@@ -37,17 +43,29 @@ impl Histogram {
     pub fn reset(&mut self) {
         self.bins = vec![0; self.bins.len()];
         self.original_bins = vec![0; self.original_bins.len()];
+        self.overflow = 0;
+        self.underflow = 0;
     }
 
     // Add a value to the histogram
-    pub fn fill(&mut self, value: f64) {
+    pub fn fill(&mut self, value: f64, current_step: usize, total_steps: usize) {
         if value >= self.range.0 && value < self.range.1 {
             let index = ((value - self.range.0) / self.bin_width) as usize;
             if index < self.bins.len() {
                 self.bins[index] += 1;
                 self.original_bins[index] += 1;
             }
+        } else if value >= self.range.1 {
+            self.overflow += 1;
+        } else {
+            self.underflow += 1;
         }
+        // Update progress
+        self.plot_settings.progress = Some(current_step as f32 / total_steps as f32);
+    }
+
+    pub fn auto_axis_lims(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+        plot_ui.set_auto_bounds(Vec2b::new(true, true));
     }
 
     pub fn set_counts(&mut self, counts: Vec<u64>) {
@@ -267,6 +285,9 @@ impl Histogram {
 
     // Renders the histogram using egui_plot
     pub fn render(&mut self, ui: &mut egui::Ui) {
+        // Display progress bar while hist is being filled
+        self.plot_settings.progress_ui(ui);
+
         self.update_line_points(); // Ensure line points are updated for projections
         self.keybinds(ui); // Handle interactive elements
 
@@ -277,6 +298,11 @@ impl Histogram {
 
         let plot_response = plot.show(ui, |plot_ui| {
             self.draw(plot_ui);
+
+            // if progress is updating, turn on the auto bounds
+            if self.plot_settings.progress.is_some() {
+                plot_ui.set_auto_bounds(Vec2b::new(true, true));
+            }
         });
 
         plot_response.response.context_menu(|ui| {
