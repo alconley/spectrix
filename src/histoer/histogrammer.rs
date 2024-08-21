@@ -6,6 +6,12 @@ use egui_tiles::TileId;
 use polars::prelude::*;
 use std::thread::JoinHandle;
 
+use rfd::FileDialog;
+
+use std::fs::File;
+use std::io::{self, Read, Write};
+use toml;
+
 use std::sync::{Arc, Mutex};
 
 use std::collections::HashMap;
@@ -23,6 +29,7 @@ pub struct Histogrammer {
     pub behavior: TreeBehavior,
     #[serde(skip)]
     pub handles: Vec<JoinHandle<()>>, // Multiple thread handles
+    #[serde(skip)]
     pub grid_histogram_map: HashMap<TileId, Vec<TileId>>, // Map grid IDs to histogram IDs
 }
 
@@ -38,123 +45,6 @@ impl Default for Histogrammer {
 }
 
 impl Histogrammer {
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
-        // Check and join finished threads
-        self.check_and_join_finished_threads();
-
-        self.tree.ui(&mut self.behavior, ui);
-    }
-
-    pub fn check_and_join_finished_threads(&mut self) {
-        // Only proceed if there are threads to check
-        if self.handles.is_empty() {
-            return;
-        }
-
-        let mut finished_indices = Vec::new();
-
-        // First, identify all the threads that have finished
-        for (i, handle) in self.handles.iter().enumerate() {
-            if handle.is_finished() {
-                finished_indices.push(i);
-            }
-        }
-
-        // Then, remove and join the finished threads
-        for &i in finished_indices.iter().rev() {
-            let handle = self.handles.swap_remove(i);
-            match handle.join() {
-                Ok(_) => log::info!("A thread completed successfully."),
-                Err(e) => log::error!("A thread encountered an error: {:?}", e),
-            }
-        }
-    }
-
-    pub fn side_panel_ui(&mut self, ui: &mut egui::Ui) {
-        self.behavior.ui(ui);
-
-        ui.separator();
-
-        if let Some(root) = self.tree.root() {
-            if ui.button("Reorganize").clicked() {
-                self.reorganize();
-            }
-
-            tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
-        }
-    }
-
-    pub fn create_grid(&mut self, tab_name: String) -> egui_tiles::TileId {
-        // Create a new grid container
-        let grid = egui_tiles::Grid::new(vec![]);
-        let grid_container = egui_tiles::Container::Grid(grid);
-        let grid_id = self.tree.tiles.insert_new(grid_container.into());
-
-        // Create a new tab and place the grid inside it
-        let tab = egui_tiles::Tabs::new(vec![grid_id]);
-        let tab_id =
-            self.tree
-                .tiles
-                .insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(
-                    tab,
-                )));
-
-        // Set the tab name in the behavior's tile_map
-        self.behavior.set_tile_tab_mapping(grid_id, tab_name);
-
-        // If the tree is empty, set this new tab as the root
-        if self.tree.is_empty() {
-            self.tree.root = Some(tab_id);
-        } else if let Some(root_id) = self.tree.root {
-            // Access the container at the root
-            if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
-                self.tree.tiles.get_mut(root_id)
-            {
-                // Add the new tab to the existing tab container
-                tabs.add_child(tab_id);
-            } else {
-                // If the root is not a tabs container, create a new tabs container
-                let new_tabs = egui_tiles::Tabs::new(vec![root_id, tab_id]);
-                let new_root_id = self.tree.tiles.insert_new(egui_tiles::Tile::Container(
-                    egui_tiles::Container::Tabs(new_tabs),
-                ));
-                self.tree.root = Some(new_root_id);
-            }
-        }
-
-        grid_id
-    }
-
-    pub fn reorganize(&mut self) {
-        // Iterate over each container (either a grid or a tab) in the map
-        for (container_id, histogram_ids) in &self.grid_histogram_map {
-            // Iterate over the histograms that should be in this container
-            for (index, &histogram_id) in histogram_ids.iter().enumerate() {
-                if self.tree.tiles.get(histogram_id).is_some() {
-                    // Move each histogram to its proper position within the container
-                    self.tree
-                        .move_tile_to_container(histogram_id, *container_id, index, true);
-                }
-            }
-        }
-    }
-
-    fn get_or_create_other_grid(&mut self) -> TileId {
-        // Search for an existing "Other" grid
-        for (grid_id, tile) in self.tree.tiles.iter() {
-            if let egui_tiles::Tile::Container(egui_tiles::Container::Grid(_)) = tile {
-                if let Some(tab_name) = self.behavior.get_tab_name(grid_id) {
-                    if tab_name == "Other" {
-                        return *grid_id;
-                    }
-                }
-            }
-        }
-
-        // If "Other" grid does not exist, create a new one
-        self.create_grid("Other".to_string())
-    }
-
     pub fn add_hist1d(&mut self, name: &str, bins: usize, range: (f64, f64), grid: Option<TileId>) {
         let mut pane_id_to_update = None;
 
@@ -433,6 +323,164 @@ impl Histogrammer {
         self.add_hist2d(name, bins, range, grid); // Add the histogram.
         self.fill_hist2d(name, lf, x_column_name, y_column_name); // Fill it with data.
     }
+
+    pub fn check_and_join_finished_threads(&mut self) {
+        // Only proceed if there are threads to check
+        if self.handles.is_empty() {
+            return;
+        }
+
+        let mut finished_indices = Vec::new();
+
+        // First, identify all the threads that have finished
+        for (i, handle) in self.handles.iter().enumerate() {
+            if handle.is_finished() {
+                finished_indices.push(i);
+            }
+        }
+
+        // Then, remove and join the finished threads
+        for &i in finished_indices.iter().rev() {
+            let handle = self.handles.swap_remove(i);
+            match handle.join() {
+                Ok(_) => log::info!("A thread completed successfully."),
+                Err(e) => log::error!("A thread encountered an error: {:?}", e),
+            }
+        }
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        // Check and join finished threads
+        self.check_and_join_finished_threads();
+
+        self.tree.ui(&mut self.behavior, ui);
+    }
+
+    pub fn side_panel_ui(&mut self, ui: &mut egui::Ui) {
+        self.behavior.ui(ui);
+
+        ui.separator();
+
+        // ui.horizontal(|ui| {
+        //     if ui.button("Save").clicked() {
+        //         self.save();
+        //     }
+        //     if ui.button("Load").clicked() {
+        //         self.load();
+        //     }
+        // });
+
+        if let Some(root) = self.tree.root() {
+            if ui.button("Reorganize").clicked() {
+                self.reorganize();
+            }
+
+            tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
+        }
+    }
+
+    pub fn create_grid(&mut self, tab_name: String) -> egui_tiles::TileId {
+        // Create a new grid container
+        let grid = egui_tiles::Grid::new(vec![]);
+        let grid_container = egui_tiles::Container::Grid(grid);
+        let grid_id = self.tree.tiles.insert_new(grid_container.into());
+
+        // Create a new tab and place the grid inside it
+        let tab = egui_tiles::Tabs::new(vec![grid_id]);
+        let tab_id =
+            self.tree
+                .tiles
+                .insert_new(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(
+                    tab,
+                )));
+
+        // Set the tab name in the behavior's tile_map
+        self.behavior.set_tile_tab_mapping(grid_id, tab_name);
+
+        // If the tree is empty, set this new tab as the root
+        if self.tree.is_empty() {
+            self.tree.root = Some(tab_id);
+        } else if let Some(root_id) = self.tree.root {
+            // Access the container at the root
+            if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
+                self.tree.tiles.get_mut(root_id)
+            {
+                // Add the new tab to the existing tab container
+                tabs.add_child(tab_id);
+            } else {
+                // If the root is not a tabs container, create a new tabs container
+                let new_tabs = egui_tiles::Tabs::new(vec![root_id, tab_id]);
+                let new_root_id = self.tree.tiles.insert_new(egui_tiles::Tile::Container(
+                    egui_tiles::Container::Tabs(new_tabs),
+                ));
+                self.tree.root = Some(new_root_id);
+            }
+        }
+
+        grid_id
+    }
+
+    pub fn reorganize(&mut self) {
+        // Iterate over each container (either a grid or a tab) in the map
+        for (container_id, histogram_ids) in &self.grid_histogram_map {
+            // Iterate over the histograms that should be in this container
+            for (index, &histogram_id) in histogram_ids.iter().enumerate() {
+                if self.tree.tiles.get(histogram_id).is_some() {
+                    // Move each histogram to its proper position within the container
+                    self.tree
+                        .move_tile_to_container(histogram_id, *container_id, index, true);
+                }
+            }
+        }
+    }
+
+    fn get_or_create_other_grid(&mut self) -> TileId {
+        // Search for an existing "Other" grid
+        for (grid_id, tile) in self.tree.tiles.iter() {
+            if let egui_tiles::Tile::Container(egui_tiles::Container::Grid(_)) = tile {
+                if let Some(tab_name) = self.behavior.get_tab_name(grid_id) {
+                    if tab_name == "Other" {
+                        return *grid_id;
+                    }
+                }
+            }
+        }
+
+        // If "Other" grid does not exist, create a new one
+        self.create_grid("Other".to_string())
+    }
+
+    // pub fn save(&self) -> io::Result<()> {
+    //     if let Some(file_path) = FileDialog::new().set_title("Save Histogrammer").save_file() {
+    //         match toml::to_string(self) {
+    //             Ok(serialized) => {
+    //                 let mut file = File::create(&file_path)?;
+    //                 file.write_all(serialized.as_bytes())?;
+    //                 log::info!("Histogrammer saved successfully to {:?}", file_path);
+    //                 println!("Histogrammer saved successfully to {:?}", file_path);
+    //             }
+    //             Err(e) => return Err(io::Error::new(io::ErrorKind::Other, "Serialization failed")),
+    //         }
+    //     }
+    //     Ok(())
+    // }
+
+    // pub fn load(&mut self) -> io::Result<()> {
+    //     if let Some(file_path) = FileDialog::new().set_title("Load Histogrammer").pick_file() {
+    //         let mut file = File::open(&file_path)?;
+    //         let mut serialized = String::new();
+    //         file.read_to_string(&mut serialized)?;
+
+    //         match toml::from_str(&serialized) {
+    //             Ok(loaded_histogrammer) => {
+    //                 *self = loaded_histogrammer;
+    //                 log::info!("Histogrammer loaded successfully from {:?}", file_path);
+    //             }
+    //             Err(e) => return Err(io::Error::new(io::ErrorKind::Other, "Deserialization failed")),
+    //         }
+    //     }
+    //     Ok(())
+    // }
 }
 
 fn tree_ui(

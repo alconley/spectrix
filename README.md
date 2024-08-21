@@ -1,6 +1,6 @@
 # general Nuclear Analysis Tool (gNAT)
 
-The general Nuclear Analysis Tool (gNAT) is a comprehensive software designed for nuclear data analysis. It provides functionalities for histogramming, Gaussian fitting, and interactive data visualization of 1D and 2D histograms using crates: `egui`, `egui-tiles`, `egui_plot`, and `polars`
+The general Nuclear Analysis Tool (gNAT, pronounced /ɡnæt/, with a hard 'G' sound followed by 'nat) is a comprehensive software designed for nuclear data analysis. It provides functionalities for histogramming, Gaussian fitting, and interactive data visualization of 1D and 2D histograms using crates: `egui`, `egui-tiles`, `egui_plot`, and `polars`.
 
 ### Running locally
 
