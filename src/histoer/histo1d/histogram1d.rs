@@ -244,6 +244,17 @@ impl Histogram {
         }
     }
 
+    pub fn draw_other_histograms(
+        &mut self,
+        plot_ui: &mut egui_plot::PlotUi,
+        histograms: &[Histogram],
+    ) {
+        for histogram in histograms {
+            let mut hist = histogram.clone();
+            hist.draw(plot_ui);
+        }
+    }
+
     pub fn limit_scrolling(&self, plot_ui: &mut egui_plot::PlotUi) {
         let plot_bounds = plot_ui.plot_bounds();
 

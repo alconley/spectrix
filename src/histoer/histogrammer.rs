@@ -8,6 +8,8 @@ use std::thread::JoinHandle;
 
 use std::sync::{Arc, Mutex};
 
+use std::collections::HashMap;
+
 pub enum ContainerType {
     Grid,
     Tabs,
@@ -21,6 +23,7 @@ pub struct Histogrammer {
     pub behavior: TreeBehavior,
     #[serde(skip)]
     pub handles: Vec<JoinHandle<()>>, // Multiple thread handles
+    pub grid_histogram_map: HashMap<TileId, Vec<TileId>>, // Map grid IDs to histogram IDs
 }
 
 impl Default for Histogrammer {
@@ -29,6 +32,7 @@ impl Default for Histogrammer {
             tree: egui_tiles::Tree::empty("Empty tree"),
             behavior: Default::default(),
             handles: vec![],
+            grid_histogram_map: HashMap::new(),
         }
     }
 }
@@ -72,6 +76,10 @@ impl Histogrammer {
         ui.separator();
 
         if let Some(root) = self.tree.root() {
+            if ui.button("Reorganize").clicked() {
+                self.reorganize();
+            }
+
             tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
         }
     }
@@ -117,6 +125,36 @@ impl Histogrammer {
         grid_id
     }
 
+    pub fn reorganize(&mut self) {
+        // Iterate over each container (either a grid or a tab) in the map
+        for (container_id, histogram_ids) in &self.grid_histogram_map {
+            // Iterate over the histograms that should be in this container
+            for (index, &histogram_id) in histogram_ids.iter().enumerate() {
+                if self.tree.tiles.get(histogram_id).is_some() {
+                    // Move each histogram to its proper position within the container
+                    self.tree
+                        .move_tile_to_container(histogram_id, *container_id, index, true);
+                }
+            }
+        }
+    }
+
+    fn get_or_create_other_grid(&mut self) -> TileId {
+        // Search for an existing "Other" grid
+        for (grid_id, tile) in self.tree.tiles.iter() {
+            if let egui_tiles::Tile::Container(egui_tiles::Container::Grid(_)) = tile {
+                if let Some(tab_name) = self.behavior.get_tab_name(grid_id) {
+                    if tab_name == "Other" {
+                        return *grid_id;
+                    }
+                }
+            }
+        }
+
+        // If "Other" grid does not exist, create a new one
+        self.create_grid("Other".to_string())
+    }
+
     pub fn add_hist1d(&mut self, name: &str, bins: usize, range: (f64, f64), grid: Option<TileId>) {
         let mut pane_id_to_update = None;
 
@@ -137,22 +175,23 @@ impl Histogrammer {
             let pane = Pane::Histogram(Arc::new(Mutex::new(Box::new(hist))));
             let pane_id = self.tree.tiles.insert_pane(pane);
 
-            if let Some(grid_id) = grid {
-                if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Grid(grid))) =
-                    self.tree.tiles.get_mut(grid_id)
-                {
-                    grid.add_child(pane_id);
-                } else {
-                    log::error!("Invalid grid ID provided");
-                }
-            } else if self.tree.is_empty() {
-                self.tree.root = Some(pane_id);
-            } else if let Some(root_id) = self.tree.root {
-                let new_grid = egui_tiles::Grid::new(vec![root_id, pane_id]);
-                let new_root_id = self.tree.tiles.insert_new(egui_tiles::Tile::Container(
-                    egui_tiles::Container::Grid(new_grid),
-                ));
-                self.tree.root = Some(new_root_id);
+            // Handle the case where grid is None by using or creating the "Other" grid
+            let grid_id = if let Some(grid_id) = grid {
+                grid_id
+            } else {
+                self.get_or_create_other_grid()
+            };
+
+            if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Grid(grid))) =
+                self.tree.tiles.get_mut(grid_id)
+            {
+                grid.add_child(pane_id);
+                self.grid_histogram_map
+                    .entry(grid_id)
+                    .or_default()
+                    .push(pane_id);
+            } else {
+                log::error!("Invalid grid ID provided");
             }
         }
     }
@@ -270,22 +309,23 @@ impl Histogrammer {
             let pane = Pane::Histogram2D(Arc::new(Mutex::new(Box::new(hist))));
             let pane_id = self.tree.tiles.insert_pane(pane);
 
-            if let Some(grid_id) = grid {
-                if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Grid(grid))) =
-                    self.tree.tiles.get_mut(grid_id)
-                {
-                    grid.add_child(pane_id);
-                } else {
-                    log::error!("Invalid grid ID provided");
-                }
-            } else if self.tree.is_empty() {
-                self.tree.root = Some(pane_id);
-            } else if let Some(root_id) = self.tree.root {
-                let new_grid = egui_tiles::Grid::new(vec![root_id, pane_id]);
-                let new_root_id = self.tree.tiles.insert_new(egui_tiles::Tile::Container(
-                    egui_tiles::Container::Grid(new_grid),
-                ));
-                self.tree.root = Some(new_root_id);
+            // Handle the case where grid is None by using or creating the "Other" grid
+            let grid_id = if let Some(grid_id) = grid {
+                grid_id
+            } else {
+                self.get_or_create_other_grid()
+            };
+
+            if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Grid(grid))) =
+                self.tree.tiles.get_mut(grid_id)
+            {
+                grid.add_child(pane_id);
+                self.grid_histogram_map
+                    .entry(grid_id)
+                    .or_default()
+                    .push(pane_id);
+            } else {
+                log::error!("Invalid grid ID provided");
             }
         }
     }

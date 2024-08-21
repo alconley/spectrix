@@ -25,7 +25,7 @@ impl Processer {
             cut_handler: CutHandler::default(),
             histogrammer: Histogrammer::default(),
             histogram_script: HistogramScript::new(),
-            save_with_scanning: true,
+            save_with_scanning: false,
             suffix: "filtered".to_string(),
         }
     }
@@ -145,6 +145,7 @@ impl Processer {
                 );
 
             egui::Grid::new("parquet_writer_grid")
+                .num_columns(4)
                 .striped(true)
                 .show(ui, |ui| {
                     ui.label("");
