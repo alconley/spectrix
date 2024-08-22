@@ -40,7 +40,7 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
     // Focal Plane histograms
 
-    let fp_grid = Some(h.create_grid("Focal Plane".to_string())); // Creates a new grid container
+    let fp_grid = Some("Focal Plane"); // Creates a new grid container
 
     h.add_fill_hist1d("X1", &lf, "X1", 600, (-300.0, 300.0), fp_grid);
     h.add_fill_hist1d("X1: only1plane", &lf_only_x1_plane, "X1", 600, (-300.0, 300.0), fp_grid);
@@ -57,7 +57,7 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
     // Particle Identification histograms
 
-    let pid_grid = Some(h.create_grid("Particle Identification".to_string())); 
+    let pid_grid = Some("Particle Identification"); 
 
     h.add_fill_hist2d("AnodeBack v ScintLeft", &lf, "ScintLeftEnergy", "AnodeBackEnergy", (512, 512), ((0.0, 4096.0), (0.0, 4096.0)), pid_grid);
     h.add_fill_hist2d("AnodeFront v ScintLeft", &lf, "ScintLeftEnergy", "AnodeFrontEnergy", (512, 512), ((0.0, 4096.0), (0.0, 4096.0)), pid_grid);
@@ -70,7 +70,7 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
     // // Particle Identification vs Focal plane histograms
 
-    let pid_v_fp_grid = Some(h.create_grid("Particle Identification v Focal Plane".to_string()));
+    let pid_v_fp_grid = Some("Particle Identification v Focal Plane");
 
     h.add_fill_hist2d("ScintLeft v X1", &lf, "X1", "ScintLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), pid_v_fp_grid);
     h.add_fill_hist2d("ScintLeft v X2", &lf, "X2", "ScintLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), pid_v_fp_grid);
@@ -92,7 +92,7 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
     // // Delay lines vs Focal plane histograms
 
-    let de_v_fp_grid = Some(h.create_grid("Delay Lines v Focal Plane".to_string()));
+    let de_v_fp_grid = Some("Delay Lines v Focal Plane");
 
     // h.add_fill_hist2d("DelayBackRight v X1", &lf, "X1", "DelayBackRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
     // h.add_fill_hist2d("DelayBackLeft v X1", &lf, "X1", "DelayBackLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);

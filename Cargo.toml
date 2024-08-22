@@ -38,7 +38,6 @@ rfd = "0.13"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9.31"
 serde_json = "1.0.125"
-toml = "0.8.19"
 geo = "0.28.0"
 fnv = "1.0.7"
 varpro = "0.10.0"
