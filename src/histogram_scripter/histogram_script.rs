@@ -1,6 +1,6 @@
-use super::configure_auxillary_detectors::AuxillaryDetectors;
+// use super::configure_auxillary_detectors::AuxillaryDetectors;
 use super::configure_lazyframes::{LazyFrameInfo, LazyFrames};
-use super::histogram_ui_elements::{Histo1dConfig, Histo2dConfig, HistoConfig};
+use super::histogram_ui_elements::{AddHisto1d, AddHisto2d, FillHisto1d, FillHisto2d, HistoConfig};
 use super::manual_histogram_script::manual_add_histograms;
 
 use crate::histoer::histogrammer::Histogrammer;
@@ -9,20 +9,20 @@ use polars::prelude::*;
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct HistogramScript {
     pub lazyframe_info: LazyFrameInfo,
-    pub histograms: Vec<HistoConfig>,
+    pub add_histograms: Vec<HistoConfig>,
+    pub fill_histograms: Vec<HistoConfig>,
+    pub grids: Vec<String>,
     pub manual_histogram_script: bool,
-
-    pub add_auxillary_detectors: bool,
-    pub auxillary_detectors: Option<AuxillaryDetectors>,
 }
 
 impl HistogramScript {
     pub fn new() -> Self {
         Self {
             lazyframe_info: LazyFrameInfo::default(),
-            histograms: Vec::new(),
-            add_auxillary_detectors: false,
-            auxillary_detectors: None,
+            add_histograms: vec![],
+            fill_histograms: vec![],
+            grids: vec![],
+            // auxillary_detectors: None,
             manual_histogram_script: true,
         }
     }
@@ -37,34 +37,40 @@ impl HistogramScript {
         lazyframe_info.lfs = main_lf_names;
         lazyframe_info.columns = main_columns;
 
-        if self.add_auxillary_detectors {
-            if let Some(auxillary_detectors) = &self.auxillary_detectors {
-                let aux_columns = auxillary_detectors.get_column_names();
-                let aux_lf_names = auxillary_detectors.get_lf_names();
+        // if self.add_auxillary_detectors {
+        //     if let Some(auxillary_detectors) = &self.auxillary_detectors {
+        //         let aux_columns = auxillary_detectors.get_column_names();
+        //         let aux_lf_names = auxillary_detectors.get_lf_names();
 
-                lazyframe_info.lfs.extend(aux_lf_names);
-                lazyframe_info.columns.extend(aux_columns);
-            }
-        }
+        //         lazyframe_info.lfs.extend(aux_lf_names);
+        //         lazyframe_info.columns.extend(aux_columns);
+        //     }
+        // }
 
         self.lazyframe_info = lazyframe_info;
     }
 
     pub fn get_hist_names(&self) -> Vec<String> {
-        self.histograms.iter().map(|hist| hist.name()).collect()
+        self.add_histograms.iter().map(|hist| hist.name()).collect()
     }
 
-    pub fn add_histogram1d(&mut self, config: Histo1dConfig) {
-        self.histograms.push(HistoConfig::Histo1d(config));
+    pub fn add_histogram1d(&mut self, config: AddHisto1d) {
+        self.add_histograms.push(HistoConfig::AddHisto1d(config));
     }
 
-    pub fn add_histogram2d(&mut self, config: Histo2dConfig) {
-        self.histograms.push(HistoConfig::Histo2d(config));
+    pub fn add_histogram2d(&mut self, config: AddHisto2d) {
+        self.add_histograms.push(HistoConfig::AddHisto2d(config));
+    }
+
+    pub fn fill_histogram1d(&mut self, config: FillHisto1d) {
+        self.fill_histograms.push(HistoConfig::FillHisto1d(config));
+    }
+
+    pub fn add_fill_histogram2d(&mut self, config: FillHisto2d) {
+        self.fill_histograms.push(HistoConfig::FillHisto2d(config));
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        let max_height = ui.min_rect().height();
-
         ui.checkbox(&mut self.manual_histogram_script, "Manual Histogram Script");
         if self.manual_histogram_script {
             ui.label("Manual Histogram Script Enabled");
@@ -77,67 +83,133 @@ impl HistogramScript {
             ui.separator();
 
             // UI for Auxillary Detectors
+            // ui.horizontal(|ui| {
+            //     ui.label("Auxillary Detectors");
+            //     ui.checkbox(&mut self.add_auxillary_detectors, "Add Auxillary Detectors");
+            // });
+
+            // if self.add_auxillary_detectors {
+            //     if let Some(auxillary_detectors) = &mut self.auxillary_detectors {
+            //         auxillary_detectors.ui(ui);
+            //     } else {
+            //         self.auxillary_detectors = Some(AuxillaryDetectors::default());
+            //     }
+            //     ui.separator();
+            // }
+
+            ui.heading("Grids");
             ui.horizontal(|ui| {
-                ui.label("Auxillary Detectors");
-                ui.checkbox(&mut self.add_auxillary_detectors, "Add Auxillary Detectors");
+                ui.label("Grids");
+                if ui.button("Add Grid").clicked() {
+                    let name = format!("Grid {}", self.grids.len());
+                    self.grids.push(name);
+                }
             });
 
-            if self.add_auxillary_detectors {
-                if let Some(auxillary_detectors) = &mut self.auxillary_detectors {
-                    auxillary_detectors.ui(ui);
-                } else {
-                    self.auxillary_detectors = Some(AuxillaryDetectors::default());
+            if !self.grids.is_empty() {
+                let mut to_remove: Option<usize> = None;
+                egui::Grid::new("Grids")
+                    .striped(true)
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("");
+                        ui.label("Name");
+                        ui.end_row();
+                        for (i, grid) in &mut self.grids.iter_mut().enumerate() {
+                            if ui.button("X").clicked() {
+                                to_remove = Some(i);
+                            }
+                            ui.text_edit_singleline(grid);
+                            ui.end_row();
+                        }
+                    });
+
+                if let Some(index) = to_remove {
+                    self.grids.remove(index);
                 }
-                ui.separator();
             }
-
-            ui.horizontal(|ui| {
-                ui.label("Add Histogram");
-                if ui.button("1d").clicked() {
-                    self.add_histogram1d(Histo1dConfig::default());
-                }
-                if ui.button("2d").clicked() {
-                    self.add_histogram2d(Histo2dConfig::default());
-                }
-            });
 
             ui.separator();
 
+            ui.horizontal(|ui| {
+                ui.heading("Add Histograms");
+                if ui.button("1d").clicked() {
+                    self.add_histogram1d(AddHisto1d::new(self.add_histograms.len()));
+                }
+                if ui.button("2d").clicked() {
+                    self.add_histogram2d(AddHisto2d::new(self.add_histograms.len()));
+                }
+            });
+
             let mut to_remove: Option<usize> = None;
-
-            ui.heading("Histograms");
-            egui::ScrollArea::vertical()
-                .id_source("HistogramScriptScrollArea")
-                .max_height(max_height * 0.6)
+            egui::Grid::new("Add Histogram Config")
+                .striped(true)
+                .num_columns(5)
                 .show(ui, |ui| {
-                    egui::Grid::new("Histogram Config")
-                        .striped(true)
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label("Name                                             ");
-                            });
-                            ui.label("LazyFrame");
-                            ui.label("Column");
-                            ui.label("Bins");
-                            ui.label("Range");
-                            ui.label("");
-                            ui.label("Grids");
-                            ui.label("");
-                            ui.end_row();
-                            for (i, config) in &mut self.histograms.iter_mut().enumerate() {
-                                config.ui(ui, self.lazyframe_info.clone());
+                    ui.horizontal(|ui| {
+                        ui.label("Name                                             ");
+                    });
+                    ui.label("Bins");
+                    ui.label("Range");
+                    ui.label("Grid");
+                    ui.label("Remove");
+                    ui.end_row();
+                    for (i, config) in &mut self.add_histograms.iter_mut().enumerate() {
+                        config.add_ui(ui, self.grids.clone());
 
-                                // Remove button
-                                if ui.button("X").clicked() {
-                                    to_remove = Some(i);
-                                }
-                                ui.end_row();
-                            }
-                        });
+                        // Remove button
+                        if ui.button("X").clicked() {
+                            to_remove = Some(i);
+                        }
+                        ui.end_row();
+                    }
                 });
 
             if let Some(index) = to_remove {
-                self.histograms.remove(index);
+                self.add_histograms.remove(index);
+            }
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.heading("Fill Histograms");
+                if ui.button("1d").clicked() {
+                    self.fill_histogram1d(FillHisto1d::new(self.fill_histograms.len()));
+                }
+                if ui.button("2d").clicked() {
+                    self.add_fill_histogram2d(FillHisto2d::new(self.fill_histograms.len()));
+                }
+            });
+
+            let mut to_remove: Option<usize> = None;
+
+            let histogram_names = self.get_hist_names();
+
+            egui::Grid::new("Histogram Config")
+                .striped(true)
+                .num_columns(5)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Histogram");
+                    });
+                    ui.label("LazyFrame");
+                    ui.label("Column");
+                    ui.label("Calculate");
+                    ui.label("Remove");
+                    ui.end_row();
+                    for (i, config) in &mut self.fill_histograms.iter_mut().enumerate() {
+                        config.fill_ui(ui, self.lazyframe_info.clone(), histogram_names.clone());
+
+                        // Remove button
+                        if ui.button("X").clicked() {
+                            to_remove = Some(i);
+                        }
+                        ui.end_row();
+                    }
+                });
+
+            if let Some(index) = to_remove {
+                self.fill_histograms.remove(index);
             }
 
             ui.separator();
@@ -154,57 +226,67 @@ impl HistogramScript {
             // add the main extra columns to the raw lazyframe
             lf = lazyframes.add_columns_to_lazyframe(&lf);
 
-            // add auxillary detectors columns to the raw lazyframe
-            if self.add_auxillary_detectors {
-                if let Some(auxillary_detectors) = &self.auxillary_detectors {
-                    lf = auxillary_detectors.add_columns_to_lazyframe(&lf);
-                }
-            }
+            // // add auxillary detectors columns to the raw lazyframe
+            // if self.add_auxillary_detectors {
+            //     if let Some(auxillary_detectors) = &self.auxillary_detectors {
+            //         lf = auxillary_detectors.add_columns_to_lazyframe(&lf);
+            //     }
+            // }
 
             // add the main lfs to the lazyframes
             lazyframes.lfs = lazyframes.filtered_lfs(lf.clone());
 
-            // add auxillary detectors lfs to the lazyframes
-            if self.add_auxillary_detectors {
-                if let Some(auxillary_detectors) = &self.auxillary_detectors {
-                    let aux_filtered_lfs = auxillary_detectors.filterd_lazyframes(lf.clone());
-                    for (name, lf) in aux_filtered_lfs {
-                        lazyframes.lfs.insert(name, lf);
+            // // add auxillary detectors lfs to the lazyframes
+            // if self.add_auxillary_detectors {
+            //     if let Some(auxillary_detectors) = &self.auxillary_detectors {
+            //         let aux_filtered_lfs = auxillary_detectors.filterd_lazyframes(lf.clone());
+            //         for (name, lf) in aux_filtered_lfs {
+            //             lazyframes.lfs.insert(name, lf);
+            //         }
+            //     }
+            // }
+
+            // add histograms to histogrammer
+
+            for hist in self.add_histograms.iter_mut() {
+                match hist {
+                    HistoConfig::AddHisto1d(config) => {
+                        let name = config.name.clone();
+                        let bins = config.bins;
+                        let range = config.range;
+                        let grid = config.grid.as_deref();
+                        h.add_hist1d(&name, bins, range, grid);
                     }
+                    HistoConfig::AddHisto2d(config) => {
+                        let name = config.name.clone();
+                        let bins = config.bins;
+                        let range = config.range;
+                        let grid = config.grid.as_deref();
+                        h.add_hist2d(&name, bins, range, grid);
+                    }
+                    _ => {}
                 }
             }
 
-            for hist in self.histograms.iter_mut() {
+            // fill histograms
+            for hist in self.fill_histograms.iter_mut() {
                 match hist {
-                    HistoConfig::Histo1d(config) => {
-                        if config.calculate {
-                            if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
-                                let name = config.name.clone();
-                                let column = config.column.clone();
-                                let bins = config.bins;
-                                let range = config.range;
-                                h.add_fill_hist1d(&name, lf, &column, bins, range, None);
-                            } else {
-                                log::error!("LazyFrame not found: {}", config.lazyframe);
-                            }
+                    HistoConfig::FillHisto1d(config) => {
+                        if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
+                            let name = config.name.clone();
+                            let column = config.column.clone();
+                            h.fill_hist1d(&name, lf, &column);
                         }
                     }
-                    HistoConfig::Histo2d(config) => {
-                        if config.calculate {
-                            if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
-                                let name = config.name.clone();
-                                let x_column = config.x_column.clone();
-                                let y_column = config.y_column.clone();
-                                let bins = config.bins;
-                                let range = config.range;
-                                h.add_fill_hist2d(
-                                    &name, lf, &x_column, &y_column, bins, range, None,
-                                );
-                            } else {
-                                log::error!("LazyFrame not found: {}", config.lazyframe);
-                            }
+                    HistoConfig::FillHisto2d(config) => {
+                        if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
+                            let name = config.name.clone();
+                            let x_column = config.x_column.clone();
+                            let y_column = config.y_column.clone();
+                            h.fill_hist2d(&name, lf, &x_column, &y_column);
                         }
                     }
+                    _ => {}
                 }
             }
         }

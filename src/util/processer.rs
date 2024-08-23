@@ -11,7 +11,6 @@ pub struct Processer {
     pub lazyframer: Option<LazyFramer>,
     pub cut_handler: CutHandler,
     pub histogrammer: Histogrammer,
-    #[serde(skip)]
     pub histogram_script: HistogramScript,
     pub save_with_scanning: bool,
     pub suffix: String,
