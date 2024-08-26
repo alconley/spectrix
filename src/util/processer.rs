@@ -232,7 +232,7 @@ impl Processer {
 
         ui.separator();
 
-        self.cut_handler.cut_ui(ui);
+        self.cut_handler.cut_ui(ui, &mut self.histogrammer);
 
         ui.separator();
 

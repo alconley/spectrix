@@ -2,6 +2,7 @@ use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
 use super::tree::TreeBehavior;
+use crate::cutter::cut_handler::CutHandler;
 use egui_tiles::TileId;
 use polars::prelude::*;
 use std::thread::JoinHandle;
@@ -462,6 +463,24 @@ impl Histogrammer {
                         self.tree
                             .move_tile_to_container(histogram_id, *grid_id, index, true);
                     }
+                }
+            }
+        }
+    }
+
+    pub fn retrieve_active_cuts(&self, cut_handler: &mut CutHandler) {
+        for (_id, tile) in self.tree.tiles.iter() {
+            if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
+                let hist = hist.lock().unwrap();
+                let active_cuts = hist.plot_settings.cuts.clone();
+
+                // Update cuts with correct column names and avoid duplicates
+                for mut new_cut in active_cuts.cuts {
+                    // Set the correct column names in the Cut struct
+                    new_cut.x_column = hist.plot_settings.cuts.x_column.clone();
+                    new_cut.y_column = hist.plot_settings.cuts.y_column.clone();
+
+                    cut_handler.cuts.push(new_cut);
                 }
             }
         }

@@ -1,4 +1,5 @@
 use super::cuts::Cut;
+use crate::histoer::histogrammer::Histogrammer;
 use polars::prelude::*;
 
 use std::fs::File;
@@ -31,13 +32,20 @@ impl CutHandler {
         self.cuts.iter().any(|cut| cut.selected)
     }
 
-    pub fn cut_ui(&mut self, ui: &mut egui::Ui) {
+    pub fn cut_ui(&mut self, ui: &mut egui::Ui, histogrammer: &mut Histogrammer) {
         ui.collapsing("Cuts", |ui| {
-            if ui.button("Get Cut").clicked() {
-                if let Err(e) = self.get_cut() {
-                    log::error!("Error loading cut: {:?}", e);
+            ui.horizontal(|ui| {
+                if ui.button("Get Cut").clicked() {
+                    if let Err(e) = self.get_cut() {
+                        log::error!("Error loading cut: {:?}", e);
+                    }
                 }
-            }
+
+                // Add a button to retrieve active cuts from histograms
+                if ui.button("Retrieve Active Cuts").clicked() {
+                    histogrammer.retrieve_active_cuts(self);
+                }
+            });
 
             if self.cuts.is_empty() {
                 ui.label("No cuts loaded");
@@ -73,6 +81,11 @@ impl CutHandler {
                             self.cuts.remove(index);
                         }
                     });
+
+                // add button to remove all
+                if ui.button("Remove All").clicked() {
+                    self.cuts.clear();
+                }
             }
         });
     }
