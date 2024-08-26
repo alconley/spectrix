@@ -359,22 +359,31 @@ impl Histogrammer {
 
         ui.separator();
 
-        // ui.horizontal(|ui| {
-        //     if ui.button("Save").clicked() {
-        //         self.save();
-        //     }
-        //     if ui.button("Load").clicked() {
-        //         self.load();
-        //     }
-        // });
+        ui.collapsing("Histogrammer", |ui| {
+            // ui.horizontal(|ui| {
+            //     if ui.button("Save").clicked() {
+            //         self.save();
+            //     }
+            //     if ui.button("Load").clicked() {
+            //         self.load();
+            //     }
+            // });
 
-        if let Some(root) = self.tree.root() {
-            if ui.button("Reorganize").clicked() {
-                self.reorganize();
+            if !self.handles.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.label("Calculating Histograms");
+                    ui.add(egui::widgets::Spinner::default());
+                });
             }
 
-            tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
-        }
+            if let Some(root) = self.tree.root() {
+                if ui.button("Reorganize").clicked() {
+                    self.reorganize();
+                }
+
+                tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
+            }
+        });
     }
 
     pub fn create_grid(&mut self, tab_name: String) -> egui_tiles::TileId {
