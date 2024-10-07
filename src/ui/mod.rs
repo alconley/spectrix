@@ -1,12 +1,8 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod app;
 #[cfg(not(target_arch = "wasm32"))]
-pub use app::GNATApp;
-#[cfg(not(target_arch = "wasm32"))]
-// pub mod pane;
-// #[cfg(not(target_arch = "wasm32"))]
-// pub mod tree;
+pub use app::Spectrix;
 #[cfg(target_arch = "wasm32")]
 mod app_web;
 #[cfg(target_arch = "wasm32")]
-pub use app_web::GNATApp;
+pub use app_web::Spectrix;

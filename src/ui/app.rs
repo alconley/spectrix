@@ -4,7 +4,7 @@ use crate::util::processer::Processer;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
-pub struct GNATApp {
+pub struct Spectrix {
     // tree: egui_tiles::Tree<Pane>,
     processer: Processer,
     // behavior: TreeBehavior,
@@ -12,7 +12,7 @@ pub struct GNATApp {
     right_side_panel_open: bool,
 }
 
-impl Default for GNATApp {
+impl Default for Spectrix {
     fn default() -> Self {
         Self {
             processer: Processer::new(),
@@ -22,7 +22,7 @@ impl Default for GNATApp {
     }
 }
 
-impl GNATApp {
+impl Spectrix {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
@@ -34,7 +34,7 @@ impl GNATApp {
     }
 }
 
-impl eframe::App for GNATApp {
+impl eframe::App for Spectrix {
     /// Called by the frame work to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
