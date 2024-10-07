@@ -47,6 +47,7 @@ impl Default for EguiImage {
                 magnification: egui::TextureFilter::Nearest,
                 minification: egui::TextureFilter::Nearest,
                 wrap_mode: egui::TextureWrapMode::ClampToEdge,
+                ..Default::default()
             },
         }
     }

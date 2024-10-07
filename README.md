@@ -1,6 +1,6 @@
-# general Nuclear Analysis Tool (gNAT)
+# Spectrix
 
-The general Nuclear Analysis Tool (gNAT, pronounced /ɡnæt/, with a hard 'G' sound followed by 'nat) is a comprehensive software designed for nuclear data analysis. It provides functionalities for histogramming, Gaussian fitting, and interactive data visualization of 1D and 2D histograms using crates: `egui`, `egui-tiles`, `egui_plot`, and `polars`.
+Spectrix is a comprehensive software designed for nucelar spectrum analysis. It provides functionalities for histogramming, Gaussian fitting, and interactive data visualization of 1D and 2D histograms using crates: `egui`, `egui-tiles`, `egui_plot`, and `polars`.
 
 ### Running locally
 
@@ -8,7 +8,7 @@ Make sure you are using the latest version of stable rust by running `rustup upd
 
 Then clone the respository
 
-`git clone https://github.com/alconley/gNAT.git`
+`git clone https://github.com/alconley/spectrix.git`
 
 `cargo run --release`
 

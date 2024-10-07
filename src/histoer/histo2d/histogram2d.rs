@@ -9,6 +9,8 @@ pub struct Histogram2D {
     pub name: String,
     pub bins: Bins,
     pub range: Range,
+    pub overflow: (u64, u64),
+    pub underflow: (u64, u64),
     pub plot_settings: PlotSettings,
     pub image: EguiImage,
     pub backup_bins: Option<Bins>,
@@ -38,6 +40,8 @@ impl Histogram2D {
                     max: range.1 .1,
                 },
             },
+            overflow: (0, 0),
+            underflow: (0, 0),
             plot_settings: PlotSettings::default(),
             image: EguiImage::heatmap(
                 name.to_string(),

@@ -104,10 +104,10 @@ impl Histogram2D {
 
         let stats_entries = [
             format!("Integral: {}", stats.0),
-            format!("Mean X: {:.2}", stats.1),
-            format!("Stdev X: {:.2}", stats.2),
-            format!("Mean Y: {:.2}", stats.3),
-            format!("Stdev Y: {:.2}", stats.4),
+            format!("Mean: ({:.2}, {:.2})", stats.1, stats.3),
+            format!("Stdev: ({:.2}, {:.2})", stats.2, stats.4),
+            format!("Overflow: ({:}, {:})", self.overflow.0, self.overflow.1),
+            format!("Underflow: ({:}, {:})", self.underflow.0, self.underflow.1),
         ];
 
         for entry in stats_entries.iter() {

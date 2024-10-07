@@ -99,6 +99,45 @@ impl Histogrammer {
                 .gt(lit(hist_range.0))
                 .and(col(column_name).lt(lit(hist_range.1)));
 
+            let overflow_filter_expr = col(column_name).gt(lit(hist_range.1));
+            // get the overflow values
+            let overflow_df = lf
+                .clone()
+                .select([col(column_name)])
+                .filter(overflow_filter_expr)
+                .sum()
+                .collect()
+                .unwrap();
+
+            let overflow_value = overflow_df.column(column_name).unwrap().get(0).unwrap(); // Now you can access the first value safely
+
+            let overflow_as_u64 = match overflow_value {
+                AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
+                AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
+                _ => panic!("Unexpected value type!"),
+            };
+
+            let underflow_filter_expr = col(column_name).lt(lit(hist_range.0));
+            // get the underflow values
+            let underflow_df = lf
+                .clone()
+                .select([col(column_name)])
+                .filter(underflow_filter_expr)
+                .sum()
+                .collect()
+                .unwrap();
+
+            let underflow_value = underflow_df.column(column_name).unwrap().get(0).unwrap(); // Now you can access the first value safely
+
+            let underflow_as_u64 = match underflow_value {
+                AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
+                AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
+                _ => panic!("Unexpected value type!"),
+            };
+
+            hist.lock().unwrap().overflow = overflow_as_u64;
+            hist.lock().unwrap().underflow = underflow_as_u64;
+
             let lf = lf.clone();
             let name = name.to_string();
             let column_name = column_name.to_string();
@@ -241,6 +280,65 @@ impl Histogrammer {
                 .and(col(x_column_name).lt(lit(hist_range.x.max)))
                 .and(col(y_column_name).gt(lit(hist_range.y.min)))
                 .and(col(y_column_name).lt(lit(hist_range.y.max)));
+
+            let overflow_expr = col(x_column_name)
+                .gt(lit(hist_range.x.max))
+                .or(col(y_column_name).gt(lit(hist_range.y.max)));
+
+            let underflow_expr = col(x_column_name)
+                .lt(lit(hist_range.x.min))
+                .or(col(y_column_name).lt(lit(hist_range.y.min)));
+
+            let overflow_df = lf
+                .clone()
+                .select([col(x_column_name), col(y_column_name)])
+                .filter(overflow_expr)
+                .sum()
+                .collect()
+                .unwrap();
+
+            let underflow_df = lf
+                .clone()
+                .select([col(x_column_name), col(y_column_name)])
+                .filter(underflow_expr)
+                .sum()
+                .collect()
+                .unwrap();
+
+            let overflow_x_value = overflow_df.column(x_column_name).unwrap().get(0).unwrap();
+
+            let overflow_y_value = overflow_df.column(y_column_name).unwrap().get(0).unwrap();
+
+            let underflow_x_value = underflow_df.column(x_column_name).unwrap().get(0).unwrap();
+
+            let underflow_y_value = underflow_df.column(y_column_name).unwrap().get(0).unwrap();
+
+            let overflow_x_as_u64 = match overflow_x_value {
+                AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
+                AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
+                _ => panic!("Unexpected value type!"),
+            };
+
+            let overflow_y_as_u64 = match overflow_y_value {
+                AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
+                AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
+                _ => panic!("Unexpected value type!"),
+            };
+
+            let underflow_x_as_u64 = match underflow_x_value {
+                AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
+                AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
+                _ => panic!("Unexpected value type!"),
+            };
+
+            let underflow_y_as_u64 = match underflow_y_value {
+                AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
+                AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
+                _ => panic!("Unexpected value type!"),
+            };
+
+            hist.lock().unwrap().overflow = (overflow_x_as_u64, overflow_y_as_u64);
+            hist.lock().unwrap().underflow = (underflow_x_as_u64, underflow_y_as_u64);
 
             let lf = lf.clone();
             let name = name.to_string();

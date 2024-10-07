@@ -7,6 +7,15 @@ use std::f64::consts::PI;
 #[allow(clippy::all)]
 pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
+    // let lf = lf.with_column(
+    //     (lit(-1.77049e-06)*col("PIPS1000Energy")*col("PIPS1000Energy") + lit(0.544755003513083)*col("PIPS1000Energy") + lit(-1.36822594543883)).alias("PIPS1000EnergyCalibrated")
+    // );
+
+    // h.add_fill_hist1d("PIPS1000Energy", &lf, "PIPS1000Energy", 16384, (0.0, 16384.0), None);
+    // h.add_fill_hist1d("PIPS1000EnergyCalibrated", &lf, "PIPS1000EnergyCalibrated", 1200, (0.0, 1200.0), None);
+    
+
+
     // Declare all the lazyframes that will be used
     let lf = lf.with_columns(vec![
         (col("DelayFrontRightEnergy") + col("DelayFrontLeftEnergy") / lit(2.0)).alias("DelayFrontAverageEnergy"),
@@ -66,7 +75,9 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
     h.add_fill_hist2d("AnodeFront v ScintRight", &lf, "ScintRightEnergy", "AnodeFrontEnergy", (512, 512), ((0.0, 4096.0), (0.0, 4096.0)), pid_grid);
     h.add_fill_hist2d("Cathode v ScintRight", &lf, "ScintRightEnergy", "CathodeEnergy", (512, 512), ((0.0, 4096.0), (0.0, 4096.0)), pid_grid);
     
-    // // //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
+    // // //
+    /* 
+    ....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
 
     // // Particle Identification vs Focal plane histograms
 
@@ -293,6 +304,8 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
     let cebra_panes = h.get_panes(cebra_panes_names);
     h.tabs.insert("CeBrA".to_string(), cebra_panes);
+
+    */
 
     */
 }
