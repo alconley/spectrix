@@ -6,14 +6,6 @@ use std::time::SystemTime;
 use super::lazyframer::LazyFramer;
 use crate::cutter::cut_handler::CutHandler;
 
-#[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct Workspacer {
-    pub directory: Option<PathBuf>,
-    pub files: Vec<PathBuf>,
-    pub selected_files: Vec<PathBuf>,
-    pub sorting_option: SortingOption,
-}
-
 #[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq)]
 pub enum SortingOption {
     #[default]
@@ -25,6 +17,22 @@ pub enum SortingOption {
     ModifiedTimeDesc,
     CreationTimeAsc,
     CreationTimeDesc,
+}
+
+#[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct WorkspacerOptions {
+    pub sorting_options: SortingOption,
+    pub save_with_scanning: bool,
+    pub suffix: String,
+    pub root: bool,
+}
+
+#[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct Workspacer {
+    pub directory: Option<PathBuf>,
+    pub files: Vec<PathBuf>,
+    pub selected_files: Vec<PathBuf>,
+    pub options: WorkspacerOptions,
 }
 
 impl SortingOption {
@@ -136,26 +144,30 @@ impl Workspacer {
         Ok(())
     }
 
-    // Method for the user to select a directory
     fn select_directory(&mut self) {
         let directory = rfd::FileDialog::new().pick_folder();
         if let Some(dir) = directory {
             self.directory = Some(dir.clone());
             // After directory selection, automatically load .parquet files
-            self.get_parquet_files_in_directory(&dir);
+            self.get_files_in_directory(&dir);
             self.validate_selected_files(); // Ensure selected_files are still valid
         }
     }
 
-    // Helper method to load .parquet files from the selected directory
-    fn get_parquet_files_in_directory(&mut self, dir: &Path) {
+    fn get_files_in_directory(&mut self, dir: &Path) {
         let files = &mut self.files;
         files.clear(); // Clear any existing files
 
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.filter_map(Result::ok) {
                 let path = entry.path();
-                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("parquet") {
+                if self.options.root {
+                    if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("root") {
+                        files.push(path);
+                    }
+                } else if path.is_file()
+                    && path.extension().and_then(|s| s.to_str()) == Some("parquet")
+                {
                     files.push(path);
                 }
             }
@@ -164,31 +176,28 @@ impl Workspacer {
 
     fn refresh_files(&mut self) {
         if let Some(ref dir) = self.directory.clone() {
-            self.get_parquet_files_in_directory(dir);
+            self.get_files_in_directory(dir);
             self.validate_selected_files(); // Ensure selected_files are still valid
         }
     }
 
-    // Validates that all selected_files actually exist in the files list
     fn validate_selected_files(&mut self) {
         let files = &mut self.files;
         let selected_files = &mut self.selected_files;
         selected_files.retain(|selected_file| files.contains(selected_file));
     }
 
-    // clear the selected files
     fn clear_selected_files(&mut self) {
         self.selected_files.clear();
     }
 
-    // select all files
     fn select_all_files(&mut self) {
         let files = self.files.clone();
         self.selected_files = files;
     }
 
     fn sort_files(&mut self) {
-        match self.sorting_option {
+        match self.options.sorting_options {
             SortingOption::AlphabeticalAsc => self.alphabetize_files(false),
             SortingOption::AlphabeticalDesc => self.alphabetize_files(true),
             SortingOption::SizeAsc => self.size_sort_files(false),
@@ -244,7 +253,6 @@ impl Workspacer {
         });
     }
 
-    // Method to get the selected directory
     fn get_directory(&self) -> Option<&PathBuf> {
         self.directory.as_ref()
     }
@@ -298,13 +306,13 @@ impl Workspacer {
         });
 
         ui.horizontal(|ui| {
-            let current_sorting_option = self.sorting_option.clone();
+            let current_sorting_option = self.options.sorting_options.clone();
             egui::ComboBox::from_label("Sorting")
                 .selected_text(current_sorting_option.display_name())
                 .show_ui(ui, |ui| {
                     if ui
                         .selectable_value(
-                            &mut self.sorting_option,
+                            &mut self.options.sorting_options,
                             SortingOption::AlphabeticalAsc,
                             SortingOption::AlphabeticalAsc.display_name(),
                         )
@@ -314,7 +322,7 @@ impl Workspacer {
                     }
                     if ui
                         .selectable_value(
-                            &mut self.sorting_option,
+                            &mut self.options.sorting_options,
                             SortingOption::AlphabeticalDesc,
                             SortingOption::AlphabeticalDesc.display_name(),
                         )
@@ -324,7 +332,7 @@ impl Workspacer {
                     }
                     if ui
                         .selectable_value(
-                            &mut self.sorting_option,
+                            &mut self.options.sorting_options,
                             SortingOption::SizeAsc,
                             SortingOption::SizeAsc.display_name(),
                         )
@@ -334,7 +342,7 @@ impl Workspacer {
                     }
                     if ui
                         .selectable_value(
-                            &mut self.sorting_option,
+                            &mut self.options.sorting_options,
                             SortingOption::SizeDesc,
                             SortingOption::SizeDesc.display_name(),
                         )
@@ -344,7 +352,7 @@ impl Workspacer {
                     }
                     if ui
                         .selectable_value(
-                            &mut self.sorting_option,
+                            &mut self.options.sorting_options,
                             SortingOption::ModifiedTimeAsc,
                             SortingOption::ModifiedTimeAsc.display_name(),
                         )
@@ -354,7 +362,7 @@ impl Workspacer {
                     }
                     if ui
                         .selectable_value(
-                            &mut self.sorting_option,
+                            &mut self.options.sorting_options,
                             SortingOption::ModifiedTimeDesc,
                             SortingOption::ModifiedTimeDesc.display_name(),
                         )
@@ -364,7 +372,7 @@ impl Workspacer {
                     }
                     if ui
                         .selectable_value(
-                            &mut self.sorting_option,
+                            &mut self.options.sorting_options,
                             SortingOption::CreationTimeAsc,
                             SortingOption::CreationTimeAsc.display_name(),
                         )
@@ -374,7 +382,7 @@ impl Workspacer {
                     }
                     if ui
                         .selectable_value(
-                            &mut self.sorting_option,
+                            &mut self.options.sorting_options,
                             SortingOption::CreationTimeDesc,
                             SortingOption::CreationTimeDesc.display_name(),
                         )
@@ -387,7 +395,11 @@ impl Workspacer {
     }
 
     fn file_selection_ui(&mut self, ui: &mut egui::Ui) {
-        ui.label(".parquet Files");
+        if self.options.root {
+            ui.label(".root Files");
+        } else {
+            ui.label(".parquet Files");
+        }
 
         let files = &mut self.files;
         let selected_files = &mut self.selected_files;
@@ -411,6 +423,9 @@ impl Workspacer {
 
     pub fn workspace_ui(&mut self, ui: &mut egui::Ui) {
         ui.collapsing("Workspace", |ui| {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.options.root, "Root Files");
+            });
             self.select_directory_ui(ui);
             self.file_selection_settings_ui(ui);
             self.file_selection_ui(ui);

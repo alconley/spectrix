@@ -4,6 +4,7 @@ use super::pane::Pane;
 use super::tree::TreeBehavior;
 use crate::cutter::cut_handler::CutHandler;
 use egui_tiles::TileId;
+use fnv::FnvHashMap;
 use polars::prelude::*;
 use std::thread::JoinHandle;
 
@@ -418,6 +419,91 @@ impl Histogrammer {
     ) {
         self.add_hist2d(name, bins, range, grid); // Add the histogram.
         self.fill_hist2d(name, lf, x_column_name, y_column_name); // Fill it with data.
+    }
+
+    pub fn add_hist1d_with_bin_values(
+        &mut self,
+        name: &str,
+        bins: Vec<u64>,
+        underflow: u64,
+        overflow: u64,
+        range: (f64, f64),
+        grid: Option<&str>,
+    ) {
+        self.add_hist1d(name, bins.len(), range, grid);
+
+        // set the bin values for the histogram
+        if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
+            self.tree.tiles.iter_mut().find(|(_id, tile)| {
+                if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+                    hist.lock().unwrap().name == name
+                } else {
+                    false
+                }
+            })
+        {
+            hist.lock().unwrap().bins = bins;
+            hist.lock().unwrap().underflow = underflow;
+            hist.lock().unwrap().overflow = overflow;
+        }
+    }
+
+    pub fn add_hist2d_with_bin_values(
+        &mut self,
+        name: &str,
+        bins: Vec<Vec<u64>>,
+        range: ((f64, f64), (f64, f64)),
+        grid: Option<&str>,
+    ) {
+        // First, add the 2D histogram (with the bin size and range)
+        self.add_hist2d(name, (bins.len(), bins[0].len()), range, grid);
+
+        let mut min_value = u64::MAX;
+        let mut max_value = u64::MIN;
+
+        // Convert the 2D bins to the FnvHashMap and update min/max counts dynamically
+        let mut bin_map = FnvHashMap::default();
+        for (i, row) in bins.iter().enumerate() {
+            for (j, &bin) in row.iter().enumerate() {
+                if bin != 0 {
+                    bin_map.insert((i, j), bin);
+
+                    // Update min and max values
+                    if bin < min_value {
+                        min_value = bin;
+                    }
+                    if bin > max_value {
+                        max_value = bin;
+                    }
+                }
+            }
+        }
+
+        // Handle the case when all bins are 0
+        if min_value == u64::MAX {
+            min_value = 0;
+        }
+
+        // Set the bin values for the histogram and update min/max count
+        if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
+            self.tree.tiles.iter_mut().find(|(_id, tile)| {
+                if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
+                    hist.lock().unwrap().name == name
+                } else {
+                    false
+                }
+            })
+        {
+            let mut hist = hist.lock().unwrap();
+            hist.bins.counts = bin_map;
+            hist.bins.min_count = min_value;
+            hist.bins.max_count = max_value;
+
+            // Flag the image to be recalculated due to new bin values
+            hist.plot_settings.recalculate_image = true;
+        } else {
+            log::error!("2D histogram '{}' not found in the tree", name);
+        }
     }
 
     pub fn check_and_join_finished_threads(&mut self) {

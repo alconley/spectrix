@@ -1,8 +1,8 @@
 # Spectrix
 
-Spectrix is a comprehensive software designed for nucelar spectrum analysis. It provides functionalities for histogramming, Gaussian fitting, and interactive data visualization of 1D and 2D histograms using crates: `egui`, `egui-tiles`, `egui_plot`, and `polars`.
+Spectrix is a comprehensive software designed for nucelar spectrum analysis. It provides functionalities for histogramming, Gaussian fitting, and interactive data visualization of 1D and 2D histograms using crates: `egui`, `egui-tiles`, `egui_plot`, and `polars`. Additionally, using uproot, you can view 1d and 2d root histograms.
 
-### Running locally
+### Running
 
 Make sure you are using the latest version of stable rust by running `rustup update`. Rust is very easy to install on any computer. First, you'll need to install the Rust toolchain (compiler, cargo, etc). Go to the [Rust website](https://www.rust-lang.org/tools/install) and follow the instructions there.
 
@@ -20,37 +20,28 @@ On Fedora Rawhide you need to run:
 
 `dnf install clang clang-devel clang-tools-extra libxkbcommon-devel pkg-config openssl-devel libxcb-devel gtk3-devel atk fontconfig-devel`
 
+If you plan on using this program to view [root](https://root.cern) histograms, you will need to have python3 with the uproot package installed. If you are using a virtual environment (recommended), run these commands
+
+```sh
+# Create a Python virtual environment
+python3 -m venv .venv
+
+# Activate the virtual environment
+source .venv/bin/activate
+
+# Set the PYO3_PYTHON environment variable to point to the Python in the virtual environment
+export PYO3_PYTHON=$(pwd)/.venv/bin/python
+
+# Set the PYTHONPATH to include the site-packages directory of the virtual environment
+export PYTHONPATH=$(pwd)/.venv/lib/python3.12/site-packages
+
+# Run the Rust project in release mode
+cargo run --release
+```
+
 ## File Format
 
 For version 1.0, this program reads in `.parquet` files using the [Polars](https://docs.rs/polars/latest/polars/) crate. Personally, the .parquet files that I use are from [Eventbuilder](https://github.com/alconley/Eventbuilder).
-
-### About Parquet
-
-Parquet is a columnar storage file format designed for efficient data storage and retrieval. Here are some of the benefits of using Parquet:
-
-- **Efficient Storage**: Parquet files are highly compressed, which reduces storage costs and improves read and write performance.
-- **Columnar Storage**: This format is optimized for querying and can read only the necessary columns, which speeds up data access.
-- **Compatibility**: Parquet is compatible with many data processing frameworks, including Apache Spark, Apache Drill, and more.
-- **Schema Evolution**: Parquet supports schema evolution, allowing you to add new columns to your dataset without breaking existing queries.
-
-## Configuring Histogram Script
-
-If someone is using this program outside of the [John D. Fox Lab](https://fsunuc.physics.fsu.edu/wiki/index.php/FSU_Fox%27s_Lab_Wiki) (i.e., the [SE-SPS](https://fsunuc.physics.fsu.edu/wiki/index.php/Split-Pole_Spectrograph) or [CeBrA](https://www.sciencedirect.com/science/article/abs/pii/S0168900223008185)), you will have to configure your histogram script. I currently have it set up so you can do a manual histogram script (example in `src/histogram_scripter/manual_histogram_script.rs`), or you have to configure the interactive histogrammer for your purposes. Both require some knowledge of how to code in Rust (mostly [polars](https://docs.rs/polars/latest/polars/) syntax), but I think it is pretty straightforward. The latter has the benefit of being able to change the binning and really explore your data without having to recompile.
-
-To configure your interactive histogrammer UI:
-
-1. Go to `src/histogram_scripter/configure_lazyframes.rs`.
-
-   - Adjust the `add_columns_to_lazyframe` function to add extra columns to the main lazyframe.
-   - Adjust the `filtered_lfs` function to declare what lazyframes the user can pick the data frame from in the UI. This is essentially where the user can filter the lazyframe with specific conditions.
-   - Hard code the column names in the `main_column_names` function. This ensures the user never calls a column that doesn't exist.
-   - Likewise, adjust the lazyframe names in the `main_lfs_names` function.
-
-2. Configure auxiliary columns (Optional).
-
-   - This option exists as an example of how a more interactive UI can be implemented for the interactive histogrammer. In the existing code, the auxiliary columns correspond to CeBrA. For these detectors, the time filtering condition and energy calibration values change with every experiment. So this enables the user to easily energy calibrate the data if needed.
-   - Just like above, you have to configure the different column names, lazyframes, and the UI.
-
 
 ## 1D Histograms
 
@@ -136,15 +127,8 @@ Another useful feature of the 2D histogram is the ability to project data along 
 
 #### Steps to Create a Projection
 
-1. **Activate Projection**: To create a projection, right-click on the 2D histogram and select "Add X Projection" or "Add Y Projection".
+1. **Activate Projection**: To create a projection, right-click on the 2D histogram and select "Add X Projection" (keybind: x) or "Add Y Projection" (keybind: y).
 
 2. **Adjust Projection Lines**: Once the projection is activated, lines will appear on the histogram indicating the range of the projection. These lines can be moved using the middle mouse button to select the desired range.
 
 3. **View and Use the Projection**: The projection will generate a 1D histogram based on the selected range. This 1D histogram can be used for further analysis, such as fitting peaks.
-
-![projection example](assets/projection_example.gif)
-
-## Future Features
-
-- Save/load all the histograms into some python program
-- Command line interface / bashscripting

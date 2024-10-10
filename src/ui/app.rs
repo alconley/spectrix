@@ -41,7 +41,7 @@ impl eframe::App for Spectrix {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("nat_top_panel").show(ctx, |ui| {
+        egui::TopBottomPanel::top("spectrix_top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.label("Show: ");
                 ui.checkbox(&mut self.left_side_panel_open, "Info Panel");
@@ -49,12 +49,12 @@ impl eframe::App for Spectrix {
             });
         });
 
-        egui::SidePanel::left("nat_left_panel").show_animated(
+        egui::SidePanel::left("spectrix_left_panel").show_animated(
             ctx,
             self.left_side_panel_open,
             |ui| {
                 ui.horizontal(|ui| {
-                    ui.heading("gNAT");
+                    ui.heading("Spectrix");
 
                     egui::global_theme_preference_switch(ui);
 
@@ -73,7 +73,7 @@ impl eframe::App for Spectrix {
             },
         );
 
-        egui::SidePanel::right("nat_right_panel").show_animated(
+        egui::SidePanel::right("spectrix_right_panel").show_animated(
             ctx,
             self.right_side_panel_open,
             |ui| {

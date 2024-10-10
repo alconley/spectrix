@@ -18,7 +18,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "gNAT",
+        "Spectrix",
         native_options,
         Box::new(|cc| Ok(Box::new(Spectrix::new(cc)))),
     )

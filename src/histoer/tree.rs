@@ -5,9 +5,13 @@ use egui_tiles::{Tile, TileId, Tiles};
 pub struct TreeBehavior {
     #[serde(skip)]
     simplification_options: egui_tiles::SimplificationOptions,
+    #[serde(skip)]
     tab_bar_height: f32,
+    #[serde(skip)]
     gap_width: f32,
+    #[serde(skip)]
     min_size: f32,
+    #[serde(skip)]
     preview_dragged_panes: bool,
     pub tile_map: std::collections::HashMap<egui_tiles::TileId, String>,
 }

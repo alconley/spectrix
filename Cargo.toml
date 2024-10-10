@@ -45,6 +45,7 @@ nalgebra = "0.33.0"
 compute = "0.2.3"
 indicatif = "0.17"
 find_peaks = "0.1.5"
+pyo3 = { version = "0.22.3", features = ["auto-initialize"] }
 
 # web:
 [target.'cfg(target_arch = "wasm32")'.dependencies]

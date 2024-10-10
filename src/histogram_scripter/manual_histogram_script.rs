@@ -14,6 +14,7 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
     // h.add_fill_hist1d("PIPS1000Energy", &lf, "PIPS1000Energy", 16384, (0.0, 16384.0), None);
     // h.add_fill_hist1d("PIPS1000EnergyCalibrated", &lf, "PIPS1000EnergyCalibrated", 1200, (0.0, 1200.0), None);
     
+    // /* 
 
 
     // Declare all the lazyframes that will be used
@@ -76,8 +77,7 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
     h.add_fill_hist2d("Cathode v ScintRight", &lf, "ScintRightEnergy", "CathodeEnergy", (512, 512), ((0.0, 4096.0), (0.0, 4096.0)), pid_grid);
     
     // // //
-    /* 
-    ....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
+    // ....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
 
     // // Particle Identification vs Focal plane histograms
 
@@ -307,5 +307,5 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
     */
 
-    */
+    // */
 }
