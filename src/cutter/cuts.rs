@@ -166,7 +166,7 @@ impl Cut {
         pb.finish();
 
         // Create a boolean column from the mask
-        let mask_series = BooleanChunked::from_slice("mask", &mask).into_series();
+        let mask_series = BooleanChunked::from_slice("mask".into(), &mask).into_series();
 
         // Create a new DataFrame with the mask column
         let mut df_with_mask = DataFrame::default();

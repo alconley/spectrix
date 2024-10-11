@@ -1,13 +1,9 @@
-// use super::pane::Pane;
-// use super::tree::TreeBehavior;
 use crate::util::processer::Processer;
 
 #[derive(serde::Deserialize, serde::Serialize)]
-#[serde(default)] // if we add new fields, give them default values when deserializing old state
+#[serde(default)]
 pub struct Spectrix {
-    // tree: egui_tiles::Tree<Pane>,
     processer: Processer,
-    // behavior: TreeBehavior,
     left_side_panel_open: bool,
     right_side_panel_open: bool,
 }
