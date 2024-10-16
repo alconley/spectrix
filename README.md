@@ -12,6 +12,14 @@ Then clone the respository
 
 `cargo run --release`
 
+If you get these errors use 
+
+`concurrent_queue::{ConcurrentQueue, ForcePushError, PopError, PushError}; no 'ForcePushError' in the root` or
+`match self.channel.queue.force_push(msg) method not found in 'ConcurrentQueue<T>'` you need to update cargo. This can be done by
+
+`cargo clean`
+`cargo update`
+
 On Linux you need to first run:
 
 `sudo apt-get install libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libgtk-3-dev`
