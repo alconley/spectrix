@@ -42,11 +42,11 @@ serde_json = "1.0.128"
 geo = "0.28.0"
 fnv = "1.0.7"
 varpro = "0.10.0"
-nalgebra = "0.33.0"
+nalgebra = "0.33.1"
 compute = "0.2.3"
 indicatif = "0.17"
 find_peaks = "0.1.5"
-pyo3 = { version = "0.22.3", features = ["auto-initialize"] }
+pyo3 = { version = "0.22.5", features = ["auto-initialize"] }
 prettytable = "0.10"
 
 # web:

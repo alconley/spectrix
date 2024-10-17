@@ -1,21 +1,20 @@
 use crate::histoer::histogrammer::Histogrammer;
 
 use polars::prelude::*;
-// use std::f64::consts::PI;
+use std::f64::consts::PI;
 
 #[rustfmt::skip]
 #[allow(clippy::all)]
 pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
-    let lf = lf.with_column(
-        (lit(-1.77049e-06)*col("PIPS1000Energy")*col("PIPS1000Energy") + lit(0.544755003513083)*col("PIPS1000Energy") + lit(-1.36822594543883)).alias("PIPS1000EnergyCalibrated")
-    );
+    // let lf = lf.with_column(
+    //     (lit(-1.77049e-06)*col("PIPS1000Energy")*col("PIPS1000Energy") + lit(0.544755003513083)*col("PIPS1000Energy") + lit(-1.36822594543883)).alias("PIPS1000EnergyCalibrated")
+    // );
 
-    h.add_fill_hist1d("PIPS1000Energy", &lf, "PIPS1000Energy", 16384, (0.0, 16384.0), None);
-    h.add_fill_hist1d("PIPS1000EnergyCalibrated", &lf, "PIPS1000EnergyCalibrated", 1200, (0.0, 1200.0), None);
+    // h.add_fill_hist1d("PIPS1000Energy", &lf, "PIPS1000Energy", 16384, (0.0, 16384.0), None);
+    // h.add_fill_hist1d("PIPS1000EnergyCalibrated", &lf, "PIPS1000EnergyCalibrated", 1200, (0.0, 1200.0), None);
     
-    /* 
-
+    // /* 
 
     // Declare all the lazyframes that will be used
     let lf = lf.with_columns(vec![
@@ -38,7 +37,7 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
         (col("DelayBackLeftTime") - col("ScintLeftTime")).alias("DelayBackLeftTime_ScintLeftTime"),
         (col("DelayBackRightTime") - col("ScintLeftTime")).alias("DelayBackRightTime_ScintLeftTime"),
         (col("ScintRightTime") - col("ScintLeftTime")).alias("ScintRightTime_ScintLeftTime"),
-        (lit(-0.013139237615)*col("Xavg")*col("Xavg") + lit(-13.80004977)*col("Xavg") + lit(9790.048149635)).alias("XavgEnergyCalibrated")
+        // (lit(-0.013139237615)*col("Xavg")*col("Xavg") + lit(-13.80004977)*col("Xavg") + lit(9790.048149635)).alias("XavgEnergyCalibrated")
     ]);
 
     let lf_bothplanes = lf.clone().filter(col("X1").neq(lit(-1e6))).filter(col("X2").neq(lit(-1e6)));
@@ -105,24 +104,29 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
     let de_v_fp_grid = Some("Delay Lines v Focal Plane");
 
-    // h.add_fill_hist2d("DelayBackRight v X1", &lf, "X1", "DelayBackRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
-    // h.add_fill_hist2d("DelayBackLeft v X1", &lf, "X1", "DelayBackLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
+
     h.add_fill_hist2d("DelayFrontRight v X1", &lf, "X1", "DelayFrontRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
     h.add_fill_hist2d("DelayFrontLeft v X1", &lf, "X1", "DelayFrontLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
+
     h.add_fill_hist2d("DelayBackRight v X2", &lf, "X2", "DelayBackRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
     h.add_fill_hist2d("DelayBackLeft v X2", &lf, "X2", "DelayBackLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
-    // h.add_fill_hist2d("DelayFrontRight v X2", &lf, "X2", "DelayFrontRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
-    // h.add_fill_hist2d("DelayFrontLeft v X2", &lf, "X2", "DelayFrontLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
+
     h.add_fill_hist2d("DelayBackRight v Xavg", &lf, "Xavg", "DelayBackRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
     h.add_fill_hist2d("DelayBackLeft v Xavg", &lf, "Xavg", "DelayBackLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
     h.add_fill_hist2d("DelayFrontRight v Xavg", &lf, "Xavg", "DelayFrontRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
     h.add_fill_hist2d("DelayFrontLeft v Xavg", &lf, "Xavg", "DelayFrontLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
-    // h.add_fill_hist2d("DelayFrontAverage v X1", &lf, "X1", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
-    // h.add_fill_hist2d("DelayBackAverage v X1", &lf, "X1", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
-    // h.add_fill_hist2d("DelayFrontAverage v X2", &lf, "X2", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
-    // h.add_fill_hist2d("DelayBackAverage v X2", &lf, "X2", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
-    // h.add_fill_hist2d("DelayFrontAverage v Xavg", &lf, "Xavg", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
-    // h.add_fill_hist2d("DelayBackAverage v Xavg", &lf, "Xavg", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
+
+    h.add_fill_hist2d("DelayBackRight v X1", &lf, "X1", "DelayBackRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
+    h.add_fill_hist2d("DelayBackLeft v X1", &lf, "X1", "DelayBackLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
+    h.add_fill_hist2d("DelayFrontRight v X2", &lf, "X2", "DelayFrontRightEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
+    h.add_fill_hist2d("DelayFrontLeft v X2", &lf, "X2", "DelayFrontLeftEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
+
+    h.add_fill_hist2d("DelayFrontAverage v X1", &lf, "X1", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
+    h.add_fill_hist2d("DelayBackAverage v X1", &lf, "X1", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
+    h.add_fill_hist2d("DelayFrontAverage v X2", &lf, "X2", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
+    h.add_fill_hist2d("DelayBackAverage v X2", &lf, "X2", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
+    h.add_fill_hist2d("DelayFrontAverage v Xavg", &lf, "Xavg", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
+    h.add_fill_hist2d("DelayBackAverage v Xavg", &lf, "Xavg", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)), de_v_fp_grid);
     
     //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
     /* 
@@ -307,5 +311,5 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
     */
 
-    */
+    // */
 }

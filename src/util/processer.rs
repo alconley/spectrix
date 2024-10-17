@@ -374,6 +374,13 @@ def get_2d_histograms(file_name):
                 {
                     self.calculate_histograms_with_cuts();
                 }
+
+                // add a spinner
+                if !self.histogrammer.handles.is_empty() {
+                    ui.separator();
+                    ui.label("Calculating Histograms");
+                    ui.add(egui::widgets::Spinner::default());
+                }
             });
 
             ui.separator();

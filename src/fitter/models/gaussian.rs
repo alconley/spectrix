@@ -1,5 +1,5 @@
-use nalgebra::{DMatrix, DVector};
-use prettytable::{cell, row, Table};
+use nalgebra::DVector;
+use prettytable::{row, Table};
 use varpro::model::builder::SeparableModelBuilder;
 use varpro::model::SeparableModel;
 use varpro::solvers::levmar::{FitResult, LevMarProblemBuilder, LevMarSolver};
@@ -509,14 +509,14 @@ impl GaussianFitter {
 
     pub fn print_fit_statistics(&self, fit_statistics: &FitStatistics<SeparableModel<f64>>) {
         // Print covariance matrix
-        let covariance_matrix = fit_statistics.covariance_matrix();
-        println!("Covariance Matrix:");
-        Self::print_matrix(covariance_matrix);
+        // let covariance_matrix = fit_statistics.covariance_matrix();
+        // println!("Covariance Matrix:");
+        // Self::print_matrix(covariance_matrix);
 
-        // Print correlation matrix
-        let correlation_matrix = fit_statistics.calculate_correlation_matrix();
-        println!("Correlation Matrix:");
-        Self::print_matrix(&correlation_matrix);
+        // // Print correlation matrix
+        // let correlation_matrix = fit_statistics.calculate_correlation_matrix();
+        // println!("Correlation Matrix:");
+        // Self::print_matrix(&correlation_matrix);
 
         // Print regression standard error
         let regression_standard_error = fit_statistics.regression_standard_error();
@@ -530,23 +530,23 @@ impl GaussianFitter {
         println!("Reduced Chi-Squared: {:.6}", reduced_chi2);
     }
 
-    // Helper function to print a matrix using prettytable
-    fn print_matrix(matrix: &DMatrix<f64>) {
-        let mut table = Table::new();
+    // // Helper function to print a matrix using prettytable
+    // fn print_matrix(matrix: &DMatrix<f64>) {
+    //     let mut table = Table::new();
 
-        // Iterate over the rows of the matrix
-        for row in matrix.row_iter() {
-            let mut table_row = Vec::new();
-            for val in row.iter() {
-                table_row.push(cell!(format!("{:.6}", val)));
-            }
-            // Add the row using add_row, but without row! macro
-            table.add_row(prettytable::Row::new(table_row));
-        }
+    //     // Iterate over the rows of the matrix
+    //     for row in matrix.row_iter() {
+    //         let mut table_row = Vec::new();
+    //         for val in row.iter() {
+    //             table_row.push(cell!(format!("{:.6}", val)));
+    //         }
+    //         // Add the row using add_row, but without row! macro
+    //         table.add_row(prettytable::Row::new(table_row));
+    //     }
 
-        // Print the table
-        table.printstd();
-    }
+    //     // Print the table
+    //     table.printstd();
+    // }
 
     pub fn get_fit_lines(&mut self) {
         if let Some(fit_params) = &self.fit_params {
