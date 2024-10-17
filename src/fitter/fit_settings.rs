@@ -9,6 +9,8 @@ pub struct FitSettings {
     pub fit_stats_height: f32,
     pub free_stddev: bool,
     pub free_position: bool,
+    pub left_tail: bool,
+    pub right_tail: bool,
     pub background_model: FitModel,
     pub background_poly_degree: usize,
     pub background_single_exp_initial_guess: f64,
@@ -25,6 +27,8 @@ impl Default for FitSettings {
             fit_stats_height: 0.0,
             free_stddev: false,
             free_position: true,
+            left_tail: false,
+            right_tail: false,
             background_model: FitModel::Polynomial(1),
             background_poly_degree: 1,
             background_single_exp_initial_guess: 200.0,
@@ -70,6 +74,10 @@ impl FitSettings {
                 .on_hover_text("Allow the standard deviation of the Gaussian to be free");
             ui.checkbox(&mut self.free_position, "Free Position")
                 .on_hover_text("Allow the position of the Gaussian to be free");
+            ui.checkbox(&mut self.left_tail, "Left Tail")
+                .on_hover_text("Allow the Gaussian to have a left tail");
+            ui.checkbox(&mut self.right_tail, "Right Tail")
+                .on_hover_text("Allow the Gaussian to have a right tail");
         });
 
         ui.separator();

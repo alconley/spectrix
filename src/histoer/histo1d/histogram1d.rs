@@ -183,6 +183,8 @@ impl Histogram {
                 peak_positions,
                 self.fits.settings.free_stddev,
                 self.fits.settings.free_position,
+                self.fits.settings.left_tail,
+                self.fits.settings.right_tail,
                 self.bin_width,
             ),
             self.fits.temp_background_fit.clone(),

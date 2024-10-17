@@ -5,23 +5,25 @@ use varpro::model::SeparableModel;
 use varpro::solvers::levmar::{FitResult, LevMarProblemBuilder, LevMarSolver};
 use varpro::statistics::FitStatistics; // Import prettytable
 
-#[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Value {
     pub value: f64,
     pub uncertainty: f64,
 }
 
-#[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GaussianParams {
     pub amplitude: Value,
     pub mean: Value,
     pub sigma: Value,
     pub fwhm: Value,
     pub area: Value,
+    pub left_tail: Option<Value>,
+    pub right_tail: Option<Value>,
 }
 
 impl GaussianParams {
-    pub fn new(amplitude: Value, mean: Value, sigma: Value, bin_width: f64) -> Option<Self> {
+    pub fn new(amplitude: Value, mean: Value, sigma: Value, bin_width: f64, left_tail: Option<Value>, right_tail: Option<Value>) -> Option<Self> {
         if sigma.value < 0.0 {
             log::error!("Sigma value is negative");
             return None;
@@ -49,6 +51,8 @@ impl GaussianParams {
                 value: area,
                 uncertainty: area_uncertainty,
             },
+            left_tail,
+            right_tail,
         })
     }
 
@@ -88,6 +92,18 @@ impl GaussianParams {
             "{:.2} ± {:.2}",
             self.area.value, self.area.uncertainty
         ));
+        if let Some(left_tail) = &self.left_tail {
+            ui.label(format!(
+                "{:.2} ± {:.2}",
+                left_tail.value, left_tail.uncertainty
+            ));
+        }
+        if let Some(right_tail) = &self.right_tail {
+            ui.label(format!(
+                "{:.2} ± {:.2}",
+                right_tail.value, right_tail.uncertainty
+            ));
+        }
     }
 
     pub fn fit_line_points(&self) -> Vec<[f64; 2]> {
@@ -95,16 +111,37 @@ impl GaussianParams {
         let start = self.mean.value - 5.0 * self.sigma.value; // Adjust start and end to be +/- 5 sigma from the mean
         let end = self.mean.value + 5.0 * self.sigma.value;
         let step = (end - start) / num_points as f64;
-
+    
         (0..num_points)
             .map(|i| {
                 let x = start + step * i as f64;
-                let y = self.amplitude.value
-                    * (-((x - self.mean.value).powi(2)) / (2.0 * self.sigma.value.powi(2))).exp();
+                let z = (x - self.mean.value) / self.sigma.value;
+                let y = if let Some(left_tail) = &self.left_tail {
+                    if z <= -left_tail.value {
+                        self.amplitude.value * (left_tail.value.powi(2) / 2.0 + left_tail.value * z).exp()
+                    } else if let Some(right_tail) = &self.right_tail {
+                        if z > right_tail.value {
+                            self.amplitude.value * (right_tail.value.powi(2) / 2.0 - right_tail.value * z).exp()
+                        } else {
+                            self.amplitude.value * (-0.5 * z.powi(2)).exp() // Gaussian core
+                        }
+                    } else {
+                        self.amplitude.value * (-0.5 * z.powi(2)).exp() // Gaussian core (right tail not enabled)
+                    }
+                } else if let Some(right_tail) = &self.right_tail {
+                    if z > right_tail.value {
+                        self.amplitude.value * (right_tail.value.powi(2) / 2.0 - right_tail.value * z).exp()
+                    } else {
+                        self.amplitude.value * (-0.5 * z.powi(2)).exp() // Gaussian core (left tail not enabled)
+                    }
+                } else {
+                    self.amplitude.value * (-0.5 * z.powi(2)).exp() // Gaussian core (no tails)
+                };
                 [x, y]
             })
             .collect()
     }
+    
 }
 
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -116,6 +153,8 @@ pub struct GaussianFitter {
     pub fit_lines: Option<Vec<Vec<[f64; 2]>>>,
     pub free_stddev: bool, // false = fit all the gaussians with the same sigma
     pub free_position: bool, // false = fix the position of the gaussians to the peak_markers
+    pub left_tail: bool,
+    pub right_tail: bool,
     pub bin_width: f64,
 }
 
@@ -126,6 +165,8 @@ impl GaussianFitter {
         peak_markers: Vec<f64>,
         free_stddev: bool,
         free_position: bool,
+        left_tail: bool,
+        right_tail: bool,
         bin_width: f64,
     ) -> Self {
         Self {
@@ -136,28 +177,117 @@ impl GaussianFitter {
             fit_lines: None,
             free_stddev,
             free_position,
+            left_tail,
+            right_tail,
             bin_width,
         }
     }
 
-    fn gaussian(x: &DVector<f64>, mean: f64, sigma: f64) -> DVector<f64> {
-        x.map(|x_val| (-((x_val - mean).powi(2)) / (2.0 * sigma.powi(2))).exp())
-    }
-
-    fn gaussian_pd_mean(x: &DVector<f64>, mean: f64, sigma: f64) -> DVector<f64> {
-        x.map(|x_val| {
-            (x_val - mean) / sigma.powi(2)
-                * (-((x_val - mean).powi(2)) / (2.0 * sigma.powi(2))).exp()
+    fn piecewise_gaussian(
+        x: &DVector<f64>, 
+        mean: f64, 
+        sigma: f64, 
+        k_l: f64, 
+        k_r: f64, 
+        left_tail: &bool, 
+        right_tail: &bool
+    ) -> DVector<f64> {
+        let z = x.map(|x_val| (x_val - mean) / sigma);
+        z.map(|z_val| {
+            if *left_tail && z_val <= -k_l {
+                (k_l.powi(2) / 2.0 + k_l * z_val).exp()
+            } else if *right_tail && k_r < z_val {
+                (k_r.powi(2) / 2.0 - k_r * z_val).exp()
+            } else {
+                (-0.5 * z_val.powi(2)).exp() // Gaussian core
+            }
         })
     }
 
-    fn gaussian_pd_std_dev(x: &DVector<f64>, mean: f64, sigma: f64) -> DVector<f64> {
-        x.map(|x_val| {
-            let exponent = -((x_val - mean).powi(2)) / (2.0 * sigma.powi(2));
-            (x_val - mean).powi(2) / sigma.powi(3) * exponent.exp()
+    fn piecewise_gaussian_pd_mean(
+        x: &DVector<f64>, 
+        mean: f64, 
+        sigma: f64, 
+        k_l: f64, 
+        k_r: f64, 
+        left_tail: &bool, 
+        right_tail: &bool
+    ) -> DVector<f64> {
+        let z = x.map(|x_val| (x_val - mean) / sigma);
+        z.map(|z_val| {
+            if *left_tail && z_val <= -k_l {
+                (k_l.powi(2) / 2.0 + k_l * z_val).exp() * -(k_l / sigma)
+            } else if *right_tail && k_r < z_val {
+                (k_r.powi(2) / 2.0 - k_r * z_val).exp() * (k_r) / sigma
+            } else {
+                (-0.5 * z_val.powi(2)).exp() * (z_val / sigma)
+            }
+        })
+    }
+    
+    fn piecewise_gaussian_pd_sigma(
+        x: &DVector<f64>, 
+        mean: f64, 
+        sigma: f64, 
+        k_l: f64, 
+        k_r: f64, 
+        left_tail: &bool, 
+        right_tail: &bool
+    ) -> DVector<f64> {
+        let z = x.map(|x_val| (x_val - mean) / sigma);
+        z.map(|z_val| {
+            if *left_tail && z_val <= -k_l {
+                (k_l.powi(2) / 2.0 + k_l * z_val).exp() * (-k_l) * (z_val / sigma)
+            } else if *right_tail && k_r < z_val {
+                (k_r.powi(2) / 2.0 - k_r * z_val).exp() * (k_r) * (z_val / sigma)
+            } else {
+                (-0.5 * z_val.powi(2)).exp() * (z_val.powi(2) / sigma)
+            }
         })
     }
 
+    fn piecewise_gaussian_pd_k_l(
+        x: &DVector<f64>, 
+        mean: f64, 
+        sigma: f64, 
+        k_l: f64, 
+        k_r: f64, 
+        left_tail: &bool, 
+        right_tail: &bool
+    ) -> DVector<f64> {
+        let z = x.map(|x_val| (x_val - mean) / sigma);
+        z.map(|z_val| {
+            if *left_tail && z_val <= -k_l {
+                (k_l + z_val) * (k_l.powi(2) / 2.0 + k_l * z_val).exp()
+            } else if *right_tail && z_val > k_r {
+                0.0 // No contribution from the right tail
+            } else {
+                0.0 // No contribution in the Gaussian core region
+            }
+        })
+    }
+
+    fn piecewise_gaussian_pd_k_r(
+        x: &DVector<f64>, 
+        mean: f64, 
+        sigma: f64, 
+        k_l: f64, 
+        k_r: f64, 
+        left_tail: &bool, 
+        right_tail: &bool
+    ) -> DVector<f64> {
+        let z = x.map(|x_val| (x_val - mean) / sigma);
+        z.map(|z_val| {
+            if *right_tail && k_r < z_val {
+                (k_r - z_val) * (k_r.powi(2) / 2.0 - k_r * z_val).exp()
+            } else if *left_tail && z_val <= -k_l {
+                0.0 // No contribution from the left tail
+            } else {
+                0.0 // No contribution in the Gaussian core region
+            }
+        })
+    }
+    
     fn average_sigma(&self) -> f64 {
         let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
         let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
@@ -169,14 +299,13 @@ impl GaussianFitter {
     pub fn multi_gauss_fit(&mut self) {
         self.fit_params = None;
         self.fit_lines = None;
-
+    
         if self.x.len() != self.y.len() {
             log::error!("x_data and y_data must have the same length");
             return;
         }
-
+    
         if self.peak_markers.is_empty() {
-            // set peak marker at the x value when y is the maximum value of the data
             let max_y = self.y.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             let max_x = self
                 .x
@@ -188,10 +317,10 @@ impl GaussianFitter {
                 .unwrap_or_default();
             self.peak_markers.push(max_x);
         }
-
+    
         let x_data = DVector::from_vec(self.x.clone());
         let y_data = DVector::from_vec(self.y.clone());
-
+    
         let (parameter_names, initial_guesses) = match (self.free_stddev, self.free_position) {
             (true, true) => self.generate_free_stddev_free_position(),
             (false, true) => self.generate_fixed_stddev_free_position(),
@@ -199,74 +328,207 @@ impl GaussianFitter {
             (true, false) => self.generate_free_stddev_fixed_position(),
         };
 
+        log::info!("Parameter names: {:?}", parameter_names);
+        log::info!("Initial guesses: {:?}", initial_guesses);
+
         let mut builder_proxy = SeparableModelBuilder::<f64>::new(parameter_names)
             .initial_parameters(initial_guesses)
             .independent_variable(x_data);
 
-        for i in 0..self.peak_markers.len() {
-            let sigma_param = if self.free_stddev {
-                format!("sigma{}", i)
-            } else {
-                "sigma".to_string()
-            };
+        let left_tail = self.left_tail;
+        let right_tail = self.right_tail;
+        let peak_markers = self.peak_markers.clone();
 
-            let mean_param = format!("mean{}", i);
+        let mut non_linear_parameters = Vec::new();
 
-            // If `mean` is free, include its function and derivatives
+        for i in 0..peak_markers.len() {
+
+            let mean = peak_markers[i];
+
+            let mut function_params = Vec::new();
             if self.free_position {
-                builder_proxy = builder_proxy
-                    .function(&[mean_param.clone(), sigma_param.clone()], Self::gaussian)
-                    .partial_deriv(mean_param, Self::gaussian_pd_mean)
-                    .partial_deriv(sigma_param.clone(), Self::gaussian_pd_std_dev);
+                function_params.push(format!("mean{}", i));
+                non_linear_parameters.push(format!("mean{}", i));
+            }
+
+            if self.free_stddev {
+                function_params.push(format!("sigma{}", i));
+                non_linear_parameters.push(format!("sigma{}", i));
+            }
+
+            if self.left_tail {
+                function_params.push(format!("k_l{}", i));
+                non_linear_parameters.push(format!("k_l{}", i));
+            }
+
+            if self.right_tail {
+                function_params.push(format!("k_r{}", i));
+                non_linear_parameters.push(format!("k_r{}", i));
+            }
+
+            if !self.free_stddev {
+                function_params.push("sigma".to_string());
+                if i == peak_markers.len() - 1 {
+                    non_linear_parameters.push("sigma".to_string());
+                }
+            }
+
+            let mean_str = format!("mean{}", i);
+            let sigma_str = if !self.free_stddev {
+                "sigma".to_string()
             } else {
-                // If `mean` is fixed, only include the function and sigma's derivative
-                let fixed_mean = self.peak_markers[i];
+                format!("sigma{}", i)
+            };
+            let k_l_str = format!("k_l{}", i);
+            let k_r_str = format!("k_r{}", i);
+            let k_l = 0.0;
+            let k_r = 0.0;
+
+
+            // 16 unique combinations, but since stdev not fixed but rather can vary, we have 8 unique combinations
+            // 1: free_position = true, free_stddev = true, left_tail = true, right_tail = true
+            // 2: free_position = true, free_stddev = true, left_tail = true, right_tail = false
+            // 3: free_position = true, free_stddev = true, left_tail = false, right_tail = true
+            // 4: free_position = true, free_stddev = true, left_tail = false, right_tail = false
+            // 5: free_position = true, free_stddev = false, left_tail = true, right_tail = true
+            // 6: free_position = true, free_stddev = false, left_tail = true, right_tail = false
+            // 7: free_position = true, free_stddev = false, left_tail = false, right_tail = true
+            // 8: free_position = true, free_stddev = false, left_tail = false, right_tail = false
+            // 9: free_position = false, free_stddev = true, left_tail = true, right_tail = true
+            // 10: free_position = false, free_stddev = true, left_tail = true, right_tail = false
+            // 11: free_position = false, free_stddev = true, left_tail = false, right_tail = true
+            // 12: free_position = false, free_stddev = true, left_tail = false, right_tail = false
+            // 13: free_position = false, free_stddev = false, left_tail = true, right_tail = true
+            // 14: free_position = false, free_stddev = false, left_tail = true, right_tail = false
+            // 15: free_position = false, free_stddev = false, left_tail = false, right_tail = true
+            // 16: free_position = false, free_stddev = false, left_tail = false, right_tail = false
+
+
+            // Add combinations for each condition
+            if self.free_position && self.left_tail && self.right_tail {
                 builder_proxy = builder_proxy
-                    .function(
-                        [sigma_param.clone()],
-                        move |x: &DVector<f64>, sigma: f64| {
-                            x.map(|x_val| {
-                                (-((x_val - fixed_mean).powi(2)) / (2.0 * sigma.powi(2))).exp()
-                            })
-                        },
-                    )
-                    .partial_deriv(sigma_param, move |x: &DVector<f64>, sigma: f64| {
-                        x.map(|x_val| {
-                            let exponent = -((x_val - fixed_mean).powi(2)) / (2.0 * sigma.powi(2));
-                            (x_val - fixed_mean).powi(2) / sigma.powi(3) * exponent.exp()
-                        })
+                    .function(&function_params, move |x: &DVector<f64>, mean: f64, sigma: f64, k_l: f64, k_r: f64| {
+                        Self::piecewise_gaussian(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                    })
+                    .partial_deriv(mean_str, move |x: &DVector<f64>, mean: f64, sigma: f64, k_l: f64, k_r: f64| {
+                        Self::piecewise_gaussian_pd_mean(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                    })
+                    .partial_deriv(sigma_str, move |x: &DVector<f64>, mean: f64, sigma: f64, k_l: f64, k_r: f64| {
+                        Self::piecewise_gaussian_pd_sigma(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                    })
+                    .partial_deriv(k_l_str, move |x: &DVector<f64>, mean: f64, sigma: f64, k_l: f64, k_r: f64| {
+                        Self::piecewise_gaussian_pd_k_l(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                    })
+                    .partial_deriv(k_r_str, move |x: &DVector<f64>, mean: f64, sigma: f64, k_l: f64, k_r: f64| {
+                        Self::piecewise_gaussian_pd_k_r(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
                     });
+            } else if self.free_position && self.left_tail && !self.right_tail {
+                builder_proxy = builder_proxy
+                .function(&function_params, move |x: &DVector<f64>, mean: f64, sigma: f64, k_l: f64| {
+                    Self::piecewise_gaussian(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(mean_str, move |x: &DVector<f64>, mean: f64, sigma: f64, k_l: f64,| {
+                    Self::piecewise_gaussian_pd_mean(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(sigma_str, move |x: &DVector<f64>, mean: f64, sigma: f64, k_l: f64| {
+                    Self::piecewise_gaussian_pd_sigma(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(k_l_str, move |x: &DVector<f64>, mean: f64, sigma: f64, k_l: f64| {
+                    Self::piecewise_gaussian_pd_k_l(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                });
+            } else if self.free_position  && !self.left_tail && self.right_tail {
+                builder_proxy = builder_proxy
+                .function(&function_params, move |x: &DVector<f64>, mean: f64, sigma: f64, k_r: f64| {
+                    Self::piecewise_gaussian(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(mean_str, move |x: &DVector<f64>, mean: f64, sigma: f64, k_r: f64| {
+                    Self::piecewise_gaussian_pd_mean(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(sigma_str, move |x: &DVector<f64>, mean: f64, sigma: f64, k_r: f64| {
+                    Self::piecewise_gaussian_pd_sigma(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(k_r_str, move |x: &DVector<f64>, mean: f64, sigma: f64, k_r: f64| {
+                    Self::piecewise_gaussian_pd_k_r(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                });
+            } else if self.free_position && !self.left_tail && !self.right_tail {
+                builder_proxy = builder_proxy
+                .function(&function_params, move |x: &DVector<f64>, mean: f64, sigma: f64| {
+                    Self::piecewise_gaussian(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(mean_str, move |x: &DVector<f64>, mean: f64, sigma: f64| {
+                    Self::piecewise_gaussian_pd_mean(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(sigma_str, move |x: &DVector<f64>, mean: f64, sigma: f64| {
+                    Self::piecewise_gaussian_pd_sigma(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                });
+            } else if !self.free_position && self.left_tail && self.right_tail {
+                builder_proxy = builder_proxy
+                .function(&function_params, move |x: &DVector<f64>, sigma: f64, k_l: f64, k_r: f64| {
+                    Self::piecewise_gaussian(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(sigma_str, move |x: &DVector<f64>, sigma: f64, k_l: f64, k_r: f64| {
+                    Self::piecewise_gaussian_pd_sigma(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(k_l_str, move |x: &DVector<f64>, sigma: f64, k_l: f64, k_r: f64| {
+                    Self::piecewise_gaussian_pd_k_l(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(k_r_str, move |x: &DVector<f64>, sigma: f64, k_l: f64, k_r: f64| {
+                    Self::piecewise_gaussian_pd_k_r(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                });
+            } else if !self.free_position && self.left_tail && !self.right_tail {
+                builder_proxy = builder_proxy
+                .function(&function_params, move |x: &DVector<f64>, sigma: f64, k_l: f64| {
+                    Self::piecewise_gaussian(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(sigma_str, move |x: &DVector<f64>, sigma: f64, k_l: f64| {
+                    Self::piecewise_gaussian_pd_sigma(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(k_l_str, move |x: &DVector<f64>, sigma: f64, k_l: f64| {
+                    Self::piecewise_gaussian_pd_k_l(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                });
+            } else if !self.free_position && !self.left_tail && self.right_tail {
+                builder_proxy = builder_proxy
+                .function(&function_params, move |x: &DVector<f64>, sigma: f64, k_r: f64| {
+                    Self::piecewise_gaussian(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(sigma_str, move |x: &DVector<f64>, sigma: f64, k_r: f64| {
+                    Self::piecewise_gaussian_pd_sigma(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(k_r_str, move |x: &DVector<f64>, sigma: f64, k_r: f64| {
+                    Self::piecewise_gaussian_pd_k_r(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                });
+            } else if !self.free_position && !self.left_tail && !self.right_tail {
+                builder_proxy = builder_proxy
+                .function(&function_params, move |x: &DVector<f64>, sigma: f64| {
+                    Self::piecewise_gaussian(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                })
+                .partial_deriv(sigma_str, move |x: &DVector<f64>, sigma: f64| {
+                    Self::piecewise_gaussian_pd_sigma(x, mean, sigma, k_l, k_r, &left_tail, &right_tail)
+                });
             }
         }
 
-        let model = match builder_proxy.build() {
-            Ok(model) => model,
-            Err(e) => {
-                log::error!("Failed to build model: {:?}", e);
-                return;
-            }
-        };
+        log::info!("Non-linear parameters: {:?}", non_linear_parameters);
 
-        let problem = match LevMarProblemBuilder::new(model)
+        // Build the model and solve the problem
+        let model = builder_proxy.build().expect("Failed to build the model");
+    
+        let problem = LevMarProblemBuilder::new(model)
             .observations(y_data)
             .build()
-        {
-            Ok(problem) => problem,
-            Err(e) => {
-                log::error!("Failed to build problem: {:?}", e);
-                return;
-            }
-        };
-
+            .expect("Failed to build the fitting problem");
+    
         match LevMarSolver::default().fit_with_statistics(problem) {
             Ok((fit_result, fit_statistics)) => {
-                self.process_fit_result(fit_result, fit_statistics);
+                self.process_fit_result(fit_result, fit_statistics, non_linear_parameters);
             }
             Err(e) => {
-                log::error!("Failed to fit model: {:?}", e);
+                log::error!("Failed to fit the model: {:?}", e);
             }
         }
     }
+    
+    
 
     fn generate_free_stddev_free_position(&self) -> (Vec<String>, Vec<f64>) {
         let mut parameter_names = Vec::new();
@@ -274,9 +536,19 @@ impl GaussianFitter {
 
         for (i, &mean) in self.peak_markers.iter().enumerate() {
             parameter_names.push(format!("mean{}", i));
-            parameter_names.push(format!("sigma{}", i));
             initial_guesses.push(mean);
+
+            parameter_names.push(format!("sigma{}", i));
             initial_guesses.push(self.average_sigma());
+
+            if self.left_tail {
+                parameter_names.push(format!("k_l{}", i));
+                initial_guesses.push(0.1);
+            }
+            if self.right_tail {
+                parameter_names.push(format!("k_r{}", i));
+                initial_guesses.push(0.1);
+            }
         }
 
         (parameter_names, initial_guesses)
@@ -289,6 +561,17 @@ impl GaussianFitter {
         for (i, &mean) in self.peak_markers.iter().enumerate() {
             parameter_names.push(format!("mean{}", i));
             initial_guesses.push(mean);
+
+            if self.left_tail {
+                parameter_names.push(format!("k_l{}", i));
+                initial_guesses.push(0.1);
+
+            }
+            if self.right_tail {
+                parameter_names.push(format!("k_r{}", i));
+                initial_guesses.push(0.1);
+
+            }
         }
 
         parameter_names.push("sigma".to_string());
@@ -298,8 +581,25 @@ impl GaussianFitter {
     }
 
     fn generate_fixed_stddev_fixed_position(&self) -> (Vec<String>, Vec<f64>) {
-        let parameter_names = vec!["sigma".to_string()];
-        let initial_guesses = vec![self.average_sigma()];
+        let mut parameter_names = Vec::new();
+        let mut initial_guesses = Vec::new();
+
+        for (i, &_mean) in self.peak_markers.iter().enumerate() {
+
+            if self.left_tail {
+                parameter_names.push(format!("k_l{}", i));
+                initial_guesses.push(0.1);
+
+            }
+            if self.right_tail {
+                parameter_names.push(format!("k_r{}", i));
+                initial_guesses.push(0.1);
+
+            }
+        }
+
+        parameter_names.push("sigma".to_string());
+        initial_guesses.push(self.average_sigma());
 
         (parameter_names, initial_guesses)
     }
@@ -311,6 +611,17 @@ impl GaussianFitter {
         for i in 0..self.peak_markers.len() {
             parameter_names.push(format!("sigma{}", i));
             initial_guesses.push(self.average_sigma());
+
+            if self.left_tail {
+                parameter_names.push(format!("k_l{}", i));
+                initial_guesses.push(0.1);
+
+            }
+            if self.right_tail {
+                parameter_names.push(format!("k_r{}", i));
+                initial_guesses.push(0.1);
+
+            }
         }
 
         (parameter_names, initial_guesses)
@@ -320,19 +631,13 @@ impl GaussianFitter {
         &mut self,
         fit_result: FitResult<SeparableModel<f64>, false>,
         fit_statistics: FitStatistics<SeparableModel<f64>>,
+        non_linear_parameters: Vec<String>,
     ) {
         let nonlinear_parameters = fit_result.nonlinear_parameters(); // DVector<f64>
         let nonlinear_variances = fit_statistics.nonlinear_parameters_variance(); // DVector<f64>
-        let linear_coefficients = match fit_result.linear_coefficients() {
-            Some(coefficients) => coefficients,
-            None => {
-                log::error!("Failed to get linear coefficients.");
-                return;
-            }
-        };
+        let linear_coefficients = fit_result.linear_coefficients().unwrap(); // DVector<f64>
         let linear_variances = fit_statistics.linear_coefficients_variance(); // DVector<f64>
-
-        // Check if sizes match
+    
         if nonlinear_parameters.len() != nonlinear_variances.len() {
             log::error!(
                 "Mismatch in sizes: nonlinear_parameters ({}), nonlinear_variances ({}).",
@@ -341,182 +646,173 @@ impl GaussianFitter {
             );
             return;
         }
-
+    
         if nonlinear_parameters.is_empty() || linear_coefficients.is_empty() {
             log::error!("Empty fit result: no nonlinear or linear parameters.");
             return;
         }
-
+    
+        log::info!("Nonlinear parameters: {:?}", nonlinear_parameters);
+        log::info!("Nonlinear variances: {:?}", nonlinear_variances);
+        log::info!("Linear coefficients: {:?}", linear_coefficients);
+        log::info!("Linear variances: {:?}", linear_variances);
+    
         let mut params: Vec<GaussianParams> = Vec::new();
-        let sigma_value = if self.free_stddev {
-            None // Free sigma, so extract it for each Gaussian
-        } else {
-            match self.extract_sigma(&nonlinear_parameters, &nonlinear_variances) {
-                Some(sigma) => Some(sigma),
-                None => {
-                    log::error!("Failed to extract sigma value.");
-                    return;
-                }
-            }
-        };
-
+        let mut current_index = 0;
+    
         for (i, &amplitude) in linear_coefficients.iter().enumerate() {
-            let mean_value = if self.free_position {
-                match self.extract_mean(i, &nonlinear_parameters, &nonlinear_variances) {
-                    Some(mean) => mean,
-                    None => {
-                        log::error!("Failed to extract mean value for Gaussian {}.", i);
-                        return;
-                    }
-                }
+            log::info!("Amplitude {}: {}", i, amplitude);
+            let amplitude_uncertainty = linear_variances[i].sqrt();
+    
+            let mut mean = self.peak_markers[i];
+            let mut mean_uncertainty = 0.0;
+    
+            let mut sigma = self.average_sigma();
+            let mut sigma_uncertainty = 0.0;
+    
+            let mut left_tail: Option<f64> = None;
+            let mut left_tail_uncertainty = 0.0;
+    
+            let mut right_tail: Option<f64> = None;
+            let mut right_tail_uncertainty = 0.0;
+    
+            // Retrieve parameter names from `non_linear_parameters` vector
+            let mean_str = format!("mean{}", i);
+            let sigma_str = if !self.free_stddev {
+                "sigma".to_string()
             } else {
-                Value {
-                    value: self.peak_markers.get(i).copied().unwrap_or_default(),
-                    uncertainty: 0.0, // Fixed position, so uncertainty is 0
-                }
+                format!("sigma{}", i)
             };
-
-            let sigma_value = sigma_value.clone().unwrap_or_else(|| {
-                self.extract_sigma_for_gaussian(i, &nonlinear_parameters, &nonlinear_variances)
-                    .unwrap_or_else(|| {
-                        log::error!("Failed to extract sigma for Gaussian {}.", i);
-                        Value {
-                            value: 0.0,
-                            uncertainty: 0.0,
-                        }
-                    })
+            let k_l_str = format!("k_l{}", i);
+            let k_r_str = format!("k_r{}", i);
+    
+            // Find the index of the parameter in the non_linear_parameters vector
+            if let Some(mean_index) = non_linear_parameters.iter().position(|p| p == &mean_str) {
+                mean = nonlinear_parameters[mean_index];
+                mean_uncertainty = nonlinear_variances[mean_index].sqrt();
+            }
+    
+            if let Some(sigma_index) = non_linear_parameters.iter().position(|p| p == &sigma_str) {
+                sigma = nonlinear_parameters[sigma_index];
+                sigma_uncertainty = nonlinear_variances[sigma_index].sqrt();
+            }
+    
+            if let Some(k_l_index) = non_linear_parameters.iter().position(|p| p == &k_l_str) {
+                left_tail = Some(nonlinear_parameters[k_l_index]);
+                left_tail_uncertainty = nonlinear_variances[k_l_index].sqrt();
+            }
+    
+            if let Some(k_r_index) = non_linear_parameters.iter().position(|p| p == &k_r_str) {
+                right_tail = Some(nonlinear_parameters[k_r_index]);
+                right_tail_uncertainty = nonlinear_variances[k_r_index].sqrt();
+            }
+    
+            // Construct GaussianParams and add it to the list
+            let amplitude_value = Value {
+                value: amplitude,
+                uncertainty: amplitude_uncertainty,
+            };
+            let mean_value = Value {
+                value: mean,
+                uncertainty: mean_uncertainty,
+            };
+            let sigma_value = Value {
+                value: sigma,
+                uncertainty: sigma_uncertainty,
+            };
+    
+            let left_tail_value = left_tail.map(|val| Value {
+                value: val,
+                uncertainty: left_tail_uncertainty,
             });
-
-            let amplitude_variance = linear_variances.get(i).copied().unwrap_or(0.0);
-
-            if let Some(gaussian_params) = GaussianParams::new(
-                Value {
-                    value: amplitude,
-                    uncertainty: amplitude_variance.sqrt(),
-                },
+    
+            let right_tail_value = right_tail.map(|val| Value {
+                value: val,
+                uncertainty: right_tail_uncertainty,
+            });
+    
+            let gaussian_param = GaussianParams::new(
+                amplitude_value,
                 mean_value,
                 sigma_value,
                 self.bin_width,
-            ) {
-                params.push(gaussian_params);
-            } else {
-                log::error!(
-                    "Invalid Gaussian parameters for Gaussian {}. Removing peak and trying again.",
-                    i
-                );
-                self.peak_markers.remove(i);
-                self.multi_gauss_fit(); // Retry the fit after removing this Gaussian
-                return;
+                left_tail_value,
+                right_tail_value,
+            );
+    
+            if let Some(param) = gaussian_param {
+                params.push(param);
             }
         }
-
+    
+        // Update peak markers and other parameters
         self.peak_markers.clear();
         for mean in &params {
             self.peak_markers.push(mean.mean.value);
         }
-
+    
         self.fit_params = Some(params);
         self.get_fit_lines();
-
+    
+        // Print fit statistics
         self.print_fit_statistics(&fit_statistics);
         self.print_peak_info();
     }
-
-    fn extract_mean(
-        &self,
-        index: usize,
-        nonlinear_parameters: &DVector<f64>,
-        nonlinear_variances: &DVector<f64>,
-    ) -> Option<Value> {
-        if index >= nonlinear_parameters.len() || index >= nonlinear_variances.len() {
-            log::error!("Index out of bounds when extracting mean.");
-            return None;
-        }
-        Some(Value {
-            value: nonlinear_parameters[index],
-            uncertainty: nonlinear_variances[index].sqrt(),
-        })
-    }
-
-    fn extract_sigma(
-        &self,
-        nonlinear_parameters: &DVector<f64>,
-        nonlinear_variances: &DVector<f64>,
-    ) -> Option<Value> {
-        let sigma_index = nonlinear_parameters.len() - 1; // Sigma is the last parameter when fixed
-        if sigma_index >= nonlinear_variances.len() {
-            log::error!("Sigma index out of bounds when extracting sigma.");
-            return None;
-        }
-        Some(Value {
-            value: nonlinear_parameters[sigma_index],
-            uncertainty: nonlinear_variances[sigma_index].sqrt(),
-        })
-    }
-
-    fn extract_sigma_for_gaussian(
-        &self,
-        index: usize,
-        nonlinear_parameters: &DVector<f64>,
-        nonlinear_variances: &DVector<f64>,
-    ) -> Option<Value> {
-        let sigma_index = index * 2 + 1; // Free sigma, after each mean
-        if sigma_index >= nonlinear_parameters.len() || sigma_index >= nonlinear_variances.len() {
-            log::error!(
-                "Index out of bounds when extracting sigma for Gaussian {}.",
-                index
-            );
-            return None;
-        }
-        Some(Value {
-            value: nonlinear_parameters[sigma_index],
-            uncertainty: nonlinear_variances[sigma_index].sqrt(),
-        })
-    }
-
+    
+    
+    // Function to print information about the fitted peaks using prettytable
     pub fn print_peak_info(&self) {
         if let Some(fit_params) = &self.fit_params {
             // Create a new table
             let mut table = Table::new();
-
-            // Add the header row
-            table.add_row(row!["Index", "Amplitude", "Mean", "Sigma", "FWHM", "Area"]);
-
-            // Add each peak's parameters as rows
+            
+            // Add a header row to the table
+            table.add_row(row!["Peak", "Amplitude", "Mean", "Sigma", "FWHM", "Area", "Left Tail", "Right Tail"]);
+            
+            // Iterate over the fit parameters and add each row to the table
             for (i, params) in fit_params.iter().enumerate() {
+                let left_tail_str = if let Some(left_tail) = &params.left_tail {
+                    format!("{:.3} ± {:.3}", left_tail.value, left_tail.uncertainty)
+                } else {
+                    "-".to_string()
+                };
+
+                let right_tail_str = if let Some(right_tail) = &params.right_tail {
+                    format!("{:.3} ± {:.3}", right_tail.value, right_tail.uncertainty)
+                } else {
+                    "-".to_string()
+                };
+
+                // Add a row with the peak info
                 table.add_row(row![
-                    i,
-                    format!(
-                        "{:.3} ± {:.3}",
-                        params.amplitude.value, params.amplitude.uncertainty
-                    ),
+                    i + 1, // Peak number
+                    format!("{:.3} ± {:.3}", params.amplitude.value, params.amplitude.uncertainty),
                     format!("{:.3} ± {:.3}", params.mean.value, params.mean.uncertainty),
-                    format!(
-                        "{:.3} ± {:.3}",
-                        params.sigma.value, params.sigma.uncertainty
-                    ),
+                    format!("{:.3} ± {:.3}", params.sigma.value, params.sigma.uncertainty),
                     format!("{:.3} ± {:.3}", params.fwhm.value, params.fwhm.uncertainty),
                     format!("{:.3} ± {:.3}", params.area.value, params.area.uncertainty),
+                    left_tail_str,
+                    right_tail_str
                 ]);
             }
 
-            // Print the table to the terminal
+            // Print the table to the console
             table.printstd();
         } else {
-            println!("No fit parameters available to display.");
+            log::warn!("No fit parameters available to print.");
         }
     }
 
     pub fn print_fit_statistics(&self, fit_statistics: &FitStatistics<SeparableModel<f64>>) {
         // Print covariance matrix
-        let covariance_matrix = fit_statistics.covariance_matrix();
-        println!("Covariance Matrix:");
-        Self::print_matrix(covariance_matrix);
+        // let covariance_matrix = fit_statistics.covariance_matrix();
+        // println!("Covariance Matrix:");
+        // Self::print_matrix(covariance_matrix);
 
-        // Print correlation matrix
-        let correlation_matrix = fit_statistics.calculate_correlation_matrix();
-        println!("Correlation Matrix:");
-        Self::print_matrix(&correlation_matrix);
+        // // Print correlation matrix
+        // let correlation_matrix = fit_statistics.calculate_correlation_matrix();
+        // println!("Correlation Matrix:");
+        // Self::print_matrix(&correlation_matrix);
 
         // Print regression standard error
         let regression_standard_error = fit_statistics.regression_standard_error();
@@ -530,7 +826,6 @@ impl GaussianFitter {
         println!("Reduced Chi-Squared: {:.6}", reduced_chi2);
     }
 
-    // Helper function to print a matrix using prettytable
     fn print_matrix(matrix: &DMatrix<f64>) {
         let mut table = Table::new();
 
