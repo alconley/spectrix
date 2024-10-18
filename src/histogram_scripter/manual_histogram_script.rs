@@ -7,14 +7,14 @@ use std::f64::consts::PI;
 #[allow(clippy::all)]
 pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
-    // let lf = lf.with_column(
-    //     (lit(-1.77049e-06)*col("PIPS1000Energy")*col("PIPS1000Energy") + lit(0.544755003513083)*col("PIPS1000Energy") + lit(-1.36822594543883)).alias("PIPS1000EnergyCalibrated")
-    // );
+    let lf = lf.with_column(
+        (lit(-1.77049e-06)*col("PIPS1000Energy")*col("PIPS1000Energy") + lit(0.544755003513083)*col("PIPS1000Energy") + lit(-1.36822594543883)).alias("PIPS1000EnergyCalibrated")
+    );
 
-    // h.add_fill_hist1d("PIPS1000Energy", &lf, "PIPS1000Energy", 16384, (0.0, 16384.0), None);
-    // h.add_fill_hist1d("PIPS1000EnergyCalibrated", &lf, "PIPS1000EnergyCalibrated", 1200, (0.0, 1200.0), None);
+    h.add_fill_hist1d("PIPS1000Energy", &lf, "PIPS1000Energy", 16384, (0.0, 16384.0), None);
+    h.add_fill_hist1d("PIPS1000EnergyCalibrated", &lf, "PIPS1000EnergyCalibrated", 1200, (0.0, 1200.0), None);
     
-    // /* 
+    /* 
 
     // Declare all the lazyframes that will be used
     let lf = lf.with_columns(vec![
@@ -311,5 +311,5 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
     */
 
-    // */
+    */
 }
