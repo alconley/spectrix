@@ -3,14 +3,12 @@ use rfd::FileDialog;
 use std::fs::File;
 use std::io::{Read, Write};
 
-// use super::background_fitter::BackgroundFitter;
 use super::fit_settings::FitSettings;
 use super::main_fitter::Fitter;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Fits {
     pub temp_fit: Option<Fitter>,
-    // pub temp_background_fit: Option<BackgroundFitter>,
     pub stored_fits: Vec<Fitter>,
     pub settings: FitSettings,
 }
@@ -33,7 +31,7 @@ impl Fits {
 
     pub fn store_temp_fit(&mut self) {
         if let Some(temp_fit) = &mut self.temp_fit.take() {
-            // temp_fit.set_background_color(egui::Color32::DARK_GREEN);
+            temp_fit.set_background_color(egui::Color32::DARK_GREEN);
             temp_fit.set_composition_color(egui::Color32::DARK_BLUE);
             temp_fit.set_decomposition_color(egui::Color32::from_rgb(150, 0, 255));
 
@@ -42,7 +40,6 @@ impl Fits {
             self.stored_fits.push(temp_fit.clone());
         }
 
-        // self.temp_background_fit = None;
     }
 
     pub fn set_log(&mut self, log_y: bool, log_x: bool) {
@@ -50,23 +47,17 @@ impl Fits {
             temp_fit.set_log(log_y, log_x);
         }
 
-        // if let Some(temp_background_fit) = &mut self.temp_background_fit {
-        //     temp_background_fit.fit_line.log_y = log_y;
-        //     temp_background_fit.fit_line.log_x = log_x;
-        // }
-
         for fit in &mut self.stored_fits {
             fit.set_log(log_y, log_x);
         }
     }
 
-    // pub fn set_stored_fits_background_color(&mut self, color: egui::Color32) {
-    //     for fit in &mut self.stored_fits {
-    //         if let Some(background) = &mut fit.background {
-    //             background.fit_line.color = color;
-    //         }
-    //     }
-    // }
+    pub fn set_stored_fits_background_color(&mut self, color: egui::Color32) {
+        for fit in &mut self.stored_fits {
+            fit.background_line.color = color;
+            
+        }
+    }
 
     pub fn set_stored_fits_composition_color(&mut self, color: egui::Color32) {
         for fit in &mut self.stored_fits {
@@ -86,13 +77,13 @@ impl Fits {
         if let Some(temp_fit) = &mut self.temp_fit {
             temp_fit.show_decomposition(self.settings.show_decomposition);
             temp_fit.show_composition(self.settings.show_composition);
-            // temp_fit.show_background(self.settings.show_background);
+            temp_fit.show_background(self.settings.show_background);
         }
 
         for fit in &mut self.stored_fits {
             fit.show_decomposition(self.settings.show_decomposition);
             fit.show_composition(self.settings.show_composition);
-            // fit.show_background(self.settings.show_background);
+            fit.show_background(self.settings.show_background);
         }
     }
 
@@ -128,7 +119,6 @@ impl Fits {
                         serde_json::from_str(&contents).expect("Failed to deserialize fits");
                     self.stored_fits.extend(loaded_fits.stored_fits); // Append loaded fits to current stored fits
                     self.temp_fit = loaded_fits.temp_fit; // override temp_fit
-                    // self.temp_background_fit = loaded_fits.temp_background_fit; // override temp_background_fit
                 }
                 Err(e) => {
                     log::error!("Error opening file: {:?}", e);
@@ -153,7 +143,6 @@ impl Fits {
 
     pub fn remove_temp_fits(&mut self) {
         self.temp_fit = None;
-        // self.temp_background_fit = None;
     }
 
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
@@ -162,10 +151,6 @@ impl Fits {
         if let Some(temp_fit) = &self.temp_fit {
             temp_fit.draw(plot_ui);
         }
-
-        // if let Some(temp_background_fit) = &self.temp_background_fit {
-        //     temp_background_fit.draw(plot_ui);
-        // }
 
         for fit in &mut self.stored_fits.iter() {
             fit.draw(plot_ui);

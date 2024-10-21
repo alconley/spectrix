@@ -1,12 +1,9 @@
 use egui::Vec2b;
-
 use super::plot_settings::PlotSettings;
 use crate::egui_plot_stuff::egui_line::EguiLine;
-// use crate::fitter::background_fitter::BackgroundFitter;
 use crate::fitter::fit_handler::Fits;
-use crate::fitter::main_fitter::{FitModel, Fitter};
-
-use crate::fitter::models::gaussian::{GaussianFitter, BackgroundModels};
+use crate::fitter::main_fitter::{Model, Fitter};
+use crate::fitter::common::Data;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Histogram {
@@ -136,28 +133,36 @@ impl Histogram {
         })
     }
 
-    // pub fn fit_background(&mut self) {
-    //     self.fits.remove_temp_fits();
+    pub fn fit_background(&mut self) {
+        log::info!("Fitting background for histogram: {}", self.name);
+        self.fits.temp_fit = None;
 
-    //     let marker_positions = self.plot_settings.markers.get_background_marker_positions();
-    //     if marker_positions.len() < 2 {
-    //         log::error!("Need to set at least two background markers to fit the histogram");
-    //         return;
-    //     }
+        let marker_positions = self.plot_settings.markers.get_background_marker_positions();
+        if marker_positions.len() < 2 {
+            log::error!("Need to set at least two background markers to fit the histogram");
+            return;
+        }
 
-    //     let (x_data, y_data): (Vec<f64>, Vec<f64>) = marker_positions
-    //         .iter()
-    //         .filter_map(|&pos| self.get_bin_count_and_center(pos))
-    //         .unzip();
+        let (x_data, y_data): (Vec<f64>, Vec<f64>) = marker_positions
+            .iter()
+            .filter_map(|&pos| self.get_bin_count_and_center(pos))
+            .unzip();
 
-    //     // let mut background_fitter = BackgroundFitter::new(x_data, y_data, FitModel::Linear);
-    //     let mut background_fitter =
-    //         BackgroundFitter::new(x_data, y_data, self.fits.settings.background_model.clone());
-    //     background_fitter.fit();
+        let mut fitter = Fitter::new(
+            self.fits.settings.background_model.clone(),
+            Data {
+                x: x_data,
+                y: y_data,
+            },
+        );
 
-    //     background_fitter.fit_line.name = format!("{} Temp Background", self.name);
-    //     self.fits.temp_background_fit = Some(background_fitter);
-    // }
+        fitter.fit_background();
+
+        fitter.background_line.name = format!("{} Temp Background", self.name);
+        
+        self.fits.temp_fit = Some(fitter);
+
+    }
 
     pub fn fit_gaussians(&mut self) {
         let region_marker_positions = self.plot_settings.markers.get_region_marker_positions();
@@ -165,62 +170,45 @@ impl Histogram {
             log::error!("Need to set two region markers to fit the histogram");
             return;
         }
-
+    
+        // check to see if there are at least 2 background markers
+        if self.plot_settings.markers.get_background_marker_positions().len() >= 2 {
+            self.fit_background();
+        }
+    
         self.plot_settings
             .markers
             .remove_peak_markers_outside_region();
         let peak_positions = self.plot_settings.markers.get_peak_marker_positions();
-
-        // if self.fits.temp_background_fit.is_none() {
-        //     if self.plot_settings.markers.background_markers.len() <= 1 {
-        //         for position in region_marker_positions.iter() {
-        //             self.plot_settings.markers.add_background_marker(*position);
-        //         }
-        //     }
-        //     self.fit_background();
-        // }
-
-        // let mut fitter = Fitter::new(
-        //     FitModel::Gaussian(
-        //         peak_positions,
-        //         self.fits.settings.free_stddev,
-        //         self.fits.settings.free_position,
-        //         self.bin_width,
-        //     ),
-        //     // self.fits.temp_background_fit.clone(),
-        // );
-
+    
         let (start_x, end_x) = (region_marker_positions[0], region_marker_positions[1]);
-
-        // fitter.x_data = self.get_bin_centers_between(start_x, end_x);
-        // fitter.y_data = self.get_bin_counts_between(start_x, end_x);
-
-
-        let x_data = self.get_bin_centers_between(start_x, end_x);
-        let y_data = self.get_bin_counts_between(start_x, end_x);
-        let background_model = BackgroundModels::Linear;
-        let equal_stdev = self.fits.settings.free_stddev;
+    
+        let data = Data {
+            x: self.get_bin_centers_between(start_x, end_x),
+            y: self.get_bin_counts_between(start_x, end_x),
+        };
+    
+        let equal_stdev = self.fits.settings.equal_stddev;
         let free_position = self.fits.settings.free_position;
         let bin_width = self.bin_width;
+    
+        let mut fitter = Fitter::new(
+            Model::Gaussian(peak_positions.clone(), equal_stdev, free_position, bin_width),
+            data,
+        );
+    
+        // Check to see if there is a temp background fit and force the background parameters if it exists
+        if let Some(temp_fit) = &self.fits.temp_fit {
+            fitter.background_line = temp_fit.background_line.clone();
+            fitter.background_result = temp_fit.background_result.clone();
+            fitter.background = temp_fit.model.clone();
+        }
 
-
-        let mut fitter = GaussianFitter::new(x_data, y_data, peak_positions.clone(), background_model, equal_stdev, free_position, bin_width);
-
-        fitter.fit_with_lmfit();
-        
-        // fitter.fit();
-
-        // fitter.set_name(self.name.clone());
-
-        // // clear peak markers and add the new peak markers
-        // self.plot_settings.markers.clear_peak_markers();
-
-        // let peak_values = fitter.get_peak_markers();
-        // for peak in peak_values {
-        //     self.plot_settings.markers.add_peak_marker(peak);
-        // }
-
-        // self.fits.temp_fit = Some(fitter);
+        self.fits.temp_fit = None;
+    
+        fitter.fit();
+        fitter.set_name(self.name.clone());
+        self.fits.temp_fit = Some(fitter);
     }
 
     // Draw the histogram, fit lines, markers, and stats

@@ -1,4 +1,4 @@
-use super::main_fitter::FitModel;
+use super::main_fitter::Model;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct FitSettings {
@@ -7,12 +7,9 @@ pub struct FitSettings {
     pub show_background: bool,
     pub show_fit_stats: bool,
     pub fit_stats_height: f32,
-    pub free_stddev: bool,
+    pub equal_stddev: bool,
     pub free_position: bool,
-    // pub background_model: FitModel,
-    pub background_poly_degree: usize,
-    pub background_single_exp_initial_guess: f64,
-    pub background_double_exp_initial_guess: (f64, f64),
+    pub background_model: Model,
 }
 
 impl Default for FitSettings {
@@ -23,12 +20,9 @@ impl Default for FitSettings {
             show_background: true,
             show_fit_stats: false,
             fit_stats_height: 0.0,
-            free_stddev: false,
+            equal_stddev: true,
             free_position: true,
-            // background_model: FitModel::Polynomial(1),
-            background_poly_degree: 1,
-            background_single_exp_initial_guess: 200.0,
-            background_double_exp_initial_guess: (200.0, 800.0),
+            background_model: Model::Linear,
         }
     }
 }
@@ -66,7 +60,7 @@ impl FitSettings {
 
         ui.heading("Gaussian Fit Settings");
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.free_stddev, "Free Standard Deviation")
+            ui.checkbox(&mut self.equal_stddev, "Free Standard Deviation")
                 .on_hover_text("Allow the standard deviation of the Gaussian to be free");
             ui.checkbox(&mut self.free_position, "Free Position")
                 .on_hover_text("Allow the position of the Gaussian to be free");
@@ -75,70 +69,10 @@ impl FitSettings {
         ui.separator();
 
         ui.heading("Background Fit Models");
-        // ui.label("Polynomial");
-        // ui.horizontal(|ui| {
-        //     ui.radio_value(
-        //         &mut self.background_model,
-        //         FitModel::Polynomial(1),
-        //         "Linear",
-        //     );
-        //     ui.radio_value(
-        //         &mut self.background_model,
-        //         FitModel::Polynomial(2),
-        //         "Quadratic",
-        //     );
-        //     ui.radio_value(&mut self.background_model, FitModel::Polynomial(3), "Cubic");
-        //     ui.radio_value(
-        //         &mut self.background_model,
-        //         FitModel::Polynomial(self.background_poly_degree),
-        //         "n",
-        //     );
-        //     ui.add(
-        //         egui::DragValue::new(&mut self.background_poly_degree)
-        //             .speed(1)
-        //             .prefix("Degree: ")
-        //             .range(1.0..=f32::INFINITY),
-        //     );
-        // });
-
-        // ui.label("Exponential");
-        // ui.horizontal(|ui| {
-        //     ui.radio_value(
-        //         &mut self.background_model,
-        //         FitModel::Exponential(self.background_single_exp_initial_guess),
-        //         "Single",
-        //     );
-
-        //     ui.add(
-        //         egui::DragValue::new(&mut self.background_single_exp_initial_guess)
-        //             .speed(10)
-        //             .prefix("b: "),
-        //     );
-
-        //     ui.radio_value(
-        //         &mut self.background_model,
-        //         FitModel::DoubleExponential(
-        //             self.background_double_exp_initial_guess.0,
-        //             self.background_double_exp_initial_guess.1,
-        //         ),
-        //         "Double",
-        //     );
-
-        //     ui.add(
-        //         egui::DragValue::new(&mut self.background_double_exp_initial_guess.0)
-        //             .speed(10)
-        //             .prefix("b: ")
-        //             .range(0.0..=f64::INFINITY),
-        //     );
-
-        //     ui.add(
-        //         egui::DragValue::new(&mut self.background_double_exp_initial_guess.1)
-        //             .speed(10)
-        //             .prefix("d: ")
-        //             .range(0.0..=f64::INFINITY),
-        //     );
-        // });
-
-        // ui.separator();
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut self.background_model, Model::Linear, "Linear");
+            ui.radio_value(&mut self.background_model, Model::None, "None");
+        });
+        
     }
 }

@@ -41,9 +41,9 @@ impl Histogram {
                 self.fits.remove_temp_fits();
             }
 
-            // if ui.input(|i| i.key_pressed(egui::Key::G)) {
-            //     self.fit_background();
-            // }
+            if ui.input(|i| i.key_pressed(egui::Key::G)) {
+                self.fit_background();
+            }
 
             if ui.input(|i| i.key_pressed(egui::Key::F)) {
                 self.fit_gaussians();
