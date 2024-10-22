@@ -1,5 +1,5 @@
 use crate::egui_plot_stuff::egui_line::EguiLine;
-// use super::models::gaussian::{Background, GaussianFitter};
+use super::models::gaussian::{GaussianFitter};
 use super::common::Data;
 use super::models::exponential::{ExponentialFitter, ExponentialParameters};
 use super::models::linear::{LinearFitter, LinearParameters};
@@ -14,7 +14,7 @@ pub enum FitModel {
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum FitResult {
-    // Gaussian(GaussianFitter),
+    Gaussian(GaussianFitter),
 }
 
 #[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -70,6 +70,35 @@ impl Fitter {
             decomposition_lines: Vec::new(),
         }
     }
+
+    pub fn fit(&mut self){
+        match &self.fit_model {
+            FitModel::Gaussian(peak_markers, equal_stdev, free_position, bin_width) => {
+                let mut fit = GaussianFitter::new(
+                    self.data.clone(),
+                    peak_markers.clone(),
+                    self.background_model.clone(),
+                    self.background_result.clone(),
+                    *equal_stdev,
+                    *free_position,
+                    *bin_width,
+                );
+
+                match fit.lmfit() {
+                    Ok(_) => {
+                        self.composition_line.points = fit.fit_points.clone();
+                        self.fit_result = Some(FitResult::Gaussian(fit));
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                    }
+                }
+            }
+            FitModel::None => {
+                log::info!("No fitting required for 'None'");
+            }
+        }
+    } 
 
     pub fn fit_background(&mut self) {
         log::info!("Fitting background");

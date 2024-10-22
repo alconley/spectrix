@@ -72,7 +72,7 @@ impl FitSettings {
 
         ui.heading("Gaussian Fit Settings");
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.equal_stddev, "Free Standard Deviation")
+            ui.checkbox(&mut self.equal_stddev, "Equal Standard Deviation")
                 .on_hover_text("Allow the standard deviation of the Gaussian to be free");
             ui.checkbox(&mut self.free_position, "Free Position")
                 .on_hover_text("Allow the position of the Gaussian to be free");
