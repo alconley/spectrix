@@ -1,9 +1,9 @@
-use egui::Vec2b;
 use super::plot_settings::PlotSettings;
 use crate::egui_plot_stuff::egui_line::EguiLine;
-use crate::fitter::fit_handler::Fits;
-use crate::fitter::main_fitter::{Model, Fitter};
 use crate::fitter::common::Data;
+use crate::fitter::fit_handler::Fits;
+use crate::fitter::main_fitter::{BackgroundModel, FitModel, Fitter};
+use egui::Vec2b;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Histogram {
@@ -148,67 +148,66 @@ impl Histogram {
             .filter_map(|&pos| self.get_bin_count_and_center(pos))
             .unzip();
 
-        let mut fitter = Fitter::new(
-            self.fits.settings.background_model.clone(),
-            Data {
-                x: x_data,
-                y: y_data,
-            },
-        );
+        let mut fitter = Fitter::new(Data {
+            x: x_data,
+            y: y_data,
+        });
+
+        fitter.background_model = self.fits.settings.background_model.clone();
 
         fitter.fit_background();
 
-        fitter.background_line.name = format!("{} Temp Background", self.name);
-        
-        self.fits.temp_fit = Some(fitter);
+        fitter.name = format!("{} Temp Fit", self.name);
+        fitter.set_name(self.name.clone());
 
+        self.fits.temp_fit = Some(fitter);
     }
 
     pub fn fit_gaussians(&mut self) {
-        let region_marker_positions = self.plot_settings.markers.get_region_marker_positions();
-        if region_marker_positions.len() != 2 {
-            log::error!("Need to set two region markers to fit the histogram");
-            return;
-        }
-    
-        // check to see if there are at least 2 background markers
-        if self.plot_settings.markers.get_background_marker_positions().len() >= 2 {
-            self.fit_background();
-        }
-    
-        self.plot_settings
-            .markers
-            .remove_peak_markers_outside_region();
-        let peak_positions = self.plot_settings.markers.get_peak_marker_positions();
-    
-        let (start_x, end_x) = (region_marker_positions[0], region_marker_positions[1]);
-    
-        let data = Data {
-            x: self.get_bin_centers_between(start_x, end_x),
-            y: self.get_bin_counts_between(start_x, end_x),
-        };
-    
-        let equal_stdev = self.fits.settings.equal_stddev;
-        let free_position = self.fits.settings.free_position;
-        let bin_width = self.bin_width;
-    
-        let mut fitter = Fitter::new(
-            Model::Gaussian(peak_positions.clone(), equal_stdev, free_position, bin_width),
-            data,
-        );
-    
-        // Check to see if there is a temp background fit and force the background parameters if it exists
-        if let Some(temp_fit) = &self.fits.temp_fit {
-            fitter.background_line = temp_fit.background_line.clone();
-            fitter.background_result = temp_fit.background_result.clone();
-            fitter.background = temp_fit.model.clone();
-        }
+        // let region_marker_positions = self.plot_settings.markers.get_region_marker_positions();
+        // if region_marker_positions.len() != 2 {
+        //     log::error!("Need to set two region markers to fit the histogram");
+        //     return;
+        // }
 
-        self.fits.temp_fit = None;
-    
-        fitter.fit();
-        fitter.set_name(self.name.clone());
-        self.fits.temp_fit = Some(fitter);
+        // // check to see if there are at least 2 background markers
+        // if self.plot_settings.markers.get_background_marker_positions().len() >= 2 {
+        //     self.fit_background();
+        // }
+
+        // self.plot_settings
+        //     .markers
+        //     .remove_peak_markers_outside_region();
+        // let peak_positions = self.plot_settings.markers.get_peak_marker_positions();
+
+        // let (start_x, end_x) = (region_marker_positions[0], region_marker_positions[1]);
+
+        // let data = Data {
+        //     x: self.get_bin_centers_between(start_x, end_x),
+        //     y: self.get_bin_counts_between(start_x, end_x),
+        // };
+
+        // let equal_stdev = self.fits.settings.equal_stddev;
+        // let free_position = self.fits.settings.free_position;
+        // let bin_width = self.bin_width;
+
+        // let mut fitter = Fitter::new(
+        //     Model::Gaussian(peak_positions.clone(), equal_stdev, free_position, bin_width),
+        //     data,
+        // );
+
+        // // Check to see if there is a temp background fit and force the background parameters if it exists
+        // if let Some(temp_fit) = &self.fits.temp_fit {
+        //     fitter.background_line = temp_fit.background_line.clone();
+        //     fitter.background_result = temp_fit.background_result.clone();
+        //     fitter.background = temp_fit.model.clone();
+        // }
+
+        // self.fits.temp_fit = None;
+
+        // fitter.fit();
+        // fitter.set_name(self.name.clone());
+        // self.fits.temp_fit = Some(fitter);
     }
 
     // Draw the histogram, fit lines, markers, and stats

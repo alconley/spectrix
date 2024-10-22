@@ -2,32 +2,37 @@ use crate::fitter::common::{Data, Parameter};
 use pyo3::{prelude::*, types::PyModule};
 
 #[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct LinearParameters {
-    pub slope: Parameter,
-    pub intercept: Parameter,
+pub struct QuadraticParameters {
+    pub a: Parameter,
+    pub b: Parameter,
+    pub c: Parameter,
 }
 
-impl Default for LinearParameters {
+impl Default for QuadraticParameters {
     fn default() -> Self {
-        LinearParameters {
-            slope: Parameter {
-                name: "slope".to_string(),
+        QuadraticParameters {
+            a: Parameter {
+                name: "a".to_string(),
                 ..Default::default()
             },
-            intercept: Parameter {
-                name: "intercept".to_string(),
+            b: Parameter {
+                name: "b".to_string(),
+                ..Default::default()
+            },
+            c: Parameter {
+                name: "c".to_string(),
                 ..Default::default()
             },
         }
     }
 }
 
-impl LinearParameters {
+impl QuadraticParameters {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Fit Parameters");
             if ui.small_button("Reset").clicked() {
-                *self = LinearParameters::default();
+                *self = QuadraticParameters::default();
             }
         });
         // create a grid for the param
@@ -41,26 +46,28 @@ impl LinearParameters {
                 ui.label("Max");
                 ui.label("Vary");
                 ui.end_row();
-                self.slope.ui(ui);
+                self.a.ui(ui);
                 ui.end_row();
-                self.intercept.ui(ui);
+                self.b.ui(ui);
+                ui.end_row();
+                self.c.ui(ui);
             });
     }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct LinearFitter {
+pub struct QuadraticFitter {
     pub data: Data,
-    pub paramaters: LinearParameters,
+    pub paramaters: QuadraticParameters,
     pub fit_points: Vec<[f64; 2]>,
     pub fit_report: String,
 }
 
-impl LinearFitter {
+impl QuadraticFitter {
     pub fn new(data: Data) -> Self {
-        LinearFitter {
+        QuadraticFitter {
             data,
-            paramaters: LinearParameters::default(),
+            paramaters: QuadraticParameters::default(),
             fit_points: Vec::new(),
             fit_report: String::new(),
         }
@@ -105,40 +112,45 @@ impl LinearFitter {
 import lmfit
 import numpy as np
 
-def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.inf, 0.0, True), intercept = ("intercept", -np.inf, np.inf, 0.0, True)):    
-    # params
-    # slope=[name, min, max, initial_guess, vary]
-    # intercept = [name, min, max, initial_guess, vary]
+def QuadraticFit(x_data: list, y_data: list, a: list = ("a", -np.inf, np.inf, 0.0, True), b = ("b", -np.inf, np.inf, 0.0, True), c: list = ("a", -np.inf, np.inf, 0.0, True),):    
+    # params = [name, min, max, initial_guess, vary]
     
-    model = lmfit.models.LinearModel()
-    params = model.make_params(slope=slope[3], intercept=intercept[3])
-    params['slope'].set(min=slope[1], max=slope[2], value=slope[3], vary=slope[4])
-    params['intercept'].set(min=intercept[1], max=intercept[2], value=intercept[3], vary=intercept[4])
-
+    model = lmfit.models.QuadraticModel()
+    params = model.make_params(a=a[3], b=b[3], c=c[3])
+    params['a'].set(min=a[1], max=a[2], value=a[3], vary=a[4])
+    params['b'].set(min=b[1], max=b[2], value=b[3], vary=b[4])
+    params['c'].set(min=c[1], max=c[2], value=c[3], vary=c[4])
     result = model.fit(y_data, params, x=x_data)
 
     print(result.fit_report())
 
     # Extract Parameters
-    slope = float(result.params['slope'].value)
-    slope_err = result.params['slope'].stderr
-    
-    if slope_err is None:
-        slope_err = float(0.0)
+    a = float(result.params['a'].value)
+    a_err = result.params['a'].stderr
+    if a_err is None:
+        a_err = float(0.0)
     else:
-        slope_err = float(slope_err)
+        a_err = float(a_err)
 
-    intercept = float(result.params['intercept'].value)
-    
-    intercept_err = result.params['intercept'].stderr
-    if intercept_err is None:
-        intercept_err = float(0.0)
+    b = float(result.params['b'].value)
+    b_err = result.params['b'].stderr
+    if b_err is None:
+        b_err = float(0.0)
     else:
-        intercept_err = float(intercept_err)
+        b_err = float(b_err)
+
+    c = float(result.params['c'].value)
+    c_err = result.params['c'].stderr
+    if c_err is None:
+        c_err = float(0.0)
+    else:
+        c_err = float(c_err)
+
 
     params = [
-        ('slope', slope, slope_err),
-        ('intercept', intercept, intercept_err)
+        ('a', a, a_err),
+        ('b', b, b_err),
+        ('c', c, c_err)
     ]
 
     x = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
@@ -150,39 +162,47 @@ def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.in
 "#;
 
             // Compile the Python code into a module
-            let module = PyModule::from_code_bound(py, code, "linear.py", "linear")?;
+            let module = PyModule::from_code_bound(py, code, "quadratic.py", "quadratic")?;
 
             let x_data = self.data.x.clone();
             let y_data = self.data.y.clone();
-            let slope_para = (
-                self.paramaters.slope.name.clone(),
-                self.paramaters.slope.min,
-                self.paramaters.slope.max,
-                self.paramaters.slope.initial_guess,
-                self.paramaters.slope.vary,
+            let a_para = (
+                self.paramaters.a.name.clone(),
+                self.paramaters.a.min,
+                self.paramaters.a.max,
+                self.paramaters.a.initial_guess,
+                self.paramaters.a.vary,
             );
-            let intercept_para = (
-                self.paramaters.intercept.name.clone(),
-                self.paramaters.intercept.min,
-                self.paramaters.intercept.max,
-                self.paramaters.intercept.initial_guess,
-                self.paramaters.intercept.vary,
+            let b_para = (
+                self.paramaters.b.name.clone(),
+                self.paramaters.b.min,
+                self.paramaters.b.max,
+                self.paramaters.b.initial_guess,
+                self.paramaters.b.vary,
+            );
+            let c_para = (
+                self.paramaters.c.name.clone(),
+                self.paramaters.c.min,
+                self.paramaters.c.max,
+                self.paramaters.c.initial_guess,
+                self.paramaters.c.vary,
             );
 
-            let result =
-                module
-                    .getattr("LinearFit")?
-                    .call1((x_data, y_data, slope_para, intercept_para))?;
+            let result = module
+                .getattr("QuadraticFit")?
+                .call1((x_data, y_data, a_para, b_para, c_para))?;
 
             let params = result.get_item(0)?.extract::<Vec<(String, f64, f64)>>()?;
             let x = result.get_item(1)?.extract::<Vec<f64>>()?;
             let y = result.get_item(2)?.extract::<Vec<f64>>()?;
             let fit_report = result.get_item(3)?.extract::<String>()?;
 
-            self.paramaters.slope.value = Some(params[0].1);
-            self.paramaters.slope.uncertainity = Some(params[0].2);
-            self.paramaters.intercept.value = Some(params[1].1);
-            self.paramaters.intercept.uncertainity = Some(params[1].2);
+            self.paramaters.a.value = Some(params[0].1);
+            self.paramaters.a.uncertainity = Some(params[0].2);
+            self.paramaters.b.value = Some(params[1].1);
+            self.paramaters.b.uncertainity = Some(params[1].2);
+            self.paramaters.c.value = Some(params[2].1);
+            self.paramaters.c.uncertainity = Some(params[2].2);
 
             self.fit_points = x.iter().zip(y.iter()).map(|(&x, &y)| [x, y]).collect();
             self.fit_report = fit_report;
@@ -194,19 +214,27 @@ def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.in
     pub fn ui(&self, ui: &mut egui::Ui) {
         // add menu button for the fit report
         ui.horizontal(|ui| {
-            if let Some(slope) = &self.paramaters.slope.value {
+            if let Some(a) = &self.paramaters.a.value {
                 ui.label(format!(
-                    "Slope: {:.3} ± {:.3}",
-                    slope,
-                    self.paramaters.slope.uncertainity.unwrap_or(0.0)
+                    "a: {:.3} ± {:.3}",
+                    a,
+                    self.paramaters.a.uncertainity.unwrap_or(0.0)
                 ));
             }
             ui.separator();
-            if let Some(intercept) = &self.paramaters.intercept.value {
+            if let Some(b) = &self.paramaters.b.value {
                 ui.label(format!(
-                    "Intercept: {:.3} ± {:.3}",
-                    intercept,
-                    self.paramaters.intercept.uncertainity.unwrap_or(0.0)
+                    "b: {:.3} ± {:.3}",
+                    b,
+                    self.paramaters.b.uncertainity.unwrap_or(0.0)
+                ));
+            }
+            ui.separator();
+            if let Some(c) = &self.paramaters.c.value {
+                ui.label(format!(
+                    "c: {:.3} ± {:.3}",
+                    c,
+                    self.paramaters.c.uncertainity.unwrap_or(0.0)
                 ));
             }
             ui.separator();

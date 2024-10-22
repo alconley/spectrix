@@ -2,36 +2,36 @@ use crate::fitter::common::{Data, Parameter};
 use pyo3::{prelude::*, types::PyModule};
 
 #[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct LinearParameters {
-    pub slope: Parameter,
-    pub intercept: Parameter,
+pub struct PowerLawParameters {
+    pub amplitude: Parameter,
+    pub exponent: Parameter,
 }
 
-impl Default for LinearParameters {
+impl Default for PowerLawParameters {
     fn default() -> Self {
-        LinearParameters {
-            slope: Parameter {
-                name: "slope".to_string(),
+        PowerLawParameters {
+            amplitude: Parameter {
+                name: "amplitude".to_string(),
                 ..Default::default()
             },
-            intercept: Parameter {
-                name: "intercept".to_string(),
+            exponent: Parameter {
+                name: "exponent".to_string(),
                 ..Default::default()
             },
         }
     }
 }
 
-impl LinearParameters {
+impl PowerLawParameters {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Fit Parameters");
             if ui.small_button("Reset").clicked() {
-                *self = LinearParameters::default();
+                *self = PowerLawParameters::default();
             }
         });
         // create a grid for the param
-        egui::Grid::new("linear_params_grid")
+        egui::Grid::new("PowerLaw_params_grid")
             .striped(true)
             .num_columns(5)
             .show(ui, |ui| {
@@ -41,33 +41,33 @@ impl LinearParameters {
                 ui.label("Max");
                 ui.label("Vary");
                 ui.end_row();
-                self.slope.ui(ui);
+                self.amplitude.ui(ui);
                 ui.end_row();
-                self.intercept.ui(ui);
+                self.exponent.ui(ui);
             });
     }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct LinearFitter {
+pub struct PowerLawFitter {
     pub data: Data,
-    pub paramaters: LinearParameters,
+    pub paramaters: PowerLawParameters,
     pub fit_points: Vec<[f64; 2]>,
     pub fit_report: String,
 }
 
-impl LinearFitter {
+impl PowerLawFitter {
     pub fn new(data: Data) -> Self {
-        LinearFitter {
+        PowerLawFitter {
             data,
-            paramaters: LinearParameters::default(),
+            paramaters: PowerLawParameters::default(),
             fit_points: Vec::new(),
             fit_report: String::new(),
         }
     }
 
     pub fn lmfit(&mut self) -> PyResult<()> {
-        log::info!("Fitting data with a linear line using `lmfit`.");
+        log::info!("Fitting data with a PowerLaw line using `lmfit`.");
         Python::with_gil(|py| {
             // let sys = py.import_bound("sys")?;
             // let version: String = sys.getattr("version")?.extract()?;
@@ -105,40 +105,35 @@ impl LinearFitter {
 import lmfit
 import numpy as np
 
-def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.inf, 0.0, True), intercept = ("intercept", -np.inf, np.inf, 0.0, True)):    
-    # params
-    # slope=[name, min, max, initial_guess, vary]
-    # intercept = [name, min, max, initial_guess, vary]
+def PowerLawFit(x_data: list, y_data: list, amplitude: list = ("amplitude", -np.inf, np.inf, 0.0, True), exponent = ("exponent", -np.inf, np.inf, 0.0, True)):    
+    # params = [name, min, max, initial_guess, vary]
     
-    model = lmfit.models.LinearModel()
-    params = model.make_params(slope=slope[3], intercept=intercept[3])
-    params['slope'].set(min=slope[1], max=slope[2], value=slope[3], vary=slope[4])
-    params['intercept'].set(min=intercept[1], max=intercept[2], value=intercept[3], vary=intercept[4])
-
+    model = lmfit.models.PowerLawModel()
+    params = model.make_params(amplitude=amplitude[3], exponent=exponent[3])
+    params['amplitude'].set(min=amplitude[1], max=amplitude[2], value=amplitude[3], vary=amplitude[4])
+    params['exponent'].set(min=exponent[1], max=exponent[2], value=exponent[3], vary=exponent[4])
     result = model.fit(y_data, params, x=x_data)
 
     print(result.fit_report())
 
     # Extract Parameters
-    slope = float(result.params['slope'].value)
-    slope_err = result.params['slope'].stderr
-    
-    if slope_err is None:
-        slope_err = float(0.0)
+    amplitude = float(result.params['amplitude'].value)
+    amplitude_err = result.params['amplitude'].stderr
+    if amplitude_err is None:
+        amplitude_err = float(0.0)
     else:
-        slope_err = float(slope_err)
-
-    intercept = float(result.params['intercept'].value)
+        amplitude_err = float(amplitude_err)
     
-    intercept_err = result.params['intercept'].stderr
-    if intercept_err is None:
-        intercept_err = float(0.0)
+    exponent = float(result.params['exponent'].value)
+    exponent_err = result.params['exponent'].stderr
+    if exponent_err is None:
+        exponent_err = float(0.0)
     else:
-        intercept_err = float(intercept_err)
+        exponent_err = float(exponent_err)
 
     params = [
-        ('slope', slope, slope_err),
-        ('intercept', intercept, intercept_err)
+        ('amplitude', amplitude, amplitude_err),
+        ('exponent', exponent, exponent_err)
     ]
 
     x = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
@@ -150,39 +145,41 @@ def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.in
 "#;
 
             // Compile the Python code into a module
-            let module = PyModule::from_code_bound(py, code, "linear.py", "linear")?;
+            let module = PyModule::from_code_bound(py, code, "powerlaw.py", "powerlaw")?;
 
             let x_data = self.data.x.clone();
             let y_data = self.data.y.clone();
-            let slope_para = (
-                self.paramaters.slope.name.clone(),
-                self.paramaters.slope.min,
-                self.paramaters.slope.max,
-                self.paramaters.slope.initial_guess,
-                self.paramaters.slope.vary,
+            let amplitude_para = (
+                self.paramaters.amplitude.name.clone(),
+                self.paramaters.amplitude.min,
+                self.paramaters.amplitude.max,
+                self.paramaters.amplitude.initial_guess,
+                self.paramaters.amplitude.vary,
             );
-            let intercept_para = (
-                self.paramaters.intercept.name.clone(),
-                self.paramaters.intercept.min,
-                self.paramaters.intercept.max,
-                self.paramaters.intercept.initial_guess,
-                self.paramaters.intercept.vary,
+            let exponent_para = (
+                self.paramaters.exponent.name.clone(),
+                self.paramaters.exponent.min,
+                self.paramaters.exponent.max,
+                self.paramaters.exponent.initial_guess,
+                self.paramaters.exponent.vary,
             );
 
-            let result =
-                module
-                    .getattr("LinearFit")?
-                    .call1((x_data, y_data, slope_para, intercept_para))?;
+            let result = module.getattr("PowerLawFit")?.call1((
+                x_data,
+                y_data,
+                amplitude_para,
+                exponent_para,
+            ))?;
 
             let params = result.get_item(0)?.extract::<Vec<(String, f64, f64)>>()?;
             let x = result.get_item(1)?.extract::<Vec<f64>>()?;
             let y = result.get_item(2)?.extract::<Vec<f64>>()?;
             let fit_report = result.get_item(3)?.extract::<String>()?;
 
-            self.paramaters.slope.value = Some(params[0].1);
-            self.paramaters.slope.uncertainity = Some(params[0].2);
-            self.paramaters.intercept.value = Some(params[1].1);
-            self.paramaters.intercept.uncertainity = Some(params[1].2);
+            self.paramaters.amplitude.value = Some(params[0].1);
+            self.paramaters.amplitude.uncertainity = Some(params[0].2);
+            self.paramaters.exponent.value = Some(params[1].1);
+            self.paramaters.exponent.uncertainity = Some(params[1].2);
 
             self.fit_points = x.iter().zip(y.iter()).map(|(&x, &y)| [x, y]).collect();
             self.fit_report = fit_report;
@@ -194,19 +191,19 @@ def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.in
     pub fn ui(&self, ui: &mut egui::Ui) {
         // add menu button for the fit report
         ui.horizontal(|ui| {
-            if let Some(slope) = &self.paramaters.slope.value {
+            if let Some(amplitude) = &self.paramaters.amplitude.value {
                 ui.label(format!(
-                    "Slope: {:.3} ± {:.3}",
-                    slope,
-                    self.paramaters.slope.uncertainity.unwrap_or(0.0)
+                    "amplitude: {:.3} ± {:.3}",
+                    amplitude,
+                    self.paramaters.amplitude.uncertainity.unwrap_or(0.0)
                 ));
             }
             ui.separator();
-            if let Some(intercept) = &self.paramaters.intercept.value {
+            if let Some(exponent) = &self.paramaters.exponent.value {
                 ui.label(format!(
-                    "Intercept: {:.3} ± {:.3}",
-                    intercept,
-                    self.paramaters.intercept.uncertainity.unwrap_or(0.0)
+                    "exponent: {:.3} ± {:.3}",
+                    exponent,
+                    self.paramaters.exponent.uncertainity.unwrap_or(0.0)
                 ));
             }
             ui.separator();

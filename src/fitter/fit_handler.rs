@@ -39,7 +39,6 @@ impl Fits {
 
             self.stored_fits.push(temp_fit.clone());
         }
-
     }
 
     pub fn set_log(&mut self, log_y: bool, log_x: bool) {
@@ -55,7 +54,6 @@ impl Fits {
     pub fn set_stored_fits_background_color(&mut self, color: egui::Color32) {
         for fit in &mut self.stored_fits {
             fit.background_line.color = color;
-            
         }
     }
 
@@ -218,22 +216,6 @@ impl Fits {
         }
     }
 
-    pub fn fit_lines_ui(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.vertical(|ui| {
-                ui.label("Fit Lines");
-
-                if let Some(temp_fit) = &mut self.temp_fit {
-                    temp_fit.lines_ui(ui);
-                }
-
-                for fit in &mut self.stored_fits {
-                    fit.lines_ui(ui);
-                }
-            });
-        });
-    }
-
     pub fn fit_context_menu_ui(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Fits", |ui| {
             self.save_and_load_ui(ui);
@@ -251,11 +233,9 @@ impl Fits {
 
             ui.separator();
 
-            egui::ScrollArea::vertical()
-                .max_height(300.0)
-                .show(ui, |ui| {
-                    self.fit_lines_ui(ui);
-                });
+            if let Some(temp_fit) = &mut self.temp_fit {
+                temp_fit.fit_result_ui(ui);
+            }
         });
     }
 }
