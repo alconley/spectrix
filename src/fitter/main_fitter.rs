@@ -1,10 +1,10 @@
-use crate::egui_plot_stuff::egui_line::EguiLine;
-use super::models::gaussian::{GaussianFitter};
 use super::common::Data;
 use super::models::exponential::{ExponentialFitter, ExponentialParameters};
+use super::models::gaussian::GaussianFitter;
 use super::models::linear::{LinearFitter, LinearParameters};
 use super::models::powerlaw::{PowerLawFitter, PowerLawParameters};
 use super::models::quadratic::{QuadraticFitter, QuadraticParameters};
+use crate::egui_plot_stuff::egui_line::EguiLine;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
 pub enum FitModel {
@@ -32,6 +32,17 @@ pub enum BackgroundResult {
     Quadratic(QuadraticFitter),
     PowerLaw(PowerLawFitter),
     Exponential(ExponentialFitter),
+}
+
+impl BackgroundResult {
+    pub fn get_fit_points(&self) -> Vec<[f64; 2]> {
+        match self {
+            BackgroundResult::Linear(fit) => fit.fit_points.clone(),
+            BackgroundResult::Quadratic(fit) => fit.fit_points.clone(),
+            BackgroundResult::PowerLaw(fit) => fit.fit_points.clone(),
+            BackgroundResult::Exponential(fit) => fit.fit_points.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -66,12 +77,12 @@ impl Fitter {
             fit_result: None,
 
             background_line: EguiLine::new(egui::Color32::GREEN),
-            composition_line: EguiLine::new(egui::Color32::DARK_BLUE),
+            composition_line: EguiLine::new(egui::Color32::BLUE),
             decomposition_lines: Vec::new(),
         }
     }
 
-    pub fn fit(&mut self){
+    pub fn fit(&mut self) {
         match &self.fit_model {
             FitModel::Gaussian(peak_markers, equal_stdev, free_position, bin_width) => {
                 let mut fit = GaussianFitter::new(
@@ -87,6 +98,19 @@ impl Fitter {
                 match fit.lmfit() {
                     Ok(_) => {
                         self.composition_line.points = fit.fit_points.clone();
+                        for fit in &fit.fit_result {
+                            let mut line = EguiLine::new(egui::Color32::from_rgb(150, 0, 255));
+                            line.points = fit.fit_points.clone();
+                            self.decomposition_lines.push(line);
+                        }
+
+                        if self.background_result.is_none() {
+                            if let Some(background_result) = &fit.background_result {
+                                self.background_line.points = background_result.get_fit_points();
+                                self.background_result = Some(background_result.clone());
+                            }
+                        }
+
                         self.fit_result = Some(FitResult::Gaussian(fit));
                     }
                     Err(e) => {
@@ -98,7 +122,7 @@ impl Fitter {
                 log::info!("No fitting required for 'None'");
             }
         }
-    } 
+    }
 
     pub fn fit_background(&mut self) {
         log::info!("Fitting background");
@@ -178,6 +202,20 @@ impl Fitter {
         log::info!("Finished fitting background");
     }
 
+    pub fn get_peak_markers(&self) -> Vec<f64> {
+        if self.fit_result.is_none() {
+            match &self.fit_model {
+                FitModel::Gaussian(peak_markers, _, _, _) => peak_markers.clone(),
+                FitModel::None => Vec::new(),
+            }
+        } else {
+            match &self.fit_result {
+                Some(FitResult::Gaussian(fit)) => fit.peak_markers.clone(),
+                None => Vec::new(),
+            }
+        }
+    }
+
     pub fn set_background_color(&mut self, color: egui::Color32) {
         self.background_line.color = color;
     }
@@ -214,6 +252,7 @@ impl Fitter {
         }
 
         self.background_line.name = format!("{}-Background", name);
+        self.name = name;
     }
 
     pub fn fit_result_ui(&mut self, ui: &mut egui::Ui) {
@@ -221,14 +260,6 @@ impl Fitter {
             egui::ScrollArea::vertical()
                 .min_scrolled_height(300.0)
                 .show(ui, |ui| {
-                    if let Some(fit_result) = &self.fit_result {
-                        self.composition_line.menu_button(ui);
-                    }
-
-                    for line in &mut self.decomposition_lines {
-                        line.menu_button(ui);
-                    }
-
                     ui.separator();
 
                     if let Some(background_result) = &self.background_result {
@@ -252,8 +283,41 @@ impl Fitter {
                             self.background_line.menu_button(ui);
                         });
                     }
+
+                    if self.fit_result.is_some() {
+                        egui::Grid::new("fit_params_grid")
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.label("Peak");
+                                ui.label("Mean");
+                                ui.label("FWHM");
+                                ui.label("Area");
+                                ui.label("Amplitude");
+                                ui.label("Sigma");
+
+                                ui.end_row();
+
+                                self.fitter_stats(ui, false);
+                            });
+
+                        for line in &mut self.decomposition_lines {
+                            line.menu_button(ui);
+                        }
+
+                        self.composition_line.menu_button(ui);
+                    }
                 });
         });
+    }
+
+    pub fn fitter_stats(&mut self, ui: &mut egui::Ui, skip_one: bool) {
+        if let Some(fit_result) = &self.fit_result {
+            match fit_result {
+                FitResult::Gaussian(fit) => {
+                    fit.fit_params_ui(ui, skip_one);
+                }
+            }
+        }
     }
 
     // Draw the background, decomposition, and composition lines

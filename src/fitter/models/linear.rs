@@ -66,6 +66,47 @@ impl LinearFitter {
         }
     }
 
+    pub fn new_from_parameters(
+        slope: (f64, f64),
+        intercept: (f64, f64),
+        min_x: f64,
+        max_x: f64,
+    ) -> Self {
+        let fit_points = vec![
+            [min_x, slope.0 * min_x + intercept.0],
+            [max_x, slope.0 * max_x + intercept.0],
+        ];
+        let paramaters = LinearParameters {
+            slope: Parameter {
+                name: "slope".to_string(),
+                min: f64::NEG_INFINITY,
+                max: f64::INFINITY,
+                initial_guess: slope.0,
+                vary: true,
+                value: Some(slope.0),
+                uncertainty: Some(slope.1),
+            },
+            intercept: Parameter {
+                name: "intercept".to_string(),
+                min: f64::NEG_INFINITY,
+                max: f64::INFINITY,
+                initial_guess: intercept.0,
+                vary: true,
+                value: Some(intercept.0),
+                uncertainty: Some(intercept.1),
+            },
+        };
+        LinearFitter {
+            data: Data {
+                x: Vec::new(),
+                y: Vec::new(),
+            },
+            paramaters,
+            fit_points,
+            fit_report: "Fitter with other model".to_string(),
+        }
+    }
+
     pub fn lmfit(&mut self) -> PyResult<()> {
         log::info!("Fitting data with a linear line using `lmfit`.");
         Python::with_gil(|py| {
@@ -161,7 +202,7 @@ def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.in
                 self.paramaters.slope.initial_guess,
                 self.paramaters.slope.vary,
             );
-            let intercept_para = (
+            let intercept_para: (String, f64, f64, f64, bool) = (
                 self.paramaters.intercept.name.clone(),
                 self.paramaters.intercept.min,
                 self.paramaters.intercept.max,
@@ -180,9 +221,9 @@ def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.in
             let fit_report = result.get_item(3)?.extract::<String>()?;
 
             self.paramaters.slope.value = Some(params[0].1);
-            self.paramaters.slope.uncertainity = Some(params[0].2);
+            self.paramaters.slope.uncertainty = Some(params[0].2);
             self.paramaters.intercept.value = Some(params[1].1);
-            self.paramaters.intercept.uncertainity = Some(params[1].2);
+            self.paramaters.intercept.uncertainty = Some(params[1].2);
 
             self.fit_points = x.iter().zip(y.iter()).map(|(&x, &y)| [x, y]).collect();
             self.fit_report = fit_report;
@@ -198,7 +239,7 @@ def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.in
                 ui.label(format!(
                     "Slope: {:.3} ± {:.3}",
                     slope,
-                    self.paramaters.slope.uncertainity.unwrap_or(0.0)
+                    self.paramaters.slope.uncertainty.unwrap_or(0.0)
                 ));
             }
             ui.separator();
@@ -206,7 +247,7 @@ def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.in
                 ui.label(format!(
                     "Intercept: {:.3} ± {:.3}",
                     intercept,
-                    self.paramaters.intercept.uncertainity.unwrap_or(0.0)
+                    self.paramaters.intercept.uncertainty.unwrap_or(0.0)
                 ));
             }
             ui.separator();

@@ -73,6 +73,43 @@ impl QuadraticFitter {
         }
     }
 
+    pub fn new_from_parameters(
+        a: (f64, f64),
+        b: (f64, f64),
+        c: (f64, f64),
+        min_x: f64,
+        max_x: f64,
+    ) -> Self {
+        let mut fitter = QuadraticFitter {
+            data: Data::default(),
+            paramaters: QuadraticParameters::default(),
+            fit_points: Vec::new(),
+            fit_report: "Fitted with other model".to_string(),
+        };
+
+        // Set the parameter values and uncertainties
+        fitter.paramaters.a.value = Some(a.0);
+        fitter.paramaters.a.uncertainty = Some(a.1);
+        fitter.paramaters.b.value = Some(b.0);
+        fitter.paramaters.b.uncertainty = Some(b.1);
+        fitter.paramaters.c.value = Some(c.0);
+        fitter.paramaters.c.uncertainty = Some(c.1);
+
+        // Generate fit points
+        let num_points = 100;
+        let step_size = (max_x - min_x) / (num_points as f64);
+        fitter.fit_points.clear();
+        for i in 0..=num_points {
+            let x = min_x + i as f64 * step_size;
+            let y = fitter.paramaters.a.value.unwrap_or(0.0) * x.powi(2)
+                + fitter.paramaters.b.value.unwrap_or(0.0) * x
+                + fitter.paramaters.c.value.unwrap_or(0.0);
+            fitter.fit_points.push([x, y]);
+        }
+
+        fitter
+    }
+
     pub fn lmfit(&mut self) -> PyResult<()> {
         log::info!("Fitting data with a linear line using `lmfit`.");
         Python::with_gil(|py| {
@@ -198,11 +235,11 @@ def QuadraticFit(x_data: list, y_data: list, a: list = ("a", -np.inf, np.inf, 0.
             let fit_report = result.get_item(3)?.extract::<String>()?;
 
             self.paramaters.a.value = Some(params[0].1);
-            self.paramaters.a.uncertainity = Some(params[0].2);
+            self.paramaters.a.uncertainty = Some(params[0].2);
             self.paramaters.b.value = Some(params[1].1);
-            self.paramaters.b.uncertainity = Some(params[1].2);
+            self.paramaters.b.uncertainty = Some(params[1].2);
             self.paramaters.c.value = Some(params[2].1);
-            self.paramaters.c.uncertainity = Some(params[2].2);
+            self.paramaters.c.uncertainty = Some(params[2].2);
 
             self.fit_points = x.iter().zip(y.iter()).map(|(&x, &y)| [x, y]).collect();
             self.fit_report = fit_report;
@@ -218,7 +255,7 @@ def QuadraticFit(x_data: list, y_data: list, a: list = ("a", -np.inf, np.inf, 0.
                 ui.label(format!(
                     "a: {:.3} ± {:.3}",
                     a,
-                    self.paramaters.a.uncertainity.unwrap_or(0.0)
+                    self.paramaters.a.uncertainty.unwrap_or(0.0)
                 ));
             }
             ui.separator();
@@ -226,7 +263,7 @@ def QuadraticFit(x_data: list, y_data: list, a: list = ("a", -np.inf, np.inf, 0.
                 ui.label(format!(
                     "b: {:.3} ± {:.3}",
                     b,
-                    self.paramaters.b.uncertainity.unwrap_or(0.0)
+                    self.paramaters.b.uncertainty.unwrap_or(0.0)
                 ));
             }
             ui.separator();
@@ -234,7 +271,7 @@ def QuadraticFit(x_data: list, y_data: list, a: list = ("a", -np.inf, np.inf, 0.
                 ui.label(format!(
                     "c: {:.3} ± {:.3}",
                     c,
-                    self.paramaters.c.uncertainity.unwrap_or(0.0)
+                    self.paramaters.c.uncertainty.unwrap_or(0.0)
                 ));
             }
             ui.separator();

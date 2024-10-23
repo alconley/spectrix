@@ -1,4 +1,4 @@
-#[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(PartialEq, Default, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Data {
     pub x: Vec<f64>,
     pub y: Vec<f64>,
@@ -12,7 +12,7 @@ pub struct Parameter {
     pub initial_guess: f64,
     pub vary: bool,
     pub value: Option<f64>,
-    pub uncertainity: Option<f64>,
+    pub uncertainty: Option<f64>,
 }
 
 impl Default for Parameter {
@@ -24,7 +24,7 @@ impl Default for Parameter {
             initial_guess: 0.0,
             vary: true,
             value: None,
-            uncertainity: None,
+            uncertainty: None,
         }
     }
 }
@@ -62,7 +62,7 @@ impl Parameter {
         if let Some(value) = self.value {
             ui.separator();
             ui.label(format!("{:.3}", value));
-            ui.label(format!("{:.3}", self.uncertainity.unwrap_or(0.0)));
+            ui.label(format!("{:.3}", self.uncertainty.unwrap_or(0.0)));
         }
     }
 }

@@ -171,18 +171,21 @@ impl Fits {
                 ui.label("Mean");
                 ui.label("FWHM");
                 ui.label("Area");
+                ui.label("Amplitude");
+                ui.label("Sigma");
+
                 ui.end_row();
 
                 if self.temp_fit.is_some() {
-                    ui.label("Current");
+                    ui.label("Temp");
 
-                    // if let Some(temp_fit) = &self.temp_fit {
-                    //     temp_fit.fitter_stats(ui);
-                    // }
+                    if let Some(temp_fit) = &mut self.temp_fit {
+                        temp_fit.fitter_stats(ui, true);
+                    }
                 }
 
                 if !self.stored_fits.is_empty() {
-                    for (i, fit) in self.stored_fits.iter().enumerate() {
+                    for (i, fit) in self.stored_fits.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
                             ui.label(format!("{}", i));
 
@@ -194,7 +197,7 @@ impl Fits {
 
                             ui.separator();
                         });
-                        // fit.fitter_stats(ui);
+                        fit.fitter_stats(ui, true);
                     }
                 }
             });
@@ -235,6 +238,10 @@ impl Fits {
 
             if let Some(temp_fit) = &mut self.temp_fit {
                 temp_fit.fit_result_ui(ui);
+            }
+
+            for fit in &mut self.stored_fits {
+                fit.fit_result_ui(ui);
             }
         });
     }

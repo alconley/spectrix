@@ -10,13 +10,48 @@ def gaussian(x, amplitude, mean, sigma):
 def gaussian(x, amplitude, mean, sigma):
     return amplitude * np.exp(-(x - mean)**2 / (2 * sigma**2))
 
-def MultipleGaussianFit(x_data: list, y_data: list, peak_markers: list, 
-                        equal_sigma: bool = True, free_position: bool = True,
-                        bg_type: str = 'linear', slope: list = ("slope", -np.inf, np.inf, 0.0, True), intercept = ("intercept", -np.inf, np.inf, 0.0, True),
-                        a: list = ("a", -np.inf, np.inf, 0.0, True), b = ("b", -np.inf, np.inf, 0.0, True), c: list = ("a", -np.inf, np.inf, 0.0, True),
-                        amplitude: list = ("amplitude", -np.inf, np.inf, 0.0, True), decay = ("decay", -np.inf, np.inf, 0.0, True)):
+import numpy as np
+import lmfit
 
-    # Initialize the model with or without a background based on the flag
+def MultipleGaussianFit(x_data: list, y_data: list, peak_markers: list, bin_width: float, 
+                        equal_sigma: bool = True, free_position: bool = True,
+                        background_params: dict = None):
+    """
+    Multiple Gaussian fit function with background model support.
+    
+    Parameters:
+    - x_data, y_data: Lists of data points.
+    - peak_markers: List of peak positions for the Gaussians.
+    - equal_sigma: Whether to constrain all Gaussians to have the same sigma.
+    - free_position: Whether to allow the positions of Gaussians to vary.
+    - background_params: Dictionary containing background model type and parameters.
+    """
+    
+    # Default background params if none are provided
+    if background_params is None:
+        background_params = {
+            'bg_type': 'linear',
+            'slope': ("slope", -np.inf, np.inf, 0.0, True),
+            'intercept': ("intercept", -np.inf, np.inf, 0.0, True),
+            'a': ("a", -np.inf, np.inf, 0.0, True),
+            'b': ("b", -np.inf, np.inf, 0.0, True),
+            'c': ("c", -np.inf, np.inf, 0.0, True),
+            'exponent': ("exponent", -np.inf, np.inf, 0.0, True),
+            'amplitude': ("amplitude", -np.inf, np.inf, 0.0, True),
+            'decay': ("decay", -np.inf, np.inf, 0.0, True),
+        }
+    
+    bg_type = background_params.get('bg_type', 'linear')
+    slope = background_params.get('slope')
+    intercept = background_params.get('intercept')
+    a = background_params.get('a')
+    b = background_params.get('b')
+    c = background_params.get('c')
+    amplitude = background_params.get('amplitude')
+    exponent = background_params.get('exponent')
+    decay = background_params.get('decay')
+
+    # Initialize the model with or without a background based on bg_type
     if bg_type == 'linear': 
         model = lmfit.models.LinearModel(prefix='bg_')
         params = model.make_params(slope=slope[3], intercept=intercept[3])
@@ -35,9 +70,9 @@ def MultipleGaussianFit(x_data: list, y_data: list, peak_markers: list,
         params['bg_decay'].set(min=decay[1], max=decay[2], value=decay[3], vary=decay[4])
     elif bg_type == 'powerlaw':
         model = lmfit.models.PowerLawModel(prefix='bg_')
-        params = model.make_params(amplitude=amplitude[3], decay=decay[3])
+        params = model.make_params(amplitude=amplitude[3], exponent=exponent[3])
         params['bg_amplitude'].set(min=amplitude[1], max=amplitude[2], value=amplitude[3], vary=amplitude[4])
-        params['bg_decay'].set(min=decay[1], max=decay[2], value=decay[3], vary=decay[4])
+        params['bg_exponent'].set(min=exponent[1], max=exponent[2], value=exponent[3], vary=exponent[4])
     elif bg_type is None:
         model = None
         params = lmfit.Parameters()
@@ -45,66 +80,60 @@ def MultipleGaussianFit(x_data: list, y_data: list, peak_markers: list,
         raise ValueError("Unsupported background model")
 
     first_gaussian = lmfit.Model(gaussian, prefix=f'g0_')
-    
+
     if model is None:
         model = first_gaussian
     else:
         model += first_gaussian
         
-    peak_markers = sorted(peak_markers) # sort the peak markers in ascending order
-    
+    if len(peak_markers) == 0:
+        peak_markers = [x_data[np.argmax(y_data)]]
+
+    peak_markers = sorted(peak_markers)  # sort the peak markers in ascending order
+
     estimated_amplitude = 1000
     estimated_sigma = 10
 
     params.update(first_gaussian.make_params(amplitude=estimated_amplitude, mean=peak_markers[0], sigma=estimated_sigma))
     params['g0_sigma'].set(min=0)  # Initial constraint for the first Gaussian's sigma
     params[f"g0_amplitude"].set(min=0)
-    
+
     params.add(f'g0_fwhm', expr=f'2.35482 * g0_sigma')  # FWHM = 2 * sqrt(2 * ln(2)) * sigma
     params[f"g0_fwhm"].set(min=0)
 
-    params.add(f'g0_area', expr=f'g0_amplitude * sqrt(2 * pi) * g0_sigma')  # Area under the Gaussian
+    params.add(f'g0_area', expr=f'g0_amplitude * sqrt(2 * pi) * g0_sigma / {bin_width}')  # Area under the Gaussian
     params[f"g0_area"].set(min=0)
-    
-    # Fix the center of the first Gaussian if free_position=False
+
     if not free_position:
         params['g0_mean'].set(vary=False)
 
-    # Set min and max for the mean based on peak markers
     params['g0_mean'].set(min=x_data[0], max=peak_markers[1] if len(peak_markers) > 1 else x_data[-1])
 
     # Add additional Gaussians
     for i, peak in enumerate(peak_markers[1:], start=1):
         g = lmfit.Model(gaussian, prefix=f'g{i}_')
         model += g
-        
-        # Estimate amplitude for each peak
-        estimated_amplitude = 1000
 
+        estimated_amplitude = 1000
         params.update(g.make_params(amplitude=estimated_amplitude, mean=peak, sigma=10))
-        
-        # Set the mean min/max based on the current and next peak
+
         min_mean = peak_markers[i-1]
         max_mean = peak_markers[i+1] if i + 1 < len(peak_markers) else x_data[-1]
         params[f'g{i}_mean'].set(min=min_mean, max=max_mean)
-        
-        params.add(f'g{i}_fwhm', expr=f'2.35482 * g{i}_sigma')  # FWHM = 2 * sqrt(2 * ln(2)) * sigma
+
+        params.add(f'g{i}_fwhm', expr=f'2.35482 * g{i}_sigma')
         params[f"g{i}_fwhm"].set(min=0)
 
-        
-        params.add(f'g{i}_area', expr=f'g{i}_amplitude * sqrt(2 * pi) * g{i}_sigma')  # Area under the Gaussian
+        params.add(f'g{i}_area', expr=f'g{i}_amplitude * sqrt(2 * pi) * g{i}_sigma / {bin_width}')
         params[f"g{i}_area"].set(min=0)
 
-
-        # Set the sigma parameter depending on whether equal_sigma is True or False
         if equal_sigma:
-            params[f'g{i}_sigma'].set(expr='g0_sigma')  # Constrain sigma to be the same as g1_sigma
+            params[f'g{i}_sigma'].set(expr='g0_sigma')
         else:
-            params[f'g{i}_sigma'].set(min=0)  # Allow different sigmas for each Gaussian
+            params[f'g{i}_sigma'].set(min=0)
 
         params[f'g{i}_amplitude'].set(min=0)
 
-        # Fix the center of the Gaussian if free_position=False
         if not free_position:
             params[f'g{i}_mean'].set(vary=False)
 
@@ -117,84 +146,42 @@ def MultipleGaussianFit(x_data: list, y_data: list, peak_markers: list,
     print("\nFit Report:")
     print(result.fit_report())
 
-    # Create a list of native Python float tuples for Gaussian parameters
+    # Extract Gaussian and background parameters
     gaussian_params = []
     for i in range(len(peak_markers)):
-        
-        amplitude = float(result.params[f'g{i}_amplitude'].value)      # Convert the value to native Python float
-        amplitude_uncertainty = result.params[f'g{i}_amplitude'].stderr      # Convert the uncertainty to native Python float
-        if amplitude_uncertainty is None:
-            amplitude_uncertainty = float(0.0)
-        else:
-            amplitude_uncertainty = float(amplitude_uncertainty)
-            
+        amplitude = float(result.params[f'g{i}_amplitude'].value)
+        amplitude_uncertainty = result.params[f'g{i}_amplitude'].stderr or 0.0
         mean = float(result.params[f'g{i}_mean'].value)
-        mean_uncertainty = result.params[f'g{i}_mean'].stderr
-        if mean_uncertainty is None:
-            mean_uncertainty = float(0.0)
-        else:
-            mean_uncertainty = float(mean_uncertainty)
-            
+        mean_uncertainty = result.params[f'g{i}_mean'].stderr or 0.0
         sigma = float(result.params[f'g{i}_sigma'].value)
-        sigma_uncertainty = result.params[f'g{i}_sigma'].stderr
-        if sigma_uncertainty is None:
-            sigma_uncertainty = float(0.0)
-        else:
-            sigma_uncertainty = float(sigma_uncertainty)
-            
+        sigma_uncertainty = result.params[f'g{i}_sigma'].stderr or 0.0
         fwhm = float(result.params[f'g{i}_fwhm'].value)
-        fwhm_uncertainty = result.params[f'g{i}_fwhm'].stderr
-        if fwhm_uncertainty is None:
-            fwhm_uncertainty = float(0.0)
-        else:
-            fwhm_uncertainty = float(fwhm_uncertainty)
-            
+        fwhm_uncertainty = result.params[f'g{i}_fwhm'].stderr or 0.0
         area = float(result.params[f'g{i}_area'].value)
-        area_uncertainty = result.params[f'g{i}_area'].stderr
-        if area_uncertainty is None:
-            area_uncertainty = float(0.0)
-        else:
-            area_uncertainty = float(area_uncertainty)
-        
-        
+        area_uncertainty = result.params[f'g{i}_area'].stderr or 0.0
+
         gaussian_params.append((
-            amplitude,
-            amplitude_uncertainty,
-            mean,
-            mean_uncertainty,
-            sigma,
-            sigma_uncertainty,
-            fwhm,
-            fwhm_uncertainty,
-            area,
-            area_uncertainty
+            amplitude, amplitude_uncertainty, mean, mean_uncertainty,
+            sigma, sigma_uncertainty, fwhm, fwhm_uncertainty, area, area_uncertainty
         ))
-    
-    # Create a list of native Python float tuples for Background parameters
+
+    # Extract background parameters
     background_params = []
     if bg_type != 'None':
         for key in result.params:
             if 'bg_' in key:
-                value = float(result.params[key].value)      # Convert the value to native Python float
-                uncertainty=result.params[key].stderr      # Convert the uncertainty to native Python float
-                if uncertainty is None:
-                    uncertainty = float(0.0)
-                else:
-                    uncertainty = float(uncertainty)
-                
-                background_params.append((
-                    key,  # Keep the parameter name
-                    value,      # Convert the value to native Python float
-                    uncertainty      # Convert the uncertainty to native Python float
-                ))
+                value = float(result.params[key].value)
+                uncertainty = result.params[key].stderr or 0.0
+                background_params.append((key, value, uncertainty))
 
-    # Create smooth fit line with plenty of data points
+    # Create smooth fit line
     x_data_line = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
     y_data_line = result.eval(x=x_data_line)
 
     fit_report = str(result.fit_report())
 
-    return gaussian_params, background_params, x_data_line, y_data_line, fit_report
+    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, result
+
 
 # Multiple Gaussian fitting function
 def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.inf, 0.0, True), intercept = ("intercept", -np.inf, np.inf, 0.0, True)):
@@ -393,10 +380,10 @@ counts_filtered = counts[fit_mask]
 
 
 # Define the peak markers (this is where you mark the initial guesses for the peak positions)
-peak_markers = [500, 550, 575]  # Replace with actual peak guesses
+peak_markers = [475, 550, 575]  # Replace with actual peak guesses
 
 # Fit the data
-gaussian_params, background_params, x_data_line, y_data_line, fit_report, result = MultipleGaussianFit(bin_centers_filtered, counts_filtered, peak_markers, equal_sigma=True, free_position=True, bg_type='linear')
+gaussian_params, background_params, x_data_line, y_data_line, fit_report, result = MultipleGaussianFit(bin_centers_filtered, counts_filtered, peak_markers, 1.0, equal_sigma=True, free_position=True)
 
 # slope = ("slope", -np.inf, np.inf, -2.0, False)
 # intercept = ("intercept", -np.inf, np.inf, 0.0, False)

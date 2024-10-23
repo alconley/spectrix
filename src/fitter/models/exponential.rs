@@ -16,6 +16,7 @@ impl Default for ExponentialParameters {
             },
             decay: Parameter {
                 name: "decay".to_string(),
+                initial_guess: 500.0,
                 ..Default::default()
             },
         }
@@ -64,6 +65,39 @@ impl ExponentialFitter {
             fit_points: Vec::new(),
             fit_report: String::new(),
         }
+    }
+
+    pub fn new_from_parameters(
+        amplitude: (f64, f64),
+        decay: (f64, f64),
+        min_x: f64,
+        max_x: f64,
+    ) -> Self {
+        let mut fitter = ExponentialFitter {
+            data: Data::default(),
+            paramaters: ExponentialParameters::default(),
+            fit_points: Vec::new(),
+            fit_report: "Fitter with other model".to_string(),
+        };
+
+        // Set the parameter values and uncertainties
+        fitter.paramaters.amplitude.value = Some(amplitude.0);
+        fitter.paramaters.amplitude.uncertainty = Some(amplitude.1);
+        fitter.paramaters.decay.value = Some(decay.0);
+        fitter.paramaters.decay.uncertainty = Some(decay.1);
+
+        // Optionally generate fit points based on the x-range (min_x to max_x)
+        let num_points = 100;
+        let step_size = (max_x - min_x) / (num_points as f64);
+        fitter.fit_points.clear();
+        for i in 0..=num_points {
+            let x = min_x + i as f64 * step_size;
+            let y = fitter.paramaters.amplitude.value.unwrap_or(1.0)
+                * (-x / fitter.paramaters.decay.value.unwrap_or(1.0)).exp();
+            fitter.fit_points.push([x, y]);
+        }
+
+        fitter
     }
 
     pub fn lmfit(&mut self) -> PyResult<()> {
@@ -177,9 +211,9 @@ def ExponentialFit(x_data: list, y_data: list, amplitude: list = ("amplitude", -
             let fit_report = result.get_item(3)?.extract::<String>()?;
 
             self.paramaters.amplitude.value = Some(params[0].1);
-            self.paramaters.amplitude.uncertainity = Some(params[0].2);
+            self.paramaters.amplitude.uncertainty = Some(params[0].2);
             self.paramaters.decay.value = Some(params[1].1);
-            self.paramaters.decay.uncertainity = Some(params[1].2);
+            self.paramaters.decay.uncertainty = Some(params[1].2);
 
             self.fit_points = x.iter().zip(y.iter()).map(|(&x, &y)| [x, y]).collect();
             self.fit_report = fit_report;
@@ -195,7 +229,7 @@ def ExponentialFit(x_data: list, y_data: list, amplitude: list = ("amplitude", -
                 ui.label(format!(
                     "amplitude: {:.3} ± {:.3}",
                     amplitude,
-                    self.paramaters.amplitude.uncertainity.unwrap_or(0.0)
+                    self.paramaters.amplitude.uncertainty.unwrap_or(0.0)
                 ));
             }
             ui.separator();
@@ -203,7 +237,7 @@ def ExponentialFit(x_data: list, y_data: list, amplitude: list = ("amplitude", -
                 ui.label(format!(
                     "decay: {:.3} ± {:.3}",
                     decay,
-                    self.paramaters.decay.uncertainity.unwrap_or(0.0)
+                    self.paramaters.decay.uncertainty.unwrap_or(0.0)
                 ));
             }
             ui.separator();

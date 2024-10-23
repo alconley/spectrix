@@ -59,29 +59,8 @@ impl FitSettings {
         ui.separator();
 
         ui.horizontal(|ui| {
-            ui.label("Show Fit Lines: ");
-            ui.checkbox(&mut self.show_decomposition, "Decomposition")
-                .on_hover_text("Show the decomposition peaks");
-            ui.checkbox(&mut self.show_composition, "Composition")
-                .on_hover_text("Show the composition line");
-            ui.checkbox(&mut self.show_background, "Background")
-                .on_hover_text("Show the background line");
-        });
+            ui.label("Background Models");
 
-        ui.separator();
-
-        ui.heading("Gaussian Fit Settings");
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut self.equal_stddev, "Equal Standard Deviation")
-                .on_hover_text("Allow the standard deviation of the Gaussian to be free");
-            ui.checkbox(&mut self.free_position, "Free Position")
-                .on_hover_text("Allow the position of the Gaussian to be free");
-        });
-
-        ui.separator();
-
-        ui.heading("Background Models");
-        ui.horizontal(|ui| {
             ui.radio_value(
                 &mut self.background_model,
                 BackgroundModel::Linear(self.linear_params.clone()),
@@ -124,6 +103,28 @@ impl FitSettings {
             params.ui(ui);
             self.exponential_params = params.clone();
         }
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.label("Gaussian Fit Settings");
+            ui.checkbox(&mut self.equal_stddev, "Equal Standard Deviation")
+                .on_hover_text("Allow the standard deviation of the Gaussian to be free");
+            ui.checkbox(&mut self.free_position, "Free Position")
+                .on_hover_text("Allow the position of the Gaussian to be free");
+        });
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.label("Show Fit Lines: ");
+            ui.checkbox(&mut self.show_decomposition, "Decomposition")
+                .on_hover_text("Show the decomposition peaks");
+            ui.checkbox(&mut self.show_composition, "Composition")
+                .on_hover_text("Show the composition line");
+            ui.checkbox(&mut self.show_background, "Background")
+                .on_hover_text("Show the background line");
+        });
 
         ui.separator();
     }
