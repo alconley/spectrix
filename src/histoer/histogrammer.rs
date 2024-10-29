@@ -442,7 +442,8 @@ impl Histogrammer {
                 }
             })
         {
-            hist.lock().unwrap().bins = bins;
+            hist.lock().unwrap().bins = bins.clone();
+            hist.lock().unwrap().original_bins = bins;
             hist.lock().unwrap().underflow = underflow;
             hist.lock().unwrap().overflow = overflow;
         }

@@ -60,7 +60,15 @@ impl Histogram2D {
                         .y_projection
                         .as_mut()
                         .unwrap()
-                        .bins = bins;
+                        .bins = bins.clone();
+
+                    self.plot_settings
+                        .projections
+                        .y_projection
+                        .as_mut()
+                        .unwrap()
+                        .original_bins = bins;
+
                     self.plot_settings
                         .projections
                         .y_projection
@@ -68,6 +76,15 @@ impl Histogram2D {
                         .unwrap()
                         .name =
                         format!("Y-Projection of {}: x={:.2}-{:.2}", self.name, min_x, max_x);
+
+                    self.plot_settings
+                        .projections
+                        .y_projection
+                        .as_mut()
+                        .unwrap()
+                        .plot_settings
+                        .egui_settings
+                        .reset_axis = true;
                 }
             } else {
                 // create a new histogram and set the bins
@@ -77,7 +94,9 @@ impl Histogram2D {
                     (self.range.y.min, self.range.y.max),
                 );
                 let bins = self.y_projection(min_x, max_x);
-                y_histogram.bins = bins;
+                y_histogram.bins = bins.clone();
+                y_histogram.original_bins = bins;
+                y_histogram.plot_settings.egui_settings.reset_axis = true;
 
                 self.plot_settings.projections.y_projection = Some(y_histogram);
 
@@ -110,7 +129,13 @@ impl Histogram2D {
                         .x_projection
                         .as_mut()
                         .unwrap()
-                        .bins = bins;
+                        .bins = bins.clone();
+                    self.plot_settings
+                        .projections
+                        .x_projection
+                        .as_mut()
+                        .unwrap()
+                        .original_bins = bins;
                     self.plot_settings
                         .projections
                         .x_projection
@@ -118,6 +143,15 @@ impl Histogram2D {
                         .unwrap()
                         .name =
                         format!("X-Projection of {}: y={:.2}-{:.2}", self.name, min_y, max_y);
+
+                    self.plot_settings
+                        .projections
+                        .x_projection
+                        .as_mut()
+                        .unwrap()
+                        .plot_settings
+                        .egui_settings
+                        .reset_axis = true;
                 }
             } else {
                 let mut x_histogram = Histogram::new(
@@ -126,7 +160,8 @@ impl Histogram2D {
                     (self.range.x.min, self.range.x.max),
                 );
                 let bins = self.x_projection(min_y, max_y);
-                x_histogram.bins = bins;
+                x_histogram.bins = bins.clone();
+                x_histogram.original_bins = bins;
 
                 self.plot_settings.projections.x_projection = Some(x_histogram);
 

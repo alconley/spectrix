@@ -222,6 +222,11 @@ def PowerLawFit(x_data: list, y_data: list, amplitude: list = ("amplitude", -np.
         })
     }
 
+    pub fn evaluate(&self, x: f64) -> f64 {
+        self.paramaters.amplitude.value.unwrap_or(1.0)
+            * x.powf(self.paramaters.exponent.value.unwrap_or(-1.0))
+    }
+
     pub fn ui(&self, ui: &mut egui::Ui) {
         // add menu button for the fit report
         ui.horizontal(|ui| {

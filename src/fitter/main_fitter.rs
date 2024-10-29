@@ -202,6 +202,36 @@ impl Fitter {
         log::info!("Finished fitting background");
     }
 
+    pub fn subtract_background(&mut self, x_data: Vec<f64>, y_data: Vec<f64>) -> Option<Vec<f64>> {
+        // Ensure background fitting has been performed
+        if self.background_result.is_none() {
+            self.fit_background(); // Fit background if not done already
+        }
+
+        // Check if background fitting was successful
+        let background_fit = self.background_result.as_ref()?;
+
+        // Generate background values for each x_data point
+        let background_values: Vec<f64> = x_data
+            .iter()
+            .map(|&x| match background_fit {
+                BackgroundResult::Linear(fit) => fit.evaluate(x),
+                BackgroundResult::Quadratic(fit) => fit.evaluate(x),
+                BackgroundResult::PowerLaw(fit) => fit.evaluate(x),
+                BackgroundResult::Exponential(fit) => fit.evaluate(x),
+            })
+            .collect();
+
+        // Subtract the background values from the actual y_data
+        let corrected_y_data: Vec<f64> = y_data
+            .iter()
+            .zip(background_values.iter())
+            .map(|(&y, &bg)| y - bg)
+            .collect();
+
+        Some(corrected_y_data)
+    }
+
     pub fn get_peak_markers(&self) -> Vec<f64> {
         if self.fit_result.is_none() {
             match &self.fit_model {

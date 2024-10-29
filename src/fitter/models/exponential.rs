@@ -222,6 +222,11 @@ def ExponentialFit(x_data: list, y_data: list, amplitude: list = ("amplitude", -
         })
     }
 
+    pub fn evaluate(&self, x: f64) -> f64 {
+        self.paramaters.amplitude.value.unwrap_or(1.0)
+            * (-x / self.paramaters.decay.value.unwrap_or(1.0)).exp()
+    }
+
     pub fn ui(&self, ui: &mut egui::Ui) {
         // add menu button for the fit report
         ui.horizontal(|ui| {

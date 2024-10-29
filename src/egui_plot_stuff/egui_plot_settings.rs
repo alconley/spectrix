@@ -17,6 +17,7 @@ pub struct EguiPlotSettings {
     pub show_background: bool,
     pub allow_double_click_reset: bool,
     pub limit_scrolling: bool,
+    pub reset_axis: bool,
 }
 
 impl Default for EguiPlotSettings {
@@ -39,6 +40,7 @@ impl Default for EguiPlotSettings {
             show_background: true,
             allow_double_click_reset: true,
             limit_scrolling: false,
+            reset_axis: false,
         }
     }
 }
@@ -68,6 +70,10 @@ impl EguiPlotSettings {
                 );
                 ui.checkbox(&mut self.limit_scrolling, "Limit Scrolling"); // custom setting
 
+                if ui.button("Reset Axis").clicked() {
+                    self.reset_axis = true;
+                }
+
                 ui.separator();
 
                 if ui.button("Reset").clicked() {
@@ -81,6 +87,7 @@ impl EguiPlotSettings {
     pub fn apply_to_plot<'a>(&mut self, plot: egui_plot::Plot<'a>) -> egui_plot::Plot<'a> {
         let log_x = self.log_x;
         let log_y = self.log_y;
+        let reset = self.reset_axis;
 
         let plot = plot
             .show_x(self.show_x_value)
@@ -135,6 +142,14 @@ impl EguiPlotSettings {
         } else {
             plot
         };
+
+        let plot = if reset {
+            self.reset_axis = false;
+            plot.reset()
+        } else {
+            plot
+        };
+
         plot
     }
 }

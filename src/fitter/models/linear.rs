@@ -232,6 +232,12 @@ def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.in
         })
     }
 
+    pub fn evaluate(&self, x: f64) -> f64 {
+        let slope = self.paramaters.slope.value.unwrap_or(0.0);
+        let intercept = self.paramaters.intercept.value.unwrap_or(0.0);
+        slope * x + intercept
+    }
+
     pub fn ui(&self, ui: &mut egui::Ui) {
         // add menu button for the fit report
         ui.horizontal(|ui| {

@@ -248,6 +248,12 @@ def QuadraticFit(x_data: list, y_data: list, a: list = ("a", -np.inf, np.inf, 0.
         })
     }
 
+    pub fn evaluate(&self, x: f64) -> f64 {
+        self.paramaters.a.value.unwrap_or(0.0) * x.powi(2)
+            + self.paramaters.b.value.unwrap_or(0.0) * x
+            + self.paramaters.c.value.unwrap_or(0.0)
+    }
+
     pub fn ui(&self, ui: &mut egui::Ui) {
         // add menu button for the fit report
         ui.horizontal(|ui| {
