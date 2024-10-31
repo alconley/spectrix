@@ -16,10 +16,10 @@ impl Default for TreeBehavior {
     fn default() -> Self {
         Self {
             simplification_options: egui_tiles::SimplificationOptions {
-                prune_empty_tabs: true,
-                prune_empty_containers: true,
-                prune_single_child_tabs: true,
-                prune_single_child_containers: true,
+                prune_empty_tabs: false,
+                prune_empty_containers: false,
+                prune_single_child_tabs: false,
+                prune_single_child_containers: false,
                 all_panes_must_have_tabs: false,
                 join_nested_linear_containers: true,
             },
@@ -121,7 +121,14 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
     }
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
-        self.simplification_options
+        egui_tiles::SimplificationOptions {
+            prune_empty_tabs: false,
+            prune_empty_containers: false,
+            prune_single_child_tabs: false,
+            prune_single_child_containers: false,
+            all_panes_must_have_tabs: false,
+            join_nested_linear_containers: false,
+        }
     }
 
     fn min_size(&self) -> f32 {
@@ -172,14 +179,24 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
         tiles: &egui_tiles::Tiles<Pane>,
         tile_id: egui_tiles::TileId,
     ) -> egui::WidgetText {
-        if let Some(tab_name) = self.get_tab_name(&tile_id) {
-            tab_name.clone().into()
+        let mut title = if let Some(tab_name) = self.get_tab_name(&tile_id) {
+            tab_name.clone()
         } else {
             match tiles.get(tile_id) {
-                Some(Tile::Pane(pane)) => self.tab_title_for_pane(pane),
-                Some(Tile::Container(_container)) => "Container".into(),
-                _ => "Unknown".into(),
+                Some(Tile::Pane(pane)) => return self.tab_title_for_pane(pane),
+                Some(Tile::Container(_)) => "Container".to_string(),
+                _ => "Unknown".to_string(),
+            }
+        };
+
+        // Check if the tile is a container with children
+        if let Some(Tile::Container(container)) = tiles.get(tile_id) {
+            let children: Vec<_> = container.children().collect(); // Collect into a vector
+            if !children.is_empty() {
+                title = format!("{} 📂", title); // Add folder icon if children are present
             }
         }
+
+        title.into()
     }
 }

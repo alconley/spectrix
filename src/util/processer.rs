@@ -108,11 +108,11 @@ def get_2d_histograms(file_name):
 
                 let result_1d = module.getattr("get_1d_histograms")?.call1((file_name,))?;
 
-                log::info!("File: {}", file_name);
-                log::info!("Result 1D: {:?}", result_1d);
+                // log::info!("File: {}", file_name);
+                // log::info!("Result 1D: {:?}", result_1d);
 
                 let length_1d: usize = result_1d.len()?;
-                log::info!("Number of histograms: {}", length_1d);
+                // log::info!("Number of histograms: {}", length_1d);
 
                 for i in 0..length_1d {
                     let item = result_1d.get_item(i)?;
@@ -123,6 +123,8 @@ def get_2d_histograms(file_name):
                     // Split the path to get the grid name and the last part as the histogram name
                     let parts: Vec<&str> = full_name.split('/').collect();
                     let grid_name = parts[..parts.len() - 1].join("/"); // Join the folder parts as the grid name
+                                                                        // let grid_name = full_name.clone(); // Join the folder parts as the grid name
+                    log::info!("Grid name: {}", grid_name);
                     let hist_name = parts.last().unwrap(); // The last part is the histogram name
 
                     let mut counts: Vec<f64> = item.get_item(1)?.extract()?;
