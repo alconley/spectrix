@@ -254,15 +254,13 @@ impl HistogramScript {
                         let name = config.name.clone();
                         let bins = config.bins;
                         let range = config.range;
-                        let grid = config.grid.as_deref();
-                        h.add_hist1d(&name, bins, range, grid);
+                        h.add_hist1d(&name, bins, range);
                     }
                     HistoConfig::AddHisto2d(config) => {
                         let name = config.name.clone();
                         let bins = config.bins;
                         let range = config.range;
-                        let grid = config.grid.as_deref();
-                        h.add_hist2d(&name, bins, range, grid);
+                        h.add_hist2d(&name, bins, range);
                     }
                     _ => {}
                 }

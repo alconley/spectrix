@@ -192,7 +192,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
         // Check if the tile is a container with children
         if let Some(Tile::Container(container)) = tiles.get(tile_id) {
             let children: Vec<_> = container.children().collect(); // Collect into a vector
-            if !children.is_empty() {
+            if !children.is_empty() && title != "Histograms" {
                 title = format!("{} 📂", title); // Add folder icon if children are present
             }
         }

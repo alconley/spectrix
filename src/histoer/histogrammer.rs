@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use std::collections::{HashMap, HashSet};
 
+#[derive(serde::Deserialize, serde::Serialize, PartialEq)]
 pub enum ContainerType {
     Grid,
     Tabs,
@@ -20,7 +21,8 @@ pub enum ContainerType {
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
-pub struct TabInfo {
+pub struct ContainerInfo {
+    container_type: ContainerType,
     parent_id: Option<TileId>, // None if it's a top-level tab
     children: Vec<TileId>,     // Child tile IDs
     display_name: String,      // Display name for the tab
@@ -34,10 +36,10 @@ pub struct Histogrammer {
     pub behavior: TreeBehavior,
     #[serde(skip)]
     pub handles: Vec<JoinHandle<()>>, // Multiple thread handles
-    pub grid_histogram_map: HashMap<String, TabInfo>, // Map full path to TabInfo
+    pub grid_histogram_map: HashMap<String, ContainerInfo>, // Map full path to TabInfo
     #[serde(skip)]
     pub selected_histograms: HashSet<String>, // Track selected histograms with unique identifiers
-    pub grid_container: Option<Vec<TileId>>,          // Vector of grid container IDs
+    pub grid_container: Option<Vec<TileId>>,                // Vector of grid container IDs
 }
 
 impl Default for Histogrammer {
@@ -55,19 +57,14 @@ impl Default for Histogrammer {
 }
 
 impl Histogrammer {
-    pub fn add_hist1d(
-        &mut self,
-        name: &str,
-        bins: usize,
-        range: (f64, f64),
-        tab_path: Option<&str>,
-    ) {
-        let mut pane_id_to_update = None;
+    pub fn add_hist1d(&mut self, name: &str, bins: usize, range: (f64, f64)) {
+        log::debug!("Creating or updating 1D histogram '{}'", name);
 
-        // Check if a histogram with the same name already exists
+        let mut pane_id_to_update = None;
         for (id, tile) in self.tree.tiles.iter_mut() {
             if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
                 if hist.lock().unwrap().name == name {
+                    log::debug!("Resetting existing 1D histogram '{}'", name);
                     hist.lock().unwrap().reset();
                     pane_id_to_update = Some(*id);
                     break;
@@ -76,31 +73,32 @@ impl Histogrammer {
         }
 
         if pane_id_to_update.is_none() {
-            // If no existing histogram was found, create a new one
+            log::debug!(
+                "No existing histogram found, creating new pane for '{}'",
+                name
+            );
             let hist = Histogram::new(name, bins, range);
             let pane = Pane::Histogram(Arc::new(Mutex::new(Box::new(hist))));
             let pane_id = self.tree.tiles.insert_pane(pane);
 
-            // Determine the tab ID based on the path or default to the root
-            let tab_full_path = tab_path.unwrap_or(name).to_string();
-            let tab_id = if let Some(tab_info) = self.grid_histogram_map.get(&tab_full_path) {
-                tab_info.tab_id
-            } else {
-                self.create_tabs(tab_full_path.clone())
-            };
+            // Pass the full name directly to create_tabs to parse into tabs and grids
+            let grid_id = self.create_tabs(name.to_string());
 
-            // Add the new pane to the tab container in the tree
-            if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
-                self.tree.tiles.get_mut(tab_id)
+            if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Grid(grid))) =
+                self.tree.tiles.get_mut(grid_id)
             {
-                tabs.add_child(pane_id);
+                log::debug!(
+                    "Adding histogram '{}' to grid container ID {:?}",
+                    name,
+                    grid_id
+                );
+                grid.add_child(pane_id);
 
-                // Update the entry in grid_histogram_map for the tab
                 self.grid_histogram_map
-                    .entry(tab_full_path.clone())
+                    .entry(name.to_string())
                     .and_modify(|tab_info| tab_info.children.push(pane_id));
             } else {
-                log::error!("Invalid tab ID provided for {}", tab_full_path);
+                log::error!("Failed to retrieve grid container for '{}'", name);
             }
         }
     }
@@ -110,14 +108,14 @@ impl Histogrammer {
         name: &str,
         bins: (usize, usize),
         range: ((f64, f64), (f64, f64)),
-        tab_path: Option<&str>,
     ) {
-        let mut pane_id_to_update = None;
+        log::debug!("Creating or updating 2D histogram '{}'", name);
 
-        // Check if a histogram with the same name already exists
+        let mut pane_id_to_update = None;
         for (id, tile) in self.tree.tiles.iter_mut() {
             if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
                 if hist.lock().unwrap().name == name {
+                    log::debug!("Resetting existing 2D histogram '{}'", name);
                     hist.lock().unwrap().reset();
                     pane_id_to_update = Some(*id);
                     break;
@@ -126,32 +124,59 @@ impl Histogrammer {
         }
 
         if pane_id_to_update.is_none() {
-            // If no existing histogram was found, create a new one
+            log::debug!(
+                "No existing histogram found, creating new pane for '{}'",
+                name
+            );
             let hist = Histogram2D::new(name, bins, range);
             let pane = Pane::Histogram2D(Arc::new(Mutex::new(Box::new(hist))));
             let pane_id = self.tree.tiles.insert_pane(pane);
 
-            // Determine the tab ID based on the path or default to the root
-            let tab_full_path = tab_path.unwrap_or(name).to_string();
-            let tab_id = if let Some(tab_info) = self.grid_histogram_map.get(&tab_full_path) {
-                tab_info.tab_id
-            } else {
-                self.create_tabs(tab_full_path.clone())
-            };
+            // Pass the full name directly to create_tabs to parse into tabs and grids
+            let grid_id = self.create_tabs(name.to_string());
 
-            // Add the new pane to the tab container in the tree
-            if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
-                self.tree.tiles.get_mut(tab_id)
+            if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Grid(grid))) =
+                self.tree.tiles.get_mut(grid_id)
             {
-                tabs.add_child(pane_id);
+                log::debug!(
+                    "Adding 2D histogram '{}' to grid container ID {:?}",
+                    name,
+                    grid_id
+                );
+                grid.add_child(pane_id);
 
-                // Update the entry in grid_histogram_map for the tab
                 self.grid_histogram_map
-                    .entry(tab_full_path.clone())
+                    .entry(name.to_string())
                     .and_modify(|tab_info| tab_info.children.push(pane_id));
             } else {
-                log::error!("Invalid tab ID provided for {}", tab_full_path);
+                log::error!("Failed to retrieve grid container for '{}'", name);
             }
+        }
+    }
+
+    fn ensure_root(&mut self) -> TileId {
+        // Ensure that `self.tree.root` has been initialized
+        if let Some(root_id) = self.tree.root {
+            root_id
+        } else {
+            // Initialize the root as the main tab container if it's not set
+            let main_tab = egui_tiles::Container::new_tabs(vec![]);
+            let main_container_id = self.tree.tiles.insert_new(main_tab.into());
+            self.tree.root = Some(main_container_id);
+
+            // Insert into grid_histogram_map
+            self.grid_histogram_map.insert(
+                self.name.clone(),
+                ContainerInfo {
+                    container_type: ContainerType::Tabs,
+                    parent_id: None,
+                    children: vec![],
+                    display_name: self.name.clone(),
+                    tab_id: main_container_id,
+                },
+            );
+
+            main_container_id
         }
     }
 
@@ -275,9 +300,8 @@ impl Histogrammer {
         column_name: &str,
         bins: usize,
         range: (f64, f64),
-        grid: Option<&str>,
     ) {
-        self.add_hist1d(name, bins, range, grid); // Add the histogram.
+        self.add_hist1d(name, bins, range); // Add the histogram.
         self.fill_hist1d(name, lf, column_name); // Fill it with data.
     }
 
@@ -438,9 +462,8 @@ impl Histogrammer {
         y_column_name: &str,
         bins: (usize, usize),
         range: ((f64, f64), (f64, f64)),
-        grid: Option<&str>,
     ) {
-        self.add_hist2d(name, bins, range, grid); // Add the histogram.
+        self.add_hist2d(name, bins, range); // Add the histogram.
         self.fill_hist2d(name, lf, x_column_name, y_column_name); // Fill it with data.
     }
 
@@ -451,9 +474,8 @@ impl Histogrammer {
         underflow: u64,
         overflow: u64,
         range: (f64, f64),
-        grid: Option<&str>,
     ) {
-        self.add_hist1d(name, bins.len(), range, grid);
+        self.add_hist1d(name, bins.len(), range);
 
         // set the bin values for the histogram
         if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
@@ -477,10 +499,9 @@ impl Histogrammer {
         name: &str,
         bins: Vec<Vec<u64>>,
         range: ((f64, f64), (f64, f64)),
-        grid: Option<&str>,
     ) {
         // First, add the 2D histogram (with the bin size and range)
-        self.add_hist2d(name, (bins.len(), bins[0].len()), range, grid);
+        self.add_hist2d(name, (bins.len(), bins[0].len()), range);
 
         let mut min_value = u64::MAX;
         let mut max_value = u64::MIN;
@@ -577,85 +598,146 @@ impl Histogrammer {
         });
     }
 
-    pub fn create_tabs(&mut self, path: String) -> egui_tiles::TileId {
-        let mut current_container_id = self.tree.root.unwrap_or_else(|| {
-            // Initialize root as the main tab container
-            let main_tab = egui_tiles::Container::new_tabs(vec![]);
-            let main_container_id = self.tree.tiles.insert_new(main_tab.into());
-            self.behavior
-                .set_tile_tab_mapping(main_container_id, self.name.clone());
-            self.tree.root = Some(main_container_id);
+    pub fn create_tabs(&mut self, name: String) -> TileId {
+        // Ensure root container exists
+        let mut current_container_id = self.ensure_root();
+        let path_components: Vec<&str> = name.split('/').collect();
+        let mut accumulated_path = String::new();
 
-            // Insert into grid_histogram_map
-            self.grid_histogram_map.insert(
-                self.name.clone(),
-                TabInfo {
-                    parent_id: None,
-                    children: vec![],
-                    display_name: self.name.clone(),
-                    tab_id: main_container_id,
-                },
-            );
-            main_container_id
-        });
-
-        let mut full_path = String::new();
-
-        for tab_name in path.split('/') {
-            if !full_path.is_empty() {
-                full_path.push('/');
+        // Traverse each component in the name to build the tab structure
+        for (i, component) in path_components.iter().enumerate() {
+            if i > 0 {
+                accumulated_path.push('/');
             }
-            full_path.push_str(tab_name);
+            accumulated_path.push_str(component);
 
-            let tab_id = if let Some(tab_info) = self.grid_histogram_map.get(&full_path) {
-                tab_info.tab_id
+            if let Some(container_info) = self.grid_histogram_map.get(&accumulated_path) {
+                current_container_id = container_info.tab_id;
             } else {
-                // Create a new tab for each path component
-                let new_tab = egui_tiles::Container::new_tabs(vec![]);
-                let new_tab_id = self.tree.tiles.insert_new(new_tab.into());
-                self.behavior
-                    .set_tile_tab_mapping(new_tab_id, tab_name.to_string());
-
-                // Attach this new tab to its parent
-                if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
-                    self.tree.tiles.get_mut(current_container_id)
-                {
-                    tabs.add_child(new_tab_id);
-                } else {
-                    log::error!(
-                        "Parent container ID {:?} is not a Tabs container",
-                        current_container_id
-                    );
-                }
-
-                // Insert into grid_histogram_map
-                self.grid_histogram_map.insert(
-                    full_path.clone(),
-                    TabInfo {
-                        parent_id: Some(current_container_id),
-                        children: vec![],
-                        display_name: tab_name.to_string(),
-                        tab_id: new_tab_id,
-                    },
+                log::debug!(
+                    "Creating tab '{}' for path '{}'",
+                    component,
+                    accumulated_path
                 );
 
-                new_tab_id
-            };
+                // Create a new tab container at each level except the last
+                if i < path_components.len() - 1 {
+                    let new_tab_id = self.add_tab_container(current_container_id, component);
 
-            current_container_id = tab_id;
+                    self.grid_histogram_map.insert(
+                        accumulated_path.clone(),
+                        ContainerInfo {
+                            container_type: ContainerType::Tabs,
+                            parent_id: Some(current_container_id),
+                            children: vec![],
+                            display_name: component.to_string(),
+                            tab_id: new_tab_id,
+                        },
+                    );
+                    current_container_id = new_tab_id;
+                }
+            }
         }
 
-        // Insert the final component into grid_histogram_map if it doesn't already exist
-        self.grid_histogram_map
-            .entry(path.clone())
-            .or_insert(TabInfo {
-                parent_id: Some(current_container_id),
-                children: vec![],
-                display_name: path.split('/').last().unwrap_or("").to_string(),
-                tab_id: current_container_id,
-            });
+        // The last component should have a grid for holding histograms
+        let histograms_grid_path = format!("{}/Histograms", accumulated_path);
+        if let Some(container_info) = self.grid_histogram_map.get(&histograms_grid_path) {
+            log::debug!(
+                "Reusing existing Histograms grid for path: {}",
+                histograms_grid_path
+            );
+            container_info.tab_id
+        } else {
+            let grid_id = self.add_histograms_grid(current_container_id);
+            log::debug!(
+                "Creating new Histograms grid for path: {}",
+                histograms_grid_path
+            );
 
-        current_container_id
+            self.grid_histogram_map.insert(
+                histograms_grid_path.clone(),
+                ContainerInfo {
+                    container_type: ContainerType::Grid,
+                    parent_id: Some(current_container_id),
+                    children: vec![],
+                    display_name: "Histograms".to_string(),
+                    tab_id: grid_id,
+                },
+            );
+            grid_id
+        }
+    }
+
+    fn add_tab_container(&mut self, parent_id: TileId, name: &str) -> TileId {
+        // Create a new Tabs container
+        let new_tab = egui_tiles::Container::new_tabs(vec![]);
+        let new_tab_id = self.tree.tiles.insert_new(new_tab.into());
+        self.behavior
+            .set_tile_tab_mapping(new_tab_id, name.to_string());
+
+        // Attach the new tab to its parent container
+        if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(parent_tabs))) =
+            self.tree.tiles.get_mut(parent_id)
+        {
+            parent_tabs.add_child(new_tab_id);
+        } else {
+            log::error!(
+                "Parent container ID {:?} is not a Tabs container",
+                parent_id
+            );
+        }
+
+        new_tab_id
+    }
+
+    fn add_histograms_grid(&mut self, parent_tab_id: TileId) -> TileId {
+        // Construct the key for lookup in grid_histogram_map
+        let histograms_key = format!("{:?}/Histograms", parent_tab_id);
+
+        // Check if there's already a "Histograms" grid under the parent
+        if let Some(container_info) = self.grid_histogram_map.get(&histograms_key) {
+            log::debug!(
+                "Reusing existing Histograms grid with ID {:?}",
+                container_info.tab_id
+            );
+            return container_info.tab_id; // Reuse the existing grid container
+        }
+
+        // Otherwise, create a new grid container
+        let grid_container = egui_tiles::Container::new_grid(vec![]);
+        let grid_id = self.tree.tiles.insert_new(grid_container.into());
+
+        // Set the display name for the grid as "Histograms"
+        self.behavior
+            .set_tile_tab_mapping(grid_id, "Histograms".to_string());
+
+        // Attach this grid to the specified parent tab container
+        if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
+            self.tree.tiles.get_mut(parent_tab_id)
+        {
+            tabs.add_child(grid_id);
+        } else {
+            log::error!(
+                "Parent container ID {:?} is not a Tabs container",
+                parent_tab_id
+            );
+        }
+
+        // Add the new grid to grid_histogram_map with the correct name and ID
+        self.grid_histogram_map.insert(
+            histograms_key.clone(),
+            ContainerInfo {
+                container_type: ContainerType::Grid,
+                parent_id: Some(parent_tab_id),
+                children: vec![],
+                display_name: "Histograms".to_string(),
+                tab_id: grid_id,
+            },
+        );
+
+        log::debug!("Created new Histograms grid with ID {:?}", grid_id);
+
+        grid_id
     }
 
     // pub fn reorganize(&mut self) {

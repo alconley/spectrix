@@ -7,13 +7,22 @@ use polars::prelude::*;
 #[allow(clippy::all)]
 pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
+    
+    // h.add_fill_hist1d("CATRINA0", &lf, "CATRINA0Energy", 4096, (0.0, 4096.0), None);
+    // h.add_fill_hist1d("CATRINA1", &lf, "CATRINA1Energy", 4096, (0.0, 4096.0), None);
+    // h.add_fill_hist1d("CATRINA2", &lf, "CATRINA2Energy", 4096, (0.0, 4096.0), None);
+
+    // h.add_fill_hist2d("CATRINA0 PSD", &lf, "CATRINA0Energy", "CATRINA0PSD", (512, 500), ((0.0, 4096.0), (0.0, 1.0)), None);
+    // h.add_fill_hist2d("CATRINA1 PSD", &lf, "CATRINA1Energy", "CATRINA1PSD", (512, 500), ((0.0, 4096.0), (0.0, 1.0)), None);
+    // h.add_fill_hist2d("CATRINA2 PSD", &lf, "CATRINA2Energy", "CATRINA2PSD", (512, 500), ((0.0, 4096.0), (0.0, 1.0)), None);
+
+
     let lf = lf.with_column(
         (lit(-1.77049e-06)*col("PIPS1000Energy")*col("PIPS1000Energy") + lit(0.544755003513083)*col("PIPS1000Energy") + lit(-1.36822594543883)).alias("PIPS1000EnergyCalibrated")
     );
 
-
-    h.add_fill_hist1d("PIPS1000Energy", &lf, "PIPS1000Energy", 16384, (0.0, 16384.0), Some("PIPS1000/test/1d"));
-    h.add_fill_hist1d("PIPS1000EnergyCalibrated", &lf, "PIPS1000EnergyCalibrated", 600, (0.0, 1200.0), Some("PIPS1000/test/test1"));
+    h.add_fill_hist1d("test/PIPS1000Energy", &lf, "PIPS1000Energy", 16384, (0.0, 16384.0));
+    h.add_fill_hist1d("PIPS1000EnergyCalibrated", &lf, "PIPS1000EnergyCalibrated", 600, (0.0, 1200.0));
     
     /* 
 

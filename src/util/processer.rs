@@ -119,14 +119,7 @@ def get_2d_histograms(file_name):
 
                     // Extract the full path of the histogram
                     let full_name: String = item.get_item(0)?.extract()?;
-
-                    // Split the path to get the grid name and the last part as the histogram name
-                    let parts: Vec<&str> = full_name.split('/').collect();
-                    let grid_name = parts[..parts.len() - 1].join("/"); // Join the folder parts as the grid name
-                                                                        // let grid_name = full_name.clone(); // Join the folder parts as the grid name
-                    log::info!("Grid name: {}", grid_name);
-                    let hist_name = parts.last().unwrap(); // The last part is the histogram name
-
+                    // let grid_name = full_name.clone(); // Join the folder parts as the grid name
                     let mut counts: Vec<f64> = item.get_item(1)?.extract()?;
                     let underflow = counts.remove(0);
                     let overflow = counts.pop().unwrap();
@@ -136,12 +129,11 @@ def get_2d_histograms(file_name):
                     let counts_u64 = counts.iter().map(|&x| x as u64).collect::<Vec<u64>>();
 
                     self.histogrammer.add_hist1d_with_bin_values(
-                        hist_name,
+                        &full_name,
                         counts_u64,
                         underflow as u64,
                         overflow as u64,
                         range,
-                        Some(grid_name.as_str()),
                     );
                 }
 
@@ -152,10 +144,6 @@ def get_2d_histograms(file_name):
                     let item = result_2d.get_item(i)?;
 
                     let full_name: String = item.get_item(0)?.extract()?;
-                    let parts: Vec<&str> = full_name.split('/').collect();
-                    let grid_name = parts[..parts.len() - 1].join("/");
-                    let hist_name = parts.last().unwrap();
-
                     let counts: Vec<Vec<f64>> = item.get_item(1)?.extract()?;
                     let bin_edges_x: Vec<f64> = item.get_item(2)?.extract()?;
                     let bin_edges_y: Vec<f64> = item.get_item(3)?.extract()?;
@@ -169,12 +157,8 @@ def get_2d_histograms(file_name):
                         .map(|row| row.iter().map(|&x| x as u64).collect::<Vec<u64>>())
                         .collect::<Vec<Vec<u64>>>();
 
-                    self.histogrammer.add_hist2d_with_bin_values(
-                        hist_name,
-                        counts_u64,
-                        range,
-                        Some(grid_name.as_str()),
-                    );
+                    self.histogrammer
+                        .add_hist2d_with_bin_values(&full_name, counts_u64, range);
                 }
             }
 
