@@ -16,35 +16,35 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
     // h.add_fill_hist2d("CATRINA1 PSD", &lf, "CATRINA1Energy", "CATRINA1PSD", (512, 500), ((0.0, 4096.0), (0.0, 1.0)), None);
     // h.add_fill_hist2d("CATRINA2 PSD", &lf, "CATRINA2Energy", "CATRINA2PSD", (512, 500), ((0.0, 4096.0), (0.0, 1.0)), None);
 
-    sps_histograms(h, lf.clone());
-    // pips1000(h, lf);
+    // sps_histograms(h, lf.clone());
+    pips1000(h, lf);
     //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
 
 
     // For 52Cr(d,pg)53Cr
-    let det_0_timecut = TimeCut { mean: -1155.6, low: -1158.0, high: -1152.0};
-    let det_1_timecut = TimeCut { mean: -1153.9, low: -1159.0, high: -1147.0};
-    let det_2_timecut = TimeCut { mean: -1154.0, low: -1158.0, high: -1151.0};
-    let det_3_timecut = TimeCut { mean: -1152.0, low: -1158.0, high: -1148.0};
-    let det_4_timecut = TimeCut { mean: -1123.1, low: -1127.0, high: -1118.0};
+    // let det_0_timecut = TimeCut { mean: -1155.6, low: -1158.0, high: -1152.0};
+    // let det_1_timecut = TimeCut { mean: -1153.9, low: -1159.0, high: -1147.0};
+    // let det_2_timecut = TimeCut { mean: -1154.0, low: -1158.0, high: -1151.0};
+    // let det_3_timecut = TimeCut { mean: -1152.0, low: -1158.0, high: -1148.0};
+    // let det_4_timecut = TimeCut { mean: -1123.1, low: -1127.0, high: -1118.0};
 
-    let det_0_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
-    let det_1_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
-    let det_2_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
-    let det_3_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
-    let det_4_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
+    // let det_0_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
+    // let det_1_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
+    // let det_2_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
+    // let det_3_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
+    // let det_4_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
 
-    let det_0_energy_calibration = EnergyCalibration { a: 0.0, b: 1.7551059351549314, c: -12.273506897222896};
-    let det_1_energy_calibration = EnergyCalibration { a: 0.0, b: 1.9510278378962256, c: -16.0245754973971};
-    let det_2_energy_calibration = EnergyCalibration { a: 0.0, b: 1.917190081718234, c: 16.430212777833802};
-    let det_3_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6931918955746692, c: 12.021258506937766};
-    let det_4_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6373533248536343, c: 13.091030061910748};
+    // let det_0_energy_calibration = EnergyCalibration { a: 0.0, b: 1.7551059351549314, c: -12.273506897222896};
+    // let det_1_energy_calibration = EnergyCalibration { a: 0.0, b: 1.9510278378962256, c: -16.0245754973971};
+    // let det_2_energy_calibration = EnergyCalibration { a: 0.0, b: 1.917190081718234, c: 16.430212777833802};
+    // let det_3_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6931918955746692, c: 12.021258506937766};
+    // let det_4_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6373533248536343, c: 13.091030061910748};
 
-    cebra(h, lf.clone(), 0, Some(det_0_timecut), None);
-    cebra(h, lf.clone(), 1, Some(det_1_timecut), None);
-    cebra(h, lf.clone(), 2, Some(det_2_timecut), None);
-    cebra(h, lf.clone(), 3, Some(det_3_timecut), None);
-    cebra(h, lf.clone(), 4, Some(det_4_timecut), None);
+    // cebra(h, lf.clone(), 0, Some(det_0_timecut), None);
+    // cebra(h, lf.clone(), 1, Some(det_1_timecut), None);
+    // cebra(h, lf.clone(), 2, Some(det_2_timecut), None);
+    // cebra(h, lf.clone(), 3, Some(det_3_timecut), None);
+    // cebra(h, lf.clone(), 4, Some(det_4_timecut), None);
 
 
     /*
@@ -170,7 +170,8 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
     // */
 }
 
-
+#[rustfmt::skip]
+#[allow(clippy::all)]
 pub fn sps_histograms(h: &mut Histogrammer, lf: LazyFrame) {
     let lf_sps = lf.with_columns(vec![
             (col("DelayFrontRightEnergy") + col("DelayFrontLeftEnergy") / lit(2.0)).alias("DelayFrontAverageEnergy"),
@@ -299,38 +300,40 @@ pub fn sps_histograms(h: &mut Histogrammer, lf: LazyFrame) {
         h.add_fill_hist1d("SE-SPS/Timing/Only X2/DelayBackRightTime-AnodeBackTime: onlyX2", &lf_only_x2_plane, "DelayBackRightTime_AnodeBackTime", 8000, (-4000.0, 4000.0));
 }
 
+#[rustfmt::skip]
+#[allow(clippy::all)]
 pub fn pips1000(h: &mut Histogrammer, lf: LazyFrame) {
     let lf_pips = lf.with_columns( vec![
         // ( ( col("PIPS1000Energy") - col("PIPS1000Short") )/ col("PIPS1000Energy") ).alias("PIPS1000PSD"),
         (lit(-1.77049e-06)*col("PIPS1000Energy")*col("PIPS1000Energy") + lit(0.544755003513083)*col("PIPS1000Energy") + lit(-1.36822594543883)).alias("PIPS1000EnergyCalibrated") ]
     );
 
-    h.add_fill_hist1d("PIPS1000: Energy", &lf_pips, "PIPS1000Energy", 16384, (0.0, 16384.0));
+    h.add_fill_hist1d("PIPS1000/Energy", &lf_pips, "PIPS1000Energy", 16384, (0.0, 16384.0));
     // h.add_fill_hist2d("PIPS1000: PSD", &lf_pips, "PIPS1000Energy", "PIPS1000PSD", (512, 500), ((0.0, 4096.0), (0.0, 1.0)));
-    h.add_fill_hist1d("PIPS1000: Energy Calibrated", &lf_pips, "PIPS1000EnergyCalibrated", 600, (0.0, 1200.0));
+    h.add_fill_hist1d("PIPS1000/Energy Calibrated", &lf_pips, "PIPS1000EnergyCalibrated", 600, (0.0, 1200.0));
 
-
-    
 }
 
 pub struct TimeCut {
     pub mean: f64,
     pub low: f64,
-    pub high: f64
+    pub high: f64,
 }
 
 pub struct GainMatch {
     pub a: f64,
     pub b: f64,
-    pub c: f64
+    pub c: f64,
 }
 
 pub struct EnergyCalibration {
     pub a: f64,
     pub b: f64,
-    pub c: f64
+    pub c: f64,
 }
 
+#[rustfmt::skip]
+#[allow(clippy::all)]
 pub fn cebra(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize, timecut: Option<TimeCut>, gainmatch: Option<GainMatch>) {
 
     let i = detector_number;

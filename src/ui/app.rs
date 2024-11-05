@@ -39,9 +39,22 @@ impl eframe::App for Spectrix {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("spectrix_top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                ui.label("Show: ");
-                ui.checkbox(&mut self.left_side_panel_open, "Info Panel");
-                ui.checkbox(&mut self.right_side_panel_open, "Histogram Script");
+                egui::global_theme_preference_switch(ui);
+
+                ui.heading("Spectrix");
+
+                ui.separator();
+
+                ui.menu_button("Panels", |ui| {
+                    ui.checkbox(&mut self.left_side_panel_open, "Info Panel");
+                    ui.checkbox(&mut self.right_side_panel_open, "Histogram Script");
+                });
+
+                ui.separator();
+
+                if ui.button("Reset").clicked() {
+                    self.processer.reset();
+                }
             });
         });
 
@@ -49,21 +62,9 @@ impl eframe::App for Spectrix {
             ctx,
             self.left_side_panel_open,
             |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("Spectrix");
-
-                    egui::global_theme_preference_switch(ui);
-
-                    if ui.button("Reset").clicked() {
-                        self.processer.reset();
-                    }
-                });
-
                 egui::ScrollArea::vertical()
                     .id_salt("LeftPanel")
                     .show(ui, |ui| {
-                        ui.separator();
-
                         self.processer.ui(ui);
                     });
             },

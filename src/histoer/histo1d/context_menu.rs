@@ -12,11 +12,11 @@ impl Histogram {
         // Add find peaks button
         ui.separator();
         ui.heading("Peak Finder");
-        // if ui.button("Detect Peaks")
-        //     .on_hover_text("Takes the settings (adjust below) and finds peaks in the spectrum\nIf there are background markers, it will fit a background before it finds the peaks in between the min and max values. Likewise for region markers.\nKeybind: o").clicked() {
-        //     self.find_peaks();
-        // }
-        // self.plot_settings.find_peaks_settings.menu_button(ui);
+        if ui.button("Detect Peaks")
+            .on_hover_text("Takes the settings (adjust below) and finds peaks in the spectrum\nIf there are background markers, it will fit a background before it finds the peaks in between the min and max values. Likewise for region markers.\nKeybind: o").clicked() {
+            self.find_peaks();
+        }
+        self.plot_settings.find_peaks_settings.menu_button(ui);
 
         ui.separator();
         ui.heading("Rebin");

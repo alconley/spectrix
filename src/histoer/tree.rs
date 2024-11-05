@@ -3,8 +3,6 @@ use egui_tiles::{Tile, TileId, Tiles};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TreeBehavior {
-    #[serde(skip)]
-    simplification_options: egui_tiles::SimplificationOptions,
     tab_bar_height: f32,
     gap_width: f32,
     min_size: f32,
@@ -15,14 +13,6 @@ pub struct TreeBehavior {
 impl Default for TreeBehavior {
     fn default() -> Self {
         Self {
-            simplification_options: egui_tiles::SimplificationOptions {
-                prune_empty_tabs: false,
-                prune_empty_containers: false,
-                prune_single_child_tabs: false,
-                prune_single_child_containers: false,
-                all_panes_must_have_tabs: false,
-                join_nested_linear_containers: true,
-            },
             tab_bar_height: 24.0,
             gap_width: 2.0,
             min_size: 50.0,
@@ -38,20 +28,6 @@ impl TreeBehavior {
             egui::Grid::new("behavior_ui")
                 .num_columns(2)
                 .show(ui, |ui| {
-                    ui.label("All panes must have tabs:");
-                    ui.checkbox(
-                        &mut self.simplification_options.all_panes_must_have_tabs,
-                        "",
-                    );
-                    ui.end_row();
-
-                    ui.label("Join nested containers:");
-                    ui.checkbox(
-                        &mut self.simplification_options.join_nested_linear_containers,
-                        "",
-                    );
-                    ui.end_row();
-
                     ui.label("Tab bar height:");
                     ui.add(
                         egui::DragValue::new(&mut self.tab_bar_height)
