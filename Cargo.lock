@@ -3996,6 +3996,7 @@ dependencies = [
  "polars-lazy",
  "prettytable",
  "pyo3",
+ "rayon",
  "rfd",
  "serde",
  "serde_json",

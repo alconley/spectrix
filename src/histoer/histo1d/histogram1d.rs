@@ -46,7 +46,6 @@ impl Histogram {
         self.underflow = 0;
     }
 
-    // Add a value to the histogram
     pub fn fill(&mut self, value: f64, current_step: usize, total_steps: usize) {
         if value >= self.range.0 && value < self.range.1 {
             let index = ((value - self.range.0) / self.bin_width) as usize;
@@ -71,14 +70,12 @@ impl Histogram {
         self.bins = counts;
     }
 
-    // Get the bin edges
     pub fn get_bin_edges(&self) -> Vec<f64> {
         (0..=self.bins.len())
             .map(|i| self.range.0 + i as f64 * self.bin_width)
             .collect()
     }
 
-    // Convert histogram bins to line points
     pub fn update_line_points(&mut self) {
         self.line.points = self
             .bins
@@ -93,7 +90,6 @@ impl Histogram {
             .collect();
     }
 
-    // Get the bin index for a given x position.
     pub fn get_bin_index(&self, x: f64) -> Option<usize> {
         if x < self.range.0 || x > self.range.1 {
             return None;
@@ -104,7 +100,6 @@ impl Histogram {
         Some(bin_index)
     }
 
-    // Get the bin centers between the start and end x values (inclusive)
     pub fn get_bin_centers_between(&self, start_x: f64, end_x: f64) -> Vec<f64> {
         let start_bin = self.get_bin_index(start_x).unwrap_or(0);
         let end_bin = self.get_bin_index(end_x).unwrap_or(self.bins.len() - 1);
@@ -114,7 +109,6 @@ impl Histogram {
             .collect()
     }
 
-    // Get the bin counts between the start and end x values (inclusive)
     pub fn get_bin_counts_between(&self, start_x: f64, end_x: f64) -> Vec<f64> {
         let start_bin = self.get_bin_index(start_x).unwrap_or(0);
         let end_bin = self.get_bin_index(end_x).unwrap_or(self.bins.len() - 1);
@@ -124,7 +118,6 @@ impl Histogram {
             .collect()
     }
 
-    // Get bin counts and bin center at x value
     pub fn get_bin_count_and_center(&self, x: f64) -> Option<(f64, f64)> {
         self.get_bin_index(x).map(|bin| {
             let bin_center = self.range.0 + (bin as f64 * self.bin_width) + self.bin_width * 0.5;
@@ -219,7 +212,6 @@ impl Histogram {
         self.fits.temp_fit = Some(fitter);
     }
 
-    // Draw the histogram, fit lines, markers, and stats
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
         // update the histogram and fit lines with the log setting and draw
         let log_y = self.plot_settings.egui_settings.log_y;
@@ -305,7 +297,6 @@ impl Histogram {
         }
     }
 
-    // Renders the histogram using egui_plot
     pub fn render(&mut self, ui: &mut egui::Ui) {
         // Display progress bar while hist is being filled
         self.plot_settings.progress_ui(ui);

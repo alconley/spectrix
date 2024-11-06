@@ -7,6 +7,8 @@ use egui_tiles::TileId;
 use fnv::FnvHashMap;
 use polars::prelude::*;
 use std::thread::JoinHandle;
+use polars::prelude::col; 
+use rayon::prelude::*;
 
 use std::sync::{Arc, Mutex};
 
@@ -149,317 +151,267 @@ impl Histogrammer {
         }
     }
 
-    fn ensure_root(&mut self) -> TileId {
-        // Ensure that `self.tree.root` has been initialized
-        if let Some(root_id) = self.tree.root {
-            root_id
-        } else {
-            // Initialize the root as the main tab container if it's not set
-            let main_tab = egui_tiles::Container::new_tabs(vec![]);
-            let main_container_id = self.tree.tiles.insert_new(main_tab.into());
-            self.tree.root = Some(main_container_id);
-
-            // Insert into histogram_map
-            self.histogram_map.insert(
-                self.name.clone(),
-                ContainerInfo {
-                    container_type: ContainerType::Tabs,
-                    parent_id: None,
-                    children: vec![],
-                    display_name: self.name.clone(),
-                    tab_id: main_container_id,
-                },
-            );
-
-            main_container_id
-        }
-    }
-
-    pub fn fill_hist1d(&mut self, name: &str, lf: &LazyFrame, column_name: &str) -> bool {
-        if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
-            self.tree.tiles.iter_mut().find(|(_id, tile)| {
-                if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                    hist.lock().unwrap().name == name
-                } else {
-                    false
-                }
-            })
-        {
-            let hist = Arc::clone(hist); // Clone the Arc to share ownership
-            let hist_range = hist.lock().unwrap().range; // Access the range safely
-            let filter_expr = col(column_name)
-                .gt(lit(hist_range.0))
-                .and(col(column_name).lt(lit(hist_range.1)));
-
-            // let overflow_filter_expr = col(column_name).gt(lit(hist_range.1));
-            // // get the overflow values
-            // let overflow_df = lf
-            //     .clone()
-            //     .select([col(column_name)])
-            //     .filter(overflow_filter_expr)
-            //     .sum()
-            //     .collect()
-            //     .unwrap();
-
-            // let overflow_value = overflow_df.column(column_name).unwrap().get(0).unwrap(); // Now you can access the first value safely
-
-            // let overflow_as_u64 = match overflow_value {
-            //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
-            //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
-            //     _ => panic!("Unexpected value type!"),
-            // };
-
-            // let underflow_filter_expr = col(column_name).lt(lit(hist_range.0));
-            // // get the underflow values
-            // let underflow_df = lf
-            //     .clone()
-            //     .select([col(column_name)])
-            //     .filter(underflow_filter_expr)
-            //     .sum()
-            //     .collect()
-            //     .unwrap();
-
-            // let underflow_value = underflow_df.column(column_name).unwrap().get(0).unwrap(); // Now you can access the first value safely
-
-            // let underflow_as_u64 = match underflow_value {
-            //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
-            //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
-            //     _ => panic!("Unexpected value type!"),
-            // };
-
-            // hist.lock().unwrap().overflow = overflow_as_u64;
-            // hist.lock().unwrap().underflow = underflow_as_u64;
-
-            let lf = lf.clone();
-            let name = name.to_string();
-            let column_name = column_name.to_string();
-
-            log::info!(
-                "Starting to fill histogram '{}' with data from column '{}'",
-                name,
-                column_name
-            );
-
-            // Spawn a new thread for the filling operation
-            let handle = std::thread::spawn(move || {
-                log::info!("Thread started for filling histogram '{}'", name);
-
-                if let Ok(df) = lf
-                    .select([col(&column_name)])
-                    .filter(filter_expr.clone()) // Clone for logging purposes
-                    .collect()
-                {
-                    log::info!("Data collected for histogram '{}'", name);
-
-                    let series = df.column(&column_name).unwrap();
-                    let values = series.f64().unwrap();
-                    let total_steps = values.len();
-
-                    log::info!(
-                        "Histogram '{}' will be filled with {} values from column '{}'",
-                        name,
-                        total_steps,
-                        column_name
-                    );
-
-                    for (i, value) in values.iter().enumerate() {
-                        if let Some(v) = value {
-                            let mut hist = hist.lock().unwrap(); // Lock the mutex to access the correct Histogram
-                            hist.fill(v, i, total_steps); // Pass the progress to the fill method
-                        }
-                    }
-
-                    log::info!("Completed filling histogram '{}'", name);
-
-                    // Optionally: Set progress to None or trigger any final updates here
-                    hist.lock().unwrap().plot_settings.progress = None;
-                } else {
-                    log::error!("Failed to collect LazyFrame for histogram '{}'", name);
-                }
-            });
-
-            // Store the thread handle in the vector
-            self.handles.push(handle);
-
-            return true;
-        }
-
-        log::error!("Histogram '{}' not found in the tree", name);
-        false
-    }
-
-    pub fn add_fill_hist1d(
+    pub fn fill_histograms(
         &mut self,
-        name: &str,
+        hist1d_specs: Vec<(&str, &str, (f64, f64), usize)>, // (hist name, column name, range, bins)
+        hist2d_specs: Vec<(&str, &str, &str, ((f64, f64), (f64, f64)), (usize, usize))>, // (hist name, x col, y col, ranges, bins)
         lf: &LazyFrame,
-        column_name: &str,
-        bins: usize,
-        range: (f64, f64),
-    ) {
-        self.add_hist1d(name, bins, range); // Add the histogram.
-        self.fill_hist1d(name, lf, column_name); // Fill it with data.
-    }
-
-    pub fn fill_hist2d(
-        &mut self,
-        name: &str,
-        lf: &LazyFrame,
-        x_column_name: &str,
-        y_column_name: &str,
     ) -> bool {
-        if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
-            self.tree.tiles.iter_mut().find(|(_id, tile)| {
-                if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                    hist.lock().unwrap().name == name
-                } else {
-                    false
-                }
-            })
-        {
-            let hist = Arc::clone(hist); // Clone the Arc to share ownership
-            let hist_range = hist.lock().unwrap().range.clone(); // Access the range safely
-            let filter_expr = col(x_column_name)
-                .gt(lit(hist_range.x.min))
-                .and(col(x_column_name).lt(lit(hist_range.x.max)))
-                .and(col(y_column_name).gt(lit(hist_range.y.min)))
-                .and(col(y_column_name).lt(lit(hist_range.y.max)));
+        // Collect all required column names
+        let mut column_names: Vec<&str> = hist1d_specs.iter().map(|(_, col, _, _)| *col).collect();
+        for (_, x_col, y_col, _, _) in &hist2d_specs {
+            column_names.push(*x_col);
+            column_names.push(*y_col);
+        }
+        column_names.sort_unstable();
+        column_names.dedup(); // Remove duplicate column names
+    
+        // Fetch actual column names from LazyFrame
+        let available_columns = self.get_column_names_from_lazyframe(lf);
+    
+        // Filter out missing columns
+        let selected_columns: Vec<_> = column_names
+            .iter()
+            .filter(|&&col_name| available_columns.contains(&col_name.to_string()))
+            .map(|&col_name| col(col_name))
+            .collect();
+    
+        if selected_columns.len() < column_names.len() {
+            log::warn!("Some columns are missing from the LazyFrame and cannot be selected.");
+            return false;
+        }
+    
+        // Initialize histograms
+        let mut hist1d_map = Vec::new();
+        let mut hist2d_map = Vec::new();
+    
 
-            // let overflow_expr = col(x_column_name)
-            //     .gt(lit(hist_range.x.max))
-            //     .or(col(y_column_name).gt(lit(hist_range.y.max)));
-
-            // let underflow_expr = col(x_column_name)
-            //     .lt(lit(hist_range.x.min))
-            //     .or(col(y_column_name).lt(lit(hist_range.y.min)));
-
-            // let overflow_df = lf
-            //     .clone()
-            //     .select([col(x_column_name), col(y_column_name)])
-            //     .filter(overflow_expr)
-            //     .sum()
-            //     .collect()
-            //     .unwrap();
-
-            // let underflow_df = lf
-            //     .clone()
-            //     .select([col(x_column_name), col(y_column_name)])
-            //     .filter(underflow_expr)
-            //     .sum()
-            //     .collect()
-            //     .unwrap();
-
-            // let overflow_x_value = overflow_df.column(x_column_name).unwrap().get(0).unwrap();
-
-            // let overflow_y_value = overflow_df.column(y_column_name).unwrap().get(0).unwrap();
-
-            // let underflow_x_value = underflow_df.column(x_column_name).unwrap().get(0).unwrap();
-
-            // let underflow_y_value = underflow_df.column(y_column_name).unwrap().get(0).unwrap();
-
-            // let overflow_x_as_u64 = match overflow_x_value {
-            //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
-            //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
-            //     _ => panic!("Unexpected value type!"),
-            // };
-
-            // let overflow_y_as_u64 = match overflow_y_value {
-            //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
-            //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
-            //     _ => panic!("Unexpected value type!"),
-            // };
-
-            // let underflow_x_as_u64 = match underflow_x_value {
-            //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
-            //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
-            //     _ => panic!("Unexpected value type!"),
-            // };
-
-            // let underflow_y_as_u64 = match underflow_y_value {
-            //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
-            //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
-            //     _ => panic!("Unexpected value type!"),
-            // };
-
-            // hist.lock().unwrap().overflow = (overflow_x_as_u64, overflow_y_as_u64);
-            // hist.lock().unwrap().underflow = (underflow_x_as_u64, underflow_y_as_u64);
-
-            let lf = lf.clone();
-            let name = name.to_string();
-            let x_column_name = x_column_name.to_string();
-            let y_column_name = y_column_name.to_string();
-
-            hist.lock().unwrap().plot_settings.cuts.x_column = x_column_name.clone();
-            hist.lock().unwrap().plot_settings.cuts.y_column = y_column_name.clone();
-
-            log::info!(
-                "Starting to fill 2D histogram '{}' with data from columns '{}' and '{}'",
-                name,
-                x_column_name,
-                y_column_name
-            );
-
-            // Spawn a new thread for the filling operation
-            let handle = std::thread::spawn(move || {
-                log::info!("Thread started for filling 2D histogram '{}'", name);
-
-                if let Ok(df) = lf
-                    .select([col(&x_column_name), col(&y_column_name)])
-                    .filter(filter_expr.clone()) // Clone for logging purposes
-                    .collect()
-                {
-                    log::info!("Data collected for 2D histogram '{}'", name);
-
-                    let x_values = df.column(&x_column_name).unwrap().f64().unwrap();
-                    let y_values = df.column(&y_column_name).unwrap().f64().unwrap();
-                    let total_steps = x_values.len();
-
-                    log::info!(
-                        "2D Histogram '{}' will be filled with {} value pairs from columns '{}' and '{}'",
-                        name,
-                        total_steps,
-                        x_column_name,
-                        y_column_name
-                    );
-
-                    for (i, (x_value, y_value)) in x_values.iter().zip(y_values.iter()).enumerate()
-                    {
-                        if let (Some(x), Some(y)) = (x_value, y_value) {
-                            let mut hist = hist.lock().unwrap(); // Lock the mutex to access the correct Histogram2D
-                            hist.fill(x, y, i, total_steps); // Pass the progress to the fill method
-                        }
+        // Separate checking phase for 1D histograms
+        let mut missing_1d = Vec::new();
+        for (hist_name, col_name, range, bins) in &hist1d_specs {
+            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
+                self.tree.tiles.iter_mut().find(|(_id, tile)| {
+                    if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+                        hist.lock().unwrap().name == *hist_name
+                    } else {
+                        false
                     }
-
-                    log::info!("Completed filling 2D histogram '{}'", name);
-
-                    // Optionally: Set progress to None or trigger any final updates here
-                    hist.lock().unwrap().plot_settings.progress = None;
-                } else {
-                    log::error!("Failed to collect LazyFrame for 2D histogram '{}'", name);
-                }
-            });
-
-            // Store the thread handle in the vector
-            self.handles.push(handle);
-
-            return true;
+                })
+            {
+                // Add the histogram with the actual column name
+                hist1d_map.push((Arc::clone(hist), col_name.to_string(), *range, *bins));
+            } else {
+                // Track missing histogram to add it in the next step
+                missing_1d.push((*hist_name, *bins, *range));
+            }
         }
 
-        log::error!("2D Histogram '{}' not found in the tree", name);
-        false
-    }
+        // Separate mutable addition phase for missing 1D histograms
+        for (hist_name, bins, range) in missing_1d {
+            self.add_hist1d(hist_name, bins, range);
+            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
+                self.tree.tiles.iter_mut().find(|(_id, tile)| {
+                    if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+                        hist.lock().unwrap().name == hist_name
+                    } else {
+                        false
+                    }
+                })
+            {
+                // Ensure we add the correct column name to hist1d_map, not the histogram display name
+                let col_name = hist1d_specs.iter().find(|(name, _, _, _)| name == &hist_name).unwrap().1;
+                hist1d_map.push((Arc::clone(hist), col_name.to_string(), range, bins));
+            }
+        }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn add_fill_hist2d(
-        &mut self,
-        name: &str,
-        lf: &LazyFrame,
-        x_column_name: &str,
-        y_column_name: &str,
-        bins: (usize, usize),
-        range: ((f64, f64), (f64, f64)),
-    ) {
-        self.add_hist2d(name, bins, range); // Add the histogram.
-        self.fill_hist2d(name, lf, x_column_name, y_column_name); // Fill it with data.
+    
+        // Separate checking phase for 2D histograms
+        let mut missing_2d = Vec::new();
+        for (name, x_col, y_col, ranges, bins) in &hist2d_specs {
+            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
+                self.tree.tiles.iter_mut().find(|(_id, tile)| {
+                    if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
+                        hist.lock().unwrap().name == *name
+                    } else {
+                        false
+                    }
+                })
+            {
+                hist2d_map.push((Arc::clone(hist), x_col.to_string(), y_col.to_string(), *ranges, *bins));
+            } else {
+                // Track missing histogram to add it in the next step, preserving the column names
+                missing_2d.push((*name, *x_col, *y_col, *ranges, *bins));
+            }
+        }
+    
+        // Separate mutable addition phase for missing 2D histograms
+        for (name, x_col, y_col, ranges, bins) in missing_2d {
+            self.add_hist2d(name, bins, ranges);
+            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
+                self.tree.tiles.iter_mut().find(|(_id, tile)| {
+                    if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
+                        hist.lock().unwrap().name == name
+                    } else {
+                        false
+                    }
+                })
+            {
+                // Ensure we push the correct column names (x_col and y_col) instead of `name`
+                hist2d_map.push((Arc::clone(hist), x_col.to_string(), y_col.to_string(), ranges, bins));
+            }
+        }
+    
+        // Filter and select necessary columns from LazyFrame
+        let lf_selected = lf.clone().select(selected_columns);
+    
+        // // Start filling histograms in a new thread
+        // let handle = std::thread::spawn(move || {
+        //     if let Ok(df) = lf_selected.collect() {
+        //         for row_idx in 0..df.height() {
+        //             // Fill 1D histograms
+        //             for (hist, col, range, _) in &hist1d_map {
+        //                 if let Ok(col_idx) = df.column(col) {
+        //                     let col_values = col_idx.f64().unwrap();
+        //                     if let Some(value) = col_values.get(row_idx) {
+        //                         if value == -1e6 {
+        //                             continue;
+        //                         }
+        //                         let mut hist = hist.lock().unwrap();
+        //                         if value < range.0 {
+        //                             hist.underflow += 1;
+        //                         } else if value > range.1 {
+        //                             hist.overflow += 1;
+        //                         } else {
+        //                             hist.fill(value, row_idx, df.height());
+        //                         }
+        //                     }
+        //                 }
+        //             }
+    
+        //             // Fill 2D histograms
+        //             for (hist, x_col, y_col, (x_range, y_range), _) in &hist2d_map {
+        //                 if let (Ok(x_values), Ok(y_values)) = (df.column(x_col), df.column(y_col)) {
+        //                     let x_vals = x_values.f64().unwrap();
+        //                     let y_vals = y_values.f64().unwrap();
+        //                     if let (Some(x), Some(y)) = (x_vals.get(row_idx), y_vals.get(row_idx)) {
+        //                         if x == -1e6 || y == -1e6 {
+        //                             continue;
+        //                         }
+        //                         let mut hist = hist.lock().unwrap();
+        //                         if x < x_range.0 {
+        //                             hist.underflow.0 += 1;
+        //                         } else if x > x_range.1 {
+        //                             hist.overflow.0 += 1;
+        //                         }
+        //                         if y < y_range.0 {
+        //                             hist.underflow.1 += 1;
+        //                         } else if y > y_range.1 {
+        //                             hist.overflow.1 += 1;
+        //                         }
+        //                         if x > x_range.0 && x < x_range.1 && y > y_range.0 && y < y_range.1 {
+        //                             hist.fill(x, y, row_idx, df.height());
+        //                         }
+        //                     }
+        //                 }
+        //             }
+        //         }
+        //         log::info!("Completed filling all 1D and 2D histograms row-by-row");
+
+        //         // Reset progress to None for all histograms
+        //         for (hist, _, _, _) in &hist1d_map {
+        //             hist.lock().unwrap().plot_settings.progress = None;
+        //         }
+        //         for (hist, _, _, _, _) in &hist2d_map {
+        //             hist.lock().unwrap().plot_settings.recalculate_image = true;
+        //             hist.lock().unwrap().plot_settings.progress = None;
+        //         }
+
+        //     } else {
+        //         log::error!("Failed to collect data for filling histograms");
+        //     }
+        // });
+        let handle = std::thread::spawn(move || {
+            if let Ok(df) = lf_selected.collect() {
+                let height = df.height();
+                
+                // Process 1D histograms
+                hist1d_map.par_iter().for_each(|(hist, col, range, _)| {
+                    if let Ok(col_idx) = df.column(col) {
+                        if let Ok(col_values) = col_idx.f64() {
+                            let mut hist = hist.lock().unwrap();
+                            for (row_idx, value) in col_values.into_no_null_iter().enumerate() {
+                                if value == -1e6 {
+                                    continue;
+                                }
+                                if value < range.0 {
+                                    hist.underflow += 1;
+                                } else if value > range.1 {
+                                    hist.overflow += 1;
+                                } else {
+                                    hist.fill(value, row_idx, height);
+                                }
+                            }
+                        }
+                    }
+                });
+        
+                // Process 2D histograms
+                hist2d_map.par_iter().for_each(|(hist, x_col, y_col, (x_range, y_range), _)| {
+                    if let (Ok(x_values), Ok(y_values)) = (df.column(x_col).and_then(|c| c.f64()), df.column(y_col).and_then(|c| c.f64())) {
+                        let mut hist = hist.lock().unwrap();
+                        for (row_idx, (x, y)) in x_values.into_no_null_iter().zip(y_values.into_no_null_iter()).enumerate() {
+                            if x == -1e6 || y == -1e6 {
+                                continue;
+                            }
+                            if x < x_range.0 {
+                                hist.underflow.0 += 1;
+                            } else if x > x_range.1 {
+                                hist.overflow.0 += 1;
+                            }
+                            if y < y_range.0 {
+                                hist.underflow.1 += 1;
+                            } else if y > y_range.1 {
+                                hist.overflow.1 += 1;
+                            }
+                            if x > x_range.0 && x < x_range.1 && y > y_range.0 && y < y_range.1 {
+                                hist.fill(x, y, row_idx, height);
+                            }
+                        }
+                    }
+                });
+        
+                log::info!("Completed filling all 1D and 2D histograms row-by-row");
+        
+                // Reset progress to None and recalculate for 2D histograms
+                for (hist, _, _, _) in &hist1d_map {
+                    hist.lock().unwrap().plot_settings.progress = None;
+                }
+                for (hist, _, _, _, _) in &hist2d_map {
+                    let mut hist = hist.lock().unwrap();
+                    hist.plot_settings.progress = None;
+                    hist.plot_settings.recalculate_image = true;
+                }
+        
+            } else {
+                log::error!("Failed to collect data for filling histograms");
+            }
+        });
+        
+    
+        self.handles.push(handle);
+        true
+    }
+    
+    pub fn get_column_names_from_lazyframe(&self, lazyframe: &LazyFrame) -> Vec<String> {
+        let lf: LazyFrame = lazyframe.clone().limit(1);
+        let df: DataFrame = lf.collect().unwrap();
+        let columns: Vec<String> = df
+            .get_column_names_owned()
+            .into_iter()
+            .map(|name| name.to_string())
+            .collect();
+
+        columns
     }
 
     pub fn add_hist1d_with_bin_values(
@@ -593,7 +545,33 @@ impl Histogrammer {
         });
     }
 
-    pub fn create_tabs(&mut self, name: String) -> TileId {
+    fn ensure_root(&mut self) -> TileId {
+        // Ensure that `self.tree.root` has been initialized
+        if let Some(root_id) = self.tree.root {
+            root_id
+        } else {
+            // Initialize the root as the main tab container if it's not set
+            let main_tab = egui_tiles::Container::new_tabs(vec![]);
+            let main_container_id = self.tree.tiles.insert_new(main_tab.into());
+            self.tree.root = Some(main_container_id);
+
+            // Insert into histogram_map
+            self.histogram_map.insert(
+                self.name.clone(),
+                ContainerInfo {
+                    container_type: ContainerType::Tabs,
+                    parent_id: None,
+                    children: vec![],
+                    display_name: self.name.clone(),
+                    tab_id: main_container_id,
+                },
+            );
+
+            main_container_id
+        }
+    }
+
+    fn create_tabs(&mut self, name: String) -> TileId {
         // Ensure root container (main tab) exists
         let mut current_container_id = self.ensure_root();
         let path_components: Vec<&str> = name.split('/').collect();
@@ -755,7 +733,7 @@ impl Histogrammer {
             if let Some(egui_tiles::Tile::Container(container)) =
                 self.tree.tiles.get_mut(main_tab_id)
             {
-                // Change to `Tabs` if not already of this type
+                // // Change to `Tabs` if not already of this type
                 if container.kind() != egui_tiles::ContainerKind::Tabs {
                     log::info!("Setting container type of {:?} to Tabs", main_tab_id);
                     container.set_kind(egui_tiles::ContainerKind::Tabs);
@@ -770,10 +748,10 @@ impl Histogrammer {
                     // let kind = container.kind();
 
                     // Change to `Tabs` if not already of this type
-                    if container.kind() != egui_tiles::ContainerKind::Tabs {
-                        log::info!("Setting container type of {:?} to Tabs", child_id);
-                        container.set_kind(egui_tiles::ContainerKind::Tabs);
-                    }
+                    // if container.kind() != egui_tiles::ContainerKind::Tabs {
+                    //     log::info!("Setting container type of {:?} to Tabs", child_id);
+                    //     container.set_kind(egui_tiles::ContainerKind::Tabs);
+                    // }
 
                     // Move the child to the main tab as a tabbed container
                     self.tree
@@ -903,3 +881,295 @@ fn tree_ui(
     // Put the tile back
     tiles.insert(tile_id, tile);
 }
+
+
+/*
+
+pub fn fill_hist1d(&mut self, name: &str, lf: &LazyFrame, column_name: &str) -> bool {
+    if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
+        self.tree.tiles.iter_mut().find(|(_id, tile)| {
+            if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+                hist.lock().unwrap().name == name
+            } else {
+                false
+            }
+        })
+    {
+        let hist = Arc::clone(hist); // Clone the Arc to share ownership
+        let hist_range = hist.lock().unwrap().range; // Access the range safely
+        let filter_expr = col(column_name)
+            .gt(lit(hist_range.0))
+            .and(col(column_name).lt(lit(hist_range.1)));
+
+        // let overflow_filter_expr = col(column_name).gt(lit(hist_range.1));
+        // // get the overflow values
+        // let overflow_df = lf
+        //     .clone()
+        //     .select([col(column_name)])
+        //     .filter(overflow_filter_expr)
+        //     .sum()
+        //     .collect()
+        //     .unwrap();
+
+        // let overflow_value = overflow_df.column(column_name).unwrap().get(0).unwrap(); // Now you can access the first value safely
+
+        // let overflow_as_u64 = match overflow_value {
+        //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
+        //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
+        //     _ => panic!("Unexpected value type!"),
+        // };
+
+        // let underflow_filter_expr = col(column_name).lt(lit(hist_range.0));
+        // // get the underflow values
+        // let underflow_df = lf
+        //     .clone()
+        //     .select([col(column_name)])
+        //     .filter(underflow_filter_expr)
+        //     .sum()
+        //     .collect()
+        //     .unwrap();
+
+        // let underflow_value = underflow_df.column(column_name).unwrap().get(0).unwrap(); // Now you can access the first value safely
+
+        // let underflow_as_u64 = match underflow_value {
+        //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
+        //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
+        //     _ => panic!("Unexpected value type!"),
+        // };
+
+        // hist.lock().unwrap().overflow = overflow_as_u64;
+        // hist.lock().unwrap().underflow = underflow_as_u64;
+
+        let lf = lf.clone();
+        let name = name.to_string();
+        let column_name = column_name.to_string();
+
+        log::info!(
+            "Starting to fill histogram '{}' with data from column '{}'",
+            name,
+            column_name
+        );
+
+        // Spawn a new thread for the filling operation
+        let handle = std::thread::spawn(move || {
+            log::info!("Thread started for filling histogram '{}'", name);
+
+            if let Ok(df) = lf
+                .select([col(&column_name)])
+                .filter(filter_expr.clone()) // Clone for logging purposes
+                .collect()
+            {
+                log::info!("Data collected for histogram '{}'", name);
+
+                let series = df.column(&column_name).unwrap();
+                let values = series.f64().unwrap();
+                let total_steps = values.len();
+
+                log::info!(
+                    "Histogram '{}' will be filled with {} values from column '{}'",
+                    name,
+                    total_steps,
+                    column_name
+                );
+
+                for (i, value) in values.iter().enumerate() {
+                    if let Some(v) = value {
+                        let mut hist = hist.lock().unwrap(); // Lock the mutex to access the correct Histogram
+                        hist.fill(v, i, total_steps); // Pass the progress to the fill method
+                    }
+                }
+
+                log::info!("Completed filling histogram '{}'", name);
+
+                // Optionally: Set progress to None or trigger any final updates here
+                hist.lock().unwrap().plot_settings.progress = None;
+            } else {
+                log::error!("Failed to collect LazyFrame for histogram '{}'", name);
+            }
+        });
+
+        // Store the thread handle in the vector
+        self.handles.push(handle);
+
+        return true;
+    }
+
+    log::error!("Histogram '{}' not found in the tree", name);
+    false
+}
+
+pub fn add_fill_hist1d(
+    &mut self,
+    name: &str,
+    lf: &LazyFrame,
+    column_name: &str,
+    bins: usize,
+    range: (f64, f64),
+) {
+    self.add_hist1d(name, bins, range); // Add the histogram.
+    self.fill_hist1d(name, lf, column_name); // Fill it with data.
+}
+
+pub fn fill_hist2d(
+    &mut self,
+    name: &str,
+    lf: &LazyFrame,
+    x_column_name: &str,
+    y_column_name: &str,
+) -> bool {
+    if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
+        self.tree.tiles.iter_mut().find(|(_id, tile)| {
+            if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
+                hist.lock().unwrap().name == name
+            } else {
+                false
+            }
+        })
+    {
+        let hist = Arc::clone(hist); // Clone the Arc to share ownership
+        let hist_range = hist.lock().unwrap().range.clone(); // Access the range safely
+        let filter_expr = col(x_column_name)
+            .gt(lit(hist_range.x.min))
+            .and(col(x_column_name).lt(lit(hist_range.x.max)))
+            .and(col(y_column_name).gt(lit(hist_range.y.min)))
+            .and(col(y_column_name).lt(lit(hist_range.y.max)));
+
+        // let overflow_expr = col(x_column_name)
+        //     .gt(lit(hist_range.x.max))
+        //     .or(col(y_column_name).gt(lit(hist_range.y.max)));
+
+        // let underflow_expr = col(x_column_name)
+        //     .lt(lit(hist_range.x.min))
+        //     .or(col(y_column_name).lt(lit(hist_range.y.min)));
+
+        // let overflow_df = lf
+        //     .clone()
+        //     .select([col(x_column_name), col(y_column_name)])
+        //     .filter(overflow_expr)
+        //     .sum()
+        //     .collect()
+        //     .unwrap();
+
+        // let underflow_df = lf
+        //     .clone()
+        //     .select([col(x_column_name), col(y_column_name)])
+        //     .filter(underflow_expr)
+        //     .sum()
+        //     .collect()
+        //     .unwrap();
+
+        // let overflow_x_value = overflow_df.column(x_column_name).unwrap().get(0).unwrap();
+
+        // let overflow_y_value = overflow_df.column(y_column_name).unwrap().get(0).unwrap();
+
+        // let underflow_x_value = underflow_df.column(x_column_name).unwrap().get(0).unwrap();
+
+        // let underflow_y_value = underflow_df.column(y_column_name).unwrap().get(0).unwrap();
+
+        // let overflow_x_as_u64 = match overflow_x_value {
+        //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
+        //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
+        //     _ => panic!("Unexpected value type!"),
+        // };
+
+        // let overflow_y_as_u64 = match overflow_y_value {
+        //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
+        //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
+        //     _ => panic!("Unexpected value type!"),
+        // };
+
+        // let underflow_x_as_u64 = match underflow_x_value {
+        //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
+        //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
+        //     _ => panic!("Unexpected value type!"),
+        // };
+
+        // let underflow_y_as_u64 = match underflow_y_value {
+        //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
+        //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
+        //     _ => panic!("Unexpected value type!"),
+        // };
+
+        // hist.lock().unwrap().overflow = (overflow_x_as_u64, overflow_y_as_u64);
+        // hist.lock().unwrap().underflow = (underflow_x_as_u64, underflow_y_as_u64);
+
+        let lf = lf.clone();
+        let name = name.to_string();
+        let x_column_name = x_column_name.to_string();
+        let y_column_name = y_column_name.to_string();
+
+        hist.lock().unwrap().plot_settings.cuts.x_column = x_column_name.clone();
+        hist.lock().unwrap().plot_settings.cuts.y_column = y_column_name.clone();
+
+        log::info!(
+            "Starting to fill 2D histogram '{}' with data from columns '{}' and '{}'",
+            name,
+            x_column_name,
+            y_column_name
+        );
+
+        // Spawn a new thread for the filling operation
+        let handle = std::thread::spawn(move || {
+            log::info!("Thread started for filling 2D histogram '{}'", name);
+
+            if let Ok(df) = lf
+                .select([col(&x_column_name), col(&y_column_name)])
+                .filter(filter_expr.clone()) // Clone for logging purposes
+                .collect()
+            {
+                log::info!("Data collected for 2D histogram '{}'", name);
+
+                let x_values = df.column(&x_column_name).unwrap().f64().unwrap();
+                let y_values = df.column(&y_column_name).unwrap().f64().unwrap();
+                let total_steps = x_values.len();
+
+                log::info!(
+                    "2D Histogram '{}' will be filled with {} value pairs from columns '{}' and '{}'",
+                    name,
+                    total_steps,
+                    x_column_name,
+                    y_column_name
+                );
+
+                for (i, (x_value, y_value)) in x_values.iter().zip(y_values.iter()).enumerate()
+                {
+                    if let (Some(x), Some(y)) = (x_value, y_value) {
+                        let mut hist = hist.lock().unwrap(); // Lock the mutex to access the correct Histogram2D
+                        hist.fill(x, y, i, total_steps); // Pass the progress to the fill method
+                    }
+                }
+
+                log::info!("Completed filling 2D histogram '{}'", name);
+
+                // Optionally: Set progress to None or trigger any final updates here
+                hist.lock().unwrap().plot_settings.progress = None;
+            } else {
+                log::error!("Failed to collect LazyFrame for 2D histogram '{}'", name);
+            }
+        });
+
+        // Store the thread handle in the vector
+        self.handles.push(handle);
+
+        return true;
+    }
+
+    log::error!("2D Histogram '{}' not found in the tree", name);
+    false
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn add_fill_hist2d(
+    &mut self,
+    name: &str,
+    lf: &LazyFrame,
+    x_column_name: &str,
+    y_column_name: &str,
+    bins: (usize, usize),
+    range: ((f64, f64), (f64, f64)),
+) {
+    self.add_hist2d(name, bins, range); // Add the histogram.
+    self.fill_hist2d(name, lf, x_column_name, y_column_name); // Fill it with data.
+}
+
+*/

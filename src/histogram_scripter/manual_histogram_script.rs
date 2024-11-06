@@ -10,35 +10,58 @@ pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
     // pips1000(h, lf);
     //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
 
-    sps_histograms(h, lf.clone());
-
+    // sps_histograms(h, lf.clone());
 
     // For 52Cr(d,pg)53Cr
-    let det_0_timecut = TimeCut { mean: -1155.6, low: -1158.0, high: -1152.0};
-    let det_1_timecut = TimeCut { mean: -1153.9, low: -1159.0, high: -1147.0};
-    let det_2_timecut = TimeCut { mean: -1154.0, low: -1158.0, high: -1151.0};
-    let det_3_timecut = TimeCut { mean: -1152.0, low: -1158.0, high: -1148.0};
-    let det_4_timecut = TimeCut { mean: -1123.1, low: -1127.0, high: -1118.0};
+    // let det_0_timecut = TimeCut { mean: -1155.6, low: -1158.0, high: -1152.0};
+    // let det_1_timecut = TimeCut { mean: -1153.9, low: -1159.0, high: -1147.0};
+    // let det_2_timecut = TimeCut { mean: -1154.0, low: -1158.0, high: -1151.0};
+    // let det_3_timecut = TimeCut { mean: -1152.0, low: -1158.0, high: -1148.0};
+    // let det_4_timecut = TimeCut { mean: -1123.1, low: -1127.0, high: -1118.0};
 
-    // These values were gain match to detector 0
-    // let det_0_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
-    // let det_1_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
-    // let det_2_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
-    // let det_3_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
-    // let det_4_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
+    // // These values were gain match to detector 0
+    // // let det_0_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
+    // // let det_1_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
+    // // let det_2_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
+    // // let det_3_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
+    // // let det_4_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
 
-    let det_0_energy_calibration = EnergyCalibration { a: 0.0, b: 1.7551059351549314, c: -12.273506897222896, bins: 1024, range: (0.0, 16384.0) };
-    let det_1_energy_calibration = EnergyCalibration { a: 0.0, b: 1.9510278378962256, c: -16.0245754973971, bins: 1024, range: (0.0, 16384.0) };
-    let det_2_energy_calibration = EnergyCalibration { a: 0.0, b: 1.917190081718234, c: 16.430212777833802, bins: 1024, range: (0.0, 16384.0) };
-    let det_3_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6931918955746692, c: 12.021258506937766, bins: 1024, range: (0.0, 16384.0) };
-    let det_4_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6373533248536343, c: 13.091030061910748, bins: 1024, range: (0.0, 16384.0) };
+    // let det_0_energy_calibration = EnergyCalibration { a: 0.0, b: 1.7551059351549314, c: -12.273506897222896, bins: 1024, range: (0.0, 16384.0) };
+    // let det_1_energy_calibration = EnergyCalibration { a: 0.0, b: 1.9510278378962256, c: -16.0245754973971, bins: 1024, range: (0.0, 16384.0) };
+    // let det_2_energy_calibration = EnergyCalibration { a: 0.0, b: 1.917190081718234, c: 16.430212777833802, bins: 1024, range: (0.0, 16384.0) };
+    // let det_3_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6931918955746692, c: 12.021258506937766, bins: 1024, range: (0.0, 16384.0) };
+    // let det_4_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6373533248536343, c: 13.091030061910748, bins: 1024, range: (0.0, 16384.0) };
 
-    cebra(h, lf.clone(), 0, Some(det_0_timecut), None, Some(det_0_energy_calibration));
-    cebra(h, lf.clone(), 1, Some(det_1_timecut), None, Some(det_1_energy_calibration));
-    cebra(h, lf.clone(), 2, Some(det_2_timecut), None, Some(det_2_energy_calibration));
-    cebra(h, lf.clone(), 3, Some(det_3_timecut), None, Some(det_3_energy_calibration));
-    cebra(h, lf.clone(), 4, Some(det_4_timecut), None, Some(det_4_energy_calibration));
+    // cebra(h, lf.clone(), 0, Some(det_0_timecut), None, Some(det_0_energy_calibration));
+    // cebra(h, lf.clone(), 1, Some(det_1_timecut), None, Some(det_1_energy_calibration));
+    // cebra(h, lf.clone(), 2, Some(det_2_timecut), None, Some(det_2_energy_calibration));
+    // cebra(h, lf.clone(), 3, Some(det_3_timecut), None, Some(det_3_energy_calibration));
+    // cebra(h, lf.clone(), 4, Some(det_4_timecut), None, Some(det_4_energy_calibration));
 
+
+    let histograms_1d = vec![
+        ("test/Xavg", "Xavg", (-300.0, 300.0), 600),
+        ("test/X1", "X1", (-300.0, 300.0), 600),
+        ("X2", "X2", (-300.0, 300.0), 600),
+    ];
+
+    let histograms_2d = vec![
+        ("X2 v X1", "X2", "X1", ((-300.0, 300.0), (-300.0, 300.0)), (600,600)),
+        ("test/X2 v X1", "X2", "X1", ((-300.0, 300.0), (-300.0, 300.0)), (600,600)),
+        ("test/1X2 v X1", "X2", "X1", ((-300.0, 300.0), (-300.0, 300.0)), (600,600)),
+        ("test/2X2 v X1", "X2", "X1", ((-300.0, 300.0), (-300.0, 300.0)), (600,600)),
+        ("test/3X2 v X1", "X2", "X1", ((-300.0, 300.0), (-300.0, 300.0)), (600,600)),
+        ("test/4X2 v X1", "X2", "X1", ((-300.0, 300.0), (-300.0, 300.0)), (600,600)),
+        ("test/5X2 v X1", "X2", "X1", ((-300.0, 300.0), (-300.0, 300.0)), (600,600)),
+        ("test/6X2 v X1", "X2", "X1", ((-300.0, 300.0), (-300.0, 300.0)), (600,600)),
+        ("test/7X2 v X1", "X2", "X1", ((-300.0, 300.0), (-300.0, 300.0)), (600,600)),
+        ("test/8X2 v X1", "X2", "X1", ((-300.0, 300.0), (-300.0, 300.0)), (600,600)),
+        ("test/9X2 v X1", "X2", "X1", ((-300.0, 300.0), (-300.0, 300.0)), (600,600)),
+
+
+    ];
+
+    h.fill_histograms(histograms_1d, histograms_2d, &lf);
 
     // */
 }
@@ -56,6 +79,7 @@ pub fn get_column_names_from_lazyframe(lazyframe: &LazyFrame) -> Vec<String> {
     columns
 }
 
+/* 
 #[rustfmt::skip]
 #[allow(clippy::all)]
 pub fn sps_histograms(h: &mut Histogrammer, lf: LazyFrame) {
@@ -375,3 +399,6 @@ pub fn catrina(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize) {
     h.add_fill_hist1d(&format!("Catrina/CATRINA{i}/Energy"), &lf, &format!("CATRINA{i}Energy"), 4096, (0.0, 4096.0));
     h.add_fill_hist2d(&format!("Catrina/CATRINA{i}/PSD vs Energy"), &lf, &format!("CATRINA{i}Energy"), &format!("CATRINA{i}PSD"), (512, 500), ((0.0, 4096.0), (0.0, 1.0)));
 }
+
+
+*/
