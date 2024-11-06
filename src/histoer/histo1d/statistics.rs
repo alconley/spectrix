@@ -55,8 +55,8 @@ impl Histogram {
                 format!("Integral: {}", integral),
                 format!("Mean: {:.2}", mean),
                 format!("Stdev: {:.2}", stdev),
-                format!("Overflow: {:}", self.overflow),
-                format!("Underflow: {:}", self.underflow),
+                // format!("Overflow: {:}", self.overflow),
+                // format!("Underflow: {:}", self.underflow),
             ];
 
             for entry in stats_entries.iter() {

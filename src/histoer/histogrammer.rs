@@ -739,10 +739,6 @@ impl Histogrammer {
         grid_id
     }
 
-    // pub fn reorganize(&mut self) {
-    //     log::info!("histogram_map: {:#?}", self.histogram_map);
-    // }
-
     fn reorganize(&mut self) {
         log::info!("histogram_map: {:#?}", self.histogram_map);
 

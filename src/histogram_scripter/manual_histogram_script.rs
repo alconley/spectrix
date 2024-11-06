@@ -7,167 +7,53 @@ use std::f64::consts::PI;
 #[allow(clippy::all)]
 pub fn manual_add_histograms(h: &mut Histogrammer, lf: LazyFrame) {
 
-    
-    // h.add_fill_hist1d("CATRINA0", &lf, "CATRINA0Energy", 4096, (0.0, 4096.0), None);
-    // h.add_fill_hist1d("CATRINA1", &lf, "CATRINA1Energy", 4096, (0.0, 4096.0), None);
-    // h.add_fill_hist1d("CATRINA2", &lf, "CATRINA2Energy", 4096, (0.0, 4096.0), None);
-
-    // h.add_fill_hist2d("CATRINA0 PSD", &lf, "CATRINA0Energy", "CATRINA0PSD", (512, 500), ((0.0, 4096.0), (0.0, 1.0)), None);
-    // h.add_fill_hist2d("CATRINA1 PSD", &lf, "CATRINA1Energy", "CATRINA1PSD", (512, 500), ((0.0, 4096.0), (0.0, 1.0)), None);
-    // h.add_fill_hist2d("CATRINA2 PSD", &lf, "CATRINA2Energy", "CATRINA2PSD", (512, 500), ((0.0, 4096.0), (0.0, 1.0)), None);
-
-    // sps_histograms(h, lf.clone());
-    pips1000(h, lf);
+    // pips1000(h, lf);
     //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
+
+    sps_histograms(h, lf.clone());
 
 
     // For 52Cr(d,pg)53Cr
-    // let det_0_timecut = TimeCut { mean: -1155.6, low: -1158.0, high: -1152.0};
-    // let det_1_timecut = TimeCut { mean: -1153.9, low: -1159.0, high: -1147.0};
-    // let det_2_timecut = TimeCut { mean: -1154.0, low: -1158.0, high: -1151.0};
-    // let det_3_timecut = TimeCut { mean: -1152.0, low: -1158.0, high: -1148.0};
-    // let det_4_timecut = TimeCut { mean: -1123.1, low: -1127.0, high: -1118.0};
+    let det_0_timecut = TimeCut { mean: -1155.6, low: -1158.0, high: -1152.0};
+    let det_1_timecut = TimeCut { mean: -1153.9, low: -1159.0, high: -1147.0};
+    let det_2_timecut = TimeCut { mean: -1154.0, low: -1158.0, high: -1151.0};
+    let det_3_timecut = TimeCut { mean: -1152.0, low: -1158.0, high: -1148.0};
+    let det_4_timecut = TimeCut { mean: -1123.1, low: -1127.0, high: -1118.0};
 
+    // These values were gain match to detector 0
     // let det_0_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
     // let det_1_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
     // let det_2_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
     // let det_3_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
     // let det_4_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
 
-    // let det_0_energy_calibration = EnergyCalibration { a: 0.0, b: 1.7551059351549314, c: -12.273506897222896};
-    // let det_1_energy_calibration = EnergyCalibration { a: 0.0, b: 1.9510278378962256, c: -16.0245754973971};
-    // let det_2_energy_calibration = EnergyCalibration { a: 0.0, b: 1.917190081718234, c: 16.430212777833802};
-    // let det_3_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6931918955746692, c: 12.021258506937766};
-    // let det_4_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6373533248536343, c: 13.091030061910748};
+    let det_0_energy_calibration = EnergyCalibration { a: 0.0, b: 1.7551059351549314, c: -12.273506897222896, bins: 1024, range: (0.0, 16384.0) };
+    let det_1_energy_calibration = EnergyCalibration { a: 0.0, b: 1.9510278378962256, c: -16.0245754973971, bins: 1024, range: (0.0, 16384.0) };
+    let det_2_energy_calibration = EnergyCalibration { a: 0.0, b: 1.917190081718234, c: 16.430212777833802, bins: 1024, range: (0.0, 16384.0) };
+    let det_3_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6931918955746692, c: 12.021258506937766, bins: 1024, range: (0.0, 16384.0) };
+    let det_4_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6373533248536343, c: 13.091030061910748, bins: 1024, range: (0.0, 16384.0) };
 
-    // cebra(h, lf.clone(), 0, Some(det_0_timecut), None);
-    // cebra(h, lf.clone(), 1, Some(det_1_timecut), None);
-    // cebra(h, lf.clone(), 2, Some(det_2_timecut), None);
-    // cebra(h, lf.clone(), 3, Some(det_3_timecut), None);
-    // cebra(h, lf.clone(), 4, Some(det_4_timecut), None);
+    cebra(h, lf.clone(), 0, Some(det_0_timecut), None, Some(det_0_energy_calibration));
+    cebra(h, lf.clone(), 1, Some(det_1_timecut), None, Some(det_1_energy_calibration));
+    cebra(h, lf.clone(), 2, Some(det_2_timecut), None, Some(det_2_energy_calibration));
+    cebra(h, lf.clone(), 3, Some(det_3_timecut), None, Some(det_3_energy_calibration));
+    cebra(h, lf.clone(), 4, Some(det_4_timecut), None, Some(det_4_energy_calibration));
 
-
-    /*
-    // CeBrA plots
-    // declare the gain matched energy columns, and time to scint left columns
-
-    let time_shits = vec![
-        1158.5,
-        1162.5,
-        1160.5,
-        1160.5,
-        1135.5,
-        1130.5,
-        1129.5,
-        1128.5,
-        1136.5,
-    ];
-
-    let gain_match_values = vec![
-        (-2.72156900878375e-19, 1.0, -5.6843418860808e-14),
-        (-4.97165415075812e-06, 1.14338957961188, -0.445011719623494),
-        (-2.35730449363139e-05, 0.996173496729512, 1.7443869915702),
-        (-1.32712886414671e-05, 0.999818365276875, 0.941072453624997),
-        (-2.76775763630926e-05, 0.860232802761158, -0.459548374380745),
-        (-2.22330292983274e-05, 1.2289729811605, 0.283037829606826),
-        (-4.12687972463716e-07, 0.701053103610418, 0.211631359048795),
-        (-3.57953438680052e-05, 1.29207015301957, 1.07805724372673),
-        (-3.03544968865592e-05, 0.957884129953653, -1.25796690476597),
-    ];
-
-    let time_cut_width = 6.0;
-
-    let mut det_lfs = Vec::new();
-    let mut det_time_lfs = Vec::new();
-    let mut det_time_cut_lfs = Vec::new();
-    for i in 0..9 {
-        let det_lf = lf.clone()
-            .filter(col(&format!("Cebra{}Energy", i)).neq(lit(-1e6)))
-            .with_column(
-                (lit(gain_match_values[i].0)*col(&format!("Cebra{}Energy", i))*col(&format!("Cebra{}Energy", i)) 
-                    + lit(gain_match_values[i].1)*col(&format!("Cebra{}Energy", i)) 
-                    + lit(gain_match_values[i].2)
-                ).alias(&format!("Cebra{}EnergyGM", i)))
-            .with_column((col(&format!("Cebra{}Time", i)) - col("ScintLeftTime")).alias(&format!("Cebra{}Time_ScintLeftTime", i)));
-
-        let det_time_lf = det_lf.clone()
-            .filter(col(&format!("Cebra{}Time", i)).neq(lit(-1e6)))
-            .filter(col("ScintLeftTime").neq(lit(-1e6)))
-            .filter(col("AnodeBackTime").neq(lit(-1e6)))
-            .with_column((col(&format!("Cebra{}Time_ScintLeftTime", i)) + lit(time_shits[i])).alias(&format!("Cebra{}Time_ScintLeftTime_Shifted", i)));
-    
-        let det_time_cut_lf = det_time_lf.clone()
-            .filter(col(&format!("Cebra{}Time_ScintLeftTime_Shifted", i)).gt(-time_cut_width))
-            .filter(col(&format!("Cebra{}Time_ScintLeftTime_Shifted", i)).lt(time_cut_width))
-            .with_column(( lit(2.598957532)*col(&format!("Cebra{}EnergyGM", i)) + lit(-12.36847047833) ).alias(&format!("Cebra{}EnergyECal", i)));
-
-        det_lfs.push(det_lf);
-        det_time_lfs.push(det_time_lf);
-        det_time_cut_lfs.push(det_time_cut_lf);
-    }
-
-    h.add_hist1d("CeBrA Gain Matched", 512, (0.0, 4096.0));
-    h.add_hist1d("CeBrA Time to Scint Shifted with TCut", 100, (-50.0, 50.0));
-    h.add_hist2d("CeBrA Gain Matched vs Xavg with TCut", (600,512), ((-300.0, 300.0),(0.0, 4096.0)));
-    h.add_hist2d("CeBrA vs Xavg: Energy Calibrated", (4096,512), ((0.0, 16384.0),(0.0, 8192.0)));
-
-    
-    for i in 0..9 {
-        // Raw CeBrA Histograms
-        h.add_fill_hist1d(&format!("Cebra{}Energy", i), &det_lfs[i], &format!("Cebra{}Energy", i), 512, (0.0, 4096.0));
-        h.add_fill_hist2d(&format!("Cebra{}Energy v Xavg", i), &det_lfs[i], "Xavg", &format!("Cebra{}Energy", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-        h.add_fill_hist1d(&format!("Cebra{}Time-ScintLeftTime", i), &det_time_lfs[i], &format!("Cebra{}Time_ScintLeftTime", i), 3200, (-1600.0, 1600.0));
-        h.add_fill_hist1d(&format!("Cebra{}Time-ScintLeftTime Shifted", i), &det_time_lfs[i], &format!("Cebra{}Time_ScintLeftTime_Shifted", i), 3200, (-1600.0, 1600.0));
-
-        // Gain Matched Histograms
-        h.add_fill_hist1d(&format!("Cebra{}EnergyGM", i), &det_lfs[i], &format!("Cebra{}EnergyGM", i), 512, (0.0, 4096.0));
-        h.add_fill_hist2d(&format!("Cebra{}EnergyGainMatched v Xavg", i), &det_lfs[i], "Xavg", &format!("Cebra{}EnergyGM", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-
-        // Time Cut Histograms
-        h.add_fill_hist1d(&format!("Cebra{}Time-ScintLeftTime Shifted Time Cut", i), &det_time_cut_lfs[i], &format!("Cebra{}Time_ScintLeftTime_Shifted", i), 100, (-50.0, 50.0));
-        h.add_fill_hist1d(&format!("Cebra{}Energy Time Cut", i), &det_time_cut_lfs[i], &format!("Cebra{}Energy", i), 512, (0.0, 4096.0));
-        h.add_fill_hist2d(&format!("Cebra{}Energy v Xavg Time Cut", i), &det_time_cut_lfs[i], "Xavg", &format!("Cebra{}Energy", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-
-        h.add_fill_hist2d(&format!("Cebra{}EnergyGM v Xavg Time Cut", i), &det_time_cut_lfs[i], "Xavg", &format!("Cebra{}EnergyGM", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-        
-        let cebra_det_panes_name_strings: Vec<String> = vec![
-            format!("Cebra{}Energy", i), 
-            format!("Cebra{}Energy v Xavg", i), 
-            format!("Cebra{}Time-ScintLeftTime", i), 
-            format!("Cebra{}Time-ScintLeftTime Shifted", i),
-            format!("Cebra{}EnergyGM", i), 
-            format!("Cebra{}EnergyGainMatched v Xavg", i),
-            format!("Cebra{}Time-ScintLeftTime Shifted Time Cut", i), 
-            format!("Cebra{}Energy Time Cut", i), 
-            format!("Cebra{}Energy v Xavg Time Cut", i),
-            format!("Cebra{}EnergyGM v Xavg Time Cut", i)
-        ];
-
-        let cebra_det_panes_name: Vec<&str> = cebra_det_panes_name_strings.iter().map(|s| s.as_str()).collect();
-
-        let cebra_det_panes = h.get_panes(cebra_det_panes_name);
-
-        h.tabs.insert(format!("CeBr3 Detector {}", i).to_string(), cebra_det_panes);
-
-        // fill the combined histograms
-        h.fill_hist1d(&format!("CeBrA Gain Matched"), &det_lfs[i], &format!("Cebra{}EnergyGM", i));
-        h.fill_hist1d(&format!("CeBrA Time to Scint Shifted with TCut"), &det_time_cut_lfs[i], &format!("Cebra{}Time_ScintLeftTime_Shifted", i));
-        h.fill_hist2d(&format!("CeBrA Gain Matched vs Xavg with TCut"), &det_time_cut_lfs[i], "Xavg", &format!("Cebra{}EnergyGM", i));
-        h.fill_hist2d(&format!("CeBrA vs Xavg: Energy Calibrated"), &det_time_cut_lfs[i], "XavgEnergyCalibrated", &format!("Cebra{}EnergyECal", i));
-    }
-
-    //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
-    let cebra_panes_names = vec![
-        "CeBrA Gain Matched", "CeBrA Time to Scint Shifted with TCut", 
-        "CeBrA Gain Matched vs Xavg with TCut", "CeBrA vs Xavg: Energy Calibrated"
-    ];
-
-    let cebra_panes = h.get_panes(cebra_panes_names);
-    h.tabs.insert("CeBrA".to_string(), cebra_panes);
-
-    */
 
     // */
+}
+
+/// Helper function to get column names from a LazyFrame
+pub fn get_column_names_from_lazyframe(lazyframe: &LazyFrame) -> Vec<String> {
+    let lf: LazyFrame = lazyframe.clone().limit(1);
+    let df: DataFrame = lf.collect().unwrap();
+    let columns: Vec<String> = df
+        .get_column_names_owned()
+        .into_iter()
+        .map(|name| name.to_string())
+        .collect();
+
+    columns
 }
 
 #[rustfmt::skip]
@@ -330,16 +216,18 @@ pub struct EnergyCalibration {
     pub a: f64,
     pub b: f64,
     pub c: f64,
+    pub bins: usize,
+    pub range: (f64, f64),
 }
 
 #[rustfmt::skip]
 #[allow(clippy::all)]
-pub fn cebra(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize, timecut: Option<TimeCut>, gainmatch: Option<GainMatch>) {
+pub fn cebra(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize, timecut: Option<TimeCut>, gainmatch: Option<GainMatch>, energy_calibration: Option<EnergyCalibration>) {
 
     let i = detector_number;
     let lf_cebra = lf.filter(col(&format!("Cebra{}Energy", detector_number)).neq(lit(-1e6)));
 
-    let column_names = get_column_names_from_lazyframe(&lf_cebra);
+    let mut column_names = get_column_names_from_lazyframe(&lf_cebra);
     
     // add the psd column if it doesn't exist
     let lf_cebra = lf_cebra.with_column(
@@ -350,30 +238,73 @@ pub fn cebra(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize, timecu
     h.add_fill_hist2d(&format!("CeBrA/Cebra{}/PSD v Energy", i), &lf_cebra, &format!("Cebra{}Energy", i), &format!("Cebra{}PSD", i), (512, 512), ((0.0, 4096.0), (0.0, 1.0)));
     
 
-    // Apply gain match if provided
-    let lf_cebra = if let Some(ref gainmatch) = &gainmatch {
-        let lf = lf_cebra.with_column(
-            (lit(gainmatch.a) * col(&format!("Cebra{}Energy", i)).pow(2.0)
-            + lit(gainmatch.b) * col(&format!("Cebra{}Energy", i))
-            + lit(gainmatch.c)).alias(&format!("Cebra{}EnergyGM", i))
-        );
+    /* 
+    Gain Matching Values
 
-        h.add_fill_hist1d(&format!("CeBrA/Cebra{}/Cebra{}EnergyGM", i, i), &lf, &format!("Cebra{}EnergyGM", i), 512, (0.0, 4096.0));
+    If the gain match column already exists, skip gain matching. 
+    This is done so if you gain match on a run by run basis, you don't need to the gain match values.
+    Just make sure you the alias is the same when analyzing the data externally.
+    */
+    let lf_cebra = if column_names.contains(&format!("Cebra{}EnergyGM", i)) {
+        log::warn!("Gain matched energy column already exists, skipping gain matching");
+        lf_cebra
+    } else {
+        if let Some(ref gainmatch) = gainmatch {
+                log::info!("Gain matching Cebra{}Energy", i);
+            let lf = lf_cebra.with_column(
+                (lit(gainmatch.a) * col(&format!("Cebra{}Energy", i)).pow(2.0)
+                + lit(gainmatch.b) * col(&format!("Cebra{}Energy", i))
+                + lit(gainmatch.c)).alias(&format!("Cebra{}EnergyGM", i))
+            );
+
+            // update column names to include the gain matched column
+            column_names.push(format!("Cebra{}EnergyGM", i));
+
+            h.add_fill_hist1d(&format!("CeBrA/Cebra{}/Cebra{}EnergyGM", i, i), &lf, &format!("Cebra{}EnergyGM", i), 512, (0.0, 4096.0));
+
+            lf
+        } else{
+            lf_cebra
+        }
+    };
+
+    // Energy Calibration logic -> if energy calibration is provided, apply it to the gain matched energy column if it exists, otherwise apply it to the raw energy column
+    let lf_cebra = if let Some(ref ecal) = energy_calibration {
+        let lf = if column_names.contains(&format!("Cebra{}EnergyGM", i)) {
+            lf_cebra.with_column(
+                (lit(ecal.a) * col(&format!("Cebra{}EnergyGM", i)).pow(2.0)
+                + lit(ecal.b) * col(&format!("Cebra{}EnergyGM", i))
+                + lit(ecal.c)).alias(&format!("Cebra{}EnergyCalibrated", i))
+            )
+        } else {
+            lf_cebra.with_column(
+                (lit(ecal.a) * col(&format!("Cebra{}Energy", i)).pow(2.0)
+                + lit(ecal.b) * col(&format!("Cebra{}Energy", i))
+                + lit(ecal.c)).alias(&format!("Cebra{}EnergyCalibrated", i))
+            )
+        };
+
+        // Update column names to include the calibrated energy column
+        column_names.push(format!("Cebra{}EnergyCalibrated", i));
+
+        // Fill histogram for the calibrated energy
+        h.add_fill_hist1d(&format!("CeBrA/Cebra{}/Cebra{}EnergyCalibrated", i, i), &lf, &format!("Cebra{}EnergyCalibrated", i), ecal.bins, ecal.range);
 
         lf
-
     } else {
         lf_cebra
     };
 
+
     let mut sps = false;
 
-    // Check if ScintLeftTime exists
+    // Check if ScintLeftTime exists and therefore SPS is present
     let lf_cebra = if column_names.contains(&"ScintLeftTime".to_string()) {
         sps = true;
     
         // Check if Cebra#RelTime exists, if not, create it as Cebra#Time - ScintLeftTime
         if !column_names.contains(&format!("Cebra{}RelTime", i)) {
+            column_names.push(format!("Cebra{}RelTime", i));
             lf_cebra.with_column(
                 (col(&format!("Cebra{}Time", i)) - col("ScintLeftTime")).alias(&format!("Cebra{}RelTime", i))
             )
@@ -385,9 +316,9 @@ pub fn cebra(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize, timecu
     };
 
     if sps {
-        h.add_fill_hist1d(&format!("CeBrA/Cebra{}/Cebra{}RelTime", i, i), &lf_cebra, &format!("Cebra{}RelTime", i), 3400, (-3200.0, 3200.0));
+        h.add_fill_hist1d(&format!("CeBrA/Cebra{}/Cebra{}RelTime", i, i), &lf_cebra, &format!("Cebra{}RelTime", i), 6400, (-3200.0, 3200.0));
         h.add_fill_hist2d(&format!("CeBrA/Cebra{}/Cebra{}Energy v Xavg", i, i), &lf_cebra, "Xavg", &format!("Cebra{}Energy", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-        h.add_fill_hist2d(&format!("CeBrA/Cebra{}/Theta v Cebra{}RelTime ", i, i), &lf_cebra, &format!("Cebra{}RelTime", i), "Theta", (3400, 300), ((-3200.0, 3200.0), (0.0, PI)));
+        h.add_fill_hist2d(&format!("CeBrA/Cebra{}/Theta v Cebra{}RelTime ", i, i), &lf_cebra, &format!("Cebra{}RelTime", i), "Theta", (6400, 300), ((-3200.0, 3200.0), (0.0, PI)));
     }
 
     // Apply timecut and shift RelTime if timecut is provided
@@ -401,37 +332,46 @@ pub fn cebra(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize, timecu
                 .filter(col(&format!("Cebra{}RelTime", i)).lt(lit(timecut.high)))
                 .filter(col("AnodeBackTime").neq(lit(-1e6)));
 
-            h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}RelTime", i, i), &lf_timecut, &format!("Cebra{}RelTime", i), 3400, (-3200.0, 3200.0));
+            h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}RelTime", i, i), &lf_timecut, &format!("Cebra{}RelTime", i), 6400, (-3200.0, 3200.0));
             h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}RelTimeShifted", i, i), &lf_timecut, &format!("Cebra{}RelTimeShifted", i), 100, (-50.0, 50.0));
             h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}Energy", i, i), &lf_timecut, &format!("Cebra{}Energy", i), 512, (0.0, 4096.0));
+            h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/Xavg", i), &lf_timecut, "Xavg", 600, (-300.0, 300.0));
+
+            h.add_fill_hist1d("CeBrA/Xavg", &lf_timecut, "Xavg", 600, (-300.0, 300.0));
+            h.add_fill_hist1d("CeBrA/CebraRelTimeShifted_TimeCut", &lf_timecut, &format!("Cebra{}RelTimeShifted", i), 100, (-50.0, 50.0));
 
             h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}Energy v Xavg", i, i), &lf_timecut, "Xavg", &format!("Cebra{}Energy", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
             h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}Energy v X1", i, i), &lf_timecut, "X1", &format!("Cebra{}Energy", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
 
-            if gainmatch.is_some() {
+            if column_names.contains(&format!("Cebra{}EnergyGM", i)) {
                 h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/GainMatched/Cebra{}EnergyGM", i, i), &lf_timecut, &format!("Cebra{}EnergyGM", i), 512, (0.0, 4096.0));
                 
                 h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/GainMatched/Cebra{}EnergyGM v Xavg", i, i), &lf_timecut, "Xavg", &format!("Cebra{}EnergyGM", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-                h.add_fill_hist2d(&"CeBrA/CebraEnergyGM v Xavg: TimeCut", &lf_timecut, "Xavg", &format!("Cebra{}EnergyGM", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+                h.add_fill_hist2d("CeBrA/CebraEnergyGM v Xavg: TimeCut", &lf_timecut, "Xavg", &format!("Cebra{}EnergyGM", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
                 
                 h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/GainMatched/Cebra{}EnergyGM v X1", i, i), &lf_timecut, "X1", &format!("Cebra{}EnergyGM", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-                h.add_fill_hist2d(&"CeBrA/CebraEnergyGM v X1: TimeCut", &lf_timecut, "X1", &format!("Cebra{}EnergyGM", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+                h.add_fill_hist2d("CeBrA/CebraEnergyGM v X1: TimeCut", &lf_timecut, "X1", &format!("Cebra{}EnergyGM", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
             }
 
+            if let Some(ref ecal) = energy_calibration {
+                h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/Calibrated/Cebra{}EnergyCalibrated", i, i), &lf_timecut, &format!("Cebra{}EnergyCalibrated", i), ecal.bins, ecal.range);
+
+                h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/Calibrated/Cebra{}EnergyCalibrated v Xavg", i, i), &lf_timecut, "Xavg", &format!("Cebra{}EnergyCalibrated", i), (600, ecal.bins), ((-300.0, 300.0), ecal.range));
+                h.add_fill_hist2d("CeBrA/CebraEnergyCalibrated v Xavg: TimeCut", &lf_timecut, "Xavg", &format!("Cebra{}EnergyCalibrated", i), (600, ecal.bins), ((-300.0, 300.0), ecal.range));
+
+                h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/Calibrated/Cebra{}EnergyCalibrated v X1", i, i), &lf_timecut, "X1", &format!("Cebra{}EnergyCalibrated", i), (600, ecal.bins), ((-300.0, 300.0), ecal.range));
+                h.add_fill_hist2d("CeBrA/CebraEnergyCalibrated v X1: TimeCut", &lf_timecut, "X1", &format!("Cebra{}EnergyCalibrated", i), (600, ecal.bins), ((-300.0, 300.0), ecal.range));
+            }
         }
     };
 
 }
 
-/// Helper function to get column names from a LazyFrame
-pub fn get_column_names_from_lazyframe(lazyframe: &LazyFrame) -> Vec<String> {
-    let lf: LazyFrame = lazyframe.clone().limit(1);
-    let df: DataFrame = lf.collect().unwrap();
-    let columns: Vec<String> = df
-        .get_column_names_owned()
-        .into_iter()
-        .map(|name| name.to_string())
-        .collect();
+#[rustfmt::skip]
+#[allow(clippy::all)]
+pub fn catrina(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize) {
+    let i = detector_number;
 
-    columns
+    h.add_fill_hist1d(&format!("Catrina/CATRINA{i}/Energy"), &lf, &format!("CATRINA{i}Energy"), 4096, (0.0, 4096.0));
+    h.add_fill_hist2d(&format!("Catrina/CATRINA{i}/PSD vs Energy"), &lf, &format!("CATRINA{i}Energy"), &format!("CATRINA{i}PSD"), (512, 500), ((0.0, 4096.0), (0.0, 1.0)));
 }

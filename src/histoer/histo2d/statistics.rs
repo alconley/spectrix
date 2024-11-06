@@ -106,8 +106,8 @@ impl Histogram2D {
             format!("Integral: {}", stats.0),
             format!("Mean: ({:.2}, {:.2})", stats.1, stats.3),
             format!("Stdev: ({:.2}, {:.2})", stats.2, stats.4),
-            format!("Overflow: ({:}, {:})", self.overflow.0, self.overflow.1),
-            format!("Underflow: ({:}, {:})", self.underflow.0, self.underflow.1),
+            // format!("Overflow: ({:}, {:})", self.overflow.0, self.overflow.1),
+            // format!("Underflow: ({:}, {:})", self.underflow.0, self.underflow.1),
         ];
 
         for entry in stats_entries.iter() {
