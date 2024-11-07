@@ -405,6 +405,6 @@ def get_2d_histograms(file_name):
     }
 
     pub fn histogram_script_ui(&mut self, ui: &mut egui::Ui) {
-        // self.histogram_script.ui(ui);
+        self.histogram_script.ui(ui);
     }
 }

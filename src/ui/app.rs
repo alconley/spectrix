@@ -70,13 +70,11 @@ impl eframe::App for Spectrix {
             },
         );
 
-        egui::SidePanel::right("spectrix_right_panel").show_animated(
-            ctx,
-            self.right_side_panel_open,
-            |ui| {
+        egui::SidePanel::right("spectrix_right_panel")
+            .resizable(false)
+            .show_animated(ctx, self.right_side_panel_open, |ui| {
                 self.processer.histogram_script_ui(ui);
-            },
-        );
+            });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             self.processer.histogrammer.ui(ui);

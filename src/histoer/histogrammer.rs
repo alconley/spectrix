@@ -5,10 +5,12 @@ use super::tree::TreeBehavior;
 use crate::cutter::cut_handler::CutHandler;
 use egui_tiles::TileId;
 use fnv::FnvHashMap;
+use polars::prelude::col;
 use polars::prelude::*;
-use std::thread::JoinHandle;
-use polars::prelude::col; 
 use rayon::prelude::*;
+use std::thread::JoinHandle;
+
+use std::convert::TryInto;
 
 use std::sync::{Arc, Mutex};
 
@@ -29,6 +31,59 @@ pub struct ContainerInfo {
     children: Vec<TileId>,     // Child tile IDs
     display_name: String,      // Display name for the tab
     tab_id: TileId,            // ID for this tab
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+pub struct Histo1DConfig {
+    pub name: String,        // Histogram display name
+    pub column_name: String, // Data column to fill from
+    pub range: (f64, f64),   // Range for the histogram
+    pub bins: usize,         // Number of bins
+    pub calculate: bool,     // Whether to calculate the histogram
+}
+
+impl Histo1DConfig {
+    pub fn new(name: &str, column_name: &str, range: (f64, f64), bins: usize) -> Self {
+        Self {
+            name: name.to_string(),
+            column_name: column_name.to_string(),
+            range,
+            bins,
+            calculate: true,
+        }
+    }
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+pub struct Histo2DConfig {
+    pub name: String,          // Histogram display name
+    pub x_column_name: String, // Data column for X-axis
+    pub y_column_name: String, // Data column for Y-axis
+    pub x_range: (f64, f64),   // Range for X-axis
+    pub y_range: (f64, f64),   // Range for Y-axis
+    pub bins: (usize, usize),  // Number of bins for X and Y axes
+    pub calculate: bool,       // Whether to calculate the histogram
+}
+
+impl Histo2DConfig {
+    pub fn new(
+        name: &str,
+        x_column_name: &str,
+        y_column_name: &str,
+        x_range: (f64, f64),
+        y_range: (f64, f64),
+        bins: (usize, usize),
+    ) -> Self {
+        Self {
+            name: name.to_string(),
+            x_column_name: x_column_name.to_string(),
+            y_column_name: y_column_name.to_string(),
+            x_range,
+            y_range,
+            bins,
+            calculate: true,
+        }
+    }
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -151,257 +206,495 @@ impl Histogrammer {
         }
     }
 
+    // pub fn fill_histograms(
+    //     &mut self,
+    //     hist1d_specs: Vec<Histo1DConfig>,
+    //     hist2d_specs: Vec<Histo2DConfig>,
+    //     lf: &LazyFrame,
+    // ) {
+    //     // Join any previous threads
+    //     for handle in self.handles.drain(..) {
+    //         if let Err(e) = handle.join() {
+    //             println!("Failed to join thread: {:?}", e);
+    //         }
+    //     }
+
+    //     let start_time = std::time::Instant::now();
+
+    //     // Collect available column names
+    //     let available_columns = self.get_column_names_from_lazyframe(lf);
+
+    //     // Filter hist1d_specs and hist2d_specs to include only those marked for calculation and with existing columns
+    //     let hist1d_specs: Vec<_> = hist1d_specs
+    //         .into_iter()
+    //         .filter(|h| {
+    //             if h.calculate {
+    //                 if available_columns.contains(&h.column_name) {
+    //                     true
+    //                 } else {
+    //                     println!(
+    //                         "Warning: Column '{}' does not exist for 1D histogram: '{}'. Skipping.",
+    //                         h.column_name, h.name
+    //                     );
+    //                     false
+    //                 }
+    //             } else {
+    //                 false
+    //             }
+    //         })
+    //         .collect();
+
+    //     let hist2d_specs: Vec<_> = hist2d_specs
+    //         .into_iter()
+    //         .filter(|h| {
+    //             if h.calculate {
+    //                 let missing_columns = !available_columns.contains(&h.x_column_name) || !available_columns.contains(&h.y_column_name);
+    //                 if missing_columns {
+    //                     println!("Warning: Columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping.", h.x_column_name, h.y_column_name, h.name);
+    //                     false
+    //                 } else {
+    //                     true
+    //                 }
+    //             } else {
+    //                 false
+    //             }
+    //         })
+    //         .collect();
+
+    //     // Collect column names for the remaining histograms
+    //     let mut column_names: Vec<&str> = hist1d_specs
+    //         .iter()
+    //         .map(|h| h.column_name.as_str())
+    //         .collect();
+    //     for h in &hist2d_specs {
+    //         column_names.push(h.x_column_name.as_str());
+    //         column_names.push(h.y_column_name.as_str());
+    //     }
+    //     column_names.sort_unstable();
+    //     column_names.dedup();
+
+    //     // Map column names to expressions for LazyFrame selection
+    //     let selected_columns: Vec<_> = column_names.iter().map(|&col_name| col(col_name)).collect();
+
+    //     // Prepare collections for histograms
+    //     let mut hist1d_map = Vec::new();
+    //     let mut hist2d_map = Vec::new();
+    //     let mut missing_1d = Vec::new();
+    //     let mut missing_2d = Vec::new();
+
+    //     // Identify and reset existing histograms, collect missing ones
+    //     for h in &hist1d_specs {
+    //         if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
+    //             self.tree.tiles.iter_mut().find(|(_id, tile)| {
+    //                 if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+    //                     hist.lock().unwrap().name == h.name
+    //                 } else {
+    //                     false
+    //                 }
+    //             })
+    //         {
+    //             hist.lock().unwrap().reset(); // Reset histogram counts
+    //             hist1d_map.push((Arc::clone(hist), h.clone()));
+    //         } else {
+    //             missing_1d.push(h.clone());
+    //         }
+    //     }
+
+    //     for h in &hist2d_specs {
+    //         if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
+    //             self.tree.tiles.iter_mut().find(|(_id, tile)| {
+    //                 if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
+    //                     hist.lock().unwrap().name == h.name
+    //                 } else {
+    //                     false
+    //                 }
+    //             })
+    //         {
+    //             hist.lock().unwrap().reset(); // Reset histogram counts
+    //             hist2d_map.push((Arc::clone(hist), h.clone()));
+    //         } else {
+    //             missing_2d.push(h.clone());
+    //         }
+    //     }
+
+    //     // Add missing 1D histograms outside of the mutable borrow loop
+    //     for h in missing_1d {
+    //         self.add_hist1d(&h.name, h.bins, h.range);
+    //         if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
+    //             self.tree.tiles.iter_mut().find(|(_id, tile)| {
+    //                 if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+    //                     hist.lock().unwrap().name == h.name
+    //                 } else {
+    //                     false
+    //                 }
+    //             })
+    //         {
+    //             hist1d_map.push((Arc::clone(hist), h));
+    //         }
+    //     }
+
+    //     // Add missing 2D histograms outside of the mutable borrow loop
+    //     for h in missing_2d {
+    //         self.add_hist2d(&h.name, h.bins, (h.x_range, h.y_range));
+    //         if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
+    //             self.tree.tiles.iter_mut().find(|(_id, tile)| {
+    //                 if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
+    //                     hist.lock().unwrap().name == h.name
+    //                 } else {
+    //                     false
+    //                 }
+    //             })
+    //         {
+    //             hist2d_map.push((Arc::clone(hist), h));
+    //         }
+    //     }
+
+    //     // Filter and select necessary columns from LazyFrame
+    //     let lf_selected = lf.clone().select(selected_columns);
+
+    //     // Spawn a thread for processing histograms
+    //     let handle = std::thread::spawn(move || {
+    //         if let Ok(df) = lf_selected.collect() {
+    //             let height = df.height();
+
+    //             for (hist, _) in &hist1d_map {
+    //                 hist.lock().unwrap().reset();
+    //             }
+
+    //             for (hist, _) in &hist2d_map {
+    //                 hist.lock().unwrap().reset();
+    //             }
+
+    //             // Process 1D histograms
+    //             hist1d_map.par_iter().for_each(|(hist, meta)| {
+    //                 if let Ok(col_idx) = df.column(&meta.column_name) {
+    //                     if let Ok(col_values) = col_idx.f64() {
+    //                         let mut hist = hist.lock().unwrap();
+    //                         for (row_idx, value) in col_values.into_no_null_iter().enumerate() {
+    //                             if value == -1e6 {
+    //                                 continue;
+    //                             }
+    //                             if value < meta.range.0 {
+    //                                 hist.underflow += 1;
+    //                             } else if value > meta.range.1 {
+    //                                 hist.overflow += 1;
+    //                             } else {
+    //                                 hist.fill(value, row_idx, height);
+    //                             }
+    //                         }
+    //                     }
+    //                 }
+    //             });
+
+    //             // Process 2D histograms
+    //             hist2d_map.par_iter().for_each(|(hist, meta)| {
+    //                 if let (Ok(x_values), Ok(y_values)) = (
+    //                     df.column(&meta.x_column_name).and_then(|c| c.f64()),
+    //                     df.column(&meta.y_column_name).and_then(|c| c.f64()),
+    //                 ) {
+    //                     let mut hist = hist.lock().unwrap();
+    //                     for (row_idx, (x, y)) in x_values
+    //                         .into_no_null_iter()
+    //                         .zip(y_values.into_no_null_iter())
+    //                         .enumerate()
+    //                     {
+    //                         if x == -1e6 || y == -1e6 {
+    //                             continue;
+    //                         }
+    //                         if x < meta.x_range.0 {
+    //                             hist.underflow.0 += 1;
+    //                         } else if x > meta.x_range.1 {
+    //                             hist.overflow.0 += 1;
+    //                         }
+    //                         if y < meta.y_range.0 {
+    //                             hist.underflow.1 += 1;
+    //                         } else if y > meta.y_range.1 {
+    //                             hist.overflow.1 += 1;
+    //                         }
+    //                         if x > meta.x_range.0
+    //                             && x < meta.x_range.1
+    //                             && y > meta.y_range.0
+    //                             && y < meta.y_range.1
+    //                         {
+    //                             hist.fill(x, y, row_idx, height);
+    //                         }
+    //                     }
+    //                 }
+    //             });
+
+    //             // Reset progress and recalculate for 2D histograms
+    //             for (hist, _) in &hist1d_map {
+    //                 hist.lock().unwrap().plot_settings.progress = None;
+    //             }
+    //             for (hist, _) in &hist2d_map {
+    //                 let mut hist = hist.lock().unwrap();
+    //                 hist.plot_settings.progress = None;
+    //                 hist.plot_settings.recalculate_image = true;
+    //             }
+
+    //             let elapsed_time = start_time.elapsed();
+    //             println!("\nFilling histograms took: {:?}\n", elapsed_time);
+    //         } else {
+    //             println!("Failed to collect data for filling histograms.");
+    //         }
+    //     });
+
+    //     self.handles.push(handle);
+    // }
+
     pub fn fill_histograms(
         &mut self,
-        hist1d_specs: Vec<(&str, &str, (f64, f64), usize)>, // (hist name, column name, range, bins)
-        hist2d_specs: Vec<(&str, &str, &str, ((f64, f64), (f64, f64)), (usize, usize))>, // (hist name, x col, y col, ranges, bins)
+        hist1d_specs: Vec<Histo1DConfig>,
+        hist2d_specs: Vec<Histo2DConfig>,
         lf: &LazyFrame,
-    ) -> bool {
-        // Collect all required column names
-        let mut column_names: Vec<&str> = hist1d_specs.iter().map(|(_, col, _, _)| *col).collect();
-        for (_, x_col, y_col, _, _) in &hist2d_specs {
-            column_names.push(*x_col);
-            column_names.push(*y_col);
+        max_rows_per_batch: usize,
+    ) {
+        // Join any previous threads
+        for handle in self.handles.drain(..) {
+            if let Err(e) = handle.join() {
+                println!("Failed to join thread: {:?}", e);
+            }
+        }
+
+        let start_time = std::time::Instant::now();
+
+        // Collect available column names
+        let available_columns = self.get_column_names_from_lazyframe(lf);
+
+        // Filter hist1d_specs and hist2d_specs to include only those marked for calculation and with existing columns
+        let hist1d_specs: Vec<_> = hist1d_specs
+            .into_iter()
+            .filter(|h| {
+                if h.calculate {
+                    if available_columns.contains(&h.column_name) {
+                        true
+                    } else {
+                        println!(
+                            "Warning: Column '{}' does not exist for 1D histogram: '{}'. Skipping.",
+                            h.column_name, h.name
+                        );
+                        false
+                    }
+                } else {
+                    false
+                }
+            })
+            .collect();
+
+        let hist2d_specs: Vec<_> = hist2d_specs
+            .into_iter()
+            .filter(|h| {
+                if h.calculate {
+                    let missing_columns = !available_columns.contains(&h.x_column_name) || !available_columns.contains(&h.y_column_name);
+                    if missing_columns {
+                        println!("Warning: Columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping.", h.x_column_name, h.y_column_name, h.name);
+                        false
+                    } else {
+                        true
+                    }
+                } else {
+                    false
+                }
+            })
+            .collect();
+
+        // Collect column names for the remaining histograms
+        let mut column_names: Vec<&str> = hist1d_specs
+            .iter()
+            .map(|h| h.column_name.as_str())
+            .collect();
+        for h in &hist2d_specs {
+            column_names.push(h.x_column_name.as_str());
+            column_names.push(h.y_column_name.as_str());
         }
         column_names.sort_unstable();
-        column_names.dedup(); // Remove duplicate column names
-    
-        // Fetch actual column names from LazyFrame
-        let available_columns = self.get_column_names_from_lazyframe(lf);
-    
-        // Filter out missing columns
-        let selected_columns: Vec<_> = column_names
-            .iter()
-            .filter(|&&col_name| available_columns.contains(&col_name.to_string()))
-            .map(|&col_name| col(col_name))
-            .collect();
-    
-        if selected_columns.len() < column_names.len() {
-            log::warn!("Some columns are missing from the LazyFrame and cannot be selected.");
-            return false;
-        }
-    
-        // Initialize histograms
+        column_names.dedup();
+
+        // Map column names to expressions for LazyFrame selection
+        let selected_columns: Vec<_> = column_names.iter().map(|&col_name| col(col_name)).collect();
+
+        // Prepare collections for histograms
         let mut hist1d_map = Vec::new();
         let mut hist2d_map = Vec::new();
-    
-
-        // Separate checking phase for 1D histograms
         let mut missing_1d = Vec::new();
-        for (hist_name, col_name, range, bins) in &hist1d_specs {
-            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
-                self.tree.tiles.iter_mut().find(|(_id, tile)| {
-                    if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                        hist.lock().unwrap().name == *hist_name
-                    } else {
-                        false
-                    }
-                })
-            {
-                // Add the histogram with the actual column name
-                hist1d_map.push((Arc::clone(hist), col_name.to_string(), *range, *bins));
-            } else {
-                // Track missing histogram to add it in the next step
-                missing_1d.push((*hist_name, *bins, *range));
-            }
-        }
-
-        // Separate mutable addition phase for missing 1D histograms
-        for (hist_name, bins, range) in missing_1d {
-            self.add_hist1d(hist_name, bins, range);
-            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
-                self.tree.tiles.iter_mut().find(|(_id, tile)| {
-                    if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                        hist.lock().unwrap().name == hist_name
-                    } else {
-                        false
-                    }
-                })
-            {
-                // Ensure we add the correct column name to hist1d_map, not the histogram display name
-                let col_name = hist1d_specs.iter().find(|(name, _, _, _)| name == &hist_name).unwrap().1;
-                hist1d_map.push((Arc::clone(hist), col_name.to_string(), range, bins));
-            }
-        }
-
-    
-        // Separate checking phase for 2D histograms
         let mut missing_2d = Vec::new();
-        for (name, x_col, y_col, ranges, bins) in &hist2d_specs {
-            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
+
+        // Identify and reset existing histograms, collect missing ones
+        for h in &hist1d_specs {
+            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
                 self.tree.tiles.iter_mut().find(|(_id, tile)| {
-                    if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                        hist.lock().unwrap().name == *name
+                    if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+                        hist.lock().unwrap().name == h.name
                     } else {
                         false
                     }
                 })
             {
-                hist2d_map.push((Arc::clone(hist), x_col.to_string(), y_col.to_string(), *ranges, *bins));
+                hist.lock().unwrap().reset(); // Reset histogram counts
+                hist1d_map.push((Arc::clone(hist), h.clone()));
             } else {
-                // Track missing histogram to add it in the next step, preserving the column names
-                missing_2d.push((*name, *x_col, *y_col, *ranges, *bins));
+                missing_1d.push(h.clone());
             }
         }
-    
-        // Separate mutable addition phase for missing 2D histograms
-        for (name, x_col, y_col, ranges, bins) in missing_2d {
-            self.add_hist2d(name, bins, ranges);
+
+        for h in &hist2d_specs {
             if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
                 self.tree.tiles.iter_mut().find(|(_id, tile)| {
                     if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                        hist.lock().unwrap().name == name
+                        hist.lock().unwrap().name == h.name
                     } else {
                         false
                     }
                 })
             {
-                // Ensure we push the correct column names (x_col and y_col) instead of `name`
-                hist2d_map.push((Arc::clone(hist), x_col.to_string(), y_col.to_string(), ranges, bins));
+                hist.lock().unwrap().reset(); // Reset histogram counts
+                hist2d_map.push((Arc::clone(hist), h.clone()));
+            } else {
+                missing_2d.push(h.clone());
             }
         }
-    
-        // Filter and select necessary columns from LazyFrame
-        let lf_selected = lf.clone().select(selected_columns);
-    
-        // // Start filling histograms in a new thread
-        // let handle = std::thread::spawn(move || {
-        //     if let Ok(df) = lf_selected.collect() {
-        //         for row_idx in 0..df.height() {
-        //             // Fill 1D histograms
-        //             for (hist, col, range, _) in &hist1d_map {
-        //                 if let Ok(col_idx) = df.column(col) {
-        //                     let col_values = col_idx.f64().unwrap();
-        //                     if let Some(value) = col_values.get(row_idx) {
-        //                         if value == -1e6 {
-        //                             continue;
-        //                         }
-        //                         let mut hist = hist.lock().unwrap();
-        //                         if value < range.0 {
-        //                             hist.underflow += 1;
-        //                         } else if value > range.1 {
-        //                             hist.overflow += 1;
-        //                         } else {
-        //                             hist.fill(value, row_idx, df.height());
-        //                         }
-        //                     }
-        //                 }
-        //             }
-    
-        //             // Fill 2D histograms
-        //             for (hist, x_col, y_col, (x_range, y_range), _) in &hist2d_map {
-        //                 if let (Ok(x_values), Ok(y_values)) = (df.column(x_col), df.column(y_col)) {
-        //                     let x_vals = x_values.f64().unwrap();
-        //                     let y_vals = y_values.f64().unwrap();
-        //                     if let (Some(x), Some(y)) = (x_vals.get(row_idx), y_vals.get(row_idx)) {
-        //                         if x == -1e6 || y == -1e6 {
-        //                             continue;
-        //                         }
-        //                         let mut hist = hist.lock().unwrap();
-        //                         if x < x_range.0 {
-        //                             hist.underflow.0 += 1;
-        //                         } else if x > x_range.1 {
-        //                             hist.overflow.0 += 1;
-        //                         }
-        //                         if y < y_range.0 {
-        //                             hist.underflow.1 += 1;
-        //                         } else if y > y_range.1 {
-        //                             hist.overflow.1 += 1;
-        //                         }
-        //                         if x > x_range.0 && x < x_range.1 && y > y_range.0 && y < y_range.1 {
-        //                             hist.fill(x, y, row_idx, df.height());
-        //                         }
-        //                     }
-        //                 }
-        //             }
-        //         }
-        //         log::info!("Completed filling all 1D and 2D histograms row-by-row");
 
-        //         // Reset progress to None for all histograms
-        //         for (hist, _, _, _) in &hist1d_map {
-        //             hist.lock().unwrap().plot_settings.progress = None;
-        //         }
-        //         for (hist, _, _, _, _) in &hist2d_map {
-        //             hist.lock().unwrap().plot_settings.recalculate_image = true;
-        //             hist.lock().unwrap().plot_settings.progress = None;
-        //         }
+        // Add missing 1D histograms outside of the mutable borrow loop
+        for h in missing_1d {
+            self.add_hist1d(&h.name, h.bins, h.range);
+            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
+                self.tree.tiles.iter_mut().find(|(_id, tile)| {
+                    if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+                        hist.lock().unwrap().name == h.name
+                    } else {
+                        false
+                    }
+                })
+            {
+                hist1d_map.push((Arc::clone(hist), h));
+            }
+        }
 
-        //     } else {
-        //         log::error!("Failed to collect data for filling histograms");
-        //     }
-        // });
-        let handle = std::thread::spawn(move || {
-            if let Ok(df) = lf_selected.collect() {
-                let height = df.height();
-                
-                // Process 1D histograms
-                hist1d_map.par_iter().for_each(|(hist, col, range, _)| {
-                    if let Ok(col_idx) = df.column(col) {
-                        if let Ok(col_values) = col_idx.f64() {
+        // Add missing 2D histograms outside of the mutable borrow loop
+        for h in missing_2d {
+            self.add_hist2d(&h.name, h.bins, (h.x_range, h.y_range));
+            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
+                self.tree.tiles.iter_mut().find(|(_id, tile)| {
+                    if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
+                        hist.lock().unwrap().name == h.name
+                    } else {
+                        false
+                    }
+                })
+            {
+                hist2d_map.push((Arc::clone(hist), h));
+            }
+        }
+
+        let mut row_start = 0;
+        loop {
+            let batch_lf = lf
+                .clone()
+                .slice(row_start as i64, max_rows_per_batch.try_into().unwrap());
+            let lf_selected = batch_lf.select(selected_columns.clone());
+
+            if lf_selected.clone().limit(1).collect().unwrap().height() == 0 {
+                break;
+            }
+
+            let hist1d_map = hist1d_map.clone();
+            let hist2d_map = hist2d_map.clone();
+
+            let handle = std::thread::spawn(move || {
+                if let Ok(df) = lf_selected.collect() {
+                    let height = df.height();
+
+                    for (hist, _) in &*hist1d_map {
+                        hist.lock().unwrap().reset();
+                    }
+
+                    for (hist, _) in &*hist2d_map {
+                        hist.lock().unwrap().reset();
+                    }
+
+                    hist1d_map.par_iter().for_each(|(hist, meta)| {
+                        if let Ok(col_idx) = df.column(&meta.column_name) {
+                            if let Ok(col_values) = col_idx.f64() {
+                                let mut hist = hist.lock().unwrap();
+                                for (row_idx, value) in col_values.into_no_null_iter().enumerate() {
+                                    if value == -1e6 {
+                                        continue;
+                                    }
+                                    if value < meta.range.0 {
+                                        hist.underflow += 1;
+                                    } else if value > meta.range.1 {
+                                        hist.overflow += 1;
+                                    } else {
+                                        hist.fill(value, row_idx, height);
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    hist2d_map.par_iter().for_each(|(hist, meta)| {
+                        if let (Ok(x_values), Ok(y_values)) = (
+                            df.column(&meta.x_column_name).and_then(|c| c.f64()),
+                            df.column(&meta.y_column_name).and_then(|c| c.f64()),
+                        ) {
                             let mut hist = hist.lock().unwrap();
-                            for (row_idx, value) in col_values.into_no_null_iter().enumerate() {
-                                if value == -1e6 {
+                            for (row_idx, (x, y)) in x_values
+                                .into_no_null_iter()
+                                .zip(y_values.into_no_null_iter())
+                                .enumerate()
+                            {
+                                if x == -1e6 || y == -1e6 {
                                     continue;
                                 }
-                                if value < range.0 {
-                                    hist.underflow += 1;
-                                } else if value > range.1 {
-                                    hist.overflow += 1;
-                                } else {
-                                    hist.fill(value, row_idx, height);
+                                if x < meta.x_range.0 {
+                                    hist.underflow.0 += 1;
+                                } else if x > meta.x_range.1 {
+                                    hist.overflow.0 += 1;
+                                }
+                                if y < meta.y_range.0 {
+                                    hist.underflow.1 += 1;
+                                } else if y > meta.y_range.1 {
+                                    hist.overflow.1 += 1;
+                                }
+                                if x > meta.x_range.0
+                                    && x < meta.x_range.1
+                                    && y > meta.y_range.0
+                                    && y < meta.y_range.1
+                                {
+                                    hist.fill(x, y, row_idx, height);
                                 }
                             }
                         }
+                    });
+
+                    println!("Processed rows {} to {}", row_start, row_start + height);
+
+                    // Reset progress and recalculate for 2D histograms
+                    for (hist, _) in &hist1d_map {
+                        hist.lock().unwrap().plot_settings.progress = None;
                     }
-                });
-        
-                // Process 2D histograms
-                hist2d_map.par_iter().for_each(|(hist, x_col, y_col, (x_range, y_range), _)| {
-                    if let (Ok(x_values), Ok(y_values)) = (df.column(x_col).and_then(|c| c.f64()), df.column(y_col).and_then(|c| c.f64())) {
+                    for (hist, _) in &hist2d_map {
                         let mut hist = hist.lock().unwrap();
-                        for (row_idx, (x, y)) in x_values.into_no_null_iter().zip(y_values.into_no_null_iter()).enumerate() {
-                            if x == -1e6 || y == -1e6 {
-                                continue;
-                            }
-                            if x < x_range.0 {
-                                hist.underflow.0 += 1;
-                            } else if x > x_range.1 {
-                                hist.overflow.0 += 1;
-                            }
-                            if y < y_range.0 {
-                                hist.underflow.1 += 1;
-                            } else if y > y_range.1 {
-                                hist.overflow.1 += 1;
-                            }
-                            if x > x_range.0 && x < x_range.1 && y > y_range.0 && y < y_range.1 {
-                                hist.fill(x, y, row_idx, height);
-                            }
-                        }
+                        hist.plot_settings.progress = None;
+                        hist.plot_settings.recalculate_image = true;
                     }
-                });
-        
-                log::info!("Completed filling all 1D and 2D histograms row-by-row");
-        
-                // Reset progress to None and recalculate for 2D histograms
-                for (hist, _, _, _) in &hist1d_map {
-                    hist.lock().unwrap().plot_settings.progress = None;
                 }
-                for (hist, _, _, _, _) in &hist2d_map {
-                    let mut hist = hist.lock().unwrap();
-                    hist.plot_settings.progress = None;
-                    hist.plot_settings.recalculate_image = true;
-                }
-        
-            } else {
-                log::error!("Failed to collect data for filling histograms");
+            });
+
+            self.handles.push(handle);
+            row_start += max_rows_per_batch;
+        }
+
+        for handle in self.handles.drain(..) {
+            if let Err(e) = handle.join() {
+                println!("Failed to join thread: {:?}", e);
             }
-        });
-        
-    
-        self.handles.push(handle);
-        true
+        }
+
+        let elapsed_time = start_time.elapsed();
+        println!("\nTotal time to fill histograms: {:?}\n", elapsed_time);
     }
-    
+
     pub fn get_column_names_from_lazyframe(&self, lazyframe: &LazyFrame) -> Vec<String> {
         let lf: LazyFrame = lazyframe.clone().limit(1);
         let df: DataFrame = lf.collect().unwrap();
@@ -733,16 +1026,25 @@ impl Histogrammer {
             if let Some(egui_tiles::Tile::Container(container)) =
                 self.tree.tiles.get_mut(main_tab_id)
             {
-                // // Change to `Tabs` if not already of this type
-                if container.kind() != egui_tiles::ContainerKind::Tabs {
-                    log::info!("Setting container type of {:?} to Tabs", main_tab_id);
-                    container.set_kind(egui_tiles::ContainerKind::Tabs);
+                match main_tab_info.container_type {
+                    ContainerType::Tabs => {
+                        container.set_kind(egui_tiles::ContainerKind::Tabs);
+                    }
+                    ContainerType::Grid => {
+                        container.set_kind(egui_tiles::ContainerKind::Grid);
+                    }
+                    ContainerType::Vertical => {
+                        container.set_kind(egui_tiles::ContainerKind::Vertical);
+                    }
+                    ContainerType::Horizontal => {
+                        container.set_kind(egui_tiles::ContainerKind::Horizontal);
+                    }
                 }
             }
 
             for (index, &child_id) in main_tab_info.children.iter().enumerate() {
                 // Step 3: Check if the child is in the tree and change its container kind to `Tabs`
-                if let Some(egui_tiles::Tile::Container(container)) =
+                if let Some(egui_tiles::Tile::Container(_container)) =
                     self.tree.tiles.get_mut(child_id)
                 {
                     // let kind = container.kind();
@@ -882,8 +1184,74 @@ fn tree_ui(
     tiles.insert(tile_id, tile);
 }
 
-
 /*
+
+        // // Start filling histograms in a new thread
+        // let handle = std::thread::spawn(move || {
+        //     if let Ok(df) = lf_selected.collect() {
+        //         for row_idx in 0..df.height() {
+        //             // Fill 1D histograms
+        //             for (hist, col, range, _) in &hist1d_map {
+        //                 if let Ok(col_idx) = df.column(col) {
+        //                     let col_values = col_idx.f64().unwrap();
+        //                     if let Some(value) = col_values.get(row_idx) {
+        //                         if value == -1e6 {
+        //                             continue;
+        //                         }
+        //                         let mut hist = hist.lock().unwrap();
+        //                         if value < range.0 {
+        //                             hist.underflow += 1;
+        //                         } else if value > range.1 {
+        //                             hist.overflow += 1;
+        //                         } else {
+        //                             hist.fill(value, row_idx, df.height());
+        //                         }
+        //                     }
+        //                 }
+        //             }
+
+        //             // Fill 2D histograms
+        //             for (hist, x_col, y_col, (x_range, y_range), _) in &hist2d_map {
+        //                 if let (Ok(x_values), Ok(y_values)) = (df.column(x_col), df.column(y_col)) {
+        //                     let x_vals = x_values.f64().unwrap();
+        //                     let y_vals = y_values.f64().unwrap();
+        //                     if let (Some(x), Some(y)) = (x_vals.get(row_idx), y_vals.get(row_idx)) {
+        //                         if x == -1e6 || y == -1e6 {
+        //                             continue;
+        //                         }
+        //                         let mut hist = hist.lock().unwrap();
+        //                         if x < x_range.0 {
+        //                             hist.underflow.0 += 1;
+        //                         } else if x > x_range.1 {
+        //                             hist.overflow.0 += 1;
+        //                         }
+        //                         if y < y_range.0 {
+        //                             hist.underflow.1 += 1;
+        //                         } else if y > y_range.1 {
+        //                             hist.overflow.1 += 1;
+        //                         }
+        //                         if x > x_range.0 && x < x_range.1 && y > y_range.0 && y < y_range.1 {
+        //                             hist.fill(x, y, row_idx, df.height());
+        //                         }
+        //                     }
+        //                 }
+        //             }
+        //         }
+        //         log::info!("Completed filling all 1D and 2D histograms row-by-row");
+
+        //         // Reset progress to None for all histograms
+        //         for (hist, _, _, _) in &hist1d_map {
+        //             hist.lock().unwrap().plot_settings.progress = None;
+        //         }
+        //         for (hist, _, _, _, _) in &hist2d_map {
+        //             hist.lock().unwrap().plot_settings.recalculate_image = true;
+        //             hist.lock().unwrap().plot_settings.progress = None;
+        //         }
+
+        //     } else {
+        //         log::error!("Failed to collect data for filling histograms");
+        //     }
+        // });
 
 pub fn fill_hist1d(&mut self, name: &str, lf: &LazyFrame, column_name: &str) -> bool {
     if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
