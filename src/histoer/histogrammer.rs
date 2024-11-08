@@ -421,12 +421,12 @@ impl Histogrammer {
                             hist.plot_settings.recalculate_image = true;
                         }
 
-                        println!("Processed rows {} to {}", row_start, row_start + height);
+                        println!("\tProcessed rows {} to {}", row_start, row_start + height);
                     }
 
                     row_start += max_rows_per_batch;
                 }
-                println!("Finished processing all rows");
+                println!("Finished processing all rows\n");
 
                 // Set calculating to false when processing is complete
                 calculating.store(false, Ordering::SeqCst);

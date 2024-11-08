@@ -71,7 +71,7 @@ impl eframe::App for Spectrix {
         );
 
         egui::SidePanel::right("spectrix_right_panel")
-            .resizable(false)
+            // .resizable(false)
             .show_animated(ctx, self.right_side_panel_open, |ui| {
                 self.processer.histogram_script_ui(ui);
             });
