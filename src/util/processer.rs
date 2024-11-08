@@ -5,6 +5,8 @@ use crate::histoer::histogrammer::Histogrammer;
 use crate::histogram_scripter::histogram_script::HistogramScript;
 use pyo3::{prelude::*, types::PyModule};
 
+use std::sync::atomic::Ordering;
+
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Processer {
     pub workspacer: Workspacer,
@@ -361,10 +363,8 @@ def get_2d_histograms(file_name):
                     self.calculate_histograms_with_cuts();
                 }
 
-                // add a spinner
-                if !self.histogrammer.handles.is_empty() {
-                    ui.separator();
-                    ui.label("Calculating Histograms");
+                if self.histogrammer.calculating.load(Ordering::Relaxed) {
+                    // Show spinner while `calculating` is true
                     ui.add(egui::widgets::Spinner::default());
                 }
             });

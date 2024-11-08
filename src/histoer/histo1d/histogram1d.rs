@@ -46,7 +46,7 @@ impl Histogram {
         self.underflow = 0;
     }
 
-    pub fn fill(&mut self, value: f64, current_step: usize, total_steps: usize) {
+    pub fn fill(&mut self, value: f64) {
         if value >= self.range.0 && value < self.range.1 {
             let index = ((value - self.range.0) / self.bin_width) as usize;
             if index < self.bins.len() {
@@ -58,8 +58,6 @@ impl Histogram {
         } else {
             self.underflow += 1;
         }
-        // Update progress
-        self.plot_settings.progress = Some(current_step as f32 / total_steps as f32);
     }
 
     pub fn auto_axis_lims(&mut self, plot_ui: &mut egui_plot::PlotUi) {

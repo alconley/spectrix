@@ -60,30 +60,26 @@ impl Histogram2D {
         self.plot_settings.recalculate_image = true;
     }
 
-    // Add a value to the histogram with progress tracking
-    pub fn fill(&mut self, x_value: f64, y_value: f64, current_step: usize, total_steps: usize) {
-        if x_value >= self.range.x.min
-            && x_value < self.range.x.max
-            && y_value >= self.range.y.min
-            && y_value < self.range.y.max
-        {
+    pub fn fill(&mut self, x_value: f64, y_value: f64) {
+        if x_value < self.range.x.min {
+            self.underflow.0 += 1; // Increment x-axis underflow
+        } else if x_value >= self.range.x.max {
+            self.overflow.0 += 1; // Increment x-axis overflow
+        } else if y_value < self.range.y.min {
+            self.underflow.1 += 1; // Increment y-axis underflow
+        } else if y_value >= self.range.y.max {
+            self.overflow.1 += 1; // Increment y-axis overflow
+        } else {
+            // Value is within range; proceed to calculate indices and update counts
             let x_index = ((x_value - self.range.x.min) / self.bins.x_width) as usize;
             let y_index = ((y_value - self.range.y.min) / self.bins.y_width) as usize;
+
             let count = self.bins.counts.entry((x_index, y_index)).or_insert(0);
             *count += 1;
 
             self.bins.min_count = self.bins.min_count.min(*count);
             self.bins.max_count = self.bins.max_count.max(*count);
         }
-
-        // Update progress if it's being tracked
-        let progress = current_step as f32 / total_steps as f32;
-        self.plot_settings.progress = Some(progress);
-
-        // // Recalculate the image at each 10% increment
-        // if (progress * 100.0) as u32 % 10 == 0 && progress > 0.0 {
-        //     self.plot_settings.recalculate_image = true;
-        // }
     }
 
     // get the bin index for a given x value

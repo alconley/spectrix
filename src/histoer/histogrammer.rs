@@ -5,16 +5,19 @@ use super::tree::TreeBehavior;
 use crate::cutter::cut_handler::CutHandler;
 use egui_tiles::TileId;
 use fnv::FnvHashMap;
+
 use polars::prelude::col;
 use polars::prelude::*;
+
 use rayon::prelude::*;
-use std::thread::JoinHandle;
 
 use std::convert::TryInto;
 
 use std::sync::{Arc, Mutex};
 
 use std::collections::HashMap;
+
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(serde::Deserialize, serde::Serialize, PartialEq, Debug)]
 pub enum ContainerType {
@@ -92,7 +95,7 @@ pub struct Histogrammer {
     pub tree: egui_tiles::Tree<Pane>,
     pub behavior: TreeBehavior,
     #[serde(skip)]
-    pub handles: Vec<JoinHandle<()>>, // Multiple thread handles
+    pub calculating: Arc<AtomicBool>, // Use AtomicBool for thread-safe status tracking
     pub histogram_map: HashMap<String, ContainerInfo>, // Map full path to TabInfo
 }
 
@@ -102,7 +105,7 @@ impl Default for Histogrammer {
             name: "Histogrammer".to_string(),
             tree: egui_tiles::Tree::empty("Empty tree"),
             behavior: Default::default(),
-            handles: vec![],
+            calculating: Arc::new(AtomicBool::new(false)),
             histogram_map: HashMap::new(),
         }
     }
@@ -206,260 +209,29 @@ impl Histogrammer {
         }
     }
 
-    // pub fn fill_histograms(
-    //     &mut self,
-    //     hist1d_specs: Vec<Histo1DConfig>,
-    //     hist2d_specs: Vec<Histo2DConfig>,
-    //     lf: &LazyFrame,
-    // ) {
-    //     // Join any previous threads
-    //     for handle in self.handles.drain(..) {
-    //         if let Err(e) = handle.join() {
-    //             println!("Failed to join thread: {:?}", e);
-    //         }
-    //     }
-
-    //     let start_time = std::time::Instant::now();
-
-    //     // Collect available column names
-    //     let available_columns = self.get_column_names_from_lazyframe(lf);
-
-    //     // Filter hist1d_specs and hist2d_specs to include only those marked for calculation and with existing columns
-    //     let hist1d_specs: Vec<_> = hist1d_specs
-    //         .into_iter()
-    //         .filter(|h| {
-    //             if h.calculate {
-    //                 if available_columns.contains(&h.column_name) {
-    //                     true
-    //                 } else {
-    //                     println!(
-    //                         "Warning: Column '{}' does not exist for 1D histogram: '{}'. Skipping.",
-    //                         h.column_name, h.name
-    //                     );
-    //                     false
-    //                 }
-    //             } else {
-    //                 false
-    //             }
-    //         })
-    //         .collect();
-
-    //     let hist2d_specs: Vec<_> = hist2d_specs
-    //         .into_iter()
-    //         .filter(|h| {
-    //             if h.calculate {
-    //                 let missing_columns = !available_columns.contains(&h.x_column_name) || !available_columns.contains(&h.y_column_name);
-    //                 if missing_columns {
-    //                     println!("Warning: Columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping.", h.x_column_name, h.y_column_name, h.name);
-    //                     false
-    //                 } else {
-    //                     true
-    //                 }
-    //             } else {
-    //                 false
-    //             }
-    //         })
-    //         .collect();
-
-    //     // Collect column names for the remaining histograms
-    //     let mut column_names: Vec<&str> = hist1d_specs
-    //         .iter()
-    //         .map(|h| h.column_name.as_str())
-    //         .collect();
-    //     for h in &hist2d_specs {
-    //         column_names.push(h.x_column_name.as_str());
-    //         column_names.push(h.y_column_name.as_str());
-    //     }
-    //     column_names.sort_unstable();
-    //     column_names.dedup();
-
-    //     // Map column names to expressions for LazyFrame selection
-    //     let selected_columns: Vec<_> = column_names.iter().map(|&col_name| col(col_name)).collect();
-
-    //     // Prepare collections for histograms
-    //     let mut hist1d_map = Vec::new();
-    //     let mut hist2d_map = Vec::new();
-    //     let mut missing_1d = Vec::new();
-    //     let mut missing_2d = Vec::new();
-
-    //     // Identify and reset existing histograms, collect missing ones
-    //     for h in &hist1d_specs {
-    //         if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
-    //             self.tree.tiles.iter_mut().find(|(_id, tile)| {
-    //                 if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-    //                     hist.lock().unwrap().name == h.name
-    //                 } else {
-    //                     false
-    //                 }
-    //             })
-    //         {
-    //             hist.lock().unwrap().reset(); // Reset histogram counts
-    //             hist1d_map.push((Arc::clone(hist), h.clone()));
-    //         } else {
-    //             missing_1d.push(h.clone());
-    //         }
-    //     }
-
-    //     for h in &hist2d_specs {
-    //         if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
-    //             self.tree.tiles.iter_mut().find(|(_id, tile)| {
-    //                 if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-    //                     hist.lock().unwrap().name == h.name
-    //                 } else {
-    //                     false
-    //                 }
-    //             })
-    //         {
-    //             hist.lock().unwrap().reset(); // Reset histogram counts
-    //             hist2d_map.push((Arc::clone(hist), h.clone()));
-    //         } else {
-    //             missing_2d.push(h.clone());
-    //         }
-    //     }
-
-    //     // Add missing 1D histograms outside of the mutable borrow loop
-    //     for h in missing_1d {
-    //         self.add_hist1d(&h.name, h.bins, h.range);
-    //         if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
-    //             self.tree.tiles.iter_mut().find(|(_id, tile)| {
-    //                 if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-    //                     hist.lock().unwrap().name == h.name
-    //                 } else {
-    //                     false
-    //                 }
-    //             })
-    //         {
-    //             hist1d_map.push((Arc::clone(hist), h));
-    //         }
-    //     }
-
-    //     // Add missing 2D histograms outside of the mutable borrow loop
-    //     for h in missing_2d {
-    //         self.add_hist2d(&h.name, h.bins, (h.x_range, h.y_range));
-    //         if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
-    //             self.tree.tiles.iter_mut().find(|(_id, tile)| {
-    //                 if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-    //                     hist.lock().unwrap().name == h.name
-    //                 } else {
-    //                     false
-    //                 }
-    //             })
-    //         {
-    //             hist2d_map.push((Arc::clone(hist), h));
-    //         }
-    //     }
-
-    //     // Filter and select necessary columns from LazyFrame
-    //     let lf_selected = lf.clone().select(selected_columns);
-
-    //     // Spawn a thread for processing histograms
-    //     let handle = std::thread::spawn(move || {
-    //         if let Ok(df) = lf_selected.collect() {
-    //             let height = df.height();
-
-    //             for (hist, _) in &hist1d_map {
-    //                 hist.lock().unwrap().reset();
-    //             }
-
-    //             for (hist, _) in &hist2d_map {
-    //                 hist.lock().unwrap().reset();
-    //             }
-
-    //             // Process 1D histograms
-    //             hist1d_map.par_iter().for_each(|(hist, meta)| {
-    //                 if let Ok(col_idx) = df.column(&meta.column_name) {
-    //                     if let Ok(col_values) = col_idx.f64() {
-    //                         let mut hist = hist.lock().unwrap();
-    //                         for (row_idx, value) in col_values.into_no_null_iter().enumerate() {
-    //                             if value == -1e6 {
-    //                                 continue;
-    //                             }
-    //                             if value < meta.range.0 {
-    //                                 hist.underflow += 1;
-    //                             } else if value > meta.range.1 {
-    //                                 hist.overflow += 1;
-    //                             } else {
-    //                                 hist.fill(value, row_idx, height);
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             });
-
-    //             // Process 2D histograms
-    //             hist2d_map.par_iter().for_each(|(hist, meta)| {
-    //                 if let (Ok(x_values), Ok(y_values)) = (
-    //                     df.column(&meta.x_column_name).and_then(|c| c.f64()),
-    //                     df.column(&meta.y_column_name).and_then(|c| c.f64()),
-    //                 ) {
-    //                     let mut hist = hist.lock().unwrap();
-    //                     for (row_idx, (x, y)) in x_values
-    //                         .into_no_null_iter()
-    //                         .zip(y_values.into_no_null_iter())
-    //                         .enumerate()
-    //                     {
-    //                         if x == -1e6 || y == -1e6 {
-    //                             continue;
-    //                         }
-    //                         if x < meta.x_range.0 {
-    //                             hist.underflow.0 += 1;
-    //                         } else if x > meta.x_range.1 {
-    //                             hist.overflow.0 += 1;
-    //                         }
-    //                         if y < meta.y_range.0 {
-    //                             hist.underflow.1 += 1;
-    //                         } else if y > meta.y_range.1 {
-    //                             hist.overflow.1 += 1;
-    //                         }
-    //                         if x > meta.x_range.0
-    //                             && x < meta.x_range.1
-    //                             && y > meta.y_range.0
-    //                             && y < meta.y_range.1
-    //                         {
-    //                             hist.fill(x, y, row_idx, height);
-    //                         }
-    //                     }
-    //                 }
-    //             });
-
-    //             // Reset progress and recalculate for 2D histograms
-    //             for (hist, _) in &hist1d_map {
-    //                 hist.lock().unwrap().plot_settings.progress = None;
-    //             }
-    //             for (hist, _) in &hist2d_map {
-    //                 let mut hist = hist.lock().unwrap();
-    //                 hist.plot_settings.progress = None;
-    //                 hist.plot_settings.recalculate_image = true;
-    //             }
-
-    //             let elapsed_time = start_time.elapsed();
-    //             println!("\nFilling histograms took: {:?}\n", elapsed_time);
-    //         } else {
-    //             println!("Failed to collect data for filling histograms.");
-    //         }
-    //     });
-
-    //     self.handles.push(handle);
-    // }
-
     pub fn fill_histograms(
         &mut self,
         hist1d_specs: Vec<Histo1DConfig>,
         hist2d_specs: Vec<Histo2DConfig>,
         lf: &LazyFrame,
+        new_columns: Vec<(String, String)>,
         max_rows_per_batch: usize,
     ) {
-        // Join any previous threads
-        for handle in self.handles.drain(..) {
-            if let Err(e) = handle.join() {
-                println!("Failed to join thread: {:?}", e);
+        let mut lf = lf.clone();
+        for (expression, alias) in new_columns {
+            if let Err(e) = Self::add_computed_column(&mut lf, &expression, &alias) {
+                println!("Error adding computed column '{}': {}", alias, e);
             }
         }
+        // Wrap `lf` in an `Arc` to safely share it between threads
+        let lf = Arc::new(lf.clone());
+        let calculating = Arc::clone(&self.calculating);
 
-        let start_time = std::time::Instant::now();
+        // Set calculating to true at the start
+        calculating.store(true, Ordering::SeqCst);
 
         // Collect available column names
-        let available_columns = self.get_column_names_from_lazyframe(lf);
+        let available_columns = self.get_column_names_from_lazyframe(&lf);
 
         // Filter hist1d_specs and hist2d_specs to include only those marked for calculation and with existing columns
         let hist1d_specs: Vec<_> = hist1d_specs
@@ -586,113 +358,90 @@ impl Histogrammer {
             }
         }
 
-        let mut row_start = 0;
-        loop {
-            let batch_lf = lf
-                .clone()
-                .slice(row_start as i64, max_rows_per_batch.try_into().unwrap());
-            let lf_selected = batch_lf.select(selected_columns.clone());
+        // Spawn the batch processing task asynchronously
+        rayon::spawn({
+            let calculating = Arc::clone(&calculating);
+            let lf = Arc::clone(&lf); // Clone lf to move into the spawn closure
+            move || {
+                let mut row_start = 0;
+                loop {
+                    // Borrow the `LazyFrame` inside the Arc without moving it
+                    let batch_lf = lf
+                        .as_ref()
+                        .clone()
+                        .slice(row_start as i64, max_rows_per_batch.try_into().unwrap());
+                    let lf_selected = batch_lf.select(selected_columns.clone());
 
-            if lf_selected.clone().limit(1).collect().unwrap().height() == 0 {
-                break;
-            }
-
-            let hist1d_map = hist1d_map.clone();
-            let hist2d_map = hist2d_map.clone();
-
-            let handle = std::thread::spawn(move || {
-                if let Ok(df) = lf_selected.collect() {
-                    let height = df.height();
-
-                    for (hist, _) in &*hist1d_map {
-                        hist.lock().unwrap().reset();
+                    // Break if no more rows are left to process
+                    if lf_selected.clone().limit(1).collect().unwrap().height() == 0 {
+                        break;
                     }
 
-                    for (hist, _) in &*hist2d_map {
-                        hist.lock().unwrap().reset();
-                    }
+                    // No need for an inner handle; use `par_iter` for parallel execution within this batch
+                    if let Ok(df) = lf_selected.collect() {
+                        let height = df.height();
 
-                    hist1d_map.par_iter().for_each(|(hist, meta)| {
-                        if let Ok(col_idx) = df.column(&meta.column_name) {
-                            if let Ok(col_values) = col_idx.f64() {
+                        // Parallel filling of histograms
+                        hist1d_map.par_iter().for_each(|(hist, meta)| {
+                            if let Ok(col_idx) = df.column(&meta.column_name) {
+                                if let Ok(col_values) = col_idx.f64() {
+                                    let mut hist = hist.lock().unwrap();
+                                    for value in col_values.into_no_null_iter() {
+                                        if value == -1e6 {
+                                            continue;
+                                        }
+
+                                        hist.fill(value);
+                                    }
+                                }
+                            }
+                        });
+
+                        hist2d_map.par_iter().for_each(|(hist, meta)| {
+                            if let (Ok(x_values), Ok(y_values)) = (
+                                df.column(&meta.x_column_name).and_then(|c| c.f64()),
+                                df.column(&meta.y_column_name).and_then(|c| c.f64()),
+                            ) {
                                 let mut hist = hist.lock().unwrap();
-                                for (row_idx, value) in col_values.into_no_null_iter().enumerate() {
-                                    if value == -1e6 {
+                                for (x, y) in x_values
+                                    .into_no_null_iter()
+                                    .zip(y_values.into_no_null_iter())
+                                {
+                                    if x == -1e6 || y == -1e6 {
                                         continue;
                                     }
-                                    if value < meta.range.0 {
-                                        hist.underflow += 1;
-                                    } else if value > meta.range.1 {
-                                        hist.overflow += 1;
-                                    } else {
-                                        hist.fill(value, row_idx, height);
-                                    }
+
+                                    hist.fill(x, y);
                                 }
                             }
-                        }
-                    });
+                        });
 
-                    hist2d_map.par_iter().for_each(|(hist, meta)| {
-                        if let (Ok(x_values), Ok(y_values)) = (
-                            df.column(&meta.x_column_name).and_then(|c| c.f64()),
-                            df.column(&meta.y_column_name).and_then(|c| c.f64()),
-                        ) {
+                        for (hist, _) in &hist2d_map {
                             let mut hist = hist.lock().unwrap();
-                            for (row_idx, (x, y)) in x_values
-                                .into_no_null_iter()
-                                .zip(y_values.into_no_null_iter())
-                                .enumerate()
-                            {
-                                if x == -1e6 || y == -1e6 {
-                                    continue;
-                                }
-                                if x < meta.x_range.0 {
-                                    hist.underflow.0 += 1;
-                                } else if x > meta.x_range.1 {
-                                    hist.overflow.0 += 1;
-                                }
-                                if y < meta.y_range.0 {
-                                    hist.underflow.1 += 1;
-                                } else if y > meta.y_range.1 {
-                                    hist.overflow.1 += 1;
-                                }
-                                if x > meta.x_range.0
-                                    && x < meta.x_range.1
-                                    && y > meta.y_range.0
-                                    && y < meta.y_range.1
-                                {
-                                    hist.fill(x, y, row_idx, height);
-                                }
-                            }
+                            hist.plot_settings.recalculate_image = true;
                         }
-                    });
 
-                    println!("Processed rows {} to {}", row_start, row_start + height);
+                        println!("Processed rows {} to {}", row_start, row_start + height);
+                    }
 
-                    // Reset progress and recalculate for 2D histograms
-                    for (hist, _) in &hist1d_map {
-                        hist.lock().unwrap().plot_settings.progress = None;
-                    }
-                    for (hist, _) in &hist2d_map {
-                        let mut hist = hist.lock().unwrap();
-                        hist.plot_settings.progress = None;
-                        hist.plot_settings.recalculate_image = true;
-                    }
+                    row_start += max_rows_per_batch;
                 }
-            });
+                println!("Finished processing all rows");
 
-            self.handles.push(handle);
-            row_start += max_rows_per_batch;
-        }
-
-        for handle in self.handles.drain(..) {
-            if let Err(e) = handle.join() {
-                println!("Failed to join thread: {:?}", e);
+                // Set calculating to false when processing is complete
+                calculating.store(false, Ordering::SeqCst);
             }
-        }
+        });
+    }
 
-        let elapsed_time = start_time.elapsed();
-        println!("\nTotal time to fill histograms: {:?}\n", elapsed_time);
+    fn add_computed_column(
+        lf: &mut LazyFrame,
+        expression: &str,
+        alias: &str,
+    ) -> Result<(), PolarsError> {
+        let computed_expr = expr_from_string(expression)?;
+        *lf = lf.clone().with_column(computed_expr.alias(alias)); // Use alias for the new column name
+        Ok(())
     }
 
     pub fn get_column_names_from_lazyframe(&self, lazyframe: &LazyFrame) -> Vec<String> {
@@ -791,35 +540,7 @@ impl Histogrammer {
         }
     }
 
-    pub fn check_and_join_finished_threads(&mut self) {
-        // Only proceed if there are threads to check
-        if self.handles.is_empty() {
-            return;
-        }
-
-        let mut finished_indices = Vec::new();
-
-        // First, identify all the threads that have finished
-        for (i, handle) in self.handles.iter().enumerate() {
-            if handle.is_finished() {
-                finished_indices.push(i);
-            }
-        }
-
-        // Then, remove and join the finished threads
-        for &i in finished_indices.iter().rev() {
-            let handle = self.handles.swap_remove(i);
-            match handle.join() {
-                Ok(_) => log::info!("A thread completed successfully."),
-                Err(e) => log::error!("A thread encountered an error: {:?}", e),
-            }
-        }
-    }
-
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        // Check and join finished threads
-        self.check_and_join_finished_threads();
-
         self.tree.ui(&mut self.behavior, ui);
     }
 
@@ -1129,6 +850,118 @@ impl Histogrammer {
     }
 }
 
+use regex::Regex;
+
+fn expr_from_string(expression: &str) -> Result<Expr, PolarsError> {
+    let re = Regex::new(r"(-?\d+\.?\d*|\w+|\*\*|[+*/()-])").unwrap();
+    let tokens: Vec<String> = re
+        .find_iter(expression)
+        .map(|m| m.as_str().to_string())
+        .collect();
+
+    let mut expr_stack: Vec<Expr> = Vec::new();
+    let mut op_stack: Vec<String> = Vec::new();
+    let mut is_first_token = true;
+
+    log::debug!("Starting evaluation of expression: '{}'", expression);
+    log::debug!("Tokens: {:?}", tokens);
+
+    for token in tokens {
+        match token.as_str() {
+            "+" | "-" | "*" | "/" | "**" => {
+                while let Some(op) = op_stack.last() {
+                    // Pop operators with higher or equal precedence
+                    if precedence(op) > precedence(&token)
+                        || (precedence(op) == precedence(&token) && is_left_associative(&token))
+                    {
+                        apply_op(&mut expr_stack, op_stack.pop().unwrap().as_str());
+                    } else {
+                        break;
+                    }
+                }
+                op_stack.push(token);
+                is_first_token = false;
+            }
+            "(" => {
+                op_stack.push(token);
+                is_first_token = false;
+            }
+            ")" => {
+                while let Some(op) = op_stack.pop() {
+                    if op == "(" {
+                        break;
+                    }
+                    apply_op(&mut expr_stack, &op);
+                }
+            }
+            _ if token.parse::<f64>().is_ok() => {
+                let number = token.parse::<f64>().unwrap();
+                if number < 0.0 && !is_first_token {
+                    op_stack.push("+".to_string());
+                }
+                expr_stack.push(lit(number));
+                is_first_token = false;
+            }
+            _ => {
+                expr_stack.push(col(&token));
+                is_first_token = false;
+            }
+        }
+    }
+
+    while let Some(op) = op_stack.pop() {
+        apply_op(&mut expr_stack, &op);
+    }
+
+    if expr_stack.len() == 1 {
+        Ok(expr_stack.pop().unwrap())
+    } else {
+        log::error!("Error: Stack ended with more than one expression, invalid expression");
+        Err(PolarsError::ComputeError("Invalid expression".into()))
+    }
+}
+
+fn precedence(op: &str) -> i32 {
+    match op {
+        "+" | "-" => 1,
+        "*" | "/" => 2,
+        "**" => 3,
+        _ => 0,
+    }
+}
+
+fn is_left_associative(op: &str) -> bool {
+    match op {
+        "+" | "-" | "*" | "/" => true,
+        "**" => false, // Exponentiation is right-associative
+        _ => false,
+    }
+}
+
+fn apply_op(expr_stack: &mut Vec<Expr>, operator: &str) {
+    if expr_stack.len() < 2 {
+        log::warn!("Error: Not enough operands for '{}'", operator);
+        return;
+    }
+
+    let right = expr_stack.pop().unwrap();
+    let left = expr_stack.pop().unwrap();
+
+    let result = match operator {
+        "+" => left + right,
+        "-" => left - right,
+        "*" => left * right,
+        "/" => left / right,
+        "**" => left.pow(right),
+        _ => {
+            log::error!("Unknown operator: '{}'", operator);
+            return;
+        }
+    };
+
+    expr_stack.push(result);
+}
+
 fn tree_ui(
     ui: &mut egui::Ui,
     behavior: &mut dyn egui_tiles::Behavior<Pane>,
@@ -1183,361 +1016,3 @@ fn tree_ui(
     // Put the tile back
     tiles.insert(tile_id, tile);
 }
-
-/*
-
-        // // Start filling histograms in a new thread
-        // let handle = std::thread::spawn(move || {
-        //     if let Ok(df) = lf_selected.collect() {
-        //         for row_idx in 0..df.height() {
-        //             // Fill 1D histograms
-        //             for (hist, col, range, _) in &hist1d_map {
-        //                 if let Ok(col_idx) = df.column(col) {
-        //                     let col_values = col_idx.f64().unwrap();
-        //                     if let Some(value) = col_values.get(row_idx) {
-        //                         if value == -1e6 {
-        //                             continue;
-        //                         }
-        //                         let mut hist = hist.lock().unwrap();
-        //                         if value < range.0 {
-        //                             hist.underflow += 1;
-        //                         } else if value > range.1 {
-        //                             hist.overflow += 1;
-        //                         } else {
-        //                             hist.fill(value, row_idx, df.height());
-        //                         }
-        //                     }
-        //                 }
-        //             }
-
-        //             // Fill 2D histograms
-        //             for (hist, x_col, y_col, (x_range, y_range), _) in &hist2d_map {
-        //                 if let (Ok(x_values), Ok(y_values)) = (df.column(x_col), df.column(y_col)) {
-        //                     let x_vals = x_values.f64().unwrap();
-        //                     let y_vals = y_values.f64().unwrap();
-        //                     if let (Some(x), Some(y)) = (x_vals.get(row_idx), y_vals.get(row_idx)) {
-        //                         if x == -1e6 || y == -1e6 {
-        //                             continue;
-        //                         }
-        //                         let mut hist = hist.lock().unwrap();
-        //                         if x < x_range.0 {
-        //                             hist.underflow.0 += 1;
-        //                         } else if x > x_range.1 {
-        //                             hist.overflow.0 += 1;
-        //                         }
-        //                         if y < y_range.0 {
-        //                             hist.underflow.1 += 1;
-        //                         } else if y > y_range.1 {
-        //                             hist.overflow.1 += 1;
-        //                         }
-        //                         if x > x_range.0 && x < x_range.1 && y > y_range.0 && y < y_range.1 {
-        //                             hist.fill(x, y, row_idx, df.height());
-        //                         }
-        //                     }
-        //                 }
-        //             }
-        //         }
-        //         log::info!("Completed filling all 1D and 2D histograms row-by-row");
-
-        //         // Reset progress to None for all histograms
-        //         for (hist, _, _, _) in &hist1d_map {
-        //             hist.lock().unwrap().plot_settings.progress = None;
-        //         }
-        //         for (hist, _, _, _, _) in &hist2d_map {
-        //             hist.lock().unwrap().plot_settings.recalculate_image = true;
-        //             hist.lock().unwrap().plot_settings.progress = None;
-        //         }
-
-        //     } else {
-        //         log::error!("Failed to collect data for filling histograms");
-        //     }
-        // });
-
-pub fn fill_hist1d(&mut self, name: &str, lf: &LazyFrame, column_name: &str) -> bool {
-    if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
-        self.tree.tiles.iter_mut().find(|(_id, tile)| {
-            if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                hist.lock().unwrap().name == name
-            } else {
-                false
-            }
-        })
-    {
-        let hist = Arc::clone(hist); // Clone the Arc to share ownership
-        let hist_range = hist.lock().unwrap().range; // Access the range safely
-        let filter_expr = col(column_name)
-            .gt(lit(hist_range.0))
-            .and(col(column_name).lt(lit(hist_range.1)));
-
-        // let overflow_filter_expr = col(column_name).gt(lit(hist_range.1));
-        // // get the overflow values
-        // let overflow_df = lf
-        //     .clone()
-        //     .select([col(column_name)])
-        //     .filter(overflow_filter_expr)
-        //     .sum()
-        //     .collect()
-        //     .unwrap();
-
-        // let overflow_value = overflow_df.column(column_name).unwrap().get(0).unwrap(); // Now you can access the first value safely
-
-        // let overflow_as_u64 = match overflow_value {
-        //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
-        //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
-        //     _ => panic!("Unexpected value type!"),
-        // };
-
-        // let underflow_filter_expr = col(column_name).lt(lit(hist_range.0));
-        // // get the underflow values
-        // let underflow_df = lf
-        //     .clone()
-        //     .select([col(column_name)])
-        //     .filter(underflow_filter_expr)
-        //     .sum()
-        //     .collect()
-        //     .unwrap();
-
-        // let underflow_value = underflow_df.column(column_name).unwrap().get(0).unwrap(); // Now you can access the first value safely
-
-        // let underflow_as_u64 = match underflow_value {
-        //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
-        //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
-        //     _ => panic!("Unexpected value type!"),
-        // };
-
-        // hist.lock().unwrap().overflow = overflow_as_u64;
-        // hist.lock().unwrap().underflow = underflow_as_u64;
-
-        let lf = lf.clone();
-        let name = name.to_string();
-        let column_name = column_name.to_string();
-
-        log::info!(
-            "Starting to fill histogram '{}' with data from column '{}'",
-            name,
-            column_name
-        );
-
-        // Spawn a new thread for the filling operation
-        let handle = std::thread::spawn(move || {
-            log::info!("Thread started for filling histogram '{}'", name);
-
-            if let Ok(df) = lf
-                .select([col(&column_name)])
-                .filter(filter_expr.clone()) // Clone for logging purposes
-                .collect()
-            {
-                log::info!("Data collected for histogram '{}'", name);
-
-                let series = df.column(&column_name).unwrap();
-                let values = series.f64().unwrap();
-                let total_steps = values.len();
-
-                log::info!(
-                    "Histogram '{}' will be filled with {} values from column '{}'",
-                    name,
-                    total_steps,
-                    column_name
-                );
-
-                for (i, value) in values.iter().enumerate() {
-                    if let Some(v) = value {
-                        let mut hist = hist.lock().unwrap(); // Lock the mutex to access the correct Histogram
-                        hist.fill(v, i, total_steps); // Pass the progress to the fill method
-                    }
-                }
-
-                log::info!("Completed filling histogram '{}'", name);
-
-                // Optionally: Set progress to None or trigger any final updates here
-                hist.lock().unwrap().plot_settings.progress = None;
-            } else {
-                log::error!("Failed to collect LazyFrame for histogram '{}'", name);
-            }
-        });
-
-        // Store the thread handle in the vector
-        self.handles.push(handle);
-
-        return true;
-    }
-
-    log::error!("Histogram '{}' not found in the tree", name);
-    false
-}
-
-pub fn add_fill_hist1d(
-    &mut self,
-    name: &str,
-    lf: &LazyFrame,
-    column_name: &str,
-    bins: usize,
-    range: (f64, f64),
-) {
-    self.add_hist1d(name, bins, range); // Add the histogram.
-    self.fill_hist1d(name, lf, column_name); // Fill it with data.
-}
-
-pub fn fill_hist2d(
-    &mut self,
-    name: &str,
-    lf: &LazyFrame,
-    x_column_name: &str,
-    y_column_name: &str,
-) -> bool {
-    if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
-        self.tree.tiles.iter_mut().find(|(_id, tile)| {
-            if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                hist.lock().unwrap().name == name
-            } else {
-                false
-            }
-        })
-    {
-        let hist = Arc::clone(hist); // Clone the Arc to share ownership
-        let hist_range = hist.lock().unwrap().range.clone(); // Access the range safely
-        let filter_expr = col(x_column_name)
-            .gt(lit(hist_range.x.min))
-            .and(col(x_column_name).lt(lit(hist_range.x.max)))
-            .and(col(y_column_name).gt(lit(hist_range.y.min)))
-            .and(col(y_column_name).lt(lit(hist_range.y.max)));
-
-        // let overflow_expr = col(x_column_name)
-        //     .gt(lit(hist_range.x.max))
-        //     .or(col(y_column_name).gt(lit(hist_range.y.max)));
-
-        // let underflow_expr = col(x_column_name)
-        //     .lt(lit(hist_range.x.min))
-        //     .or(col(y_column_name).lt(lit(hist_range.y.min)));
-
-        // let overflow_df = lf
-        //     .clone()
-        //     .select([col(x_column_name), col(y_column_name)])
-        //     .filter(overflow_expr)
-        //     .sum()
-        //     .collect()
-        //     .unwrap();
-
-        // let underflow_df = lf
-        //     .clone()
-        //     .select([col(x_column_name), col(y_column_name)])
-        //     .filter(underflow_expr)
-        //     .sum()
-        //     .collect()
-        //     .unwrap();
-
-        // let overflow_x_value = overflow_df.column(x_column_name).unwrap().get(0).unwrap();
-
-        // let overflow_y_value = overflow_df.column(y_column_name).unwrap().get(0).unwrap();
-
-        // let underflow_x_value = underflow_df.column(x_column_name).unwrap().get(0).unwrap();
-
-        // let underflow_y_value = underflow_df.column(y_column_name).unwrap().get(0).unwrap();
-
-        // let overflow_x_as_u64 = match overflow_x_value {
-        //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
-        //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
-        //     _ => panic!("Unexpected value type!"),
-        // };
-
-        // let overflow_y_as_u64 = match overflow_y_value {
-        //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
-        //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
-        //     _ => panic!("Unexpected value type!"),
-        // };
-
-        // let underflow_x_as_u64 = match underflow_x_value {
-        //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
-        //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
-        //     _ => panic!("Unexpected value type!"),
-        // };
-
-        // let underflow_y_as_u64 = match underflow_y_value {
-        //     AnyValue::Int64(val) => val as u64,   // Cast if it's an Int64
-        //     AnyValue::Float64(val) => val as u64, // Cast if it's a Float64
-        //     _ => panic!("Unexpected value type!"),
-        // };
-
-        // hist.lock().unwrap().overflow = (overflow_x_as_u64, overflow_y_as_u64);
-        // hist.lock().unwrap().underflow = (underflow_x_as_u64, underflow_y_as_u64);
-
-        let lf = lf.clone();
-        let name = name.to_string();
-        let x_column_name = x_column_name.to_string();
-        let y_column_name = y_column_name.to_string();
-
-        hist.lock().unwrap().plot_settings.cuts.x_column = x_column_name.clone();
-        hist.lock().unwrap().plot_settings.cuts.y_column = y_column_name.clone();
-
-        log::info!(
-            "Starting to fill 2D histogram '{}' with data from columns '{}' and '{}'",
-            name,
-            x_column_name,
-            y_column_name
-        );
-
-        // Spawn a new thread for the filling operation
-        let handle = std::thread::spawn(move || {
-            log::info!("Thread started for filling 2D histogram '{}'", name);
-
-            if let Ok(df) = lf
-                .select([col(&x_column_name), col(&y_column_name)])
-                .filter(filter_expr.clone()) // Clone for logging purposes
-                .collect()
-            {
-                log::info!("Data collected for 2D histogram '{}'", name);
-
-                let x_values = df.column(&x_column_name).unwrap().f64().unwrap();
-                let y_values = df.column(&y_column_name).unwrap().f64().unwrap();
-                let total_steps = x_values.len();
-
-                log::info!(
-                    "2D Histogram '{}' will be filled with {} value pairs from columns '{}' and '{}'",
-                    name,
-                    total_steps,
-                    x_column_name,
-                    y_column_name
-                );
-
-                for (i, (x_value, y_value)) in x_values.iter().zip(y_values.iter()).enumerate()
-                {
-                    if let (Some(x), Some(y)) = (x_value, y_value) {
-                        let mut hist = hist.lock().unwrap(); // Lock the mutex to access the correct Histogram2D
-                        hist.fill(x, y, i, total_steps); // Pass the progress to the fill method
-                    }
-                }
-
-                log::info!("Completed filling 2D histogram '{}'", name);
-
-                // Optionally: Set progress to None or trigger any final updates here
-                hist.lock().unwrap().plot_settings.progress = None;
-            } else {
-                log::error!("Failed to collect LazyFrame for 2D histogram '{}'", name);
-            }
-        });
-
-        // Store the thread handle in the vector
-        self.handles.push(handle);
-
-        return true;
-    }
-
-    log::error!("2D Histogram '{}' not found in the tree", name);
-    false
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn add_fill_hist2d(
-    &mut self,
-    name: &str,
-    lf: &LazyFrame,
-    x_column_name: &str,
-    y_column_name: &str,
-    bins: (usize, usize),
-    range: ((f64, f64), (f64, f64)),
-) {
-    self.add_hist2d(name, bins, range); // Add the histogram.
-    self.fill_hist2d(name, lf, x_column_name, y_column_name); // Fill it with data.
-}
-
-*/

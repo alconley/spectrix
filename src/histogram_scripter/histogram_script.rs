@@ -10,6 +10,7 @@ use polars::prelude::*;
 pub struct HistogramScript {
     pub lazyframe_info: LazyFrameInfo,
     pub hist_configs: Vec<HistoConfig>, // Unified vector for both 1D and 2D configurations
+    pub new_columns: Vec<(String, String)>,
 }
 
 // Enum to encapsulate 1D and 2D histogram configurations
@@ -24,6 +25,7 @@ impl HistogramScript {
         Self {
             lazyframe_info: LazyFrameInfo::default(),
             hist_configs: vec![],
+            new_columns: vec![],
         }
     }
 
@@ -57,6 +59,27 @@ impl HistogramScript {
                 self.hist_configs = sps_histograms();
             }
         });
+
+        ui.separator();
+
+        if ui.button("Add New Column").clicked() {
+            self.new_columns.push(("".to_string(), "".to_string()));
+        }
+
+        for (expression, alias) in self.new_columns.iter_mut() {
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(expression)
+                        .hint_text("Expression")
+                        .clip_text(false),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(alias)
+                        .hint_text("Alias")
+                        .clip_text(false),
+                );
+            });
+        }
 
         ui.separator();
 
@@ -288,6 +311,12 @@ impl HistogramScript {
             }
         }
 
-        h.fill_histograms(histo1d_configs, histo2d_configs, &lf, 100000000);
+        h.fill_histograms(
+            histo1d_configs,
+            histo2d_configs,
+            &lf,
+            self.new_columns.clone(),
+            10000000,
+        );
     }
 }
