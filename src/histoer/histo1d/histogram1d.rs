@@ -240,9 +240,9 @@ impl Histogram {
             self.plot_settings.cursor_position = None;
         }
 
-        if self.plot_settings.egui_settings.limit_scrolling {
-            self.limit_scrolling(plot_ui);
-        }
+        // if self.plot_settings.egui_settings.limit_scrolling {
+        self.limit_scrolling(plot_ui);
+        // }
     }
 
     pub fn draw_other_histograms(
@@ -265,6 +265,7 @@ impl Histogram {
         let current_y_max = plot_bounds.max()[1];
 
         let y_max = self.bins.iter().max().cloned().unwrap_or(0) as f64;
+        let y_min = self.bins.iter().min().cloned().unwrap_or(0) as f64;
 
         if current_x_min == -1.0
             && current_x_max == 1.0
@@ -272,17 +273,17 @@ impl Histogram {
             && current_y_max == 1.0
         {
             let default_bounds =
-                egui_plot::PlotBounds::from_min_max([self.range.0, 0.0], [self.range.1, y_max]);
+                egui_plot::PlotBounds::from_min_max([self.range.0, y_min], [self.range.1, y_max]);
 
             plot_ui.set_plot_bounds(default_bounds);
             return;
         }
 
         // Clamping bounds only for scrolling
-        let new_x_min = current_x_min.max(self.range.0);
-        let new_x_max = current_x_max.min(self.range.1);
-        let new_y_min = current_y_min.max(0.0);
-        let new_y_max = current_y_max.min(y_max);
+        let new_x_min = current_x_min.max(self.range.0 * 1.1);
+        let new_x_max = current_x_max.min(self.range.1 * 1.1);
+        let new_y_min = current_y_min.max(y_min * 1.1);
+        let new_y_max = current_y_max.min(y_max * 1.1);
 
         if new_x_min != current_x_min
             || new_x_max != current_x_max
@@ -307,12 +308,34 @@ impl Histogram {
 
         self.fits.fit_stats_ui(ui);
 
+        let (scroll, _pointer_down, _modifiers) = ui.input(|i| {
+            let scroll = i.events.iter().find_map(|e| match e {
+                egui::Event::MouseWheel {
+                    unit: _,
+                    delta,
+                    modifiers: _,
+                } => Some(*delta),
+                _ => None,
+            });
+            (scroll, i.pointer.primary_down(), i.modifiers)
+        });
+
         let plot_response = plot.show(ui, |plot_ui| {
             self.draw(plot_ui);
 
             // if progress is updating, turn on the auto bounds
             if self.plot_settings.progress.is_some() {
                 plot_ui.set_auto_bounds(Vec2b::new(true, true));
+            }
+
+            if self.plot_settings.cursor_position.is_some() {
+                if let Some(delta_pos) = scroll {
+                    if delta_pos.y > 0.0 {
+                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.0));
+                    } else if delta_pos.y < 0.0 {
+                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 1.0));
+                    }
+                }
             }
         });
 
