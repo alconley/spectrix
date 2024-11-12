@@ -273,69 +273,69 @@ def get_2d_histograms(file_name):
         }
     }
 
-    pub fn saving_ui(&mut self, ui: &mut egui::Ui) {
-        ui.collapsing("Parquet Writer", |ui| {
-            ui.checkbox(&mut self.save_with_scanning, "Save with Scanning")
-                .on_hover_text(
-                    "This can save files that are larger than memory at the cost of being slower.",
-                );
+    // pub fn saving_ui(&mut self, ui: &mut egui::Ui) {
+    //     ui.collapsing("Parquet Writer", |ui| {
+    //         ui.checkbox(&mut self.save_with_scanning, "Save with Scanning")
+    //             .on_hover_text(
+    //                 "This can save files that are larger than memory at the cost of being slower.",
+    //             );
 
-            egui::Grid::new("parquet_writer_grid")
-                .num_columns(4)
-                .striped(true)
-                .show(ui, |ui| {
-                    ui.label("");
-                    ui.label("Single File");
-                    ui.label("Individually");
-                    ui.label("Suffix     ");
-                    ui.end_row();
+    //         egui::Grid::new("parquet_writer_grid")
+    //             .num_columns(4)
+    //             .striped(true)
+    //             .show(ui, |ui| {
+    //                 ui.label("");
+    //                 ui.label("Single File");
+    //                 ui.label("Individually");
+    //                 ui.label("Suffix     ");
+    //                 ui.end_row();
 
-                    ui.label("Non-Filtered");
+    //                 ui.label("Non-Filtered");
 
-                    if ui
-                        .add_enabled(
-                            self.workspacer.selected_files.len() > 1,
-                            egui::Button::new("Save"),
-                        )
-                        .clicked()
-                    {
-                        self.save_selected_files_to_single_file();
-                    }
+    //                 if ui
+    //                     .add_enabled(
+    //                         self.workspacer.selected_files.len() > 1,
+    //                         egui::Button::new("Save"),
+    //                     )
+    //                     .clicked()
+    //                 {
+    //                     self.save_selected_files_to_single_file();
+    //                 }
 
-                    ui.end_row();
+    //                 ui.end_row();
 
-                    ui.label("Cut Filtered");
+    //                 ui.label("Cut Filtered");
 
-                    if ui
-                        .add_enabled(
-                            self.cut_handler.cuts_are_selected()
-                                && !self.workspacer.selected_files.is_empty(),
-                            egui::Button::new("Save"),
-                        )
-                        .on_disabled_hover_text("No cuts selected.")
-                        .clicked()
-                    {
-                        self.save_filtered_files_to_single_file();
-                    }
+    //                 if ui
+    //                     .add_enabled(
+    //                         self.cut_handler.cuts_are_selected()
+    //                             && !self.workspacer.selected_files.is_empty(),
+    //                         egui::Button::new("Save"),
+    //                     )
+    //                     .on_disabled_hover_text("No cuts selected.")
+    //                     .clicked()
+    //                 {
+    //                     self.save_filtered_files_to_single_file();
+    //                 }
 
-                    if ui
-                        .add_enabled(
-                            self.cut_handler.cuts_are_selected()
-                                && !self.workspacer.selected_files.is_empty(),
-                            egui::Button::new("Save"),
-                        )
-                        .on_disabled_hover_text("No cuts selected.")
-                        .clicked()
-                    {
-                        self.save_filtered_files_individually(&self.suffix.clone());
-                    }
+    //                 if ui
+    //                     .add_enabled(
+    //                         self.cut_handler.cuts_are_selected()
+    //                             && !self.workspacer.selected_files.is_empty(),
+    //                         egui::Button::new("Save"),
+    //                     )
+    //                     .on_disabled_hover_text("No cuts selected.")
+    //                     .clicked()
+    //                 {
+    //                     self.save_filtered_files_individually(&self.suffix.clone());
+    //                 }
 
-                    ui.text_edit_singleline(&mut self.suffix);
+    //                 ui.text_edit_singleline(&mut self.suffix);
 
-                    ui.end_row();
-                });
-        });
-    }
+    //                 ui.end_row();
+    //             });
+    //     });
+    // }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         if !self.workspacer.options.root {
@@ -351,17 +351,17 @@ def get_2d_histograms(file_name):
                     self.calculate_histograms();
                 }
 
-                if ui
-                    .add_enabled(
-                        !self.workspacer.selected_files.is_empty()
-                            && self.cut_handler.cuts_are_selected(),
-                        egui::Button::new("with Cuts"),
-                    )
-                    .on_disabled_hover_text("No files selected or cuts selected.")
-                    .clicked()
-                {
-                    self.calculate_histograms_with_cuts();
-                }
+                // if ui
+                //     .add_enabled(
+                //         !self.workspacer.selected_files.is_empty()
+                //             && self.cut_handler.cuts_are_selected(),
+                //         egui::Button::new("with Cuts"),
+                //     )
+                //     .on_disabled_hover_text("No files selected or cuts selected.")
+                //     .clicked()
+                // {
+                //     self.calculate_histograms_with_cuts();
+                // }
 
                 if self.histogrammer.calculating.load(Ordering::Relaxed) {
                     // Show spinner while `calculating` is true
@@ -390,9 +390,9 @@ def get_2d_histograms(file_name):
 
             ui.separator();
 
-            self.saving_ui(ui);
+            // self.saving_ui(ui);
 
-            ui.separator();
+            // ui.separator();
 
             if let Some(lazyframer) = &mut self.lazyframer {
                 lazyframer.ui(ui);

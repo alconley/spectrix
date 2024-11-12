@@ -4,7 +4,7 @@ use geo::Contains;
 
 use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
 pub struct EguiPolygon {
     pub draw: bool,
     pub name_in_legend: bool,

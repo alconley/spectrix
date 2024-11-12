@@ -24,7 +24,7 @@ pub const COLOR_OPTIONS: &[(Color32, &str)] = &[
     (Color32::LIGHT_BLUE, "Light Blue"),
 ];
 
-#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize, PartialEq)]
 pub struct Rgb {
     pub r: u8,
     pub g: u8,

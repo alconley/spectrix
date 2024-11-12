@@ -3,6 +3,8 @@ use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
 use super::tree::TreeBehavior;
 use crate::cutter::cut_handler::CutHandler;
+use crate::cutter::cuts::Cut;
+
 use egui_tiles::TileId;
 use fnv::FnvHashMap;
 
@@ -42,6 +44,7 @@ pub struct Histo1DConfig {
     pub column_name: String, // Data column to fill from
     pub range: (f64, f64),   // Range for the histogram
     pub bins: usize,         // Number of bins
+    pub cuts: Vec<Cut>,      // Cuts for the histogram
     pub calculate: bool,     // Whether to calculate the histogram
 }
 
@@ -52,6 +55,7 @@ impl Histo1DConfig {
             column_name: column_name.to_string(),
             range,
             bins,
+            cuts: Vec::new(),
             calculate: true,
         }
     }
@@ -65,6 +69,7 @@ pub struct Histo2DConfig {
     pub x_range: (f64, f64),   // Range for X-axis
     pub y_range: (f64, f64),   // Range for Y-axis
     pub bins: (usize, usize),  // Number of bins for X and Y axes
+    pub cuts: Vec<Cut>,        // Cuts for the histogram
     pub calculate: bool,       // Whether to calculate the histogram
 }
 
@@ -84,6 +89,7 @@ impl Histo2DConfig {
             x_range,
             y_range,
             bins,
+            cuts: Vec::new(),
             calculate: true,
         }
     }
@@ -233,52 +239,68 @@ impl Histogrammer {
         // Collect available column names
         let available_columns = self.get_column_names_from_lazyframe(&lf);
 
-        // Filter hist1d_specs and hist2d_specs to include only those marked for calculation and with existing columns
-        let hist1d_specs: Vec<_> = hist1d_specs
-            .into_iter()
-            .filter(|h| {
-                if h.calculate {
-                    if available_columns.contains(&h.column_name) {
-                        true
-                    } else {
-                        println!(
-                            "Warning: Column '{}' does not exist for 1D histogram: '{}'. Skipping.",
-                            h.column_name, h.name
-                        );
-                        false
-                    }
-                } else {
-                    false
+        // Filter and validate histograms based on existing columns
+        let hist1d_specs: Vec<_> = hist1d_specs.into_iter().filter(|h| {
+            if h.calculate {
+                let column_exists = available_columns.contains(&h.column_name);
+                if !column_exists {
+                    println!("Warning: Column '{}' does not exist for 1D histogram '{}'. Skipping.", h.column_name, h.name);
+                    return false;
                 }
-            })
-            .collect();
+                for cut in &h.cuts {
+                    if !available_columns.contains(&cut.x_column) {
+                        println!("Warning: Cut column '{}' does not exist for 1D histogram '{}'. Skipping cut.", cut.x_column, h.name);
+                        return false;
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        }).collect();
 
-        let hist2d_specs: Vec<_> = hist2d_specs
-            .into_iter()
-            .filter(|h| {
-                if h.calculate {
-                    let missing_columns = !available_columns.contains(&h.x_column_name) || !available_columns.contains(&h.y_column_name);
-                    if missing_columns {
-                        println!("Warning: Columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping.", h.x_column_name, h.y_column_name, h.name);
-                        false
-                    } else {
-                        true
-                    }
-                } else {
-                    false
+        let hist2d_specs: Vec<_> = hist2d_specs.into_iter().filter(|h| {
+            if h.calculate {
+                let columns_exist = available_columns.contains(&h.x_column_name) && available_columns.contains(&h.y_column_name);
+                if !columns_exist {
+                    println!("Warning: Columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping.", h.x_column_name, h.y_column_name, h.name);
+                    return false;
                 }
-            })
-            .collect();
+                for cut in &h.cuts {
+                    if !available_columns.contains(&cut.x_column) || !available_columns.contains(&cut.y_column) {
+                        println!("Warning: Cut columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping cut.", cut.x_column, cut.y_column, h.name);
+                        return false;
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        }).collect();
 
         // Collect column names for the remaining histograms
         let mut column_names: Vec<&str> = hist1d_specs
             .iter()
             .map(|h| h.column_name.as_str())
             .collect();
+
+        // Include columns required for cuts in both 1D and 2D histograms
+        for h in &hist1d_specs {
+            for cut in &h.cuts {
+                column_names.push(cut.x_column.as_str());
+            }
+        }
+
         for h in &hist2d_specs {
             column_names.push(h.x_column_name.as_str());
             column_names.push(h.y_column_name.as_str());
+
+            for cut in &h.cuts {
+                column_names.push(cut.x_column.as_str());
+                column_names.push(cut.y_column.as_str());
+            }
         }
+
         column_names.sort_unstable();
         column_names.dedup();
 
@@ -381,17 +403,87 @@ impl Histogrammer {
                     if let Ok(df) = lf_selected.collect() {
                         let height = df.height();
 
-                        // Parallel filling of histograms
+                        // // Parallel filling of histograms
+                        // hist1d_map.par_iter().for_each(|(hist, meta)| {
+                        //     if let Ok(col_idx) = df.column(&meta.column_name) {
+                        //         if let Ok(col_values) = col_idx.f64() {
+                        //             let mut hist = hist.lock().unwrap();
+                        //             for value in col_values.into_no_null_iter() {
+                        //                 if value == -1e6 {
+                        //                     continue;
+                        //                 }
+
+                        //                 hist.fill(value);
+                        //             }
+                        //         }
+                        //     }
+                        // });
+
+                        // hist2d_map.par_iter().for_each(|(hist, meta)| {
+                        //     if let (Ok(x_values), Ok(y_values)) = (
+                        //         df.column(&meta.x_column_name).and_then(|c| c.f64()),
+                        //         df.column(&meta.y_column_name).and_then(|c| c.f64()),
+                        //     ) {
+                        //         let mut hist = hist.lock().unwrap();
+                        //         for (x, y) in x_values
+                        //             .into_no_null_iter()
+                        //             .zip(y_values.into_no_null_iter())
+                        //         {
+                        //             if x == -1e6 || y == -1e6 {
+                        //                 continue;
+                        //             }
+
+                        //             hist.fill(x, y);
+                        //         }
+                        //     }
+                        // });
+
+                        // Parallel filling of 1D histograms
                         hist1d_map.par_iter().for_each(|(hist, meta)| {
                             if let Ok(col_idx) = df.column(&meta.column_name) {
                                 if let Ok(col_values) = col_idx.f64() {
                                     let mut hist = hist.lock().unwrap();
-                                    for value in col_values.into_no_null_iter() {
+
+                                    // Loop over each row, matching the row index in the DataFrame with the cut columns
+                                    for (index, value) in col_values.into_no_null_iter().enumerate()
+                                    {
                                         if value == -1e6 {
                                             continue;
                                         }
 
-                                        hist.fill(value);
+                                        // Track if this point passes all cuts for this histogram
+                                        let mut passes_all_cuts = true;
+
+                                        // Evaluate each cut for the current point
+                                        for cut in &meta.cuts {
+                                            // Get the cut-specific column values for the current row
+                                            if let (Ok(cut_x_values), Ok(cut_y_values)) = (
+                                                df.column(&cut.x_column).and_then(|c| c.f64()),
+                                                df.column(&cut.y_column).and_then(|c| c.f64()),
+                                            ) {
+                                                if let (Some(cut_x), Some(cut_y)) = (
+                                                    cut_x_values.get(index),
+                                                    cut_y_values.get(index),
+                                                ) {
+                                                    // Check if the point (cut_x, cut_y) is inside the cut polygon
+                                                    if !cut.is_inside(cut_x, cut_y) {
+                                                        passes_all_cuts = false;
+                                                        break;
+                                                    }
+                                                } else {
+                                                    passes_all_cuts = false;
+                                                    break;
+                                                }
+                                            } else {
+                                                passes_all_cuts = false;
+                                                break;
+                                            }
+                                        }
+
+                                        // Fill histogram only if all cuts pass for this point
+                                        if passes_all_cuts {
+                                            hist.fill(value);
+                                        }
                                     }
                                 }
                             }
@@ -403,21 +495,57 @@ impl Histogrammer {
                                 df.column(&meta.y_column_name).and_then(|c| c.f64()),
                             ) {
                                 let mut hist = hist.lock().unwrap();
-                                for (x, y) in x_values
+
+                                // Loop over each row, matching the row index in the DataFrame with the cut columns
+                                for (index, (x, y)) in x_values
                                     .into_no_null_iter()
                                     .zip(y_values.into_no_null_iter())
+                                    .enumerate()
                                 {
                                     if x == -1e6 || y == -1e6 {
                                         continue;
                                     }
 
-                                    hist.fill(x, y);
+                                    // Track if this point passes all cuts for this histogram
+                                    let mut passes_all_cuts = true;
+
+                                    // Evaluate each cut for the current point
+                                    for cut in &meta.cuts {
+                                        // Get the cut-specific column values for the current row
+                                        if let (Ok(cut_x_values), Ok(cut_y_values)) = (
+                                            df.column(&cut.x_column).and_then(|c| c.f64()),
+                                            df.column(&cut.y_column).and_then(|c| c.f64()),
+                                        ) {
+                                            if let (Some(cut_x), Some(cut_y)) =
+                                                (cut_x_values.get(index), cut_y_values.get(index))
+                                            {
+                                                // Check if the point (cut_x, cut_y) is inside the cut polygon
+                                                if !cut.is_inside(cut_x, cut_y) {
+                                                    passes_all_cuts = false;
+                                                    break;
+                                                }
+                                            } else {
+                                                passes_all_cuts = false;
+                                                break;
+                                            }
+                                        } else {
+                                            passes_all_cuts = false;
+                                            break;
+                                        }
+                                    }
+
+                                    // Fill histogram only if all cuts pass for this point
+                                    if passes_all_cuts {
+                                        hist.fill(x, y);
+                                    }
                                 }
                             }
                         });
 
-                        for (hist, _) in &hist2d_map {
+                        for (hist, meta) in &hist2d_map {
                             let mut hist = hist.lock().unwrap();
+                            hist.plot_settings.cuts.x_column = meta.x_column_name.clone();
+                            hist.plot_settings.cuts.y_column = meta.y_column_name.clone();
                             hist.plot_settings.recalculate_image = true;
                         }
 

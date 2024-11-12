@@ -21,15 +21,10 @@ impl CutHandler {
         {
             let file = File::open(file_path)?;
             let reader = BufReader::new(file);
-            let mut cut: Cut = serde_json::from_reader(reader)?;
-            cut.selected = true;
+            let cut: Cut = serde_json::from_reader(reader)?;
             self.cuts.push(cut);
         }
         Ok(())
-    }
-
-    pub fn cuts_are_selected(&self) -> bool {
-        self.cuts.iter().any(|cut| cut.selected)
     }
 
     pub fn cut_ui(&mut self, ui: &mut egui::Ui, histogrammer: &mut Histogrammer) {
@@ -68,7 +63,6 @@ impl CutHandler {
                             cut.ui(ui);
 
                             ui.horizontal(|ui| {
-                                ui.checkbox(&mut cut.selected, "");
                                 if ui.button("🗙").clicked() {
                                     index_to_remove = Some(index);
                                 }
@@ -98,9 +92,7 @@ impl CutHandler {
 
         // Iterate through all cuts and apply their respective filters.
         for cut in &mut self.cuts {
-            if cut.selected {
-                filtered_lf = cut.filter_lf_with_cut(&filtered_lf)?;
-            }
+            filtered_lf = cut.filter_lf_with_cut(&filtered_lf)?;
         }
 
         Ok(filtered_lf)
