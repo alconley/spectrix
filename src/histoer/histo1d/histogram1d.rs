@@ -240,9 +240,7 @@ impl Histogram {
             self.plot_settings.cursor_position = None;
         }
 
-        // if self.plot_settings.egui_settings.limit_scrolling {
         self.limit_scrolling(plot_ui);
-        // }
     }
 
     pub fn draw_other_histograms(
@@ -298,7 +296,8 @@ impl Histogram {
 
     pub fn render(&mut self, ui: &mut egui::Ui) {
         // Display progress bar while hist is being filled
-        self.plot_settings.progress_ui(ui);
+        // disabled since the row calculation is done in chucks
+        // self.plot_settings.progress_ui(ui);
 
         self.update_line_points(); // Ensure line points are updated for projections
         self.keybinds(ui); // Handle interactive elements
@@ -323,9 +322,23 @@ impl Histogram {
         let plot_response = plot.show(ui, |plot_ui| {
             self.draw(plot_ui);
 
-            // if progress is updating, turn on the auto bounds
             if self.plot_settings.progress.is_some() {
-                plot_ui.set_auto_bounds(Vec2b::new(true, true));
+                let y_max = self.bins.iter().max().cloned().unwrap_or(0) as f64;
+                let mut plot_bounds = plot_ui.plot_bounds();
+                plot_bounds.extend_with_y(y_max * 1.1);
+                plot_ui.set_plot_bounds(plot_bounds);
+            }
+
+            if self.plot_settings.egui_settings.reset_axis {
+                // let y_min = self.bins.iter().min().cloned().unwrap_or(0) as f64;
+                // let y_max = self.bins.iter().max().cloned().unwrap_or(0) as f64;
+                // let plot_bounds = egui_plot::PlotBounds::from_min_max(
+                //     [self.range.0 * 1.1, y_min * 1.1],
+                //     [self.range.1 * 1.1, y_max * 1.1],
+                // );
+                // plot_ui.set_plot_bounds(plot_bounds);
+                plot_ui.auto_bounds();
+                self.plot_settings.egui_settings.reset_axis = false;
             }
 
             if self.plot_settings.cursor_position.is_some() {
@@ -333,6 +346,10 @@ impl Histogram {
                     if delta_pos.y > 0.0 {
                         plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.0));
                     } else if delta_pos.y < 0.0 {
+                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 1.0));
+                    } else if delta_pos.x > 0.0 {
+                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.0));
+                    } else if delta_pos.x < 0.0 {
                         plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 1.0));
                     }
                 }

@@ -484,6 +484,11 @@ impl Histogrammer {
                                         if passes_all_cuts {
                                             hist.fill(value);
                                         }
+
+                                        hist.plot_settings.progress = Some(
+                                            (row_start as f32 + index as f32)
+                                                / (df.height() as f32),
+                                        );
                                     }
                                 }
                             }
@@ -547,6 +552,11 @@ impl Histogrammer {
                             hist.plot_settings.cuts.x_column = meta.x_column_name.clone();
                             hist.plot_settings.cuts.y_column = meta.y_column_name.clone();
                             hist.plot_settings.recalculate_image = true;
+                        }
+
+                        for hist in &hist1d_map {
+                            let mut hist = hist.0.lock().unwrap();
+                            hist.plot_settings.progress = None;
                         }
 
                         println!("\tProcessed rows {} to {}", row_start, row_start + height);

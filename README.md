@@ -96,7 +96,6 @@ Keybinds (cursor must be in the plot):
     - Data is evaluated at the bin center for the background marker.
 - O: Peak find
     - Peak find settings are located in the context menu.
-    - Use with caution, lol.
 - F: Fit Gaussians
     - Settings and results can be found in the context menu.
     - Requires 2 region markers. Data will be evaluated between the markers.
@@ -104,7 +103,6 @@ Keybinds (cursor must be in the plot):
     - If no peak markers are between the region markers, the program will assume there is only 1 peak approximately at the max value in the data.
     - If there is no background fit when the fit button is clicked, the selected background model will be used and fitted. This can result in longer and potentially incorrect fits due to more parameters being fit. A fix would be adjusting the initial guess', min, and max value or fiting the background with the background markers.
     - The lmfit fit report, fit stats, and fit lines can be viewed in the Fits menu.
-
 - S: Store Fit
     - Saves the fit.
     - Can save/load the fit to/from a file in the context menu.

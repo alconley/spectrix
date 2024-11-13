@@ -162,6 +162,7 @@ impl Histogram2D {
                 let bins = self.x_projection(min_y, max_y);
                 x_histogram.bins = bins.clone();
                 x_histogram.original_bins = bins;
+                x_histogram.plot_settings.egui_settings.reset_axis = true;
 
                 self.plot_settings.projections.x_projection = Some(x_histogram);
 
@@ -192,10 +193,12 @@ impl Projections {
             y_projection: None,
             y_projection_line_1: EguiVerticalLine {
                 name: "Y Projection Line 1".to_string(),
+                mid_point_radius: 5.0,
                 ..EguiVerticalLine::default()
             },
             y_projection_line_2: EguiVerticalLine {
                 name: "Y Projection Line 2".to_string(),
+                mid_point_radius: 5.0,
                 ..EguiVerticalLine::default()
             },
 
@@ -203,45 +206,16 @@ impl Projections {
             x_projection: None,
             x_projection_line_1: EguiHorizontalLine {
                 name: "X Projection Line 1".to_string(),
+                mid_point_radius: 5.0,
                 ..EguiHorizontalLine::default()
             },
             x_projection_line_2: EguiHorizontalLine {
                 name: "X Projection Line 2".to_string(),
+                mid_point_radius: 5.0,
                 ..EguiHorizontalLine::default()
             },
         }
     }
-
-    // this pops out a new window with the y projection
-
-    // fn show_y_projection(&mut self, ui: &mut egui::Ui) {
-    //     if self.add_y_projection && self.y_projection.is_some() {
-    //         ui.ctx().show_viewport_immediate(
-    //             egui::ViewportId::from_hash_of("Y Projection".to_string()),
-    //             egui::ViewportBuilder::default()
-    //                 .with_title(self.y_projection.as_ref().unwrap().name.clone())
-    //                 .with_inner_size([600.0, 400.0]),
-    //             |ctx, class| {
-    //                 assert!(
-    //                     class == egui::ViewportClass::Immediate,
-    //                     "This egui backend doesn't support multiple viewports"
-    //                 );
-
-    //                 egui::CentralPanel::default().show(ctx, |ui| {
-    //                     if let Some(histogram) = &mut self.y_projection {
-    //                         histogram.render(ui);
-    //                     }
-    //                 });
-
-    //                 if ctx.input(|i| i.viewport().close_requested()) {
-    //                     // Tell parent viewport that we should not show next frame:
-    //                     self.y_projection = None;
-    //                     self.add_y_projection = false;
-    //                 }
-    //             },
-    //         );
-    //     }
-    // }
 
     fn show_y_projection(&mut self, ui: &mut egui::Ui) {
         if self.add_y_projection && self.y_projection.is_some() {

@@ -226,6 +226,18 @@ impl Histogram2D {
             self.plot_settings.recalculate_image = false;
         }
 
+        let (scroll, _pointer_down, _modifiers) = ui.input(|i| {
+            let scroll = i.events.iter().find_map(|e| match e {
+                egui::Event::MouseWheel {
+                    unit: _,
+                    delta,
+                    modifiers: _,
+                } => Some(*delta),
+                _ => None,
+            });
+            (scroll, i.pointer.primary_down(), i.modifiers)
+        });
+
         let mut plot = egui_plot::Plot::new(self.name.clone());
         plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
@@ -238,6 +250,20 @@ impl Histogram2D {
 
         let plot_response = plot.show(ui, |plot_ui| {
             self.draw(plot_ui);
+
+            if self.plot_settings.cursor_position.is_some() {
+                if let Some(delta_pos) = scroll {
+                    if delta_pos.y > 0.0 {
+                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.1));
+                    } else if delta_pos.y < 0.0 {
+                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 0.9));
+                    } else if delta_pos.x > 0.0 {
+                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.1));
+                    } else if delta_pos.x < 0.0 {
+                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 0.9));
+                    }
+                }
+            }
         });
 
         plot_response.response.context_menu(|ui| {
