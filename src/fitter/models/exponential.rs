@@ -1,209 +1,256 @@
-use crate::egui_plot_stuff::egui_line::EguiLine;
+use crate::fitter::common::{Data, Parameter};
+use pyo3::{prelude::*, types::PyModule};
 
-use nalgebra::DVector;
-use varpro::model::builder::SeparableModelBuilder;
-use varpro::solvers::levmar::{LevMarProblemBuilder, LevMarSolver};
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct Coefficient {
-    pub value: f64,
-    pub uncertainty: f64,
+#[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct ExponentialParameters {
+    pub amplitude: Parameter,
+    pub decay: Parameter,
 }
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct Coefficients {
-    pub a: Coefficient,
-    pub b: Coefficient,
+impl Default for ExponentialParameters {
+    fn default() -> Self {
+        ExponentialParameters {
+            amplitude: Parameter {
+                name: "amplitude".to_string(),
+                ..Default::default()
+            },
+            decay: Parameter {
+                name: "decay".to_string(),
+                initial_guess: 500.0,
+                ..Default::default()
+            },
+        }
+    }
+}
+
+impl ExponentialParameters {
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Fit Parameters");
+            if ui.small_button("Reset").clicked() {
+                *self = ExponentialParameters::default();
+            }
+        });
+        // create a grid for the param
+        egui::Grid::new("Exponential_params_grid")
+            .striped(true)
+            .num_columns(5)
+            .show(ui, |ui| {
+                ui.label("Parameter");
+                ui.label("Initial Guess");
+                ui.label("Min");
+                ui.label("Max");
+                ui.label("Vary");
+                ui.end_row();
+                self.amplitude.ui(ui);
+                ui.end_row();
+                self.decay.ui(ui);
+            });
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ExponentialFitter {
-    pub x_data: Vec<f64>,
-    pub y_data: Vec<f64>,
-    pub weights: Vec<f64>,
-    pub initial_b_guess: f64,
-    pub coefficients: Option<Coefficients>,
-    pub fit_line: EguiLine,
+    pub data: Data,
+    pub paramaters: ExponentialParameters,
+    pub fit_points: Vec<[f64; 2]>,
+    pub fit_report: String,
 }
 
 impl ExponentialFitter {
-    /// Creates a new ExponentialFitter with the given data.
-    pub fn new(initial_b_guess: f64) -> Self {
-        let mut fit_line = EguiLine::new(egui::Color32::GREEN);
-        fit_line.name = "Exponential Fit".to_string();
-        fit_line.width = 1.0;
-
+    pub fn new(data: Data) -> Self {
         ExponentialFitter {
-            x_data: Vec::new(),
-            y_data: Vec::new(),
-            weights: Vec::new(),
-            initial_b_guess,
-            coefficients: None,
-            fit_line,
+            data,
+            paramaters: ExponentialParameters::default(),
+            fit_points: Vec::new(),
+            fit_report: String::new(),
         }
     }
 
-    fn exponential(x: &DVector<f64>, b: f64) -> DVector<f64> {
-        x.map(|x_val| (-x_val / b).exp())
-    }
+    pub fn new_from_parameters(
+        amplitude: (f64, f64),
+        decay: (f64, f64),
+        min_x: f64,
+        max_x: f64,
+    ) -> Self {
+        let mut fitter = ExponentialFitter {
+            data: Data::default(),
+            paramaters: ExponentialParameters::default(),
+            fit_points: Vec::new(),
+            fit_report: "Fitter with other model".to_string(),
+        };
 
-    fn exponential_pd_b(x: &DVector<f64>, b: f64) -> DVector<f64> {
-        x.map(|x_val| (x_val / b.powi(2)) * (-x_val / b).exp())
-    }
+        // Set the parameter values and uncertainties
+        fitter.paramaters.amplitude.value = Some(amplitude.0);
+        fitter.paramaters.amplitude.uncertainty = Some(amplitude.1);
+        fitter.paramaters.decay.value = Some(decay.0);
+        fitter.paramaters.decay.uncertainty = Some(decay.1);
 
-    pub fn fit(&mut self) {
-        let x_data = DVector::from_vec(self.x_data.clone());
-        let y_data = DVector::from_vec(self.y_data.clone());
-        // let weights = DVector::from_vec(self.weights.clone());
-
-        if x_data.len() < 3 {
-            log::error!("Not enough data points to fit exponential");
-            return;
+        // Optionally generate fit points based on the x-range (min_x to max_x)
+        let num_points = 100;
+        let step_size = (max_x - min_x) / (num_points as f64);
+        fitter.fit_points.clear();
+        for i in 0..=num_points {
+            let x = min_x + i as f64 * step_size;
+            let y = fitter.paramaters.amplitude.value.unwrap_or(1.0)
+                * (-x / fitter.paramaters.decay.value.unwrap_or(1.0)).exp();
+            fitter.fit_points.push([x, y]);
         }
 
-        let parameter_names: Vec<String> = vec!["b".to_string()];
+        fitter
+    }
 
-        let intitial_parameters = vec![self.initial_b_guess];
+    pub fn lmfit(&mut self) -> PyResult<()> {
+        log::info!("Fitting data with a Exponential line using `lmfit`.");
+        Python::with_gil(|py| {
+            // let sys = py.import_bound("sys")?;
+            // let version: String = sys.getattr("version")?.extract()?;
+            // let executable: String = sys.getattr("executable")?.extract()?;
+            // println!("Using Python version: {}", version);
+            // println!("Python executable: {}", executable);
 
-        let builder_proxy = SeparableModelBuilder::<f64>::new(parameter_names)
-            .initial_parameters(intitial_parameters)
-            .independent_variable(x_data)
-            .function(&["b"], Self::exponential)
-            .partial_deriv("b", Self::exponential_pd_b);
-
-        let model = match builder_proxy.build() {
-            Ok(model) => model,
-            Err(err) => {
-                log::error!("Error building model: {}", err);
-                return;
-            }
-        };
-
-        let problem = match LevMarProblemBuilder::new(model)
-            .observations(y_data)
-            // .weights(weights)
-            .build()
-        {
-            Ok(problem) => problem,
-            Err(err) => {
-                log::error!("Error building problem: {}", err);
-                return;
-            }
-        };
-
-        if let Ok((fit_result, fit_statistics)) =
-            LevMarSolver::default().fit_with_statistics(problem)
-        {
-            log::info!("fit_result: {:?}", fit_result);
-            log::info!("fit_statistics: {:?}", fit_statistics);
-            log::info!(
-                "Weighted residuals: {:?}",
-                fit_statistics.weighted_residuals()
-            );
-            log::info!(
-                "Regression standard error: {:?}",
-                fit_statistics.regression_standard_error()
-            );
-            log::info!(
-                "Covariance matrix: {:?}\n",
-                fit_statistics.covariance_matrix()
-            );
-
-            let nonlinear_parameters = fit_result.nonlinear_parameters();
-            let nonlinear_variances = fit_statistics.nonlinear_parameters_variance();
-
-            let linear_coefficients = fit_result.linear_coefficients();
-
-            let linear_coefficients = match linear_coefficients {
-                Some(coefficients) => coefficients,
-                None => {
-                    log::error!("No linear coefficients found");
-                    return;
+            // Check if the `uproot` module can be imported
+            match py.import_bound("lmfit") {
+                Ok(_) => {
+                    // println!("Successfully imported `lmfit` module.");
                 }
-            };
-            let linear_variances = fit_statistics.linear_coefficients_variance();
+                Err(_) => {
+                    eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
+                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                        "`lmfit` module not available",
+                    ));
+                }
+            }
 
-            let parameter_a = linear_coefficients[0];
-            let parameter_a_variance = linear_variances[0];
-            let parameter_a_uncertainity = parameter_a_variance.sqrt();
+            match py.import_bound("numpy") {
+                Ok(_) => {
+                    // println!("Successfully imported `lmfit` module.");
+                }
+                Err(_) => {
+                    eprintln!("Error: `numpy` module could not be found. Make sure you are using the correct Python environment with `numpy` installed.");
+                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                        "`numpy` module not available",
+                    ));
+                }
+            }
 
-            let parameter_b = nonlinear_parameters[0];
-            let parameter_b_variance = nonlinear_variances[0];
-            let parameter_b_uncertainity = parameter_b_variance.sqrt();
+            // Define the Python code as a module
+            let code = r#"
+import lmfit
+import numpy as np
 
-            self.coefficients = Some(Coefficients {
-                a: Coefficient {
-                    value: parameter_a,
-                    uncertainty: parameter_a_uncertainity,
-                },
-                b: Coefficient {
-                    value: parameter_b,
-                    uncertainty: parameter_b_uncertainity,
-                },
+def ExponentialFit(x_data: list, y_data: list, amplitude: list = ("amplitude", -np.inf, np.inf, 0.0, True), decay = ("decay", -np.inf, np.inf, 0.0, True)):    
+    # params = [name, min, max, initial_guess, vary]
+    
+    model = lmfit.models.ExponentialModel()
+    params = model.make_params(amplitude=amplitude[3], decay=decay[3])
+    params['amplitude'].set(min=amplitude[1], max=amplitude[2], value=amplitude[3], vary=amplitude[4])
+    params['decay'].set(min=decay[1], max=decay[2], value=decay[3], vary=decay[4])
+    result = model.fit(y_data, params, x=x_data)
+
+    print(result.fit_report())
+
+    # Extract Parameters
+    amplitude = float(result.params['amplitude'].value)
+    amplitude_err = result.params['amplitude'].stderr
+    if amplitude_err is None:
+        amplitude_err = float(0.0)
+    else:
+        amplitude_err = float(amplitude_err)
+    
+    decay = float(result.params['decay'].value)
+    decay_err = result.params['decay'].stderr
+    if decay_err is None:
+        decay_err = float(0.0)
+    else:
+        decay_err = float(decay_err)
+
+    params = [
+        ('amplitude', amplitude, amplitude_err),
+        ('decay', decay, decay_err)
+    ]
+
+    x = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
+    y = result.eval(x=x)
+
+    fit_report = str(result.fit_report())
+
+    return params, x, y, fit_report
+"#;
+
+            // Compile the Python code into a module
+            let module = PyModule::from_code_bound(py, code, "Exponential.py", "Exponential")?;
+
+            let x_data = self.data.x.clone();
+            let y_data = self.data.y.clone();
+            let amplitude_para = (
+                self.paramaters.amplitude.name.clone(),
+                self.paramaters.amplitude.min,
+                self.paramaters.amplitude.max,
+                self.paramaters.amplitude.initial_guess,
+                self.paramaters.amplitude.vary,
+            );
+            let decay_para = (
+                self.paramaters.decay.name.clone(),
+                self.paramaters.decay.min,
+                self.paramaters.decay.max,
+                self.paramaters.decay.initial_guess,
+                self.paramaters.decay.vary,
+            );
+
+            let result = module.getattr("ExponentialFit")?.call1((
+                x_data,
+                y_data,
+                amplitude_para,
+                decay_para,
+            ))?;
+
+            let params = result.get_item(0)?.extract::<Vec<(String, f64, f64)>>()?;
+            let x = result.get_item(1)?.extract::<Vec<f64>>()?;
+            let y = result.get_item(2)?.extract::<Vec<f64>>()?;
+            let fit_report = result.get_item(3)?.extract::<String>()?;
+
+            self.paramaters.amplitude.value = Some(params[0].1);
+            self.paramaters.amplitude.uncertainty = Some(params[0].2);
+            self.paramaters.decay.value = Some(params[1].1);
+            self.paramaters.decay.uncertainty = Some(params[1].2);
+
+            self.fit_points = x.iter().zip(y.iter()).map(|(&x, &y)| [x, y]).collect();
+            self.fit_report = fit_report;
+
+            Ok(())
+        })
+    }
+
+    pub fn evaluate(&self, x: f64) -> f64 {
+        self.paramaters.amplitude.value.unwrap_or(1.0)
+            * (-x / self.paramaters.decay.value.unwrap_or(1.0)).exp()
+    }
+
+    pub fn ui(&self, ui: &mut egui::Ui) {
+        // add menu button for the fit report
+        ui.horizontal(|ui| {
+            if let Some(amplitude) = &self.paramaters.amplitude.value {
+                ui.label(format!(
+                    "amplitude: {:.3} ± {:.3}",
+                    amplitude,
+                    self.paramaters.amplitude.uncertainty.unwrap_or(0.0)
+                ));
+            }
+            ui.separator();
+            if let Some(decay) = &self.paramaters.decay.value {
+                ui.label(format!(
+                    "decay: {:.3} ± {:.3}",
+                    decay,
+                    self.paramaters.decay.uncertainty.unwrap_or(0.0)
+                ));
+            }
+            ui.separator();
+            ui.menu_button("Fit Report", |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(self.fit_report.clone());
+                });
             });
-
-            self.compute_fit_points();
-        }
-    }
-
-    fn compute_fit_points(&mut self) {
-        if let Some(coefficients) = &self.coefficients {
-            let a = coefficients.a.value;
-            let b = coefficients.b.value;
-
-            let x_min = self.x_data.iter().cloned().fold(f64::INFINITY, f64::min);
-            let x_max = self
-                .x_data
-                .iter()
-                .cloned()
-                .fold(f64::NEG_INFINITY, f64::max);
-
-            let number_points = 1000;
-            for i in 0..number_points {
-                let x = x_min + (x_max - x_min) / (number_points as f64) * (i as f64);
-                let y = a * (-x / b).exp();
-                self.fit_line.add_point(x, y);
-            }
-        }
-    }
-
-    pub fn subtract_background(&self, x_data: Vec<f64>, y_data: Vec<f64>) -> Vec<f64> {
-        if let Some(coef) = &self.coefficients {
-            if coef.a.value == 0.0 {
-                log::error!("No coefficients found for exponential fit");
-                return y_data;
-            }
-
-            let mut y_data = y_data.clone();
-
-            for (i, x) in x_data.iter().enumerate() {
-                let y = coef.a.value * (-x / coef.b.value).exp();
-                y_data[i] -= y;
-            }
-
-            y_data
-        } else {
-            y_data
-        }
-    }
-
-    fn _draw(&self, plot_ui: &mut egui_plot::PlotUi) {
-        self.fit_line.draw(plot_ui);
-    }
-
-    pub fn fit_params_ui(&self, ui: &mut egui::Ui) {
-        ui.label("Coefficients:");
-        if let Some(coef) = &self.coefficients {
-            ui.label(format!(
-                "a: {:.3} ± {:.3}",
-                coef.a.value, coef.a.uncertainty
-            ));
-            ui.label(format!(
-                "b: {:.3} ± {:.3}",
-                coef.b.value, coef.b.uncertainty
-            ));
-        } else {
-            ui.label("No coefficients found");
-        }
+        });
     }
 }

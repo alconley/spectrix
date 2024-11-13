@@ -1,294 +1,490 @@
 // use super::configure_auxillary_detectors::AuxillaryDetectors;
-use super::configure_lazyframes::{LazyFrameInfo, LazyFrames};
-use super::histogram_ui_elements::{AddHisto1d, AddHisto2d, FillHisto1d, FillHisto2d, HistoConfig};
-use super::manual_histogram_script::manual_add_histograms;
+use super::manual_histogram_scripts::sps_histograms;
 
-use crate::histoer::histogrammer::Histogrammer;
+use crate::cutter::cuts::Cut;
+use crate::histoer::histogrammer::{Histo1DConfig, Histo2DConfig, Histogrammer};
+use egui_extras::{Column, TableBuilder};
 use polars::prelude::*;
 
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct HistogramScript {
-    pub lazyframe_info: LazyFrameInfo,
-    pub add_histograms: Vec<HistoConfig>,
-    pub fill_histograms: Vec<HistoConfig>,
-    pub grids: Vec<String>,
-    pub manual_histogram_script: bool,
+    pub hist_configs: Vec<HistoConfig>, // Unified vector for both 1D and 2D configurations
+    pub new_columns: Vec<(String, String)>,
+    pub cuts: Vec<Cut>,
+}
+
+// Enum to encapsulate 1D and 2D histogram configurations
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub enum HistoConfig {
+    Histo1D(Histo1DConfig),
+    Histo2D(Histo2DConfig),
 }
 
 impl HistogramScript {
     pub fn new() -> Self {
         Self {
-            lazyframe_info: LazyFrameInfo::default(),
-            add_histograms: vec![],
-            fill_histograms: vec![],
-            grids: vec![],
-            // auxillary_detectors: None,
-            manual_histogram_script: true,
+            hist_configs: vec![],
+            new_columns: vec![],
+            cuts: vec![],
         }
-    }
-
-    pub fn get_lazyframe_info(&mut self) {
-        let mut lazyframe_info = LazyFrameInfo::default();
-
-        let lazyframes = LazyFrames::new();
-        let main_columns = lazyframes.main_column_names();
-        let main_lf_names = lazyframes.main_lfs_names();
-
-        lazyframe_info.lfs = main_lf_names;
-        lazyframe_info.columns = main_columns;
-
-        // if self.add_auxillary_detectors {
-        //     if let Some(auxillary_detectors) = &self.auxillary_detectors {
-        //         let aux_columns = auxillary_detectors.get_column_names();
-        //         let aux_lf_names = auxillary_detectors.get_lf_names();
-
-        //         lazyframe_info.lfs.extend(aux_lf_names);
-        //         lazyframe_info.columns.extend(aux_columns);
-        //     }
-        // }
-
-        self.lazyframe_info = lazyframe_info;
-    }
-
-    pub fn get_hist_names(&self) -> Vec<String> {
-        self.add_histograms.iter().map(|hist| hist.name()).collect()
-    }
-
-    pub fn add_histogram1d(&mut self, config: AddHisto1d) {
-        self.add_histograms.push(HistoConfig::AddHisto1d(config));
-    }
-
-    pub fn add_histogram2d(&mut self, config: AddHisto2d) {
-        self.add_histograms.push(HistoConfig::AddHisto2d(config));
-    }
-
-    pub fn fill_histogram1d(&mut self, config: FillHisto1d) {
-        self.fill_histograms.push(HistoConfig::FillHisto1d(config));
-    }
-
-    pub fn add_fill_histogram2d(&mut self, config: FillHisto2d) {
-        self.fill_histograms.push(HistoConfig::FillHisto2d(config));
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        ui.checkbox(&mut self.manual_histogram_script, "Manual Histogram Script");
-        if self.manual_histogram_script {
-            ui.label("Manual Histogram Script Enabled");
-            ui.label(
-                "Create your custom script in src/histogram_scripter/manual_histogram_script.rs",
-            );
-        } else {
-            self.get_lazyframe_info();
+        ui.label("Custom Histogram Scripts");
+        ui.horizontal(|ui| {
+            if ui.button("SE-SPS").clicked() {
+                let (columns, histograms) = sps_histograms();
+                self.hist_configs = histograms;
+                self.new_columns = columns;
+            }
+        });
+
+        ui.separator();
+
+        // Add header controls
+        ui.horizontal(|ui| {
+            if ui.button("Add 1D Histogram").clicked() {
+                self.hist_configs.push(HistoConfig::Histo1D(Histo1DConfig {
+                    name: "".to_string(),
+                    column_name: "".to_string(),
+                    range: (0.0, 4096.0),
+                    bins: 512,
+                    cuts: vec![],
+                    calculate: true,
+                }));
+            }
+
+            if ui.button("Add 2D Histogram").clicked() {
+                self.hist_configs.push(HistoConfig::Histo2D(Histo2DConfig {
+                    name: "".to_string(),
+                    x_column_name: "".to_string(),
+                    y_column_name: "".to_string(),
+                    x_range: (0.0, 4096.0),
+                    y_range: (0.0, 4096.0),
+                    bins: (512, 512),
+                    cuts: vec![],
+                    calculate: true,
+                }));
+            }
 
             ui.separator();
 
-            // UI for Auxillary Detectors
-            // ui.horizontal(|ui| {
-            //     ui.label("Auxillary Detectors");
-            //     ui.checkbox(&mut self.add_auxillary_detectors, "Add Auxillary Detectors");
-            // });
+            if ui.button("Remove All").clicked() {
+                self.hist_configs.clear();
+            }
+        });
 
-            // if self.add_auxillary_detectors {
-            //     if let Some(auxillary_detectors) = &mut self.auxillary_detectors {
-            //         auxillary_detectors.ui(ui);
-            //     } else {
-            //         self.auxillary_detectors = Some(AuxillaryDetectors::default());
-            //     }
-            //     ui.separator();
-            // }
+        ui.separator();
 
-            ui.heading("Grids");
+        egui::ScrollArea::vertical().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label("Grids");
-                if ui.button("Add Grid").clicked() {
-                    let name = format!("Grid {}", self.grids.len());
-                    self.grids.push(name);
+                ui.heading("Cuts");
+
+                if ui.button("+").clicked() {
+                    let mut new_cut = Cut::default();
+                    if let Err(e) = new_cut.load_cut_from_json() {
+                        log::error!("Failed to load cut: {:?}", e);
+                    } else {
+                        self.cuts.push(new_cut);
+                    }
                 }
             });
 
-            if !self.grids.is_empty() {
-                let mut to_remove: Option<usize> = None;
-                egui::Grid::new("Grids")
+            if self.cuts.is_empty() {
+                ui.label("No cuts loaded");
+            } else {
+                // Table for Cuts with similar layout to Column Creation and Histograms
+                let mut indices_to_remove_cut = Vec::new();
+
+                TableBuilder::new(ui)
+                    .id_salt("cuts_table")
+                    .column(Column::auto()) // Name
+                    .column(Column::auto()) // X Column
+                    .column(Column::auto()) // Y Column
+                    .column(Column::remainder()) // Actions
                     .striped(true)
-                    .num_columns(2)
-                    .show(ui, |ui| {
-                        ui.label("");
+                    .vscroll(false)
+                    .header(20.0, |mut header| {
+                        header.col(|ui| {
+                            ui.label("Name");
+                        });
+                        header.col(|ui| {
+                            ui.label("X Column");
+                        });
+                        header.col(|ui| {
+                            ui.label("Y Column");
+                        });
+                    })
+                    .body(|mut body| {
+                        for (index, cut) in self.cuts.iter_mut().enumerate() {
+                            body.row(18.0, |mut row| {
+                                row.col(|ui| {
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut cut.polygon.name)
+                                            .hint_text("Cut Name")
+                                            .clip_text(false),
+                                    );
+                                });
+                                row.col(|ui| {
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut cut.x_column)
+                                            .hint_text("X Column")
+                                            .clip_text(false),
+                                    );
+                                });
+                                row.col(|ui| {
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut cut.y_column)
+                                            .hint_text("Y Column")
+                                            .clip_text(false),
+                                    );
+                                });
+                                row.col(|ui| {
+                                    if ui.button("X").clicked() {
+                                        indices_to_remove_cut.push(index);
+                                    }
+                                });
+                            });
+                        }
+                    });
+
+                // Remove indices in reverse order to prevent shifting issues
+                for &index in indices_to_remove_cut.iter().rev() {
+                    self.cuts.remove(index);
+                }
+            }
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.heading("Column Creation");
+
+                if ui.button("+").clicked() {
+                    self.new_columns.push(("".to_string(), "".to_string()));
+                }
+            });
+
+            if !self.new_columns.is_empty() {
+                let mut indices_to_remove_column = Vec::new();
+
+                TableBuilder::new(ui)
+                    .id_salt("new_columns")
+                    .column(Column::auto()) // expression
+                    .column(Column::auto()) // alias
+                    .column(Column::remainder()) // Actions
+                    .striped(true)
+                    .vscroll(false)
+                    .header(20.0, |mut header| {
+                        header.col(|ui| {
+                            ui.label("Expression");
+                        });
+                        header.col(|ui| {
+                            ui.label("Alias");
+                        });
+                    })
+                    .body(|mut body| {
+                        for (index, (expression, alias)) in self.new_columns.iter_mut().enumerate()
+                        {
+                            body.row(18.0, |mut row| {
+                                row.col(|ui| {
+                                    ui.add(
+                                        egui::TextEdit::singleline(expression)
+                                            .hint_text("Expression")
+                                            .clip_text(false),
+                                    );
+                                });
+
+                                row.col(|ui| {
+                                    ui.add(
+                                        egui::TextEdit::singleline(alias)
+                                            .hint_text("Alias")
+                                            .clip_text(false),
+                                    );
+                                });
+
+                                row.col(|ui| {
+                                    ui.horizontal(|ui| {
+                                        if ui.button("X").clicked() {
+                                            indices_to_remove_column.push(index);
+                                        }
+                                    });
+                                });
+                            });
+                        }
+                    });
+
+                // Remove indices in reverse order to prevent shifting issues
+                for &index in indices_to_remove_column.iter().rev() {
+                    self.new_columns.remove(index);
+                }
+            }
+
+            ui.separator();
+
+            ui.heading("Histograms");
+
+            let mut indices_to_remove = Vec::new();
+
+            // Create the table
+            TableBuilder::new(ui)
+                .id_salt("hist_configs")
+                .column(Column::auto()) // Type
+                .column(Column::auto()) // Name
+                .column(Column::auto()) // Columns
+                .column(Column::auto()) // Ranges
+                .column(Column::auto()) // Bins
+                .column(Column::auto()) // cuts
+                .column(Column::remainder()) // Actions
+                .striped(true)
+                .vscroll(false)
+                .header(20.0, |mut header| {
+                    header.col(|ui| {
+                        ui.label(" # ");
+                    });
+                    header.col(|ui| {
                         ui.label("Name");
-                        ui.end_row();
-                        for (i, grid) in &mut self.grids.iter_mut().enumerate() {
-                            if ui.button("X").clicked() {
-                                to_remove = Some(i);
-                            }
-                            ui.text_edit_singleline(grid);
-                            ui.end_row();
-                        }
                     });
-
-                if let Some(index) = to_remove {
-                    self.grids.remove(index);
-                }
-            }
-
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                ui.heading("Add Histograms");
-                if ui.button("1d").clicked() {
-                    self.add_histogram1d(AddHisto1d::new(self.add_histograms.len()));
-                }
-                if ui.button("2d").clicked() {
-                    self.add_histogram2d(AddHisto2d::new(self.add_histograms.len()));
-                }
-            });
-
-            let mut to_remove: Option<usize> = None;
-            egui::Grid::new("Add Histogram Config")
-                .striped(true)
-                .num_columns(5)
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Name                                             ");
+                    header.col(|ui| {
+                        ui.label("Column(s)");
                     });
-                    ui.label("Bins");
-                    ui.label("Range");
-                    ui.label("Grid");
-                    ui.label("Remove");
-                    ui.end_row();
-                    for (i, config) in &mut self.add_histograms.iter_mut().enumerate() {
-                        config.add_ui(ui, self.grids.clone());
+                    header.col(|ui| {
+                        ui.label("Range(s)");
+                    });
+                    header.col(|ui| {
+                        ui.label("Bins");
+                    });
+                    header.col(|ui| {
+                        ui.label("Cuts");
+                    });
+                    header.col(|ui| {
+                        ui.label("Actions");
+                    });
+                })
+                .body(|mut body| {
+                    for (index, config) in self.hist_configs.iter_mut().enumerate() {
+                        body.row(18.0, |mut row| {
+                            row.col(|ui| match config {
+                                HistoConfig::Histo1D(_) => {
+                                    ui.label(format!("{index}"));
+                                }
+                                HistoConfig::Histo2D(_) => {
+                                    ui.label(format!("{index}"));
+                                }
+                            });
 
-                        // Remove button
-                        if ui.button("X").clicked() {
-                            to_remove = Some(i);
-                        }
-                        ui.end_row();
+                            row.col(|ui| match config {
+                                HistoConfig::Histo1D(hist) => {
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut hist.name)
+                                            .hint_text("Name")
+                                            .clip_text(false),
+                                    );
+                                }
+
+                                HistoConfig::Histo2D(hist) => {
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut hist.name)
+                                            .hint_text("Name")
+                                            .clip_text(false),
+                                    );
+                                }
+                            });
+
+                            row.col(|ui| match config {
+                                HistoConfig::Histo1D(hist) => {
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut hist.column_name)
+                                            .hint_text("Column Name")
+                                            .clip_text(false),
+                                    );
+                                }
+                                HistoConfig::Histo2D(hist) => {
+                                    ui.vertical(|ui| {
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut hist.x_column_name)
+                                                .hint_text("X Column Name")
+                                                .clip_text(false),
+                                        );
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut hist.y_column_name)
+                                                .hint_text("Y Column Name")
+                                                .clip_text(false),
+                                        );
+                                    });
+                                }
+                            });
+
+                            row.col(|ui| match config {
+                                HistoConfig::Histo1D(hist) => {
+                                    ui.horizontal(|ui| {
+                                        ui.add(
+                                            egui::DragValue::new(&mut hist.range.0)
+                                                .speed(0.1)
+                                                .prefix("(")
+                                                .suffix(","),
+                                        );
+                                        ui.add(
+                                            egui::DragValue::new(&mut hist.range.1)
+                                                .speed(0.1)
+                                                .prefix(" ")
+                                                .suffix(")"),
+                                        );
+                                    });
+                                }
+                                HistoConfig::Histo2D(hist) => {
+                                    ui.vertical(|ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.add(
+                                                egui::DragValue::new(&mut hist.x_range.0)
+                                                    .speed(1.0)
+                                                    .prefix("(")
+                                                    .suffix(","),
+                                            );
+                                            ui.add(
+                                                egui::DragValue::new(&mut hist.x_range.1)
+                                                    .speed(1.0)
+                                                    .prefix(" ")
+                                                    .suffix(")"),
+                                            );
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.add(
+                                                egui::DragValue::new(&mut hist.y_range.0)
+                                                    .speed(1.0)
+                                                    .prefix("(")
+                                                    .suffix(","),
+                                            );
+                                            ui.add(
+                                                egui::DragValue::new(&mut hist.y_range.1)
+                                                    .speed(1.0)
+                                                    .prefix(" ")
+                                                    .suffix(")"),
+                                            );
+                                        });
+                                    });
+                                }
+                            });
+
+                            row.col(|ui| match config {
+                                HistoConfig::Histo1D(hist) => {
+                                    ui.add(egui::DragValue::new(&mut hist.bins).speed(1));
+                                }
+                                HistoConfig::Histo2D(hist) => {
+                                    ui.vertical(|ui| {
+                                        ui.add(egui::DragValue::new(&mut hist.bins.0).speed(1));
+                                        ui.add(egui::DragValue::new(&mut hist.bins.1).speed(1));
+                                    });
+                                }
+                            });
+
+                            row.col(|ui| match config {
+                                HistoConfig::Histo1D(hist) => {
+                                    egui::ComboBox::from_id_salt(format!(
+                                        "cut_select_1d_{}",
+                                        index
+                                    ))
+                                    .selected_text("Select cuts")
+                                    .width(ui.available_width())
+                                    .show_ui(ui, |ui| {
+                                        for cut in &self.cuts {
+                                            let mut is_selected = hist
+                                                .cuts
+                                                .iter()
+                                                .any(|selected_cut| selected_cut == cut);
+                                            if ui
+                                                .checkbox(&mut is_selected, &cut.polygon.name)
+                                                .clicked()
+                                            {
+                                                if is_selected && !hist.cuts.contains(cut) {
+                                                    hist.cuts.push(cut.clone());
+                                                } else if !is_selected {
+                                                    hist.cuts
+                                                        .retain(|selected_cut| selected_cut != cut);
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                                HistoConfig::Histo2D(hist) => {
+                                    egui::ComboBox::from_id_salt(format!(
+                                        "cut_select_2d_{}",
+                                        index
+                                    ))
+                                    .selected_text("Select cuts")
+                                    .width(ui.available_width())
+                                    .show_ui(ui, |ui| {
+                                        for cut in &self.cuts {
+                                            let mut is_selected = hist
+                                                .cuts
+                                                .iter()
+                                                .any(|selected_cut| selected_cut == cut);
+                                            if ui
+                                                .checkbox(&mut is_selected, &cut.polygon.name)
+                                                .clicked()
+                                            {
+                                                if is_selected && !hist.cuts.contains(cut) {
+                                                    hist.cuts.push(cut.clone());
+                                                } else if !is_selected {
+                                                    hist.cuts
+                                                        .retain(|selected_cut| selected_cut != cut);
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                            });
+
+                            row.col(|ui| {
+                                ui.horizontal(|ui| {
+                                    match config {
+                                        HistoConfig::Histo1D(hist) => {
+                                            ui.checkbox(&mut hist.calculate, "");
+                                        }
+                                        HistoConfig::Histo2D(hist) => {
+                                            ui.checkbox(&mut hist.calculate, "");
+                                        }
+                                    }
+
+                                    ui.separator();
+
+                                    if ui.button("X").clicked() {
+                                        indices_to_remove.push(index);
+                                    }
+                                });
+                            });
+                        });
                     }
                 });
 
-            if let Some(index) = to_remove {
-                self.add_histograms.remove(index);
+            // Remove indices in reverse order to prevent shifting issues
+            for &index in indices_to_remove.iter().rev() {
+                self.hist_configs.remove(index);
             }
-
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                ui.heading("Fill Histograms");
-                if ui.button("1d").clicked() {
-                    self.fill_histogram1d(FillHisto1d::new(self.fill_histograms.len()));
-                }
-                if ui.button("2d").clicked() {
-                    self.add_fill_histogram2d(FillHisto2d::new(self.fill_histograms.len()));
-                }
-            });
-
-            let mut to_remove: Option<usize> = None;
-
-            let histogram_names = self.get_hist_names();
-
-            egui::Grid::new("Histogram Config")
-                .striped(true)
-                .num_columns(5)
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Histogram");
-                    });
-                    ui.label("LazyFrame");
-                    ui.label("Column");
-                    ui.label("Calculate");
-                    ui.label("Remove");
-                    ui.end_row();
-                    for (i, config) in &mut self.fill_histograms.iter_mut().enumerate() {
-                        config.fill_ui(ui, self.lazyframe_info.clone(), histogram_names.clone());
-
-                        // Remove button
-                        if ui.button("X").clicked() {
-                            to_remove = Some(i);
-                        }
-                        ui.end_row();
-                    }
-                });
-
-            if let Some(index) = to_remove {
-                self.fill_histograms.remove(index);
-            }
-
-            ui.separator();
-        }
+        });
     }
 
     pub fn add_histograms(&mut self, h: &mut Histogrammer, lf: LazyFrame) {
-        if self.manual_histogram_script {
-            manual_add_histograms(h, lf);
-        } else {
-            let mut lazyframes = LazyFrames::new();
+        // form the 1d and 2d histo congifurations vecs
+        let mut histo1d_configs = Vec::new();
+        let mut histo2d_configs = Vec::new();
 
-            let mut lf = lf;
-            // add the main extra columns to the raw lazyframe
-            lf = lazyframes.add_columns_to_lazyframe(&lf);
-
-            // // add auxillary detectors columns to the raw lazyframe
-            // if self.add_auxillary_detectors {
-            //     if let Some(auxillary_detectors) = &self.auxillary_detectors {
-            //         lf = auxillary_detectors.add_columns_to_lazyframe(&lf);
-            //     }
-            // }
-
-            // add the main lfs to the lazyframes
-            lazyframes.lfs = lazyframes.filtered_lfs(lf.clone());
-
-            // // add auxillary detectors lfs to the lazyframes
-            // if self.add_auxillary_detectors {
-            //     if let Some(auxillary_detectors) = &self.auxillary_detectors {
-            //         let aux_filtered_lfs = auxillary_detectors.filterd_lazyframes(lf.clone());
-            //         for (name, lf) in aux_filtered_lfs {
-            //             lazyframes.lfs.insert(name, lf);
-            //         }
-            //     }
-            // }
-
-            // add histograms to histogrammer
-
-            for hist in self.add_histograms.iter_mut() {
-                match hist {
-                    HistoConfig::AddHisto1d(config) => {
-                        let name = config.name.clone();
-                        let bins = config.bins;
-                        let range = config.range;
-                        let grid = config.grid.as_deref();
-                        h.add_hist1d(&name, bins, range, grid);
-                    }
-                    HistoConfig::AddHisto2d(config) => {
-                        let name = config.name.clone();
-                        let bins = config.bins;
-                        let range = config.range;
-                        let grid = config.grid.as_deref();
-                        h.add_hist2d(&name, bins, range, grid);
-                    }
-                    _ => {}
+        for config in self.hist_configs.iter() {
+            match config {
+                HistoConfig::Histo1D(histo1d) => {
+                    histo1d_configs.push(histo1d.clone());
                 }
-            }
-
-            // fill histograms
-            for hist in self.fill_histograms.iter_mut() {
-                match hist {
-                    HistoConfig::FillHisto1d(config) => {
-                        if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
-                            let name = config.name.clone();
-                            let column = config.column.clone();
-                            h.fill_hist1d(&name, lf, &column);
-                        }
-                    }
-                    HistoConfig::FillHisto2d(config) => {
-                        if let Some(lf) = lazyframes.get_lf(&config.lazyframe) {
-                            let name = config.name.clone();
-                            let x_column = config.x_column.clone();
-                            let y_column = config.y_column.clone();
-                            h.fill_hist2d(&name, lf, &x_column, &y_column);
-                        }
-                    }
-                    _ => {}
+                HistoConfig::Histo2D(histo2d) => {
+                    histo2d_configs.push(histo2d.clone());
                 }
             }
         }
+
+        h.fill_histograms(
+            histo1d_configs,
+            histo2d_configs,
+            &lf,
+            self.new_columns.clone(),
+            10000000,
+        );
     }
 }

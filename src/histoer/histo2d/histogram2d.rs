@@ -1,4 +1,5 @@
 use fnv::FnvHashMap;
+use rayon::prelude::*;
 
 use crate::egui_plot_stuff::egui_image::EguiImage;
 
@@ -59,27 +60,25 @@ impl Histogram2D {
         self.plot_settings.recalculate_image = true;
     }
 
-    // Add a value to the histogram with progress tracking
-    pub fn fill(&mut self, x_value: f64, y_value: f64, current_step: usize, total_steps: usize) {
-        if x_value >= self.range.x.min
-            && x_value < self.range.x.max
-            && y_value >= self.range.y.min
-            && y_value < self.range.y.max
-        {
+    pub fn fill(&mut self, x_value: f64, y_value: f64) {
+        if x_value < self.range.x.min {
+            self.underflow.0 += 1; // Increment x-axis underflow
+        } else if x_value >= self.range.x.max {
+            self.overflow.0 += 1; // Increment x-axis overflow
+        } else if y_value < self.range.y.min {
+            self.underflow.1 += 1; // Increment y-axis underflow
+        } else if y_value >= self.range.y.max {
+            self.overflow.1 += 1; // Increment y-axis overflow
+        } else {
+            // Value is within range; proceed to calculate indices and update counts
             let x_index = ((x_value - self.range.x.min) / self.bins.x_width) as usize;
             let y_index = ((y_value - self.range.y.min) / self.bins.y_width) as usize;
+
             let count = self.bins.counts.entry((x_index, y_index)).or_insert(0);
             *count += 1;
 
             self.bins.min_count = self.bins.min_count.min(*count);
             self.bins.max_count = self.bins.max_count.max(*count);
-        }
-
-        // Update progress if it's being tracked
-        self.plot_settings.progress = Some(current_step as f32 / total_steps as f32);
-
-        if self.plot_settings.progress.is_some() && (current_step % (total_steps) / 10) == 0 {
-            self.plot_settings.recalculate_image = true;
         }
     }
 
@@ -105,35 +104,37 @@ impl Histogram2D {
         Some(bin_index)
     }
 
-    // Convert histogram data to a ColorImage
+    // Convert histogram data to a ColorImage in parallel using Rayon
     fn data_2_image(&self) -> egui::ColorImage {
-        let width = ((self.range.x.max - self.range.x.min) / self.bins.x_width) as usize; // number of pixels in x direction
-        let height = ((self.range.y.max - self.range.y.min) / self.bins.y_width) as usize; // number of pixels in y direction
-
-        // The pixels, row by row, from top to bottom. Each pixel is a Color32.
-        let mut pixels = Vec::with_capacity(width * height);
+        let width = ((self.range.x.max - self.range.x.min) / self.bins.x_width) as usize;
+        let height = ((self.range.y.max - self.range.y.min) / self.bins.y_width) as usize;
 
         let colormap_options = self.plot_settings.colormap_options;
 
-        for y in 0..height {
-            for x in 0..width {
-                let count = self
-                    .bins
-                    .counts
-                    .get(&(x, height - y - 1))
-                    .cloned()
-                    .unwrap_or(0);
-                let color = self.plot_settings.colormap.color(
-                    count,
-                    self.bins.min_count,
-                    self.bins.max_count,
-                    colormap_options,
-                );
-                pixels.push(color);
-            }
-        }
+        // Parallelize over rows, and for each row, compute pixel colors for all columns
+        let pixels: Vec<_> = (0..height)
+            .into_par_iter()
+            .map(|y| {
+                (0..width)
+                    .map(|x| {
+                        let count = self
+                            .bins
+                            .counts
+                            .get(&(x, height - y - 1))
+                            .cloned()
+                            .unwrap_or(0);
+                        self.plot_settings.colormap.color(
+                            count,
+                            self.bins.min_count,
+                            self.bins.max_count,
+                            colormap_options,
+                        )
+                    })
+                    .collect::<Vec<_>>() // Collect each row as a `Vec<Color32>`
+            })
+            .flatten() // Flatten the rows into a single Vec<Color32> for pixels
+            .collect();
 
-        // Create the ColorImage with the specified width and height and pixel data
         egui::ColorImage {
             size: [width, height],
             pixels,
@@ -225,6 +226,18 @@ impl Histogram2D {
             self.plot_settings.recalculate_image = false;
         }
 
+        let (scroll, _pointer_down, _modifiers) = ui.input(|i| {
+            let scroll = i.events.iter().find_map(|e| match e {
+                egui::Event::MouseWheel {
+                    unit: _,
+                    delta,
+                    modifiers: _,
+                } => Some(*delta),
+                _ => None,
+            });
+            (scroll, i.pointer.primary_down(), i.modifiers)
+        });
+
         let mut plot = egui_plot::Plot::new(self.name.clone());
         plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
@@ -237,6 +250,20 @@ impl Histogram2D {
 
         let plot_response = plot.show(ui, |plot_ui| {
             self.draw(plot_ui);
+
+            if self.plot_settings.cursor_position.is_some() {
+                if let Some(delta_pos) = scroll {
+                    if delta_pos.y > 0.0 {
+                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.1));
+                    } else if delta_pos.y < 0.0 {
+                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 0.9));
+                    } else if delta_pos.x > 0.0 {
+                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.1));
+                    } else if delta_pos.x < 0.0 {
+                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 0.9));
+                    }
+                }
+            }
         });
 
         plot_response.response.context_menu(|ui| {

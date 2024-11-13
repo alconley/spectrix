@@ -7,23 +7,49 @@ use std::io::{BufReader, Write};
 
 use crate::egui_plot_stuff::egui_polygon::EguiPolygon;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct Cut {
     pub polygon: EguiPolygon,
     pub x_column: String,
     pub y_column: String,
-    #[serde(skip)]
-    pub selected: bool,
+}
+
+impl Default for Cut {
+    fn default() -> Self {
+        Cut {
+            polygon: EguiPolygon::default(),
+            x_column: "".to_string(),
+            y_column: "".to_string(),
+        }
+    }
 }
 
 impl Cut {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         // putting this in a grid
-        ui.text_edit_singleline(&mut self.x_column);
+        // ui.text_edit_singleline(&mut self.x_column);
 
-        ui.text_edit_singleline(&mut self.y_column);
+        // ui.text_edit_singleline(&mut self.y_column);
 
-        self.polygon.polygon_info_menu_button(ui);
+        // self.polygon.polygon_info_menu_button(ui);
+
+        ui.add(
+            egui::TextEdit::singleline(&mut self.polygon.name)
+                .hint_text("Name")
+                .clip_text(false),
+        );
+
+        ui.add(
+            egui::TextEdit::singleline(&mut self.x_column)
+                .hint_text("X Column Name")
+                .clip_text(false),
+        );
+
+        ui.add(
+            egui::TextEdit::singleline(&mut self.y_column)
+                .hint_text("Y Column Name")
+                .clip_text(false),
+        );
     }
 
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
@@ -217,7 +243,6 @@ impl HistogramCuts {
             polygon: new_cut,
             x_column: "".to_string(),
             y_column: "".to_string(),
-            selected: false,
         };
         self.cuts.push(new_cut);
     }

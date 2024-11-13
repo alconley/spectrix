@@ -1,661 +1,820 @@
-use nalgebra::DVector;
-use prettytable::{row, Table};
-use varpro::model::builder::SeparableModelBuilder;
-use varpro::model::SeparableModel;
-use varpro::solvers::levmar::{FitResult, LevMarProblemBuilder, LevMarSolver};
-use varpro::statistics::FitStatistics; // Import prettytable
+use crate::fitter::common::{Data, Parameter};
+use crate::fitter::main_fitter::{BackgroundModel, BackgroundResult};
+use crate::fitter::models::exponential::ExponentialFitter;
+use crate::fitter::models::linear::LinearFitter;
+use crate::fitter::models::powerlaw::PowerLawFitter;
+use crate::fitter::models::quadratic::QuadraticFitter;
 
-#[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct Value {
-    pub value: f64,
-    pub uncertainty: f64,
+use pyo3::{
+    prelude::*,
+    types::{PyDict, PyModule},
+};
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct GaussianParameters {
+    pub amplitude: Parameter,
+    pub mean: Parameter,
+    pub sigma: Parameter,
+    pub fwhm: Parameter,
+    pub area: Parameter,
+    pub fit_points: Vec<[f64; 2]>, // Vector of (x, y) points representing the Gaussian curve
 }
 
-#[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct GaussianParams {
-    pub amplitude: Value,
-    pub mean: Value,
-    pub sigma: Value,
-    pub fwhm: Value,
-    pub area: Value,
+impl Default for GaussianParameters {
+    fn default() -> Self {
+        GaussianParameters {
+            amplitude: Parameter {
+                name: "amplitude".to_string(),
+                ..Default::default()
+            },
+            mean: Parameter {
+                name: "mean".to_string(),
+                ..Default::default()
+            },
+            sigma: Parameter {
+                name: "sigma".to_string(),
+                ..Default::default()
+            },
+            fwhm: Parameter {
+                name: "fwhm".to_string(),
+                ..Default::default()
+            },
+            area: Parameter {
+                name: "area".to_string(),
+                ..Default::default()
+            },
+            fit_points: Vec::new(),
+        }
+    }
 }
 
-impl GaussianParams {
-    pub fn new(amplitude: Value, mean: Value, sigma: Value, bin_width: f64) -> Option<Self> {
-        if sigma.value < 0.0 {
-            log::error!("Sigma value is negative");
-            return None;
-        }
-
-        let fwhm = Self::calculate_fwhm(sigma.value);
-        let fwhm_uncertainty = Self::fwhm_uncertainty(sigma.uncertainty);
-
-        let area = Self::calculate_area(amplitude.value, sigma.value, bin_width);
-        if area < 0.0 {
-            log::error!("Area is negative");
-            return None;
-        }
-        let area_uncertainty = Self::area_uncertainty(amplitude.clone(), sigma.clone());
-
-        Some(GaussianParams {
-            amplitude,
-            mean,
-            sigma,
-            fwhm: Value {
-                value: fwhm,
-                uncertainty: fwhm_uncertainty,
+impl GaussianParameters {
+    pub fn new(
+        amp: (f64, f64),
+        mean: (f64, f64),
+        sigma: (f64, f64),
+        fwhm: (f64, f64),
+        area: (f64, f64),
+    ) -> Self {
+        GaussianParameters {
+            amplitude: Parameter {
+                name: "amplitude".to_string(),
+                value: Some(amp.0),
+                uncertainty: Some(amp.1),
+                ..Default::default()
             },
-            area: Value {
-                value: area,
-                uncertainty: area_uncertainty,
+            mean: Parameter {
+                name: "mean".to_string(),
+                value: Some(mean.0),
+                uncertainty: Some(mean.1),
+                ..Default::default()
             },
-        })
+            sigma: Parameter {
+                name: "sigma".to_string(),
+                value: Some(sigma.0),
+                uncertainty: Some(sigma.1),
+                ..Default::default()
+            },
+            fwhm: Parameter {
+                name: "fwhm".to_string(),
+                value: Some(fwhm.0),
+                uncertainty: Some(fwhm.1),
+                ..Default::default()
+            },
+            area: Parameter {
+                name: "area".to_string(),
+                value: Some(area.0),
+                uncertainty: Some(area.1),
+                ..Default::default()
+            },
+            fit_points: Vec::new(),
+        }
     }
 
-    // Method to calculate FWHM
-    fn calculate_fwhm(sigma: f64) -> f64 {
-        2.0 * (2.0 * f64::ln(2.0)).sqrt() * sigma
-    }
+    /// Function to generate fit points 5 sigma out from the mean.
+    /// Fit points are generated in the range [mean - 5 * sigma, mean + 5 * sigma].
+    pub fn generate_fit_points(&mut self, num_points: usize) {
+        if let (Some(mean), Some(sigma)) = (self.mean.value, self.sigma.value) {
+            let range_min = mean - 5.0 * sigma;
+            let range_max = mean + 5.0 * sigma;
+            let step_size = (range_max - range_min) / (num_points as f64);
 
-    // Method to calculate FWHM uncertainty
-    fn fwhm_uncertainty(sigma_uncertainty: f64) -> f64 {
-        2.0 * (2.0 * f64::ln(2.0)).sqrt() * sigma_uncertainty
-    }
-
-    // Method to calculate area
-    fn calculate_area(amplitude: f64, sigma: f64, bin_width: f64) -> f64 {
-        amplitude * sigma * (2.0 * std::f64::consts::PI).sqrt() / bin_width
-    }
-
-    // Method to calculate area uncertainty
-    fn area_uncertainty(amplitude: Value, sigma: Value) -> f64 {
-        let two_pi_sqrt = (2.0 * std::f64::consts::PI).sqrt();
-        ((sigma.value * two_pi_sqrt * amplitude.uncertainty).powi(2)
-            + (amplitude.value * two_pi_sqrt * sigma.uncertainty).powi(2))
-        .sqrt()
+            self.fit_points.clear();
+            for i in 0..=num_points {
+                let x = range_min + i as f64 * step_size;
+                let y = self.amplitude.value.unwrap_or(1.0)
+                    * (-((x - mean).powi(2)) / (2.0 * sigma.powi(2))).exp();
+                self.fit_points.push([x, y]);
+            }
+        }
     }
 
     pub fn params_ui(&self, ui: &mut egui::Ui) {
         ui.label(format!(
             "{:.2} ± {:.2}",
-            self.mean.value, self.mean.uncertainty
+            self.mean.value.unwrap_or(0.0),
+            self.mean.uncertainty.unwrap_or(0.0)
         ));
+
         ui.label(format!(
             "{:.2} ± {:.2}",
-            self.fwhm.value, self.fwhm.uncertainty
+            self.fwhm.value.unwrap_or(0.0),
+            self.fwhm.uncertainty.unwrap_or(0.0)
         ));
+
         ui.label(format!(
             "{:.2} ± {:.2}",
-            self.area.value, self.area.uncertainty
+            self.area.value.unwrap_or(0.0),
+            self.area.uncertainty.unwrap_or(0.0)
         ));
-    }
 
-    pub fn fit_line_points(&self) -> Vec<[f64; 2]> {
-        let num_points = 1000;
-        let start = self.mean.value - 5.0 * self.sigma.value; // Adjust start and end to be +/- 5 sigma from the mean
-        let end = self.mean.value + 5.0 * self.sigma.value;
-        let step = (end - start) / num_points as f64;
+        ui.label(format!(
+            "{:.2} ± {:.2}",
+            self.amplitude.value.unwrap_or(0.0),
+            self.amplitude.uncertainty.unwrap_or(0.0)
+        ));
 
-        (0..num_points)
-            .map(|i| {
-                let x = start + step * i as f64;
-                let y = self.amplitude.value
-                    * (-((x - self.mean.value).powi(2)) / (2.0 * self.sigma.value.powi(2))).exp();
-                [x, y]
-            })
-            .collect()
+        ui.label(format!(
+            "{:.2} ± {:.2}",
+            self.sigma.value.unwrap_or(0.0),
+            self.sigma.uncertainty.unwrap_or(0.0)
+        ));
     }
 }
 
-#[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct GaussianFitter {
-    x: Vec<f64>,
-    y: Vec<f64>,
-    pub peak_markers: Vec<f64>,
-    pub fit_params: Option<Vec<GaussianParams>>,
-    pub fit_lines: Option<Vec<Vec<[f64; 2]>>>,
-    pub free_stddev: bool, // false = fit all the gaussians with the same sigma
-    pub free_position: bool, // false = fix the position of the gaussians to the peak_markers
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct GaussianFitSettings {
+    pub equal_stdev: bool,
+    pub free_position: bool,
     pub bin_width: f64,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct GaussianFitter {
+    pub data: Data,
+    pub peak_markers: Vec<f64>,
+    pub fit_settings: GaussianFitSettings,
+    pub background_model: BackgroundModel,
+    pub background_result: Option<BackgroundResult>,
+    pub fit_result: Vec<GaussianParameters>,
+    pub fit_points: Vec<[f64; 2]>,
+    pub fit_report: String,
 }
 
 impl GaussianFitter {
     pub fn new(
-        x: Vec<f64>,
-        y: Vec<f64>,
+        data: Data,
         peak_markers: Vec<f64>,
-        free_stddev: bool,
+        background_model: BackgroundModel,
+        background_result: Option<BackgroundResult>,
+        equal_stdev: bool,
         free_position: bool,
         bin_width: f64,
     ) -> Self {
         Self {
-            x,
-            y,
+            data,
             peak_markers,
-            fit_params: None,
-            fit_lines: None,
-            free_stddev,
-            free_position,
-            bin_width,
+            background_model,
+            background_result,
+            fit_settings: GaussianFitSettings {
+                equal_stdev,
+                free_position,
+                bin_width,
+            },
+            fit_result: Vec::new(),
+            fit_points: Vec::new(),
+            fit_report: String::new(),
         }
     }
 
-    fn gaussian(x: &DVector<f64>, mean: f64, sigma: f64) -> DVector<f64> {
-        x.map(|x_val| (-((x_val - mean).powi(2)) / (2.0 * sigma.powi(2))).exp())
-    }
+    pub fn lmfit(&mut self) -> PyResult<()> {
+        Python::with_gil(|py| {
+            // let sys = py.import_bound("sys")?;
+            // let version: String = sys.getattr("version")?.extract()?;
+            // let executable: String = sys.getattr("executable")?.extract()?;
+            // println!("Using Python version: {}", version);
+            // println!("Python executable: {}", executable);
 
-    fn gaussian_pd_mean(x: &DVector<f64>, mean: f64, sigma: f64) -> DVector<f64> {
-        x.map(|x_val| {
-            (x_val - mean) / sigma.powi(2)
-                * (-((x_val - mean).powi(2)) / (2.0 * sigma.powi(2))).exp()
-        })
-    }
-
-    fn gaussian_pd_std_dev(x: &DVector<f64>, mean: f64, sigma: f64) -> DVector<f64> {
-        x.map(|x_val| {
-            let exponent = -((x_val - mean).powi(2)) / (2.0 * sigma.powi(2));
-            (x_val - mean).powi(2) / sigma.powi(3) * exponent.exp()
-        })
-    }
-
-    fn average_sigma(&self) -> f64 {
-        let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        let range = max_x - min_x;
-
-        range / (5.0 * self.peak_markers.len() as f64)
-    }
-
-    pub fn multi_gauss_fit(&mut self) {
-        self.fit_params = None;
-        self.fit_lines = None;
-
-        if self.x.len() != self.y.len() {
-            log::error!("x_data and y_data must have the same length");
-            return;
-        }
-
-        if self.peak_markers.is_empty() {
-            // set peak marker at the x value when y is the maximum value of the data
-            let max_y = self.y.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            let max_x = self
-                .x
-                .iter()
-                .cloned()
-                .zip(self.y.iter().cloned())
-                .find(|&(_, y)| y == max_y)
-                .map(|(x, _)| x)
-                .unwrap_or_default();
-            self.peak_markers.push(max_x);
-        }
-
-        let x_data = DVector::from_vec(self.x.clone());
-        let y_data = DVector::from_vec(self.y.clone());
-
-        let (parameter_names, initial_guesses) = match (self.free_stddev, self.free_position) {
-            (true, true) => self.generate_free_stddev_free_position(),
-            (false, true) => self.generate_fixed_stddev_free_position(),
-            (false, false) => self.generate_fixed_stddev_fixed_position(),
-            (true, false) => self.generate_free_stddev_fixed_position(),
-        };
-
-        let mut builder_proxy = SeparableModelBuilder::<f64>::new(parameter_names)
-            .initial_parameters(initial_guesses)
-            .independent_variable(x_data);
-
-        for i in 0..self.peak_markers.len() {
-            let sigma_param = if self.free_stddev {
-                format!("sigma{}", i)
-            } else {
-                "sigma".to_string()
-            };
-
-            let mean_param = format!("mean{}", i);
-
-            // If `mean` is free, include its function and derivatives
-            if self.free_position {
-                builder_proxy = builder_proxy
-                    .function(&[mean_param.clone(), sigma_param.clone()], Self::gaussian)
-                    .partial_deriv(mean_param, Self::gaussian_pd_mean)
-                    .partial_deriv(sigma_param.clone(), Self::gaussian_pd_std_dev);
-            } else {
-                // If `mean` is fixed, only include the function and sigma's derivative
-                let fixed_mean = self.peak_markers[i];
-                builder_proxy = builder_proxy
-                    .function(
-                        [sigma_param.clone()],
-                        move |x: &DVector<f64>, sigma: f64| {
-                            x.map(|x_val| {
-                                (-((x_val - fixed_mean).powi(2)) / (2.0 * sigma.powi(2))).exp()
-                            })
-                        },
-                    )
-                    .partial_deriv(sigma_param, move |x: &DVector<f64>, sigma: f64| {
-                        x.map(|x_val| {
-                            let exponent = -((x_val - fixed_mean).powi(2)) / (2.0 * sigma.powi(2));
-                            (x_val - fixed_mean).powi(2) / sigma.powi(3) * exponent.exp()
-                        })
-                    });
-            }
-        }
-
-        let model = match builder_proxy.build() {
-            Ok(model) => model,
-            Err(e) => {
-                log::error!("Failed to build model: {:?}", e);
-                return;
-            }
-        };
-
-        let problem = match LevMarProblemBuilder::new(model)
-            .observations(y_data)
-            .build()
-        {
-            Ok(problem) => problem,
-            Err(e) => {
-                log::error!("Failed to build problem: {:?}", e);
-                return;
-            }
-        };
-
-        match LevMarSolver::default().fit_with_statistics(problem) {
-            Ok((fit_result, fit_statistics)) => {
-                self.process_fit_result(fit_result, fit_statistics);
-            }
-            Err(e) => {
-                log::error!("Failed to fit model: {:?}", e);
-            }
-        }
-    }
-
-    fn generate_free_stddev_free_position(&self) -> (Vec<String>, Vec<f64>) {
-        let mut parameter_names = Vec::new();
-        let mut initial_guesses = Vec::new();
-
-        for (i, &mean) in self.peak_markers.iter().enumerate() {
-            parameter_names.push(format!("mean{}", i));
-            parameter_names.push(format!("sigma{}", i));
-            initial_guesses.push(mean);
-            initial_guesses.push(self.average_sigma());
-        }
-
-        (parameter_names, initial_guesses)
-    }
-
-    fn generate_fixed_stddev_free_position(&self) -> (Vec<String>, Vec<f64>) {
-        let mut parameter_names = Vec::new();
-        let mut initial_guesses = Vec::new();
-
-        for (i, &mean) in self.peak_markers.iter().enumerate() {
-            parameter_names.push(format!("mean{}", i));
-            initial_guesses.push(mean);
-        }
-
-        parameter_names.push("sigma".to_string());
-        initial_guesses.push(self.average_sigma());
-
-        (parameter_names, initial_guesses)
-    }
-
-    fn generate_fixed_stddev_fixed_position(&self) -> (Vec<String>, Vec<f64>) {
-        let parameter_names = vec!["sigma".to_string()];
-        let initial_guesses = vec![self.average_sigma()];
-
-        (parameter_names, initial_guesses)
-    }
-
-    fn generate_free_stddev_fixed_position(&self) -> (Vec<String>, Vec<f64>) {
-        let mut parameter_names = Vec::new();
-        let mut initial_guesses = Vec::new();
-
-        for i in 0..self.peak_markers.len() {
-            parameter_names.push(format!("sigma{}", i));
-            initial_guesses.push(self.average_sigma());
-        }
-
-        (parameter_names, initial_guesses)
-    }
-
-    fn process_fit_result(
-        &mut self,
-        fit_result: FitResult<SeparableModel<f64>, false>,
-        fit_statistics: FitStatistics<SeparableModel<f64>>,
-    ) {
-        let nonlinear_parameters = fit_result.nonlinear_parameters(); // DVector<f64>
-        let nonlinear_variances = fit_statistics.nonlinear_parameters_variance(); // DVector<f64>
-        let linear_coefficients = match fit_result.linear_coefficients() {
-            Some(coefficients) => coefficients,
-            None => {
-                log::error!("Failed to get linear coefficients.");
-                return;
-            }
-        };
-        let linear_variances = fit_statistics.linear_coefficients_variance(); // DVector<f64>
-
-        // Check if sizes match
-        if nonlinear_parameters.len() != nonlinear_variances.len() {
-            log::error!(
-                "Mismatch in sizes: nonlinear_parameters ({}), nonlinear_variances ({}).",
-                nonlinear_parameters.len(),
-                nonlinear_variances.len()
-            );
-            return;
-        }
-
-        if nonlinear_parameters.is_empty() || linear_coefficients.is_empty() {
-            log::error!("Empty fit result: no nonlinear or linear parameters.");
-            return;
-        }
-
-        let mut params: Vec<GaussianParams> = Vec::new();
-        let sigma_value = if self.free_stddev {
-            None // Free sigma, so extract it for each Gaussian
-        } else {
-            match self.extract_sigma(&nonlinear_parameters, &nonlinear_variances) {
-                Some(sigma) => Some(sigma),
-                None => {
-                    log::error!("Failed to extract sigma value.");
-                    return;
+            // Check if the `uproot` module can be imported
+            match py.import_bound("lmfit") {
+                Ok(_) => {
+                    // println!("Successfully imported `lmfit` module.");
+                }
+                Err(_) => {
+                    eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
+                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                        "`lmfit` module not available",
+                    ));
                 }
             }
-        };
 
-        for (i, &amplitude) in linear_coefficients.iter().enumerate() {
-            let mean_value = if self.free_position {
-                match self.extract_mean(i, &nonlinear_parameters, &nonlinear_variances) {
-                    Some(mean) => mean,
-                    None => {
-                        log::error!("Failed to extract mean value for Gaussian {}.", i);
-                        return;
+            // Define the Python code as a module
+            let code = r#"
+import numpy as np
+import lmfit
+
+def gaussian(x, amplitude, mean, sigma):
+    return amplitude * np.exp(-(x - mean)**2 / (2 * sigma**2))
+
+def MultipleGaussianFit(x_data: list, y_data: list, peak_markers: list, bin_width: float,
+                        equal_sigma: bool = True, free_position: bool = True,
+                        background_params: dict = None):
+    """
+    Multiple Gaussian fit function with background model support.
+    
+    Parameters:
+    - x_data, y_data: Lists of data points.
+    - peak_markers: List of peak positions for the Gaussians.
+    - equal_sigma: Whether to constrain all Gaussians to have the same sigma.
+    - free_position: Whether to allow the positions of Gaussians to vary.
+    - background_params: Dictionary containing background model type and parameters.
+    """
+    
+    # Default background params if none are provided
+    if background_params is None:
+        background_params = {
+            'bg_type': 'linear',
+            'slope': ("slope", -np.inf, np.inf, 0.0, True),
+            'intercept': ("intercept", -np.inf, np.inf, 0.0, True),
+            'a': ("a", -np.inf, np.inf, 0.0, True),
+            'b': ("b", -np.inf, np.inf, 0.0, True),
+            'c': ("c", -np.inf, np.inf, 0.0, True),
+            'exponent': ("exponent", -np.inf, np.inf, 0.0, True),
+            'amplitude': ("amplitude", -np.inf, np.inf, 0.0, True),
+            'decay': ("decay", -np.inf, np.inf, 0.0, True),
+        }
+    
+    bg_type = background_params.get('bg_type', 'linear')
+    slope = background_params.get('slope')
+    intercept = background_params.get('intercept')
+    a = background_params.get('a')
+    b = background_params.get('b')
+    c = background_params.get('c')
+    amplitude = background_params.get('amplitude')
+    exponent = background_params.get('exponent')
+    decay = background_params.get('decay')
+
+    # Initialize the model with or without a background based on bg_type
+    if bg_type == 'linear': 
+        model = lmfit.models.LinearModel(prefix='bg_')
+        params = model.make_params(slope=slope[3], intercept=intercept[3])
+        params['bg_slope'].set(min=slope[1], max=slope[2], value=slope[3], vary=slope[4])
+        params['bg_intercept'].set(min=intercept[1], max=intercept[2], value=intercept[3], vary=intercept[4])
+    elif bg_type == 'quadratic':
+        model = lmfit.models.QuadraticModel(prefix='bg_')
+        params = model.make_params(a=a[3], b=b[3], c=c[3])
+        params['bg_a'].set(min=a[1], max=a[2], value=a[3], vary=a[4])
+        params['bg_b'].set(min=b[1], max=b[2], value=b[3], vary=b[4])
+        params['bg_c'].set(min=c[1], max=c[2], value=c[3], vary=c[4])
+    elif bg_type == 'exponential':
+        model = lmfit.models.ExponentialModel(prefix='bg_')
+        params = model.make_params(amplitude=amplitude[3], decay=decay[3])
+        params['bg_amplitude'].set(min=amplitude[1], max=amplitude[2], value=amplitude[3], vary=amplitude[4])
+        params['bg_decay'].set(min=decay[1], max=decay[2], value=decay[3], vary=decay[4])
+    elif bg_type == 'powerlaw':
+        model = lmfit.models.PowerLawModel(prefix='bg_')
+        params = model.make_params(amplitude=amplitude[3], exponent=exponent[3])
+        params['bg_amplitude'].set(min=amplitude[1], max=amplitude[2], value=amplitude[3], vary=amplitude[4])
+        params['bg_exponent'].set(min=exponent[1], max=exponent[2], value=exponent[3], vary=exponent[4])
+    elif bg_type == 'none':
+        model = None
+        params = lmfit.Parameters()
+    else:
+        raise ValueError("Unsupported background model")
+
+    first_gaussian = lmfit.Model(gaussian, prefix=f'g0_')
+
+    if model is None:
+        model = first_gaussian
+    else:
+        model += first_gaussian
+    
+    if len(peak_markers) == 0:
+        peak_markers = [x_data[np.argmax(y_data)]]
+
+
+    peak_markers = sorted(peak_markers)  # sort the peak markers in ascending order
+
+    estimated_amplitude = 1000
+    estimated_sigma = 10
+
+    params.update(first_gaussian.make_params(amplitude=estimated_amplitude, mean=peak_markers[0], sigma=estimated_sigma))
+    params['g0_sigma'].set(min=0)  # Initial constraint for the first Gaussian's sigma
+    params[f"g0_amplitude"].set(min=0)
+
+    params.add(f'g0_fwhm', expr=f'2.35482 * g0_sigma')  # FWHM = 2 * sqrt(2 * ln(2)) * sigma
+    params[f"g0_fwhm"].set(min=0)
+
+    params.add(f'g0_area', expr=f'g0_amplitude * sqrt(2 * pi) * g0_sigma / {bin_width}')  # Area under the Gaussian
+    params[f"g0_area"].set(min=0)
+
+    if not free_position:
+        params['g0_mean'].set(vary=False)
+
+    params['g0_mean'].set(min=x_data[0], max=peak_markers[1] if len(peak_markers) > 1 else x_data[-1])
+
+    # Add additional Gaussians
+    for i, peak in enumerate(peak_markers[1:], start=1):
+        g = lmfit.Model(gaussian, prefix=f'g{i}_')
+        model += g
+
+        estimated_amplitude = 1000
+        params.update(g.make_params(amplitude=estimated_amplitude, mean=peak, sigma=10))
+
+        min_mean = peak_markers[i-1]
+        max_mean = peak_markers[i+1] if i + 1 < len(peak_markers) else x_data[-1]
+        params[f'g{i}_mean'].set(min=min_mean, max=max_mean)
+
+        params.add(f'g{i}_fwhm', expr=f'2.35482 * g{i}_sigma')
+        params[f"g{i}_fwhm"].set(min=0)
+
+        params.add(f'g{i}_area', expr=f'g{i}_amplitude * sqrt(2 * pi) * g{i}_sigma / {bin_width}')
+        params[f"g{i}_area"].set(min=0)
+
+        if equal_sigma:
+            params[f'g{i}_sigma'].set(expr='g0_sigma')
+        else:
+            params[f'g{i}_sigma'].set(min=0)
+
+        params[f'g{i}_amplitude'].set(min=0)
+
+        if not free_position:
+            params[f'g{i}_mean'].set(vary=False)
+
+    # Fit the model to the data
+    result = model.fit(y_data, params, x=x_data)
+
+    print("\nInitial Parameter Guesses:")
+    params.pretty_print()
+
+    print("\nFit Report:")
+    print(result.fit_report())
+
+    # Extract Gaussian and background parameters
+    gaussian_params = []
+    for i in range(len(peak_markers)):
+        amplitude = float(result.params[f'g{i}_amplitude'].value)
+        amplitude_uncertainty = result.params[f'g{i}_amplitude'].stderr or 0.0
+        mean = float(result.params[f'g{i}_mean'].value)
+        mean_uncertainty = result.params[f'g{i}_mean'].stderr or 0.0
+        sigma = float(result.params[f'g{i}_sigma'].value)
+        sigma_uncertainty = result.params[f'g{i}_sigma'].stderr or 0.0
+        fwhm = float(result.params[f'g{i}_fwhm'].value)
+        fwhm_uncertainty = result.params[f'g{i}_fwhm'].stderr or 0.0
+        area = float(result.params[f'g{i}_area'].value)
+        area_uncertainty = result.params[f'g{i}_area'].stderr or 0.0
+
+        gaussian_params.append((
+            amplitude, amplitude_uncertainty, mean, mean_uncertainty,
+            sigma, sigma_uncertainty, fwhm, fwhm_uncertainty, area, area_uncertainty
+        ))
+
+    # Extract background parameters
+    background_params = []
+    if bg_type != 'None':
+        for key in result.params:
+            if 'bg_' in key:
+                value = float(result.params[key].value)
+                uncertainty = result.params[key].stderr or 0.0
+                background_params.append((key, value, uncertainty))
+
+    # Create smooth fit line
+    x_data_line = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
+    y_data_line = result.eval(x=x_data_line)
+
+    fit_report = str(result.fit_report())
+
+    return gaussian_params, background_params, x_data_line, y_data_line, fit_report
+"#;
+
+            // Compile the Python code into a module
+            let module = PyModule::from_code_bound(py, code, "gaussian.py", "gaussian")?;
+
+            let x_data = self.data.x.clone();
+            let y_data = self.data.y.clone();
+            let peak_markers = self.peak_markers.clone();
+            let equal_sigma = self.fit_settings.equal_stdev;
+            let free_position = self.fit_settings.free_position;
+            let bin_width = self.fit_settings.bin_width;
+
+            // Form the `background_params` dictionary
+            let background_params = PyDict::new_bound(py);
+
+            match self.background_model {
+                BackgroundModel::Linear(ref params) => {
+                    if let Some(BackgroundResult::Linear(ref fitter)) = &self.background_result {
+                        // Use fitted values for slope and intercept and set `vary` to false
+                        let fitted_slope = fitter
+                            .paramaters
+                            .slope
+                            .value
+                            .unwrap_or(fitter.paramaters.slope.initial_guess);
+                        let fitted_intercept = fitter
+                            .paramaters
+                            .intercept
+                            .value
+                            .unwrap_or(fitter.paramaters.intercept.initial_guess);
+
+                        background_params.set_item("bg_type", "linear")?;
+                        background_params.set_item(
+                            "slope",
+                            (
+                                "slope".to_string(),
+                                params.slope.min,
+                                params.slope.max,
+                                fitted_slope,
+                                false,
+                            ),
+                        )?;
+                        background_params.set_item(
+                            "intercept",
+                            (
+                                "intercept".to_string(),
+                                params.intercept.min,
+                                params.intercept.max,
+                                fitted_intercept,
+                                false,
+                            ),
+                        )?;
+                    } else {
+                        // Use the initial guesses and allow them to vary
+                        background_params.set_item("bg_type", "linear")?;
+                        background_params.set_item(
+                            "slope",
+                            (
+                                "slope".to_string(),
+                                params.slope.min,
+                                params.slope.max,
+                                params.slope.initial_guess,
+                                params.slope.vary,
+                            ),
+                        )?;
+                        background_params.set_item(
+                            "intercept",
+                            (
+                                "intercept".to_string(),
+                                params.intercept.min,
+                                params.intercept.max,
+                                params.intercept.initial_guess,
+                                params.intercept.vary,
+                            ),
+                        )?;
                     }
                 }
-            } else {
-                Value {
-                    value: self.peak_markers.get(i).copied().unwrap_or_default(),
-                    uncertainty: 0.0, // Fixed position, so uncertainty is 0
+                BackgroundModel::Quadratic(ref params) => {
+                    if let Some(BackgroundResult::Quadratic(ref fitter)) = &self.background_result {
+                        // Use fitted values for a, b, and c, set `vary` to false
+                        let fitted_a = fitter
+                            .paramaters
+                            .a
+                            .value
+                            .unwrap_or(fitter.paramaters.a.initial_guess);
+                        let fitted_b = fitter
+                            .paramaters
+                            .b
+                            .value
+                            .unwrap_or(fitter.paramaters.b.initial_guess);
+                        let fitted_c = fitter
+                            .paramaters
+                            .c
+                            .value
+                            .unwrap_or(fitter.paramaters.c.initial_guess);
+
+                        background_params.set_item("bg_type", "quadratic")?;
+                        background_params.set_item(
+                            "a",
+                            ("a".to_string(), params.a.min, params.a.max, fitted_a, false),
+                        )?;
+                        background_params.set_item(
+                            "b",
+                            ("b".to_string(), params.b.min, params.b.max, fitted_b, false),
+                        )?;
+                        background_params.set_item(
+                            "c",
+                            ("c".to_string(), params.c.min, params.c.max, fitted_c, false),
+                        )?;
+                    } else {
+                        // Use the initial guesses and allow them to vary
+                        background_params.set_item("bg_type", "quadratic")?;
+                        background_params.set_item(
+                            "a",
+                            (
+                                "a".to_string(),
+                                params.a.min,
+                                params.a.max,
+                                params.a.initial_guess,
+                                params.a.vary,
+                            ),
+                        )?;
+                        background_params.set_item(
+                            "b",
+                            (
+                                "b".to_string(),
+                                params.b.min,
+                                params.b.max,
+                                params.b.initial_guess,
+                                params.b.vary,
+                            ),
+                        )?;
+                        background_params.set_item(
+                            "c",
+                            (
+                                "c".to_string(),
+                                params.c.min,
+                                params.c.max,
+                                params.c.initial_guess,
+                                params.c.vary,
+                            ),
+                        )?;
+                    }
                 }
-            };
+                BackgroundModel::Exponential(ref params) => {
+                    if let Some(BackgroundResult::Exponential(ref fitter)) = &self.background_result
+                    {
+                        // Use fitted values for amplitude and decay, set `vary` to false
+                        let fitted_amplitude = fitter
+                            .paramaters
+                            .amplitude
+                            .value
+                            .unwrap_or(fitter.paramaters.amplitude.initial_guess);
+                        let fitted_decay = fitter
+                            .paramaters
+                            .decay
+                            .value
+                            .unwrap_or(fitter.paramaters.decay.initial_guess);
 
-            let sigma_value = sigma_value.clone().unwrap_or_else(|| {
-                self.extract_sigma_for_gaussian(i, &nonlinear_parameters, &nonlinear_variances)
-                    .unwrap_or_else(|| {
-                        log::error!("Failed to extract sigma for Gaussian {}.", i);
-                        Value {
-                            value: 0.0,
-                            uncertainty: 0.0,
-                        }
-                    })
-            });
+                        background_params.set_item("bg_type", "exponential")?;
+                        background_params.set_item(
+                            "amplitude",
+                            (
+                                "amplitude".to_string(),
+                                params.amplitude.min,
+                                params.amplitude.max,
+                                fitted_amplitude,
+                                false,
+                            ),
+                        )?;
+                        background_params.set_item(
+                            "decay",
+                            (
+                                "decay".to_string(),
+                                params.decay.min,
+                                params.decay.max,
+                                fitted_decay,
+                                false,
+                            ),
+                        )?;
+                    } else {
+                        // Use the initial guesses and allow them to vary
+                        background_params.set_item("bg_type", "exponential")?;
+                        background_params.set_item(
+                            "amplitude",
+                            (
+                                "amplitude".to_string(),
+                                params.amplitude.min,
+                                params.amplitude.max,
+                                params.amplitude.initial_guess,
+                                params.amplitude.vary,
+                            ),
+                        )?;
+                        background_params.set_item(
+                            "decay",
+                            (
+                                "decay".to_string(),
+                                params.decay.min,
+                                params.decay.max,
+                                params.decay.initial_guess,
+                                params.decay.vary,
+                            ),
+                        )?;
+                    }
+                }
+                BackgroundModel::PowerLaw(ref params) => {
+                    if let Some(BackgroundResult::PowerLaw(ref fitter)) = &self.background_result {
+                        // Use fitted values for amplitude and exponent, set `vary` to false
+                        let fitted_amplitude = fitter
+                            .paramaters
+                            .amplitude
+                            .value
+                            .unwrap_or(fitter.paramaters.amplitude.initial_guess);
+                        let fitted_exponent = fitter
+                            .paramaters
+                            .exponent
+                            .value
+                            .unwrap_or(fitter.paramaters.exponent.initial_guess);
 
-            let amplitude_variance = linear_variances.get(i).copied().unwrap_or(0.0);
+                        background_params.set_item("bg_type", "powerlaw")?;
+                        background_params.set_item(
+                            "amplitude",
+                            (
+                                "amplitude".to_string(),
+                                params.amplitude.min,
+                                params.amplitude.max,
+                                fitted_amplitude,
+                                false,
+                            ),
+                        )?;
+                        background_params.set_item(
+                            "exponent",
+                            (
+                                "exponent".to_string(),
+                                params.exponent.min,
+                                params.exponent.max,
+                                fitted_exponent,
+                                false,
+                            ),
+                        )?;
+                    } else {
+                        // Use the initial guesses and allow them to vary
+                        background_params.set_item("bg_type", "powerlaw")?;
+                        background_params.set_item(
+                            "amplitude",
+                            (
+                                "amplitude".to_string(),
+                                params.amplitude.min,
+                                params.amplitude.max,
+                                params.amplitude.initial_guess,
+                                params.amplitude.vary,
+                            ),
+                        )?;
+                        background_params.set_item(
+                            "exponent",
+                            (
+                                "exponent".to_string(),
+                                params.exponent.min,
+                                params.exponent.max,
+                                params.exponent.initial_guess,
+                                params.exponent.vary,
+                            ),
+                        )?;
+                    }
+                }
+                BackgroundModel::None => {
+                    background_params.set_item("bg_type", "none")?;
+                }
+            }
 
-            if let Some(gaussian_params) = GaussianParams::new(
-                Value {
-                    value: amplitude,
-                    uncertainty: amplitude_variance.sqrt(),
-                },
-                mean_value,
-                sigma_value,
-                self.bin_width,
-            ) {
-                params.push(gaussian_params);
-            } else {
-                log::error!(
-                    "Invalid Gaussian parameters for Gaussian {}. Removing peak and trying again.",
-                    i
+            log::info!("Fitting Gaussian model");
+
+            let result = module.getattr("MultipleGaussianFit")?.call1((
+                x_data.clone(),
+                y_data,
+                peak_markers,
+                bin_width,
+                equal_sigma,
+                free_position,
+                background_params,
+            ))?;
+
+            let gaussian_params =
+                result
+                    .get_item(0)?
+                    .extract::<Vec<(f64, f64, f64, f64, f64, f64, f64, f64, f64, f64)>>()?;
+            let background_params = result.get_item(1)?.extract::<Vec<(String, f64, f64)>>()?;
+            let x_composition = result.get_item(2)?.extract::<Vec<f64>>()?;
+            let y_composition = result.get_item(3)?.extract::<Vec<f64>>()?;
+            let fit_report = result.get_item(4)?.extract::<String>()?;
+
+            self.peak_markers.clear();
+
+            for (amp, amp_err, mean, mean_err, sigma, sigma_err, fwhm, fwhm_err, area, area_err) in
+                gaussian_params
+            {
+                log::info!("Amplitude: {:.3} ± {:.3}, Mean: {:.3} ± {:.3}, Sigma: {:.3} ± {:.3}, FWHM: {:.3} ± {:.3}, Area: {:.3} ± {:.3}", 
+                            amp, amp_err, mean, mean_err, sigma, sigma_err, fwhm, fwhm_err, area, area_err);
+
+                self.peak_markers.push(mean);
+
+                // Create the GaussianParameters for each set of values
+                let mut gaussian_param = GaussianParameters::new(
+                    (amp, amp_err),
+                    (mean, mean_err),
+                    (sigma, sigma_err),
+                    (fwhm, fwhm_err),
+                    (area, area_err),
                 );
-                self.peak_markers.remove(i);
-                self.multi_gauss_fit(); // Retry the fit after removing this Gaussian
-                return;
-            }
-        }
 
-        self.peak_markers.clear();
-        for mean in &params {
-            self.peak_markers.push(mean.mean.value);
-        }
+                // Generate the fit points for this Gaussian, using 100 points (or as many as needed)
+                gaussian_param.generate_fit_points(100);
 
-        self.fit_params = Some(params);
-        self.get_fit_lines();
-
-        self.print_fit_statistics(&fit_statistics);
-        self.print_peak_info();
-    }
-
-    fn extract_mean(
-        &self,
-        index: usize,
-        nonlinear_parameters: &DVector<f64>,
-        nonlinear_variances: &DVector<f64>,
-    ) -> Option<Value> {
-        if index >= nonlinear_parameters.len() || index >= nonlinear_variances.len() {
-            log::error!("Index out of bounds when extracting mean.");
-            return None;
-        }
-        Some(Value {
-            value: nonlinear_parameters[index],
-            uncertainty: nonlinear_variances[index].sqrt(),
-        })
-    }
-
-    fn extract_sigma(
-        &self,
-        nonlinear_parameters: &DVector<f64>,
-        nonlinear_variances: &DVector<f64>,
-    ) -> Option<Value> {
-        let sigma_index = nonlinear_parameters.len() - 1; // Sigma is the last parameter when fixed
-        if sigma_index >= nonlinear_variances.len() {
-            log::error!("Sigma index out of bounds when extracting sigma.");
-            return None;
-        }
-        Some(Value {
-            value: nonlinear_parameters[sigma_index],
-            uncertainty: nonlinear_variances[sigma_index].sqrt(),
-        })
-    }
-
-    fn extract_sigma_for_gaussian(
-        &self,
-        index: usize,
-        nonlinear_parameters: &DVector<f64>,
-        nonlinear_variances: &DVector<f64>,
-    ) -> Option<Value> {
-        let sigma_index = index * 2 + 1; // Free sigma, after each mean
-        if sigma_index >= nonlinear_parameters.len() || sigma_index >= nonlinear_variances.len() {
-            log::error!(
-                "Index out of bounds when extracting sigma for Gaussian {}.",
-                index
-            );
-            return None;
-        }
-        Some(Value {
-            value: nonlinear_parameters[sigma_index],
-            uncertainty: nonlinear_variances[sigma_index].sqrt(),
-        })
-    }
-
-    pub fn print_peak_info(&self) {
-        if let Some(fit_params) = &self.fit_params {
-            // Create a new table
-            let mut table = Table::new();
-
-            // Add the header row
-            table.add_row(row!["Index", "Amplitude", "Mean", "Sigma", "FWHM", "Area"]);
-
-            // Add each peak's parameters as rows
-            for (i, params) in fit_params.iter().enumerate() {
-                table.add_row(row![
-                    i,
-                    format!(
-                        "{:.3} ± {:.3}",
-                        params.amplitude.value, params.amplitude.uncertainty
-                    ),
-                    format!("{:.3} ± {:.3}", params.mean.value, params.mean.uncertainty),
-                    format!(
-                        "{:.3} ± {:.3}",
-                        params.sigma.value, params.sigma.uncertainty
-                    ),
-                    format!("{:.3} ± {:.3}", params.fwhm.value, params.fwhm.uncertainty),
-                    format!("{:.3} ± {:.3}", params.area.value, params.area.uncertainty),
-                ]);
+                self.fit_result.push(gaussian_param);
             }
 
-            // Print the table to the terminal
-            table.printstd();
-        } else {
-            println!("No fit parameters available to display.");
-        }
-    }
+            if self.background_result.is_none() {
+                let min_x = x_data.iter().cloned().fold(f64::INFINITY, f64::min);
+                let max_x = x_data.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
-    pub fn print_fit_statistics(&self, fit_statistics: &FitStatistics<SeparableModel<f64>>) {
-        // Print covariance matrix
-        // let covariance_matrix = fit_statistics.covariance_matrix();
-        // println!("Covariance Matrix:");
-        // Self::print_matrix(covariance_matrix);
+                match self.background_model {
+                    // Handle the Linear case
+                    BackgroundModel::Linear(_) => {
+                        let slope = background_params[0].1;
+                        let slope_err = background_params[0].2;
+                        let intercept = background_params[1].1;
+                        let intercept_err = background_params[1].2;
 
-        // // Print correlation matrix
-        // let correlation_matrix = fit_statistics.calculate_correlation_matrix();
-        // println!("Correlation Matrix:");
-        // Self::print_matrix(&correlation_matrix);
+                        let linear_fitter = LinearFitter::new_from_parameters(
+                            (slope, slope_err),
+                            (intercept, intercept_err),
+                            min_x,
+                            max_x,
+                        );
 
-        // Print regression standard error
-        let regression_standard_error = fit_statistics.regression_standard_error();
-        println!(
-            "Regression Standard Error: {:.6}",
-            regression_standard_error
-        );
+                        self.background_result = Some(BackgroundResult::Linear(linear_fitter));
+                    }
 
-        // Print reduced chi-squared
-        let reduced_chi2 = fit_statistics.reduced_chi2();
-        println!("Reduced Chi-Squared: {:.6}", reduced_chi2);
-    }
+                    // Handle the Exponential case
+                    BackgroundModel::Exponential(_) => {
+                        let amplitude = background_params[0].1;
+                        let amplitude_err = background_params[0].2;
+                        let decay = background_params[1].1;
+                        let decay_err = background_params[1].2;
 
-    // // Helper function to print a matrix using prettytable
-    // fn print_matrix(matrix: &DMatrix<f64>) {
-    //     let mut table = Table::new();
+                        let exponential_fitter = ExponentialFitter::new_from_parameters(
+                            (amplitude, amplitude_err),
+                            (decay, decay_err),
+                            min_x,
+                            max_x,
+                        );
 
-    //     // Iterate over the rows of the matrix
-    //     for row in matrix.row_iter() {
-    //         let mut table_row = Vec::new();
-    //         for val in row.iter() {
-    //             table_row.push(cell!(format!("{:.6}", val)));
-    //         }
-    //         // Add the row using add_row, but without row! macro
-    //         table.add_row(prettytable::Row::new(table_row));
-    //     }
+                        self.background_result =
+                            Some(BackgroundResult::Exponential(exponential_fitter));
+                    }
 
-    //     // Print the table
-    //     table.printstd();
-    // }
+                    // Handle the Quadratic case (to be implemented similarly)
+                    BackgroundModel::Quadratic(_) => {
+                        let a = background_params[0].1;
+                        let a_err = background_params[0].2;
+                        let b = background_params[1].1;
+                        let b_err = background_params[1].2;
+                        let c = background_params[2].1;
+                        let c_err = background_params[2].2;
 
-    pub fn get_fit_lines(&mut self) {
-        if let Some(fit_params) = &self.fit_params {
-            let mut fit_lines = Vec::new();
+                        let quadratic_fitter = QuadraticFitter::new_from_parameters(
+                            (a, a_err),
+                            (b, b_err),
+                            (c, c_err),
+                            min_x,
+                            max_x,
+                        );
 
-            for params in fit_params.iter() {
-                let line = params.fit_line_points();
-                fit_lines.push(line);
-            }
+                        self.background_result =
+                            Some(BackgroundResult::Quadratic(quadratic_fitter));
+                    }
 
-            self.fit_lines = Some(fit_lines);
-        } else {
-            self.fit_lines = None;
-        }
-    }
+                    // Handle the PowerLaw case (to be implemented similarly)
+                    BackgroundModel::PowerLaw(_) => {
+                        let amplitude = background_params[0].1;
+                        let amplitude_err = background_params[0].2;
+                        let exponent = background_params[1].1;
+                        let exponent_err = background_params[1].2;
 
-    pub fn composition_fit_points_polynomial(&self, coef: Vec<f64>) -> Vec<[f64; 2]> {
-        // coef = [c0, c1, c2, ...] c0 + c1*x + c2*x^2 + ...
-        let num_points = 3000;
-        let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        let step = (max_x - min_x) / num_points as f64;
+                        let powerlaw_fitter = PowerLawFitter::new_from_parameters(
+                            (amplitude, amplitude_err),
+                            (exponent, exponent_err),
+                            min_x,
+                            max_x,
+                        );
 
-        (0..=num_points)
-            .map(|i| {
-                let x = min_x + step * i as f64;
-                let y_gauss = self.fit_params.as_ref().map_or(0.0, |params| {
-                    params.iter().fold(0.0, |sum, param| {
-                        sum + param.amplitude.value
-                            * (-((x - param.mean.value).powi(2))
-                                / (2.0 * param.sigma.value.powi(2)))
-                            .exp()
-                    })
-                });
-                let y_background = coef
-                    .iter()
-                    .enumerate()
-                    .fold(0.0, |sum, (j, c)| sum + c * x.powi(j as i32));
-                let y_total = y_gauss + y_background;
-                [x, y_total]
-            })
-            .collect()
-    }
+                        self.background_result = Some(BackgroundResult::PowerLaw(powerlaw_fitter));
+                    }
 
-    pub fn composition_fit_points_exponential(&self, a: f64, b: f64) -> Vec<[f64; 2]> {
-        let num_points = 3000;
-        let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        let step = (max_x - min_x) / num_points as f64;
-
-        (0..=num_points)
-            .map(|i| {
-                let x = min_x + step * i as f64;
-                let y_gauss = self.fit_params.as_ref().map_or(0.0, |params| {
-                    params.iter().fold(0.0, |sum, param| {
-                        sum + param.amplitude.value
-                            * (-((x - param.mean.value).powi(2))
-                                / (2.0 * param.sigma.value.powi(2)))
-                            .exp()
-                    })
-                });
-                let y_background = a * (-x / b).exp();
-                let y_total = y_gauss + y_background;
-                [x, y_total]
-            })
-            .collect()
-    }
-
-    pub fn composition_fit_points_double_exponential(
-        &self,
-        a: f64,
-        b: f64,
-        c: f64,
-        d: f64,
-    ) -> Vec<[f64; 2]> {
-        let num_points = 3000;
-        let min_x = self.x.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max_x = self.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        let step = (max_x - min_x) / num_points as f64;
-
-        (0..=num_points)
-            .map(|i| {
-                let x = min_x + step * i as f64;
-                let y_gauss = self.fit_params.as_ref().map_or(0.0, |params| {
-                    params.iter().fold(0.0, |sum, param| {
-                        sum + param.amplitude.value
-                            * (-((x - param.mean.value).powi(2))
-                                / (2.0 * param.sigma.value.powi(2)))
-                            .exp()
-                    })
-                });
-                let y_background = a * (-x / b).exp() + c * (-x / d).exp();
-                let y_total = y_gauss + y_background;
-                [x, y_total]
-            })
-            .collect()
-    }
-
-    pub fn fit_params_ui(&self, ui: &mut egui::Ui) {
-        if let Some(fit_params) = &self.fit_params {
-            for (i, params) in fit_params.iter().enumerate() {
-                if i != 0 {
-                    ui.label("");
+                    BackgroundModel::None => {}
                 }
-
-                ui.label(format!("{}", i));
-                params.params_ui(ui);
-                ui.end_row();
             }
+
+            // Create the composition line
+            let fit_points = x_composition
+                .iter()
+                .zip(y_composition.iter())
+                .map(|(&x, &y)| [x, y])
+                .collect();
+            self.fit_points = fit_points;
+
+            self.fit_report = fit_report;
+
+            Ok(())
+        })
+    }
+
+    pub fn fit_params_ui(&self, ui: &mut egui::Ui, skip_one: bool) {
+        for (i, params) in self.fit_result.iter().enumerate() {
+            if skip_one && i != 0 {
+                ui.label("");
+            }
+            ui.label(format!("{}", i));
+            params.params_ui(ui);
+
+            if i == 0 {
+                ui.menu_button("Fit Report", |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(self.fit_report.clone());
+                        });
+                    });
+                });
+            }
+
+            ui.end_row();
         }
     }
 }

@@ -1,230 +1,253 @@
-use super::models::double_exponential::DoubleExponentialFitter;
-use super::models::exponential::ExponentialFitter;
+use super::common::Data;
+use super::models::exponential::{ExponentialFitter, ExponentialParameters};
 use super::models::gaussian::GaussianFitter;
-use super::models::polynomial::PolynomialFitter;
-
+use super::models::linear::{LinearFitter, LinearParameters};
+use super::models::powerlaw::{PowerLawFitter, PowerLawParameters};
+use super::models::quadratic::{QuadraticFitter, QuadraticParameters};
 use crate::egui_plot_stuff::egui_line::EguiLine;
-
-use crate::fitter::background_fitter::BackgroundFitter;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
 pub enum FitModel {
-    Gaussian(Vec<f64>, bool, bool, f64), // put the initial peak locations in here, free sigma, free position
-    Polynomial(usize), // the degree of the polynomial: 1 for linear, 2 for quadratic, etc.
-    Exponential(f64),  // the initial guess for the exponential decay constant
-    DoubleExponential(f64, f64), // the initial guess for the exponential decay constants
+    Gaussian(Vec<f64>, bool, bool, f64), // initial peak locations, free sigma, free position, bin width
+    None,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum FitResult {
     Gaussian(GaussianFitter),
-    Polynomial(PolynomialFitter),
-    Exponential(ExponentialFitter),
-    DoubleExponential(DoubleExponentialFitter),
 }
+
+#[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub enum BackgroundModel {
+    Linear(LinearParameters),
+    Quadratic(QuadraticParameters),
+    PowerLaw(PowerLawParameters),
+    Exponential(ExponentialParameters),
+    None,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub enum BackgroundResult {
+    Linear(LinearFitter),
+    Quadratic(QuadraticFitter),
+    PowerLaw(PowerLawFitter),
+    Exponential(ExponentialFitter),
+}
+
+impl BackgroundResult {
+    pub fn get_fit_points(&self) -> Vec<[f64; 2]> {
+        match self {
+            BackgroundResult::Linear(fit) => fit.fit_points.clone(),
+            BackgroundResult::Quadratic(fit) => fit.fit_points.clone(),
+            BackgroundResult::PowerLaw(fit) => fit.fit_points.clone(),
+            BackgroundResult::Exponential(fit) => fit.fit_points.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Fitter {
     pub name: String,
-    pub x_data: Vec<f64>,
-    pub y_data: Vec<f64>,
-    pub y_err: Option<Vec<f64>>,
-    pub background: Option<BackgroundFitter>,
-    pub model: FitModel,
-    pub result: Option<FitResult>,
-    pub decomposition_lines: Vec<EguiLine>,
+
+    pub data: Data,
+
+    pub background_model: BackgroundModel,
+    pub background_result: Option<BackgroundResult>,
+
+    pub fit_model: FitModel,
+    pub fit_result: Option<FitResult>,
+
+    pub background_line: EguiLine,
     pub composition_line: EguiLine,
+    pub decomposition_lines: Vec<EguiLine>,
 }
 
 impl Fitter {
     // Constructor to create a new Fitter with empty data and specified model
-    pub fn new(model: FitModel, background: Option<BackgroundFitter>) -> Self {
+    pub fn new(data: Data) -> Self {
         Fitter {
             name: "Fit".to_string(),
-            x_data: Vec::new(),
-            y_data: Vec::new(),
-            y_err: None,
-            background,
-            model,
-            result: None,
+
+            data,
+
+            background_model: BackgroundModel::None,
+            background_result: None,
+
+            fit_model: FitModel::None,
+            fit_result: None,
+
+            background_line: EguiLine::new(egui::Color32::GREEN),
+            composition_line: EguiLine::new(egui::Color32::BLUE),
             decomposition_lines: Vec::new(),
-            composition_line: EguiLine::default(),
-        }
-    }
-
-    fn subtract_background(&self) -> Vec<f64> {
-        if let Some(bg_fitter) = &self.background {
-            match &bg_fitter.result {
-                Some(FitResult::Polynomial(fitter)) => {
-                    fitter.subtract_background(self.x_data.clone(), self.y_data.clone())
-                }
-                Some(FitResult::Exponential(fitter)) => {
-                    fitter.subtract_background(self.x_data.clone(), self.y_data.clone())
-                }
-                Some(FitResult::DoubleExponential(fitter)) => {
-                    fitter.subtract_background(self.x_data.clone(), self.y_data.clone())
-                }
-                _ => self.y_data.clone(),
-            }
-        } else {
-            self.y_data.clone()
-        }
-    }
-
-    pub fn get_peak_markers(&self) -> Vec<f64> {
-        if let Some(FitResult::Gaussian(fit)) = &self.result {
-            fit.peak_markers.clone()
-        } else if let FitModel::Gaussian(peak_markers, _, _, _) = &self.model {
-            peak_markers.clone()
-        } else {
-            Vec::new()
         }
     }
 
     pub fn fit(&mut self) {
-        // Fit the background if it's defined and there is no background result
-        if let Some(bg_fitter) = &mut self.background {
-            if bg_fitter.result.is_none() {
-                bg_fitter.fit();
-            }
-        }
-
-        // Perform the background subtraction if necessary
-        let y_data_corrected = self.subtract_background();
-
-        // Perform the fit based on the model
-        match &self.model {
-            FitModel::Gaussian(peak_markers, free_stddev, free_position, bin_width) => {
-                // Perform Gaussian fit
+        match &self.fit_model {
+            FitModel::Gaussian(peak_markers, equal_stdev, free_position, bin_width) => {
                 let mut fit = GaussianFitter::new(
-                    self.x_data.clone(),
-                    y_data_corrected,
+                    self.data.clone(),
                     peak_markers.clone(),
-                    *free_stddev,
+                    self.background_model.clone(),
+                    self.background_result.clone(),
+                    *equal_stdev,
                     *free_position,
                     *bin_width,
                 );
 
-                fit.multi_gauss_fit();
+                match fit.lmfit() {
+                    Ok(_) => {
+                        self.composition_line.points = fit.fit_points.clone();
+                        for fit in &fit.fit_result {
+                            let mut line = EguiLine::new(egui::Color32::from_rgb(150, 0, 255));
+                            line.points = fit.fit_points.clone();
+                            self.decomposition_lines.push(line);
+                        }
 
-                // get the fit_lines and store them in the decomposition_lines
-                let decomposition_default_color = egui::Color32::from_rgb(255, 0, 255);
-                if let Some(fit_lines) = &fit.fit_lines {
-                    for (i, line) in fit_lines.iter().enumerate() {
-                        let mut fit_line = EguiLine::new(decomposition_default_color);
-                        fit_line.name = format!("Peak {}", i);
+                        if self.background_result.is_none() {
+                            if let Some(background_result) = &fit.background_result {
+                                self.background_line.points = background_result.get_fit_points();
+                                self.background_result = Some(background_result.clone());
+                            }
+                        }
 
-                        fit_line.points.clone_from(line);
-                        fit_line.name_in_legend = false;
-                        fit_line.width = 1.0;
-                        self.decomposition_lines.push(fit_line);
+                        self.fit_result = Some(FitResult::Gaussian(fit));
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
                     }
                 }
-
-                // calculate the composition line
-                if let Some(background) = &self.background {
-                    match &background.result {
-                        Some(FitResult::Polynomial(fitter)) => {
-                            if let Some(coef) = &fitter.coefficients {
-                                let composition_points =
-                                    fit.composition_fit_points_polynomial(coef.clone());
-                                let mut line = EguiLine::new(egui::Color32::BLUE);
-                                line.name = "Composition".to_string();
-                                line.points = composition_points;
-                                line.width = 1.0;
-                                self.composition_line = line;
-                            }
-                        }
-                        Some(FitResult::Exponential(fitter)) => {
-                            if let Some(coef) = &fitter.coefficients {
-                                let a = coef.a.value;
-                                let b = coef.b.value;
-                                let composition_points =
-                                    fit.composition_fit_points_exponential(a, b);
-                                let mut line = EguiLine::new(egui::Color32::BLUE);
-                                line.name = "Composition".to_string();
-                                line.points = composition_points;
-                                line.width = 1.0;
-                                self.composition_line = line;
-                            }
-                        }
-                        Some(FitResult::DoubleExponential(fitter)) => {
-                            if let Some(coef) = &fitter.coefficients {
-                                let a = coef.a.value;
-                                let b = coef.b.value;
-                                let c = coef.c.value;
-                                let d = coef.d.value;
-                                let composition_points =
-                                    fit.composition_fit_points_double_exponential(a, b, c, d);
-                                let mut line = EguiLine::new(egui::Color32::BLUE);
-                                line.name = "Composition".to_string();
-                                line.points = composition_points;
-                                line.width = 1.0;
-                                self.composition_line = line;
-                            }
-                        }
-                        _ => {}
-                    }
-                    // if let Some((slope, intercept)) = background.get_slope_intercept() {
-                    //     let composition_points =
-                    //         fit.composition_fit_points_linear_bg(slope, intercept);
-
-                    // let mut line = EguiLine::new(egui::Color32::BLUE);
-                    // line.name = "Composition".to_string();
-                    // line.points = composition_points;
-                    // self.composition_line = line;
-                    // }
-                }
-
-                self.result = Some(FitResult::Gaussian(fit));
             }
-
-            FitModel::Polynomial(degree) => {
-                // Perform Polynomial fit
-                let mut fit = PolynomialFitter::new(*degree);
-                fit.x_data.clone_from(&self.x_data);
-                fit.y_data.clone_from(&y_data_corrected);
-                fit.fit();
-
-                self.result = Some(FitResult::Polynomial(fit));
-            }
-
-            FitModel::Exponential(initial_b_guess) => {
-                // Perform Exponential fit
-                let mut fit = ExponentialFitter::new(*initial_b_guess);
-                fit.x_data.clone_from(&self.x_data);
-                fit.y_data.clone_from(&y_data_corrected);
-                fit.fit();
-
-                self.result = Some(FitResult::Exponential(fit));
-            }
-
-            FitModel::DoubleExponential(initial_b_guess, initial_d_guess) => {
-                // Perform Double Exponential fit
-                let mut fit = DoubleExponentialFitter::new(*initial_b_guess, *initial_d_guess);
-                fit.x_data.clone_from(&self.x_data);
-                fit.y_data.clone_from(&y_data_corrected);
-                fit.fit();
-
-                self.result = Some(FitResult::DoubleExponential(fit));
+            FitModel::None => {
+                log::info!("No fitting required for 'None'");
             }
         }
     }
 
-    pub fn fitter_stats(&self, ui: &mut egui::Ui) {
-        if let Some(fit) = &self.result {
-            match fit {
-                FitResult::Gaussian(fit) => fit.fit_params_ui(ui),
-                FitResult::Polynomial(fit) => fit.fit_params_ui(ui),
-                FitResult::Exponential(fit) => fit.fit_params_ui(ui),
-                FitResult::DoubleExponential(fit) => fit.fit_params_ui(ui),
+    pub fn fit_background(&mut self) {
+        log::info!("Fitting background");
+        match &self.background_model {
+            BackgroundModel::Linear(params) => {
+                let mut fit = LinearFitter::new(self.data.clone());
+
+                // Copy the parameters from the background model to the LinearFitter
+                fit.paramaters = params.clone(); // Ensure LinearParameters are used
+
+                // Perform the fit
+                match fit.lmfit() {
+                    Ok(_) => {
+                        self.background_line.points = fit.fit_points.clone();
+                        self.background_result = Some(BackgroundResult::Linear(fit));
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                    }
+                }
+            }
+            BackgroundModel::Quadratic(params) => {
+                let mut fit = QuadraticFitter::new(self.data.clone());
+
+                // Copy the parameters from the background model to the QuadraticFitter
+                fit.paramaters = params.clone(); // Ensure QuadraticParameters are used
+
+                // Perform the fit
+                match fit.lmfit() {
+                    Ok(_) => {
+                        self.background_line.points = fit.fit_points.clone();
+                        self.background_result = Some(BackgroundResult::Quadratic(fit));
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                    }
+                }
+            }
+            BackgroundModel::PowerLaw(params) => {
+                let mut fit = PowerLawFitter::new(self.data.clone());
+
+                // Copy the parameters from the background model to the PowerLawFitter
+                fit.paramaters = params.clone(); // Ensure PowerLawParameters are used
+
+                // Perform the fit
+                match fit.lmfit() {
+                    Ok(_) => {
+                        self.background_line.points = fit.fit_points.clone();
+                        self.background_result = Some(BackgroundResult::PowerLaw(fit));
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                    }
+                }
+            }
+            BackgroundModel::Exponential(params) => {
+                let mut fit = ExponentialFitter::new(self.data.clone());
+
+                // Copy the parameters from the background model to the ExponentialFitter
+                fit.paramaters = params.clone(); // Ensure ExponentialParameters are used
+
+                // Perform the fit
+                match fit.lmfit() {
+                    Ok(_) => {
+                        self.background_line.points = fit.fit_points.clone();
+                        self.background_result = Some(BackgroundResult::Exponential(fit));
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                    }
+                }
+            }
+            BackgroundModel::None => {
+                log::info!("No background fitting required for 'None'");
+            }
+        }
+        log::info!("Finished fitting background");
+    }
+
+    pub fn subtract_background(&mut self, x_data: Vec<f64>, y_data: Vec<f64>) -> Option<Vec<f64>> {
+        // Ensure background fitting has been performed
+        if self.background_result.is_none() {
+            self.fit_background(); // Fit background if not done already
+        }
+
+        // Check if background fitting was successful
+        let background_fit = self.background_result.as_ref()?;
+
+        // Generate background values for each x_data point
+        let background_values: Vec<f64> = x_data
+            .iter()
+            .map(|&x| match background_fit {
+                BackgroundResult::Linear(fit) => fit.evaluate(x),
+                BackgroundResult::Quadratic(fit) => fit.evaluate(x),
+                BackgroundResult::PowerLaw(fit) => fit.evaluate(x),
+                BackgroundResult::Exponential(fit) => fit.evaluate(x),
+            })
+            .collect();
+
+        // Subtract the background values from the actual y_data
+        let corrected_y_data: Vec<f64> = y_data
+            .iter()
+            .zip(background_values.iter())
+            .map(|(&y, &bg)| y - bg)
+            .collect();
+
+        Some(corrected_y_data)
+    }
+
+    pub fn get_peak_markers(&self) -> Vec<f64> {
+        if self.fit_result.is_none() {
+            match &self.fit_model {
+                FitModel::Gaussian(peak_markers, _, _, _) => peak_markers.clone(),
+                FitModel::None => Vec::new(),
+            }
+        } else {
+            match &self.fit_result {
+                Some(FitResult::Gaussian(fit)) => fit.peak_markers.clone(),
+                None => Vec::new(),
             }
         }
     }
 
     pub fn set_background_color(&mut self, color: egui::Color32) {
-        if let Some(background) = &mut self.background {
-            background.fit_line.color = color;
-        }
+        self.background_line.color = color;
     }
 
     pub fn set_composition_color(&mut self, color: egui::Color32) {
@@ -248,9 +271,7 @@ impl Fitter {
     }
 
     pub fn show_background(&mut self, show: bool) {
-        if let Some(background) = &mut self.background {
-            background.fit_line.draw = show;
-        }
+        self.background_line.draw = show;
     }
 
     pub fn set_name(&mut self, name: String) {
@@ -260,39 +281,84 @@ impl Fitter {
             line.name = format!("{}-Peak {}", name, i);
         }
 
-        if let Some(background) = &mut self.background {
-            background.fit_line.name = format!("{}-Background", name);
-        }
+        self.background_line.name = format!("{}-Background", name);
+        self.name = name;
     }
 
-    pub fn lines_ui(&mut self, ui: &mut egui::Ui) {
-        if let Some(background) = &mut self.background {
-            background.fit_line.menu_button(ui);
+    pub fn fit_result_ui(&mut self, ui: &mut egui::Ui) {
+        ui.collapsing(self.name.clone(), |ui| {
+            egui::ScrollArea::vertical()
+                .min_scrolled_height(300.0)
+                .show(ui, |ui| {
+                    ui.separator();
+
+                    if let Some(background_result) = &self.background_result {
+                        ui.label("Background");
+                        match background_result {
+                            BackgroundResult::Linear(fit) => {
+                                fit.ui(ui);
+                            }
+                            BackgroundResult::Quadratic(fit) => {
+                                fit.ui(ui);
+                            }
+                            BackgroundResult::PowerLaw(fit) => {
+                                fit.ui(ui);
+                            }
+                            BackgroundResult::Exponential(fit) => {
+                                fit.ui(ui);
+                            }
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label("Line");
+                            self.background_line.menu_button(ui);
+                        });
+                    }
+
+                    if self.fit_result.is_some() {
+                        egui::Grid::new("fit_params_grid")
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.label("Peak");
+                                ui.label("Mean");
+                                ui.label("FWHM");
+                                ui.label("Area");
+                                ui.label("Amplitude");
+                                ui.label("Sigma");
+
+                                ui.end_row();
+
+                                self.fitter_stats(ui, false);
+                            });
+
+                        for line in &mut self.decomposition_lines {
+                            line.menu_button(ui);
+                        }
+
+                        self.composition_line.menu_button(ui);
+                    }
+                });
+        });
+    }
+
+    pub fn fitter_stats(&mut self, ui: &mut egui::Ui, skip_one: bool) {
+        if let Some(fit_result) = &self.fit_result {
+            match fit_result {
+                FitResult::Gaussian(fit) => {
+                    fit.fit_params_ui(ui, skip_one);
+                }
+            }
         }
-
-        self.composition_line.menu_button(ui);
-
-        for line in &mut self.decomposition_lines {
-            line.menu_button(ui);
-        }
-
-        ui.separator();
     }
 
     // Draw the background, decomposition, and composition lines
     pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
-        // Draw the decomposition lines
         for line in &self.decomposition_lines {
             line.draw(plot_ui);
         }
 
-        // Draw the background if it exists
-        if let Some(background) = &self.background {
-            background.draw(plot_ui);
-        }
-
-        // Draw the composition line
         self.composition_line.draw(plot_ui);
+
+        self.background_line.draw(plot_ui);
     }
 
     // Set the log_y flag for all lines
@@ -302,12 +368,10 @@ impl Fitter {
             line.log_x = log_x;
         }
 
-        if let Some(background) = &mut self.background {
-            background.fit_line.log_y = log_y;
-            background.fit_line.log_x = log_x;
-        }
-
         self.composition_line.log_y = log_y;
         self.composition_line.log_x = log_x;
+
+        self.background_line.log_y = log_y;
+        self.background_line.log_x = log_x;
     }
 }

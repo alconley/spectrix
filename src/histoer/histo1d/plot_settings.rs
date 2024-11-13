@@ -39,14 +39,14 @@ impl PlotSettings {
         self.markers.interactive_dragging(response);
     }
 
-    pub fn progress_ui(&mut self, ui: &mut egui::Ui) {
-        if let Some(progress) = self.progress {
-            ui.add(
-                egui::ProgressBar::new(progress)
-                    .show_percentage()
-                    .animate(true)
-                    .text(format!("{:.0}%", progress * 100.0)),
-            );
-        }
-    }
+    // pub fn progress_ui(&mut self, ui: &mut egui::Ui) {
+    //     if let Some(progress) = self.progress {
+    //         ui.add(
+    //             egui::ProgressBar::new(progress)
+    //                 .show_percentage()
+    //                 .animate(true)
+    //                 .text(format!("{:.0}%", progress * 100.0)),
+    //         );
+    //     }
+    // }
 }

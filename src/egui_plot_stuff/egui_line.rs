@@ -60,6 +60,13 @@ impl EguiLine {
         }
     }
 
+    pub fn new_with_points(points: Vec<[f64; 2]>) -> Self {
+        EguiLine {
+            points,
+            ..EguiLine::default()
+        }
+    }
+
     pub fn clear_points(&mut self) {
         self.points.clear();
     }

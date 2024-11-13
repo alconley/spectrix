@@ -3,14 +3,12 @@ use rfd::FileDialog;
 use std::fs::File;
 use std::io::{Read, Write};
 
-use super::background_fitter::BackgroundFitter;
 use super::fit_settings::FitSettings;
 use super::main_fitter::Fitter;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Fits {
     pub temp_fit: Option<Fitter>,
-    pub temp_background_fit: Option<BackgroundFitter>,
     pub stored_fits: Vec<Fitter>,
     pub settings: FitSettings,
 }
@@ -25,7 +23,7 @@ impl Fits {
     pub fn new() -> Self {
         Fits {
             temp_fit: None,
-            temp_background_fit: None,
+            // temp_background_fit: None,
             stored_fits: Vec::new(),
             settings: FitSettings::default(),
         }
@@ -41,18 +39,11 @@ impl Fits {
 
             self.stored_fits.push(temp_fit.clone());
         }
-
-        self.temp_background_fit = None;
     }
 
     pub fn set_log(&mut self, log_y: bool, log_x: bool) {
         if let Some(temp_fit) = &mut self.temp_fit {
             temp_fit.set_log(log_y, log_x);
-        }
-
-        if let Some(temp_background_fit) = &mut self.temp_background_fit {
-            temp_background_fit.fit_line.log_y = log_y;
-            temp_background_fit.fit_line.log_x = log_x;
         }
 
         for fit in &mut self.stored_fits {
@@ -62,9 +53,7 @@ impl Fits {
 
     pub fn set_stored_fits_background_color(&mut self, color: egui::Color32) {
         for fit in &mut self.stored_fits {
-            if let Some(background) = &mut fit.background {
-                background.fit_line.color = color;
-            }
+            fit.background_line.color = color;
         }
     }
 
@@ -128,7 +117,6 @@ impl Fits {
                         serde_json::from_str(&contents).expect("Failed to deserialize fits");
                     self.stored_fits.extend(loaded_fits.stored_fits); // Append loaded fits to current stored fits
                     self.temp_fit = loaded_fits.temp_fit; // override temp_fit
-                    self.temp_background_fit = loaded_fits.temp_background_fit; // override temp_background_fit
                 }
                 Err(e) => {
                     log::error!("Error opening file: {:?}", e);
@@ -153,7 +141,6 @@ impl Fits {
 
     pub fn remove_temp_fits(&mut self) {
         self.temp_fit = None;
-        self.temp_background_fit = None;
     }
 
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
@@ -161,10 +148,6 @@ impl Fits {
 
         if let Some(temp_fit) = &self.temp_fit {
             temp_fit.draw(plot_ui);
-        }
-
-        if let Some(temp_background_fit) = &self.temp_background_fit {
-            temp_background_fit.draw(plot_ui);
         }
 
         for fit in &mut self.stored_fits.iter() {
@@ -188,18 +171,21 @@ impl Fits {
                 ui.label("Mean");
                 ui.label("FWHM");
                 ui.label("Area");
+                ui.label("Amplitude");
+                ui.label("Sigma");
+
                 ui.end_row();
 
                 if self.temp_fit.is_some() {
-                    ui.label("Current");
+                    ui.label("Temp");
 
-                    if let Some(temp_fit) = &self.temp_fit {
-                        temp_fit.fitter_stats(ui);
+                    if let Some(temp_fit) = &mut self.temp_fit {
+                        temp_fit.fitter_stats(ui, true);
                     }
                 }
 
                 if !self.stored_fits.is_empty() {
-                    for (i, fit) in self.stored_fits.iter().enumerate() {
+                    for (i, fit) in self.stored_fits.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
                             ui.label(format!("{}", i));
 
@@ -211,7 +197,7 @@ impl Fits {
 
                             ui.separator();
                         });
-                        fit.fitter_stats(ui);
+                        fit.fitter_stats(ui, true);
                     }
                 }
             });
@@ -233,22 +219,6 @@ impl Fits {
         }
     }
 
-    pub fn fit_lines_ui(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.vertical(|ui| {
-                ui.label("Fit Lines");
-
-                if let Some(temp_fit) = &mut self.temp_fit {
-                    temp_fit.lines_ui(ui);
-                }
-
-                for fit in &mut self.stored_fits {
-                    fit.lines_ui(ui);
-                }
-            });
-        });
-    }
-
     pub fn fit_context_menu_ui(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Fits", |ui| {
             self.save_and_load_ui(ui);
@@ -266,11 +236,13 @@ impl Fits {
 
             ui.separator();
 
-            egui::ScrollArea::vertical()
-                .max_height(300.0)
-                .show(ui, |ui| {
-                    self.fit_lines_ui(ui);
-                });
+            if let Some(temp_fit) = &mut self.temp_fit {
+                temp_fit.fit_result_ui(ui);
+            }
+
+            for fit in &mut self.stored_fits {
+                fit.fit_result_ui(ui);
+            }
         });
     }
 }

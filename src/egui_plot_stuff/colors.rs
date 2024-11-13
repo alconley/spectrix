@@ -3,6 +3,7 @@ use egui::Color32;
 pub const COLOR_OPTIONS: &[(Color32, &str)] = &[
     (Color32::from_rgb(120, 47, 64), "FSU Garnet"), // go noles!
     (Color32::from_rgb(206, 184, 136), "FSU Gold"),
+    (Color32::from_rgb(92, 184, 176), "Westcott Water"),
     (Color32::BLACK, "Black"),
     (Color32::DARK_GRAY, "Dark Gray"),
     (Color32::GRAY, "Gray"),
@@ -23,7 +24,7 @@ pub const COLOR_OPTIONS: &[(Color32, &str)] = &[
     (Color32::LIGHT_BLUE, "Light Blue"),
 ];
 
-#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize, PartialEq)]
 pub struct Rgb {
     pub r: u8,
     pub g: u8,

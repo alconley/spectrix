@@ -23,6 +23,7 @@ pub struct EguiVerticalLine {
     pub stroke_rgb: Rgb,
 
     pub interactive_dragging: bool,
+    pub mid_point_radius: f32,
 
     #[serde(skip)]
     pub is_dragging: bool,
@@ -44,6 +45,7 @@ impl Default for EguiVerticalLine {
             color_rgb: Rgb::from_color32(Color32::BLUE),
             stroke_rgb: Rgb::from_color32(Color32::BLUE),
             interactive_dragging: true,
+            mid_point_radius: 3.0,
             is_dragging: false,
         }
     }
@@ -89,7 +91,7 @@ impl EguiVerticalLine {
                 let mid_point = egui_plot::Points::new(mid_point_pos)
                     .color(self.color)
                     .highlight(self.highlighted)
-                    .radius(3.0)
+                    .radius(self.mid_point_radius)
                     .id(Id::new(self.name.clone()));
 
                 plot_ui.points(mid_point);

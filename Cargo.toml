@@ -33,6 +33,7 @@ env_logger = "0.11.5"
 # performant will make the compile times slower but should make the histogrammer faster
 polars = { version = "0.43.1", features = ["lazy", "parquet", "performant"] }
 polars-lazy = { version = "0.43.1", features = ["hist"] }
+rayon = "1.10.0"
 hashbrown = { version = "=0.14.5", features = ["raw"] } #needed until polars fixes
 
 rfd = "0.15"
@@ -47,7 +48,7 @@ compute = "0.2.3"
 indicatif = "0.17"
 find_peaks = "0.1.5"
 pyo3 = { version = "0.22.5", features = ["auto-initialize"] }
-prettytable = "0.10"
+regex = "1.11.1"
 
 # web:
 [target.'cfg(target_arch = "wasm32")'.dependencies]
