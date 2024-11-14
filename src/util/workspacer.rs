@@ -1,10 +1,6 @@
-use polars::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-
-use super::lazyframer::LazyFramer;
-use crate::cutter::cut_handler::CutHandler;
 
 #[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq)]
 pub enum SortingOption {
@@ -51,99 +47,6 @@ impl SortingOption {
 }
 
 impl Workspacer {
-    // combine the selected files and saveinto a single parquet file
-    pub fn save_selected_files_to_single_file(
-        &self,
-        output_path: &PathBuf,
-        scan: bool,
-    ) -> Result<(), PolarsError> {
-        let selected_files = &self.selected_files;
-        // create a lazyframe from the selected files
-        let mut lazyframer = LazyFramer::new(selected_files.clone());
-
-        // save the lazyframe to a single file
-        lazyframer.save_lazyframe(output_path, scan)
-    }
-
-    pub fn save_filtered_files_to_single_file(
-        &self,
-        output_path: &PathBuf,
-        cut_handler: &mut CutHandler,
-        scan: bool,
-    ) -> Result<(), PolarsError> {
-        let selected_files = &self.selected_files;
-        // create a lazyframe from the selected files
-        let mut lazyframer = LazyFramer::new(selected_files.clone());
-
-        if let Some(ref mut lazyframe) = lazyframer.lazyframe {
-            match cut_handler.filter_lf_with_selected_cuts(lazyframe) {
-                Ok(filtered_lf) => {
-                    lazyframer.lazyframe = Some(filtered_lf);
-                    lazyframer.save_lazyframe(output_path, scan)
-                }
-                Err(e) => {
-                    log::error!("Error filtering LazyFrame: {}", e);
-                    Err(e) // Return the error here to propagate the error
-                }
-            }
-        } else {
-            Err(PolarsError::NoData("No LazyFrame available".into())) // Handle the case where lazyframe is None
-        }
-    }
-
-    pub fn save_individually_filtered_files(
-        &self,
-        output_dir: &Path,
-        cut_handler: &mut CutHandler,
-        suffix: &str,
-        scan: bool,
-    ) -> Result<(), PolarsError> {
-        for file in &self.selected_files {
-            // Create a LazyFramer for the current file
-            let mut lazyframer = LazyFramer::new(vec![file.clone()]);
-
-            if let Some(ref mut lazyframe) = lazyframer.lazyframe {
-                match cut_handler.filter_lf_with_selected_cuts(lazyframe) {
-                    Ok(filtered_lf) => {
-                        lazyframer.lazyframe = Some(filtered_lf);
-
-                        // need to put suffix before .parquet
-                        let file_name = file.file_name().unwrap().to_string_lossy();
-                        // strip the .parquet extension
-                        let file_name = &file_name[..file_name.len() - 8];
-
-                        let new_file_name = format!("{}_{}.parquet", file_name, suffix);
-
-                        let mut new_path = output_dir.to_path_buf();
-                        new_path.push(new_file_name);
-
-                        // Save the filtered LazyFrame to the new file
-                        if let Err(e) = lazyframer.save_lazyframe(&new_path, scan) {
-                            log::error!(
-                                "Failed to save filtered LazyFrame to {}: {}",
-                                new_path.display(),
-                                e
-                            );
-                            return Err(e);
-                        }
-                    }
-                    Err(e) => {
-                        log::error!(
-                            "Error filtering LazyFrame for file {}: {}",
-                            file.display(),
-                            e
-                        );
-                        return Err(e);
-                    }
-                }
-            } else {
-                log::error!("No LazyFrame available for file {}", file.display());
-                return Err(PolarsError::NoData("No LazyFrame available".into()));
-            }
-        }
-        Ok(())
-    }
-
     fn select_directory(&mut self) {
         let directory = rfd::FileDialog::new().pick_folder();
         if let Some(dir) = directory {

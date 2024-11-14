@@ -2,7 +2,6 @@ use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
 use super::tree::TreeBehavior;
-use crate::cutter::cut_handler::CutHandler;
 use crate::cutter::cuts::Cut;
 
 use egui_tiles::TileId;
@@ -248,9 +247,15 @@ impl Histogrammer {
                     return false;
                 }
                 for cut in &h.cuts {
-                    if !available_columns.contains(&cut.x_column) {
-                        println!("Warning: Cut column '{}' does not exist for 1D histogram '{}'. Skipping cut.", cut.x_column, h.name);
-                        return false;
+                    match cut {
+                        Cut::Cut1D(_) => {
+                        }
+                        Cut::Cut2D(cut) => {
+                            if !available_columns.contains(&cut.x_column) {
+                                println!("Warning: Cut column '{}' does not exist for 1D histogram '{}'. Skipping cut.", cut.x_column, h.name);
+                                return false;
+                            }
+                        }
                     }
                 }
                 true
@@ -267,9 +272,15 @@ impl Histogrammer {
                     return false;
                 }
                 for cut in &h.cuts {
-                    if !available_columns.contains(&cut.x_column) || !available_columns.contains(&cut.y_column) {
-                        println!("Warning: Cut columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping cut.", cut.x_column, cut.y_column, h.name);
-                        return false;
+                    match cut {
+                        Cut::Cut1D(_) => {
+                        }
+                        Cut::Cut2D(cut) => {
+                            if !available_columns.contains(&cut.x_column) || !available_columns.contains(&cut.y_column) {
+                                println!("Warning: Cut columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping cut.", cut.x_column, cut.y_column, h.name);
+                                return false;
+                            }
+                        }
                     }
                 }
                 true
@@ -287,7 +298,12 @@ impl Histogrammer {
         // Include columns required for cuts in both 1D and 2D histograms
         for h in &hist1d_specs {
             for cut in &h.cuts {
-                column_names.push(cut.x_column.as_str());
+                match cut {
+                    Cut::Cut1D(_) => {}
+                    Cut::Cut2D(cut) => {
+                        column_names.push(cut.x_column.as_str());
+                    }
+                }
             }
         }
 
@@ -296,8 +312,13 @@ impl Histogrammer {
             column_names.push(h.y_column_name.as_str());
 
             for cut in &h.cuts {
-                column_names.push(cut.x_column.as_str());
-                column_names.push(cut.y_column.as_str());
+                match cut {
+                    Cut::Cut1D(_) => {}
+                    Cut::Cut2D(cut) => {
+                        column_names.push(cut.x_column.as_str());
+                        column_names.push(cut.y_column.as_str());
+                    }
+                }
             }
         }
 
@@ -421,25 +442,8 @@ impl Histogrammer {
 
                                         // Evaluate each cut for the current point
                                         for cut in &meta.cuts {
-                                            // Get the cut-specific column values for the current row
-                                            if let (Ok(cut_x_values), Ok(cut_y_values)) = (
-                                                df.column(&cut.x_column).and_then(|c| c.f64()),
-                                                df.column(&cut.y_column).and_then(|c| c.f64()),
-                                            ) {
-                                                if let (Some(cut_x), Some(cut_y)) = (
-                                                    cut_x_values.get(index),
-                                                    cut_y_values.get(index),
-                                                ) {
-                                                    // Check if the point (cut_x, cut_y) is inside the cut polygon
-                                                    if !cut.is_inside(cut_x, cut_y) {
-                                                        passes_all_cuts = false;
-                                                        break;
-                                                    }
-                                                } else {
-                                                    passes_all_cuts = false;
-                                                    break;
-                                                }
-                                            } else {
+                                            // Call point_is_inside to check if this point satisfies the cut
+                                            if !cut.valid(&df, index) {
                                                 passes_all_cuts = false;
                                                 break;
                                             }
@@ -481,24 +485,8 @@ impl Histogrammer {
 
                                     // Evaluate each cut for the current point
                                     for cut in &meta.cuts {
-                                        // Get the cut-specific column values for the current row
-                                        if let (Ok(cut_x_values), Ok(cut_y_values)) = (
-                                            df.column(&cut.x_column).and_then(|c| c.f64()),
-                                            df.column(&cut.y_column).and_then(|c| c.f64()),
-                                        ) {
-                                            if let (Some(cut_x), Some(cut_y)) =
-                                                (cut_x_values.get(index), cut_y_values.get(index))
-                                            {
-                                                // Check if the point (cut_x, cut_y) is inside the cut polygon
-                                                if !cut.is_inside(cut_x, cut_y) {
-                                                    passes_all_cuts = false;
-                                                    break;
-                                                }
-                                            } else {
-                                                passes_all_cuts = false;
-                                                break;
-                                            }
-                                        } else {
+                                        // Call point_is_inside to check if this point satisfies the cut
+                                        if !cut.valid(&df, index) {
                                             passes_all_cuts = false;
                                             break;
                                         }
@@ -514,8 +502,8 @@ impl Histogrammer {
 
                         for (hist, meta) in &hist2d_map {
                             let mut hist = hist.lock().unwrap();
-                            hist.plot_settings.cuts.x_column = meta.x_column_name.clone();
-                            hist.plot_settings.cuts.y_column = meta.y_column_name.clone();
+                            // hist.plot_settings.cuts.x_column = meta.x_column_name.clone();
+                            // hist.plot_settings.cuts.y_column = meta.y_column_name.clone();
                             hist.plot_settings.recalculate_image = true;
                         }
 
@@ -934,22 +922,22 @@ impl Histogrammer {
         log::info!("Reorganization complete.");
     }
 
-    pub fn retrieve_active_cuts(&self, cut_handler: &mut CutHandler) {
-        for (_id, tile) in self.tree.tiles.iter() {
-            if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                let hist = hist.lock().unwrap();
-                let active_cuts = hist.plot_settings.cuts.clone();
+    pub fn retrieve_active_cuts(&self) {
+        // for (_id, tile) in self.tree.tiles.iter() {
+        //     if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
+        //         let hist = hist.lock().unwrap();
+        //         let active_cuts = hist.plot_settings.cuts.clone();
 
-                // Update cuts with correct column names and avoid duplicates
-                for mut new_cut in active_cuts.cuts {
-                    // Set the correct column names in the Cut struct
-                    new_cut.x_column = hist.plot_settings.cuts.x_column.clone();
-                    new_cut.y_column = hist.plot_settings.cuts.y_column.clone();
+        //         // Update cuts with correct column names and avoid duplicates
+        //         for mut new_cut in active_cuts.cuts {
+        //             // Set the correct column names in the Cut struct
+        //             new_cut.x_column = hist.plot_settings.cuts.x_column.clone();
+        //             new_cut.y_column = hist.plot_settings.cuts.y_column.clone();
 
-                    cut_handler.cuts.push(new_cut);
-                }
-            }
-        }
+        //             cut_handler.cuts.push(new_cut);
+        //         }
+        //     }
+        // }
     }
 }
 

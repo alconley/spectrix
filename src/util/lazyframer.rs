@@ -1,5 +1,4 @@
 use polars::prelude::*;
-use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -59,57 +58,8 @@ impl LazyFramer {
         self.lazyframe = Some(lf);
     }
 
-    pub fn save_lazyframe(&mut self, output_path: &PathBuf, scan: bool) -> Result<(), PolarsError> {
-        if let Some(ref lf) = self.lazyframe {
-            if scan {
-                // use sink parquet to save the LazyFrame to a single file
-                // this ensures you can save the lazyframe to a single file even if it is larger than memory
-                let options = ParquetWriteOptions::default();
-
-                lf.clone().sink_parquet(output_path, options)?;
-            } else {
-                // use collect to save the LazyFrame to a single file
-                // this will load the entire LazyFrame into memory
-                let mut df = lf.clone().collect()?;
-
-                // Open a file in write mode at the specified output path
-                let file = File::create(output_path).map_err(|e| PolarsError::IO {
-                    error: Arc::new(e),
-                    msg: None,
-                })?;
-
-                // Write the filtered DataFrame to a Parquet file
-                ParquetWriter::new(file)
-                    .set_parallel(true)
-                    .finish(&mut df)?;
-            }
-        } else {
-            log::error!("LazyFrame is not loaded");
-        }
-        Ok(())
-    }
-
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.collapsing("LazyFrame", |ui| {
-            if ui.button("Save Current LazyFrame").clicked() {
-                if let Some(_lf) = &self.lazyframe {
-                    let output_path = rfd::FileDialog::new()
-                        .add_filter("Parquet Files", &["parquet"])
-                        .save_file();
-
-                    if let Some(output_path) = output_path {
-                        match self.save_lazyframe(&output_path, true) {
-                            Ok(_) => {
-                                log::info!("Saved LazyFrame to {:?}", output_path);
-                            }
-                            Err(e) => {
-                                log::error!("Failed to save LazyFrame: {}", e);
-                            }
-                        }
-                    }
-                }
-            }
-
             ui.label("Columns:");
             if self.columns.is_empty() {
                 ui.label("No columns");

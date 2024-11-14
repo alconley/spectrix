@@ -1,7 +1,7 @@
 // use super::configure_auxillary_detectors::AuxillaryDetectors;
 use super::manual_histogram_scripts::sps_histograms;
 
-use crate::cutter::cuts::Cut;
+use crate::cutter::cuts::{Cut, Cut1D, Cut2D};
 use crate::histoer::histogrammer::{Histo1DConfig, Histo2DConfig, Histogrammer};
 use egui_extras::{Column, TableBuilder};
 use polars::prelude::*;
@@ -187,12 +187,20 @@ impl HistogramScript {
             ui.horizontal(|ui| {
                 ui.heading("Cuts");
 
-                if ui.button("+").clicked() {
-                    let mut new_cut = Cut::default();
-                    if let Err(e) = new_cut.load_cut_from_json() {
-                        log::error!("Failed to load cut: {:?}", e);
+                if ui.button("+1D").clicked() {
+                    // Add logic to create a new 1D cut and add it to `self.cuts`
+                    // For example:
+                    self.cuts.push(Cut::Cut1D(Cut1D::new("", "")));
+                }
+
+                if ui.button("+2D").clicked() {
+                    // Create a new instance of Cut2D and attempt to load it from a JSON file
+                    let mut new_cut2d = Cut2D::default();
+                    if new_cut2d.load_cut_from_json().is_ok() {
+                        // If successfully loaded, add it to the cuts vector as a Cuts::Cut2D variant
+                        self.cuts.push(Cut::Cut2D(new_cut2d));
                     } else {
-                        self.cuts.push(new_cut);
+                        log::error!("Failed to load 2D cut from file.");
                     }
                 }
             });
@@ -200,97 +208,90 @@ impl HistogramScript {
             if self.cuts.is_empty() {
                 ui.label("No cuts loaded");
             } else {
-                // Table for Cuts with similar layout to Column Creation and Histograms
                 let mut indices_to_remove_cut = Vec::new();
 
-                TableBuilder::new(ui)
-                    .id_salt("cuts_table")
-                    .column(Column::auto()) // Name
-                    .column(Column::auto()) // X Column
-                    .column(Column::auto()) // Y Column
-                    .column(Column::remainder()) // Actions
-                    .striped(true)
-                    .vscroll(false)
-                    .header(20.0, |mut header| {
-                        header.col(|ui| {
-                            ui.label("Name");
-                        });
-                        header.col(|ui| {
-                            ui.label("X Column");
-                        });
-                        header.col(|ui| {
-                            ui.label("Y Column");
-                        });
-                    })
-                    .body(|mut body| {
-                        for (index, cut) in self.cuts.iter_mut().enumerate() {
-                            body.row(18.0, |mut row| {
-                                row.col(|ui| {
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut cut.polygon.name)
-                                            .hint_text("Cut Name")
-                                            .clip_text(false),
-                                    );
-                                });
-                                row.col(|ui| {
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut cut.x_column)
-                                            .hint_text("X Column")
-                                            .clip_text(false),
-                                    );
-                                });
-                                row.col(|ui| {
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut cut.y_column)
-                                            .hint_text("Y Column")
-                                            .clip_text(false),
-                                    );
-                                });
-                                row.col(|ui| {
-                                    if ui.button("X").clicked() {
-                                        indices_to_remove_cut.push(index);
-                                    }
-                                });
-                            });
-                        }
+                let mut cuts_1d = Vec::new();
+                let mut cuts_2d = Vec::new();
+
+                self.cuts
+                    .iter_mut()
+                    .enumerate()
+                    .for_each(|(i, cut)| match cut {
+                        Cut::Cut1D(_) => cuts_1d.push((i, cut)),
+                        Cut::Cut2D(cut2d) => cuts_2d.push((i, cut2d)),
                     });
 
-                // Remove indices in reverse order to prevent shifting issues
+                // Render 1D Cuts Table
+                if !cuts_1d.is_empty() {
+                    ui.label("1D Cuts");
+                    TableBuilder::new(ui)
+                        .id_salt("cuts_1d_table")
+                        .column(Column::auto()) // Name
+                        .column(Column::auto()) // Expression
+                        .column(Column::remainder()) // Actions
+                        .striped(true)
+                        .vscroll(false)
+                        .header(20.0, |mut header| {
+                            header.col(|ui| {
+                                ui.label("Name");
+                            });
+                        })
+                        .body(|mut body| {
+                            for (index, cut1d) in cuts_1d {
+                                body.row(18.0, |mut row| {
+                                    cut1d.table_row(&mut row);
+                                    row.col(|ui| {
+                                        ui.horizontal(|ui| {
+                                            if ui.button("X").clicked() {
+                                                indices_to_remove_cut.push(index);
+                                            }
+                                        });
+                                    });
+                                });
+                            }
+                        });
+                }
+
+                if !cuts_2d.is_empty() {
+                    ui.label("2D Cuts");
+                    TableBuilder::new(ui)
+                        .id_salt("cuts_2d_table")
+                        .column(Column::auto()) // Name
+                        .column(Column::auto()) // X Column
+                        .column(Column::auto()) // Y Column
+                        .column(Column::remainder()) // Actions
+                        .striped(true)
+                        .vscroll(false)
+                        .header(20.0, |mut header| {
+                            header.col(|ui| {
+                                ui.label("Name");
+                            });
+                            header.col(|ui| {
+                                ui.label("X Column");
+                            });
+                            header.col(|ui| {
+                                ui.label("Y Column");
+                            });
+                        })
+                        .body(|mut body| {
+                            for (index, cut2d) in cuts_2d {
+                                body.row(18.0, |mut row| {
+                                    cut2d.table_row(&mut row);
+                                    row.col(|ui| {
+                                        ui.horizontal(|ui| {
+                                            if ui.button("X").clicked() {
+                                                indices_to_remove_cut.push(index);
+                                            }
+                                        });
+                                    });
+                                });
+                            }
+                        });
+                }
+
                 for &index in indices_to_remove_cut.iter().rev() {
                     self.cuts.remove(index);
                 }
-
-                // Buttons to apply cuts to all histograms or remove all cuts from histograms
-                ui.horizontal(|ui| {
-                    if ui.button("Apply").clicked() {
-                        for config in &mut self.hist_configs {
-                            match config {
-                                HistoConfig::Histo1D(hist) => {
-                                    hist.cuts = self.cuts.clone(); // Apply all cuts to 1D histograms
-                                }
-                                HistoConfig::Histo2D(hist) => {
-                                    hist.cuts = self.cuts.clone(); // Apply all cuts to 2D histograms
-                                }
-                            }
-                        }
-                    }
-                    ui.label("/");
-
-                    if ui.button("Remove").clicked() {
-                        for config in &mut self.hist_configs {
-                            match config {
-                                HistoConfig::Histo1D(hist) => {
-                                    hist.cuts.clear(); // Clear all cuts from 1D histograms
-                                }
-                                HistoConfig::Histo2D(hist) => {
-                                    hist.cuts.clear(); // Clear all cuts from 2D histograms
-                                }
-                            }
-                        }
-                    }
-
-                    ui.label(" all cuts on histograms");
-                });
             }
 
             ui.separator();
@@ -550,15 +551,37 @@ impl HistogramScript {
                                                 .cuts
                                                 .iter()
                                                 .any(|selected_cut| selected_cut == cut);
-                                            if ui
-                                                .checkbox(&mut is_selected, &cut.polygon.name)
-                                                .clicked()
-                                            {
-                                                if is_selected && !hist.cuts.contains(cut) {
-                                                    hist.cuts.push(cut.clone());
-                                                } else if !is_selected {
-                                                    hist.cuts
-                                                        .retain(|selected_cut| selected_cut != cut);
+                                            match cut {
+                                                Cut::Cut1D(cut1d) => {
+                                                    if ui
+                                                        .checkbox(&mut is_selected, &cut1d.name)
+                                                        .clicked()
+                                                    {
+                                                        if is_selected && !hist.cuts.contains(cut) {
+                                                            hist.cuts.push(cut.clone());
+                                                        } else if !is_selected {
+                                                            hist.cuts.retain(|selected_cut| {
+                                                                selected_cut != cut
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                                Cut::Cut2D(cut2d) => {
+                                                    if ui
+                                                        .checkbox(
+                                                            &mut is_selected,
+                                                            &cut2d.polygon.name,
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        if is_selected && !hist.cuts.contains(cut) {
+                                                            hist.cuts.push(cut.clone());
+                                                        } else if !is_selected {
+                                                            hist.cuts.retain(|selected_cut| {
+                                                                selected_cut != cut
+                                                            });
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -577,15 +600,37 @@ impl HistogramScript {
                                                 .cuts
                                                 .iter()
                                                 .any(|selected_cut| selected_cut == cut);
-                                            if ui
-                                                .checkbox(&mut is_selected, &cut.polygon.name)
-                                                .clicked()
-                                            {
-                                                if is_selected && !hist.cuts.contains(cut) {
-                                                    hist.cuts.push(cut.clone());
-                                                } else if !is_selected {
-                                                    hist.cuts
-                                                        .retain(|selected_cut| selected_cut != cut);
+                                            match cut {
+                                                Cut::Cut1D(cut1d) => {
+                                                    if ui
+                                                        .checkbox(&mut is_selected, &cut1d.name)
+                                                        .clicked()
+                                                    {
+                                                        if is_selected && !hist.cuts.contains(cut) {
+                                                            hist.cuts.push(cut.clone());
+                                                        } else if !is_selected {
+                                                            hist.cuts.retain(|selected_cut| {
+                                                                selected_cut != cut
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                                Cut::Cut2D(cut2d) => {
+                                                    if ui
+                                                        .checkbox(
+                                                            &mut is_selected,
+                                                            &cut2d.polygon.name,
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        if is_selected && !hist.cuts.contains(cut) {
+                                                            hist.cuts.push(cut.clone());
+                                                        } else if !is_selected {
+                                                            hist.cuts.retain(|selected_cut| {
+                                                                selected_cut != cut
+                                                            });
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }

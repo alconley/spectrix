@@ -1,22 +1,92 @@
 use geo::Contains;
-use indicatif::ProgressBar;
-use indicatif::ProgressStyle;
-use polars::prelude::*;
+use regex::Regex;
 use std::fs::File;
 use std::io::{BufReader, Write};
+
+use polars::prelude::*;
 
 use crate::egui_plot_stuff::egui_polygon::EguiPolygon;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct Cut {
+pub enum Cut {
+    Cut1D(Cut1D),
+    Cut2D(Cut2D),
+}
+
+impl Default for Cut {
+    fn default() -> Self {
+        Cut::Cut2D(Cut2D::default())
+    }
+}
+
+impl Cut {
+    pub fn new_2d_cut(&self) -> Self {
+        Cut::Cut2D(Cut2D::default())
+    }
+
+    // Method to check if a cut is valid for a specific row in the DataFrame
+    pub fn valid(&self, df: &DataFrame, row_idx: usize) -> bool {
+        match self {
+            Cut::Cut1D(cut1d) => cut1d.valid(df, row_idx),
+            Cut::Cut2D(cut2d) => cut2d.valid(df, row_idx),
+        }
+    }
+
+    // Optional: Method to parse conditions if the cut is a Cut1D
+    pub fn parse_conditions(&self) -> Option<Vec<ParsedCondition>> {
+        if let Cut::Cut1D(cut1d) = self {
+            Some(cut1d.parse_conditions())
+        } else {
+            None
+        }
+    }
+
+    pub fn menu_button(&mut self, ui: &mut egui::Ui) {
+        match self {
+            Cut::Cut1D(cut1d) => cut1d.menu_button(ui),
+            Cut::Cut2D(cut2d) => cut2d.menu_button(ui),
+        }
+    }
+
+    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+        match self {
+            Cut::Cut1D(_) => {}
+            Cut::Cut2D(cut2d) => cut2d.polygon.draw(plot_ui),
+        }
+    }
+
+    pub fn interactive_response(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
+        match self {
+            Cut::Cut1D(_) => {}
+            Cut::Cut2D(cut2d) => cut2d.polygon.handle_interactions(plot_response),
+        }
+    }
+
+    pub fn is_dragging(&self) -> bool {
+        match self {
+            Cut::Cut1D(_) => false,
+            Cut::Cut2D(cut2d) => cut2d.polygon.is_dragging,
+        }
+    }
+
+    pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>) {
+        match self {
+            Cut::Cut1D(cut1d) => cut1d.table_row(row),
+            Cut::Cut2D(cut2d) => cut2d.table_row(row),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct Cut2D {
     pub polygon: EguiPolygon,
     pub x_column: String,
     pub y_column: String,
 }
 
-impl Default for Cut {
+impl Default for Cut2D {
     fn default() -> Self {
-        Cut {
+        Cut2D {
             polygon: EguiPolygon::default(),
             x_column: "".to_string(),
             y_column: "".to_string(),
@@ -24,15 +94,8 @@ impl Default for Cut {
     }
 }
 
-impl Cut {
+impl Cut2D {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        // putting this in a grid
-        // ui.text_edit_singleline(&mut self.x_column);
-
-        // ui.text_edit_singleline(&mut self.y_column);
-
-        // self.polygon.polygon_info_menu_button(ui);
-
         ui.add(
             egui::TextEdit::singleline(&mut self.polygon.name)
                 .hint_text("Name")
@@ -52,6 +115,30 @@ impl Cut {
         );
     }
 
+    pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>) {
+        row.col(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.polygon.name)
+                    .hint_text("Cut Name")
+                    .clip_text(false),
+            );
+        });
+        row.col(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.x_column)
+                    .hint_text("X Column")
+                    .clip_text(false),
+            );
+        });
+        row.col(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.y_column)
+                    .hint_text("Y Column")
+                    .clip_text(false),
+            );
+        });
+    }
+
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
         if ui.button("Load").clicked() {
             if let Err(e) = self.load_cut_from_json() {
@@ -66,6 +153,24 @@ impl Cut {
         }
 
         self.polygon.menu_button(ui);
+    }
+
+    pub fn valid(&self, df: &DataFrame, row_idx: usize) -> bool {
+        // Attempt to retrieve the x and y column values for the specified row
+        if let (Ok(cut_x_values), Ok(cut_y_values)) = (
+            df.column(&self.x_column).and_then(|c| c.f64()),
+            df.column(&self.y_column).and_then(|c| c.f64()),
+        ) {
+            // Retrieve the x and y values for the given row index
+            if let (Some(cut_x), Some(cut_y)) =
+                (cut_x_values.get(row_idx), cut_y_values.get(row_idx))
+            {
+                // Check if the point (cut_x, cut_y) is inside the polygon
+                return self.is_inside(cut_x, cut_y);
+            }
+        }
+        // Return false if columns or row data were not found or if point is not inside polygon
+        false
     }
 
     pub fn save_cut_to_json(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -88,7 +193,7 @@ impl Cut {
         {
             let file = File::open(file_path)?;
             let reader = BufReader::new(file);
-            let cut: Cut = serde_json::from_reader(reader)?;
+            let cut: Cut2D = serde_json::from_reader(reader)?;
             *self = cut;
         }
         Ok(())
@@ -105,211 +210,108 @@ impl Cut {
         let polygon = self.to_geo_polygon();
         polygon.contains(&point)
     }
-
-    pub fn filter_lf_with_cut(&self, lf: &LazyFrame) -> Result<LazyFrame, PolarsError> {
-        let x_column = self.x_column.clone(); // Clone the column names to avoid borrowing `self`
-        let y_column = self.y_column.clone();
-        let polygon = self.polygon.clone(); // Clone the polygon or other data needed
-
-        // Ensure the columns exist
-        let check_lf = lf.clone().limit(1);
-        let df = check_lf.collect()?;
-        let columns: Vec<String> = df
-            .get_column_names_owned()
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        if !columns.contains(&x_column) {
-            log::error!("Column {} does not exist", x_column);
-            return Err(PolarsError::ColumnNotFound(x_column.into()));
-        }
-
-        if !columns.contains(&y_column) {
-            log::error!("Column {} does not exist", y_column);
-            return Err(PolarsError::ColumnNotFound(y_column.into()));
-        }
-
-        let x_min = polygon
-            .vertices
-            .iter()
-            .map(|&[x, _]| x)
-            .fold(f64::INFINITY, |a, b| a.min(b));
-        let x_max = polygon
-            .vertices
-            .iter()
-            .map(|&[x, _]| x)
-            .fold(f64::NEG_INFINITY, |a, b| a.max(b));
-        let y_min = polygon
-            .vertices
-            .iter()
-            .map(|&[_, y]| y)
-            .fold(f64::INFINITY, |a, b| a.min(b));
-        let y_max = polygon
-            .vertices
-            .iter()
-            .map(|&[_, y]| y)
-            .fold(f64::NEG_INFINITY, |a, b| a.max(b));
-
-        // Apply the basic range filters first
-        let filtered_lf = lf
-            .clone()
-            .filter(col(&x_column).gt_eq(lit(x_min)))
-            .filter(col(&x_column).lt_eq(lit(x_max)))
-            .filter(col(&y_column).gt_eq(lit(y_min)))
-            .filter(col(&y_column).lt_eq(lit(y_max)));
-
-        let filtered_df = filtered_lf
-            .clone()
-            .select([col(&x_column), col(&y_column)])
-            .collect()?;
-
-        // Create the mask after collecting the filtered DataFrame
-        let x_values = filtered_df.column(&x_column)?.f64()?;
-        let y_values = filtered_df.column(&y_column)?.f64()?;
-        let mut mask = Vec::with_capacity(filtered_df.height());
-
-        // Initialize progress bar
-        let pb = ProgressBar::new(filtered_df.height() as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template(&format!(
-                    "Filtering with {} [{{bar:40.cyan/blue}}] {{pos}}/{{len}} ({{eta}})",
-                    self.polygon.name
-                ))
-                .expect("Failed to create progress style")
-                .progress_chars("#>-"),
-        );
-
-        for (x_value, y_value) in x_values.into_iter().zip(y_values) {
-            let inside = match (x_value, y_value) {
-                (Some(x), Some(y)) => polygon.is_inside(x, y),
-                _ => false,
-            };
-            mask.push(inside);
-            pb.inc(1); // Increment the progress bar
-        }
-        pb.finish();
-
-        // Create a boolean column from the mask
-        let mask_series = BooleanChunked::from_slice("mask".into(), &mask).into_series();
-
-        // Create a new DataFrame with the mask column
-        let mut df_with_mask = DataFrame::default();
-        df_with_mask.with_column(mask_series)?;
-
-        let lf_with_mask = df_with_mask.lazy();
-
-        let args = UnionArgs::default();
-        let final_filtered_lf = concat_lf_horizontal(&[filtered_lf, lf_with_mask], args)?;
-
-        let final_filtered_lf = final_filtered_lf.filter(col("mask").eq(lit(true)));
-        let final_filtered_lf = final_filtered_lf.drop(["mask"]);
-
-        Ok(final_filtered_lf)
-    }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct HistogramCuts {
-    pub cuts: Vec<Cut>,
-    pub x_column: String,
-    pub y_column: String,
+// Struct to hold each parsed condition
+#[derive(Debug)]
+pub struct ParsedCondition {
+    pub column_name: String,
+    pub operator: String,
+    pub literal_value: f64,
 }
 
-impl Default for HistogramCuts {
-    fn default() -> Self {
-        HistogramCuts {
-            cuts: vec![],
-            x_column: "".to_string(),
-            y_column: "".to_string(),
-        }
-    }
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct Cut1D {
+    pub name: String,
+    pub expression: String, // Logical expression to evaluate, e.g., "X1 != -1e6 & X2 == -1e6"
 }
 
-impl HistogramCuts {
-    pub fn new_cut(&mut self) {
-        // make all the polygons not have interactive clicking
-        for cut in &mut self.cuts {
-            cut.polygon.interactive_clicking = false;
-        }
-
-        // get index of the last cut for the default name
-        let index = self.cuts.len();
-        let default_name = format!("cut_{}", index);
-        let new_cut = EguiPolygon::new(&default_name);
-
-        let new_cut = Cut {
-            polygon: new_cut,
-            x_column: "".to_string(),
-            y_column: "".to_string(),
-        };
-        self.cuts.push(new_cut);
-    }
-
-    pub fn is_dragging(&self) -> bool {
-        for cut in &self.cuts {
-            if cut.polygon.is_dragging {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn sycronize_column_names(&mut self) {
-        for cut in &mut self.cuts {
-            cut.x_column.clone_from(&self.x_column);
-            cut.y_column.clone_from(&self.y_column);
+impl Cut1D {
+    pub fn new(name: &str, expression: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            expression: expression.to_string(),
         }
     }
 
-    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
-        for cut in &mut self.cuts {
-            cut.polygon.draw(plot_ui);
-        }
-    }
-
-    pub fn interactive_response(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
-        for cuts in &mut self.cuts {
-            cuts.polygon.handle_interactions(plot_response);
-        }
+    pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>) {
+        row.col(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.name)
+                    .hint_text("Name")
+                    .clip_text(false),
+            );
+        });
+        row.col(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.expression)
+                    .hint_text("Expression")
+                    .clip_text(false),
+            );
+        });
     }
 
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.heading("Cuts");
-            if ui.button("Add Cut").clicked() {
-                self.new_cut();
-            }
-        });
+        ui.add(
+            egui::TextEdit::singleline(&mut self.name)
+                .hint_text("Name")
+                .clip_text(false),
+        );
 
-        ui.horizontal(|ui| {
-            ui.label("X Column");
-            ui.text_edit_singleline(&mut self.x_column);
-        });
+        ui.add(
+            egui::TextEdit::singleline(&mut self.expression)
+                .hint_text("Expression")
+                .clip_text(false),
+        );
+    }
 
-        ui.horizontal(|ui| {
-            ui.label("Y Column");
-            ui.text_edit_singleline(&mut self.y_column);
-        });
+    // Function to parse and return each condition as a vector of ParsedCondition structs
+    pub fn parse_conditions(&self) -> Vec<ParsedCondition> {
+        // Regex pattern to match "<column> <operator> <literal>"
+        let condition_re =
+            Regex::new(r"(?P<column>\w+)\s*(?P<op>>=|<=|!=|==|>|<)\s*(?P<value>-?\d+(\.\d+)?)")
+                .unwrap();
 
-        self.sycronize_column_names();
+        let mut conditions = Vec::new();
 
-        let mut index_to_remove = None;
-        for (index, cut) in self.cuts.iter_mut().enumerate() {
-            ui.horizontal(|ui| {
-                if ui.button("🗙").clicked() {
-                    index_to_remove = Some(index);
-                }
+        // Find all matches in the expression and parse them
+        for caps in condition_re.captures_iter(&self.expression) {
+            // Extract the column name, operator, and value from the regex groups
+            let column_name = caps["column"].to_string();
+            let operator = caps["op"].to_string();
+            let literal_value: f64 = caps["value"].parse().unwrap();
 
-                ui.separator();
-
-                cut.menu_button(ui);
+            // Add the parsed condition to the vector
+            conditions.push(ParsedCondition {
+                column_name,
+                operator,
+                literal_value,
             });
         }
 
-        if let Some(index) = index_to_remove {
-            self.cuts.remove(index);
-        }
+        println!("Parsed conditions: {:?}", conditions);
+
+        conditions
+    }
+
+    pub fn valid(&self, df: &DataFrame, row_idx: usize) -> bool {
+        self.parse_conditions();
+        false
+        // // Attempt to retrieve the x and y column values for the specified row
+        // if let (Ok(cut_x_values), Ok(cut_y_values)) = (
+        //     df.column(&self.x_column).and_then(|c| c.f64()),
+        //     df.column(&self.y_column).and_then(|c| c.f64()),
+        // ) {
+        //     // Retrieve the x and y values for the given row index
+        //     if let (Some(cut_x), Some(cut_y)) = (
+        //         cut_x_values.get(row_idx),
+        //         cut_y_values.get(row_idx),
+        //     ) {
+        //         // Check if the point (cut_x, cut_y) is inside the polygon
+        //         return self.is_inside(cut_x, cut_y);
+        //     }
+        // }
+        // // Return false if columns or row data were not found or if point is not inside polygon
+        // false
     }
 }

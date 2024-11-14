@@ -1,4 +1,6 @@
-use crate::cutter::cuts::HistogramCuts;
+// use crate::cutter::Cut::HistogramCut;
+use crate::cutter::cuts::Cut;
+
 use crate::egui_plot_stuff::egui_plot_settings::EguiPlotSettings;
 
 use super::colormaps::{ColorMap, ColormapOptions};
@@ -9,7 +11,7 @@ pub struct PlotSettings {
     #[serde(skip)]
     pub cursor_position: Option<egui_plot::PlotPoint>,
     pub egui_settings: EguiPlotSettings,
-    pub cuts: HistogramCuts,
+    pub cuts: Cut,
     pub stats_info: bool,
     pub colormap: ColorMap,
     pub colormap_options: ColormapOptions,
@@ -27,7 +29,7 @@ impl Default for PlotSettings {
         PlotSettings {
             cursor_position: None,
             egui_settings: EguiPlotSettings::default(),
-            cuts: HistogramCuts::default(),
+            cuts: Cut::default(),
             stats_info: false,
             colormap: ColorMap::default(),
             colormap_options: ColormapOptions::default(),
@@ -61,12 +63,12 @@ impl PlotSettings {
 
         self.cuts.menu_button(ui);
 
-        // if any cuts are active temp disable double clicking to reset
-        self.egui_settings.allow_double_click_reset = !self
-            .cuts
-            .cuts
-            .iter()
-            .any(|cut| cut.polygon.interactive_clicking);
+        // if any Cut are active temp disable double clicking to reset
+        // self.egui_settings.allow_double_click_reset = !self
+        //     .Cut
+        //     .Cut
+        //     .iter()
+        //     .any(|cut| cut.polygon.interactive_clicking);
     }
 
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {

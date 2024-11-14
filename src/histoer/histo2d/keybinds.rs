@@ -9,7 +9,7 @@ impl Histogram2D {
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::C)) {
-                self.plot_settings.cuts.new_cut();
+                self.plot_settings.cuts.new_2d_cut();
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::X)) {
