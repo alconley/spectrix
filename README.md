@@ -59,7 +59,7 @@ On Fedora Rawhide you need to run:
 
 ## Overview
 
-Spectrix program reads in `.parquet` files using the [Polars](https://docs.rs/polars/latest/polars/) crate. Personally, the .parquet files that I use are from [Eventbuilder](https://github.com/alconley/Eventbuilder). Here the parquet files are a dataframe (similar to a root tree) that stores the raw data as an f64. The histograms are calculated off the file "src/histogram_scripter/manual_histogram_script.rs". This file can be easily modified to calculate different histograms. There is also an option to modify/add/remove histograms from the gui. I want to rework this in the future to make it so everything can be configured from the ui, but for now the file "src/histogram_scripter/configure_lazyframes.rs" would have to be adjusted if you want to use this. To change between the manual and gui script, just check the box in the Histogram Script panel.
+Spectrix program reads in `.parquet` files using the [Polars](https://docs.rs/polars/latest/polars/) crate. Personally, the .parquet files that I use are from [Eventbuilder](https://github.com/alconley/Eventbuilder). Here the parquet files are a dataframe (similar to a root tree) that stores the raw data as an f64. The histograms can be configured in the right panel in the ui. New column creation/cuts can also be done in the ui.
 
 Additionally, the user can read in a 1D and 2D histograms from a root file using the python package: uproot. The user has to select "Root Files" in the Workspace for the files to appear in the gui. If there is an issure reading root files/additional requests let me know and I can try to add them. In the future, I would like to have the option to read in a root tree, and perform histogramming. However, for now, a root tree can be easily converted to a the parquet format using [hep-convert](https://hepconvert.readthedocs.io/en/latest/root_to_parquet.html).
 
@@ -126,30 +126,3 @@ Keybinds (cursor must be in the plot):
 - Different Colormaps with that can be reversed, log norm, and adjustable Z range
 - Easy to draw cut/gates
 - Rebinning
-
-### Cutting/Gating Data
-
-A powerful feature of this program is the ability to filter data using cuts or gates on a 2D histogram. This is done by drawing a polygon around the region of interest, saving the file, and then loading it into the program through the side panel. When you calculate histograms with cuts, a boolean mask is created to filter the data in the underlying lazy frame based on the columns provided by the user. This option is only availiable with parquet files.
-
-#### Steps to Create a Cut/Gate
-
-1. **Draw a Polygon**: Use the interactive UI to draw a polygon around the region of interest on the 2D histogram. This can be activated by right-clicking on the plot and selecting the "Add Cut" button or pressing "c". To place vertices of the polygon, click around the data of interest. Double-click the final point to complete the polygon. The vertices can be moved using left mouse button.
-
-2. **Save and Load the Cut**: Once the polygon is drawn, either save the cut somewhere on your computer and load it or hit the "Retrieve Active Cuts" button in the info panel. 
-
-3. **Filter the Lazy Frame**: A boolean mask will be computed for the specified columns (the user must specify which columns to filter). The entire lazy frame will be filtered using this boolean mask. Multiple cuts can be used; just ensure they are activated (this might be broken right now).
-
-Here is an example of filtering our data using a particle identification 2D histogram. In the example, I select all the data that corresponds to the protons.
-
-
-### Projecting Data
-
-Another useful feature of the 2D histogram is the ability to project data along the X or Y axis to create 1D histograms. This allows for analysis of data distribution along a particular axis.
-
-#### Steps to Create a Projection
-
-1. **Activate Projection**: To create a projection, right-click on the 2D histogram and select "Add X Projection" (keybind: x) or "Add Y Projection" (keybind: y).
-
-2. **Adjust Projection Lines**: Once the projection is activated, lines will appear on the histogram indicating the range of the projection. These lines can be moved using the left mouse button to select the desired range.
-
-3. **View and Use the Projection**: The projection will generate a 1D histogram based on the selected range. This 1D histogram can be used for further analysis, such as fitting peaks.

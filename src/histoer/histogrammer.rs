@@ -403,41 +403,6 @@ impl Histogrammer {
                     if let Ok(df) = lf_selected.collect() {
                         let height = df.height();
 
-                        // // Parallel filling of histograms
-                        // hist1d_map.par_iter().for_each(|(hist, meta)| {
-                        //     if let Ok(col_idx) = df.column(&meta.column_name) {
-                        //         if let Ok(col_values) = col_idx.f64() {
-                        //             let mut hist = hist.lock().unwrap();
-                        //             for value in col_values.into_no_null_iter() {
-                        //                 if value == -1e6 {
-                        //                     continue;
-                        //                 }
-
-                        //                 hist.fill(value);
-                        //             }
-                        //         }
-                        //     }
-                        // });
-
-                        // hist2d_map.par_iter().for_each(|(hist, meta)| {
-                        //     if let (Ok(x_values), Ok(y_values)) = (
-                        //         df.column(&meta.x_column_name).and_then(|c| c.f64()),
-                        //         df.column(&meta.y_column_name).and_then(|c| c.f64()),
-                        //     ) {
-                        //         let mut hist = hist.lock().unwrap();
-                        //         for (x, y) in x_values
-                        //             .into_no_null_iter()
-                        //             .zip(y_values.into_no_null_iter())
-                        //         {
-                        //             if x == -1e6 || y == -1e6 {
-                        //                 continue;
-                        //             }
-
-                        //             hist.fill(x, y);
-                        //         }
-                        //     }
-                        // });
-
                         // Parallel filling of 1D histograms
                         hist1d_map.par_iter().for_each(|(hist, meta)| {
                             if let Ok(col_idx) = df.column(&meta.column_name) {

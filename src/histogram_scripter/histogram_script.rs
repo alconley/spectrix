@@ -5,16 +5,33 @@ use crate::cutter::cuts::Cut;
 use crate::histoer::histogrammer::{Histo1DConfig, Histo2DConfig, Histogrammer};
 use egui_extras::{Column, TableBuilder};
 use polars::prelude::*;
+use rfd::FileDialog;
+use serde_json;
+use std::fs::File;
+use std::io::{self, BufReader, BufWriter};
+
+// Enum for sorting options
+#[derive(Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, Default)]
+pub enum SortOrder {
+    #[default]
+    Name,
+    Column,
+    Type, // 1D or 2D
+}
 
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct HistogramScript {
     pub hist_configs: Vec<HistoConfig>, // Unified vector for both 1D and 2D configurations
     pub new_columns: Vec<(String, String)>,
     pub cuts: Vec<Cut>,
+    #[serde(skip)]
+    pub sort_order: SortOrder,
+    #[serde(skip)]
+    pub reverse_sort: bool,
 }
 
 // Enum to encapsulate 1D and 2D histogram configurations
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize, Debug)]
 pub enum HistoConfig {
     Histo1D(Histo1DConfig),
     Histo2D(Histo2DConfig),
@@ -26,6 +43,62 @@ impl HistogramScript {
             hist_configs: vec![],
             new_columns: vec![],
             cuts: vec![],
+            sort_order: SortOrder::default(),
+            reverse_sort: false,
+        }
+    }
+
+    // Helper function to check if a histogram with the given name already exists
+    fn histogram_exists(&self, name: &str) -> bool {
+        self.hist_configs.iter().any(|config| match config {
+            HistoConfig::Histo1D(hist) => hist.name == name,
+            HistoConfig::Histo2D(hist) => hist.name == name,
+        })
+    }
+
+    // Helper function to check if a column with the given alias already exists
+    fn column_exists(&self, alias: &str) -> bool {
+        self.new_columns
+            .iter()
+            .any(|(_, col_alias)| col_alias == alias)
+    }
+
+    // Sorting logic based on the selected SortOrder and reverse_sort flag
+    fn sort_histograms(&mut self) {
+        match self.sort_order {
+            SortOrder::Name => {
+                self.hist_configs.sort_by(|a, b| match (a, b) {
+                    (HistoConfig::Histo1D(h1), HistoConfig::Histo1D(h2)) => h1.name.cmp(&h2.name),
+                    (HistoConfig::Histo2D(h1), HistoConfig::Histo2D(h2)) => h1.name.cmp(&h2.name),
+                    _ => std::cmp::Ordering::Equal,
+                });
+            }
+            SortOrder::Column => {
+                self.hist_configs.sort_by(|a, b| match (a, b) {
+                    (HistoConfig::Histo1D(h1), HistoConfig::Histo1D(h2)) => {
+                        h1.column_name.cmp(&h2.column_name)
+                    }
+                    (HistoConfig::Histo2D(h1), HistoConfig::Histo2D(h2)) => h1
+                        .x_column_name
+                        .cmp(&h2.x_column_name)
+                        .then_with(|| h1.y_column_name.cmp(&h2.y_column_name)),
+                    _ => std::cmp::Ordering::Equal,
+                });
+            }
+            SortOrder::Type => {
+                self.hist_configs.sort_by(|a, b| match (a, b) {
+                    (HistoConfig::Histo1D(_), HistoConfig::Histo2D(_)) => std::cmp::Ordering::Less,
+                    (HistoConfig::Histo2D(_), HistoConfig::Histo1D(_)) => {
+                        std::cmp::Ordering::Greater
+                    }
+                    _ => std::cmp::Ordering::Equal,
+                });
+            }
+        }
+
+        // Reverse the order if reverse_sort is true
+        if self.reverse_sort {
+            self.hist_configs.reverse();
         }
     }
 
@@ -34,8 +107,42 @@ impl HistogramScript {
         ui.horizontal(|ui| {
             if ui.button("SE-SPS").clicked() {
                 let (columns, histograms) = sps_histograms();
-                self.hist_configs = histograms;
-                self.new_columns = columns;
+                for histogram in histograms {
+                    match &histogram {
+                        HistoConfig::Histo1D(histo1d) => {
+                            if !self.histogram_exists(&histo1d.name) {
+                                self.hist_configs
+                                    .push(HistoConfig::Histo1D(histo1d.clone()));
+                            }
+                        }
+                        HistoConfig::Histo2D(histo2d) => {
+                            if !self.histogram_exists(&histo2d.name) {
+                                self.hist_configs
+                                    .push(HistoConfig::Histo2D(histo2d.clone()));
+                            }
+                        }
+                    }
+                }
+
+                // Only add columns if the alias is unique
+                for (expression, alias) in columns {
+                    if !self.column_exists(&alias) {
+                        self.new_columns.push((expression, alias));
+                    }
+                }
+            }
+
+            ui.separator();
+
+            if ui.button("Save Script").clicked() {
+                if let Err(e) = self.save_histogram_script() {
+                    log::error!("Failed to save script: {}", e);
+                }
+            }
+            if ui.button("Load Script").clicked() {
+                if let Err(e) = self.load_histogram_script() {
+                    log::error!("Failed to load script: {}", e);
+                }
             }
         });
 
@@ -152,6 +259,38 @@ impl HistogramScript {
                 for &index in indices_to_remove_cut.iter().rev() {
                     self.cuts.remove(index);
                 }
+
+                // Buttons to apply cuts to all histograms or remove all cuts from histograms
+                ui.horizontal(|ui| {
+                    if ui.button("Apply").clicked() {
+                        for config in &mut self.hist_configs {
+                            match config {
+                                HistoConfig::Histo1D(hist) => {
+                                    hist.cuts = self.cuts.clone(); // Apply all cuts to 1D histograms
+                                }
+                                HistoConfig::Histo2D(hist) => {
+                                    hist.cuts = self.cuts.clone(); // Apply all cuts to 2D histograms
+                                }
+                            }
+                        }
+                    }
+                    ui.label("/");
+
+                    if ui.button("Remove").clicked() {
+                        for config in &mut self.hist_configs {
+                            match config {
+                                HistoConfig::Histo1D(hist) => {
+                                    hist.cuts.clear(); // Clear all cuts from 1D histograms
+                                }
+                                HistoConfig::Histo2D(hist) => {
+                                    hist.cuts.clear(); // Clear all cuts from 2D histograms
+                                }
+                            }
+                        }
+                    }
+
+                    ui.label(" all cuts on histograms");
+                });
             }
 
             ui.separator();
@@ -222,6 +361,26 @@ impl HistogramScript {
             ui.separator();
 
             ui.heading("Histograms");
+
+            // Sorting controls
+            ui.horizontal(|ui| {
+                ui.label("Sort by:");
+                if ui.button("Name").clicked() {
+                    self.sort_order = SortOrder::Name;
+                    self.reverse_sort = !self.reverse_sort;
+                    self.sort_histograms();
+                }
+                if ui.button("Column").clicked() {
+                    self.sort_order = SortOrder::Column;
+                    self.reverse_sort = !self.reverse_sort;
+                    self.sort_histograms();
+                }
+                if ui.button("Type").clicked() {
+                    self.sort_order = SortOrder::Type;
+                    self.reverse_sort = !self.reverse_sort;
+                    self.sort_histograms();
+                }
+            });
 
             let mut indices_to_remove = Vec::new();
 
@@ -463,22 +622,220 @@ impl HistogramScript {
         });
     }
 
+    pub fn save_histogram_script(&self) -> io::Result<()> {
+        if let Some(path) = FileDialog::new()
+            .set_title("Save Histogram Script")
+            .save_file()
+        {
+            let file = File::create(path)?;
+            let writer = BufWriter::new(file);
+            serde_json::to_writer(writer, &self)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        } else {
+            Ok(()) // User canceled, return Ok
+        }
+    }
+
+    // Function to load histogram configuration from a JSON file
+    pub fn load_histogram_script(&mut self) -> io::Result<()> {
+        if let Some(path) = FileDialog::new()
+            .set_title("Load Histogram Script")
+            .pick_file()
+        {
+            let file = File::open(path)?;
+            let reader = BufReader::new(file);
+            *self = serde_json::from_reader(reader)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        }
+        Ok(())
+    }
+
     pub fn add_histograms(&mut self, h: &mut Histogrammer, lf: LazyFrame) {
-        // form the 1d and 2d histo congifurations vecs
         let mut histo1d_configs = Vec::new();
         let mut histo2d_configs = Vec::new();
 
-        for config in self.hist_configs.iter() {
+        let range_re = regex::Regex::new(r"\{(\d+)-(\d+)\}").unwrap();
+        // Regex for range pattern `{start-end}`
+
+        let list_re = regex::Regex::new(r"\{([\d,]+)\}").unwrap();
+        // Regex for discrete comma-separated values `{val1,val2,...}`
+
+        for config in &self.hist_configs {
             match config {
+                // 1D Histogram Configuration
                 HistoConfig::Histo1D(histo1d) => {
-                    histo1d_configs.push(histo1d.clone());
+                    if histo1d.calculate {
+                        if histo1d.name.contains("{}") {
+                            // name has {} and column_name has a range pattern
+                            if let Some(caps) = range_re.captures(&histo1d.column_name) {
+                                let start: usize = caps[1].parse().unwrap();
+                                let end: usize = caps[2].parse().unwrap();
+
+                                // Loop through start and end values
+                                for i in start..=end {
+                                    let mut new_config = histo1d.clone();
+                                    new_config.name =
+                                        histo1d.name.replace("{}", &i.to_string()).to_string();
+                                    new_config.column_name = range_re
+                                        .replace(&histo1d.column_name, i.to_string())
+                                        .to_string();
+                                    histo1d_configs.push(new_config);
+                                }
+                            }
+                            // name has {} and column_name has a list pattern
+                            else if let Some(caps) = list_re.captures(&histo1d.column_name) {
+                                // Split comma-separated values and loop over them
+                                let values: Vec<&str> = caps[1].split(',').collect();
+                                for val in values {
+                                    let mut new_config = histo1d.clone();
+                                    new_config.name = histo1d.name.replace("{}", val).to_string();
+                                    new_config.column_name =
+                                        list_re.replace(&histo1d.column_name, val).to_string();
+                                    histo1d_configs.push(new_config);
+                                }
+                            // Unsupported pattern
+                            } else {
+                                log::error!(
+                                    "Warning: Unsupported pattern for 1D histogram with name '{}', column '{}'",
+                                    histo1d.name, histo1d.column_name
+                                );
+                            }
+                        } else {
+                            // No {} in name, but column_name has a range pattern
+                            if let Some(caps) = range_re.captures(&histo1d.column_name) {
+                                let start: usize = caps[1].parse().unwrap();
+                                let end: usize = caps[2].parse().unwrap();
+
+                                for i in start..=end {
+                                    let mut new_config = histo1d.clone();
+                                    new_config.column_name = range_re
+                                        .replace(&histo1d.column_name, i.to_string())
+                                        .to_string();
+                                    histo1d_configs.push(new_config);
+                                }
+                            }
+                            // No {} in name, but column_name has a list pattern
+                            else if let Some(caps) = list_re.captures(&histo1d.column_name) {
+                                let values: Vec<&str> = caps[1].split(',').collect();
+                                for val in values {
+                                    let mut new_config = histo1d.clone();
+                                    new_config.column_name =
+                                        list_re.replace(&histo1d.column_name, val).to_string();
+                                    histo1d_configs.push(new_config);
+                                }
+                            // No {} in name or column_name i.e. a normal configuration
+                            } else {
+                                histo1d_configs.push(histo1d.clone());
+                            }
+                        }
+                    }
                 }
+
+                // 2D Histogram Configuration
                 HistoConfig::Histo2D(histo2d) => {
-                    histo2d_configs.push(histo2d.clone());
+                    if histo2d.calculate {
+                        if histo2d.name.contains("{}") {
+                            // Case 1: `{}` in `name`, `x_column_name` has a pattern
+                            if let Some(caps) = range_re.captures(&histo2d.x_column_name) {
+                                let start: usize = caps[1].parse().unwrap();
+                                let end: usize = caps[2].parse().unwrap();
+                                for i in start..=end {
+                                    let mut new_config = histo2d.clone();
+                                    new_config.name = histo2d.name.replace("{}", &i.to_string());
+                                    new_config.x_column_name = range_re
+                                        .replace(&histo2d.x_column_name, i.to_string())
+                                        .to_string();
+                                    new_config.y_column_name = histo2d.y_column_name.clone();
+                                    histo2d_configs.push(new_config);
+                                }
+                            } else if let Some(caps) = list_re.captures(&histo2d.x_column_name) {
+                                let values: Vec<&str> = caps[1].split(',').collect();
+                                for val in values {
+                                    let mut new_config = histo2d.clone();
+                                    new_config.name = histo2d.name.replace("{}", val);
+                                    new_config.x_column_name =
+                                        list_re.replace(&histo2d.x_column_name, val).to_string();
+                                    new_config.y_column_name = histo2d.y_column_name.clone();
+                                    histo2d_configs.push(new_config);
+                                }
+                            }
+                            // Case 2: `{}` in `name`, `y_column_name` has a pattern
+                            else if let Some(caps) = range_re.captures(&histo2d.y_column_name) {
+                                let start: usize = caps[1].parse().unwrap();
+                                let end: usize = caps[2].parse().unwrap();
+                                for i in start..=end {
+                                    let mut new_config = histo2d.clone();
+                                    new_config.name = histo2d.name.replace("{}", &i.to_string());
+                                    new_config.x_column_name = histo2d.x_column_name.clone();
+                                    new_config.y_column_name = range_re
+                                        .replace(&histo2d.y_column_name, i.to_string())
+                                        .to_string();
+                                    histo2d_configs.push(new_config);
+                                }
+                            } else if let Some(caps) = list_re.captures(&histo2d.y_column_name) {
+                                let values: Vec<&str> = caps[1].split(',').collect();
+                                for val in values {
+                                    let mut new_config = histo2d.clone();
+                                    new_config.name = histo2d.name.replace("{}", val);
+                                    new_config.x_column_name = histo2d.x_column_name.clone();
+                                    new_config.y_column_name =
+                                        list_re.replace(&histo2d.y_column_name, val).to_string();
+                                    histo2d_configs.push(new_config);
+                                }
+                            } else {
+                                log::error!(
+                                "Warning: Unsupported pattern for 2D histogram with name '{}', x_column '{}', y_column '{}'",
+                                histo2d.name, histo2d.x_column_name, histo2d.y_column_name
+                            );
+                            }
+                        } else {
+                            // Static `name`, expand `x_column_name` or `y_column_name` with range or list patterns
+                            if let Some(caps) = range_re.captures(&histo2d.x_column_name) {
+                                let start: usize = caps[1].parse().unwrap();
+                                let end: usize = caps[2].parse().unwrap();
+                                for i in start..=end {
+                                    let mut new_config = histo2d.clone();
+                                    new_config.x_column_name = range_re
+                                        .replace(&histo2d.x_column_name, i.to_string())
+                                        .to_string();
+                                    histo2d_configs.push(new_config);
+                                }
+                            } else if let Some(caps) = list_re.captures(&histo2d.x_column_name) {
+                                let values: Vec<&str> = caps[1].split(',').collect();
+                                for val in values {
+                                    let mut new_config = histo2d.clone();
+                                    new_config.x_column_name =
+                                        list_re.replace(&histo2d.x_column_name, val).to_string();
+                                    histo2d_configs.push(new_config);
+                                }
+                            } else if let Some(caps) = range_re.captures(&histo2d.y_column_name) {
+                                let start: usize = caps[1].parse().unwrap();
+                                let end: usize = caps[2].parse().unwrap();
+                                for i in start..=end {
+                                    let mut new_config = histo2d.clone();
+                                    new_config.y_column_name = range_re
+                                        .replace(&histo2d.y_column_name, i.to_string())
+                                        .to_string();
+                                    histo2d_configs.push(new_config);
+                                }
+                            } else if let Some(caps) = list_re.captures(&histo2d.y_column_name) {
+                                let values: Vec<&str> = caps[1].split(',').collect();
+                                for val in values {
+                                    let mut new_config = histo2d.clone();
+                                    new_config.y_column_name =
+                                        list_re.replace(&histo2d.y_column_name, val).to_string();
+                                    histo2d_configs.push(new_config);
+                                }
+                            } else {
+                                histo2d_configs.push(histo2d.clone());
+                            }
+                        }
+                    }
                 }
             }
         }
 
+        // Pass expanded configurations to fill_histograms
         h.fill_histograms(
             histo1d_configs,
             histo2d_configs,
