@@ -1,7 +1,7 @@
 // use super::configure_auxillary_detectors::AuxillaryDetectors;
 use super::manual_histogram_scripts::sps_histograms;
 
-use crate::cutter::cuts::{Cut, Cut1D, Cut2D};
+use crate::histoer::cuts::{Cut, Cut1D, Cut2D};
 use crate::histoer::histogrammer::{Histo1DConfig, Histo2DConfig, Histogrammer};
 use egui_extras::{Column, TableBuilder};
 use polars::prelude::*;
@@ -185,6 +185,75 @@ impl HistogramScript {
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.horizontal(|ui| {
+                ui.heading("Column Creation");
+
+                if ui.button("+").clicked() {
+                    self.new_columns.push(("".to_string(), "".to_string()));
+                }
+
+                if ui.button("Remove All").clicked() {
+                    self.new_columns.clear();
+                }
+            });
+
+            if !self.new_columns.is_empty() {
+                let mut indices_to_remove_column = Vec::new();
+
+                TableBuilder::new(ui)
+                    .id_salt("new_columns")
+                    .column(Column::auto()) // expression
+                    .column(Column::auto()) // alias
+                    .column(Column::remainder()) // Actions
+                    .striped(true)
+                    .vscroll(false)
+                    .header(20.0, |mut header| {
+                        header.col(|ui| {
+                            ui.label("Alias");
+                        });
+                        header.col(|ui| {
+                            ui.label("Expression");
+                        });
+                    })
+                    .body(|mut body| {
+                        for (index, (expression, alias)) in self.new_columns.iter_mut().enumerate()
+                        {
+                            body.row(18.0, |mut row| {
+                                row.col(|ui| {
+                                    ui.add(
+                                        egui::TextEdit::singleline(alias)
+                                            .hint_text("Alias")
+                                            .clip_text(false),
+                                    );
+                                });
+
+                                row.col(|ui| {
+                                    ui.add(
+                                        egui::TextEdit::singleline(expression)
+                                            .hint_text("Expression")
+                                            .clip_text(false),
+                                    );
+                                });
+
+                                row.col(|ui| {
+                                    ui.horizontal(|ui| {
+                                        if ui.button("X").clicked() {
+                                            indices_to_remove_column.push(index);
+                                        }
+                                    });
+                                });
+                            });
+                        }
+                    });
+
+                // Remove indices in reverse order to prevent shifting issues
+                for &index in indices_to_remove_column.iter().rev() {
+                    self.new_columns.remove(index);
+                }
+            }
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
                 ui.heading("Cuts");
 
                 if ui.button("+1D").clicked() {
@@ -201,6 +270,20 @@ impl HistogramScript {
                         self.cuts.push(Cut::Cut2D(new_cut2d));
                     } else {
                         log::error!("Failed to load 2D cut from file.");
+                    }
+                }
+
+                if ui.button("Remove All").clicked() {
+                    self.cuts.clear();
+                    for hist_config in &mut self.hist_configs {
+                        match hist_config {
+                            HistoConfig::Histo1D(hist1d) => {
+                                hist1d.cuts.clear();
+                            }
+                            HistoConfig::Histo2D(hist2d) => {
+                                hist2d.cuts.clear();
+                            }
+                        }
                     }
                 }
             });
@@ -234,6 +317,9 @@ impl HistogramScript {
                         .header(20.0, |mut header| {
                             header.col(|ui| {
                                 ui.label("Name");
+                            });
+                            header.col(|ui| {
+                                ui.label("Operation(s)");
                             });
                         })
                         .body(|mut body| {
@@ -291,71 +377,6 @@ impl HistogramScript {
 
                 for &index in indices_to_remove_cut.iter().rev() {
                     self.cuts.remove(index);
-                }
-            }
-
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                ui.heading("Column Creation");
-
-                if ui.button("+").clicked() {
-                    self.new_columns.push(("".to_string(), "".to_string()));
-                }
-            });
-
-            if !self.new_columns.is_empty() {
-                let mut indices_to_remove_column = Vec::new();
-
-                TableBuilder::new(ui)
-                    .id_salt("new_columns")
-                    .column(Column::auto()) // expression
-                    .column(Column::auto()) // alias
-                    .column(Column::remainder()) // Actions
-                    .striped(true)
-                    .vscroll(false)
-                    .header(20.0, |mut header| {
-                        header.col(|ui| {
-                            ui.label("Expression");
-                        });
-                        header.col(|ui| {
-                            ui.label("Alias");
-                        });
-                    })
-                    .body(|mut body| {
-                        for (index, (expression, alias)) in self.new_columns.iter_mut().enumerate()
-                        {
-                            body.row(18.0, |mut row| {
-                                row.col(|ui| {
-                                    ui.add(
-                                        egui::TextEdit::singleline(expression)
-                                            .hint_text("Expression")
-                                            .clip_text(false),
-                                    );
-                                });
-
-                                row.col(|ui| {
-                                    ui.add(
-                                        egui::TextEdit::singleline(alias)
-                                            .hint_text("Alias")
-                                            .clip_text(false),
-                                    );
-                                });
-
-                                row.col(|ui| {
-                                    ui.horizontal(|ui| {
-                                        if ui.button("X").clicked() {
-                                            indices_to_remove_column.push(index);
-                                        }
-                                    });
-                                });
-                            });
-                        }
-                    });
-
-                // Remove indices in reverse order to prevent shifting issues
-                for &index in indices_to_remove_column.iter().rev() {
-                    self.new_columns.remove(index);
                 }
             }
 
@@ -665,6 +686,46 @@ impl HistogramScript {
                 self.hist_configs.remove(index);
             }
         });
+
+        self.verify_cuts();
+    }
+
+    fn verify_cuts(&mut self) {
+        // Synchronize cuts after all UI interactions
+        for hist_config in &mut self.hist_configs {
+            match hist_config {
+                HistoConfig::Histo1D(hist1d) => {
+                    for hist_cut in &mut hist1d.cuts {
+                        if let Some(updated_cut) =
+                            self.cuts.iter().find(|cut| cut.name() == hist_cut.name())
+                        {
+                            // Replace the cut if the operation or content has changed
+                            *hist_cut = updated_cut.clone();
+                        }
+                    }
+
+                    // Remove cuts that no longer exist in `self.cuts`
+                    hist1d
+                        .cuts
+                        .retain(|cut| self.cuts.iter().any(|c| c.name() == cut.name()));
+                }
+                HistoConfig::Histo2D(hist2d) => {
+                    for hist_cut in &mut hist2d.cuts {
+                        if let Some(updated_cut) =
+                            self.cuts.iter().find(|cut| cut.name() == hist_cut.name())
+                        {
+                            // Replace the cut if the operation or content has changed
+                            *hist_cut = updated_cut.clone();
+                        }
+                    }
+
+                    // Remove cuts that no longer exist in `self.cuts`
+                    hist2d
+                        .cuts
+                        .retain(|cut| self.cuts.iter().any(|c| c.name() == cut.name()));
+                }
+            }
+        }
     }
 
     pub fn save_histogram_script(&self) -> io::Result<()> {
@@ -876,6 +937,24 @@ impl HistogramScript {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Parse all conditions in histo1d_configs
+        for config in &mut histo1d_configs {
+            for cut in &mut config.cuts {
+                if let Cut::Cut1D(cut1d) = cut {
+                    cut1d.parse_conditions(); // Pre-parse the conditions
+                }
+            }
+        }
+
+        // Parse all conditions in histo2d_configs
+        for config in &mut histo2d_configs {
+            for cut in &mut config.cuts {
+                if let Cut::Cut1D(cut1d) = cut {
+                    cut1d.parse_conditions(); // Pre-parse the conditions
                 }
             }
         }

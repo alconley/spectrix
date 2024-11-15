@@ -1,8 +1,8 @@
+use super::cuts::Cut;
 use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
 use super::tree::TreeBehavior;
-use crate::cutter::cuts::Cut;
 
 use egui_tiles::TileId;
 use fnv::FnvHashMap;
@@ -225,7 +225,7 @@ impl Histogrammer {
         let mut lf = lf.clone();
         for (expression, alias) in new_columns {
             if let Err(e) = Self::add_computed_column(&mut lf, &expression, &alias) {
-                println!("Error adding computed column '{}': {}", alias, e);
+                log::error!("Error adding computed column '{}': {}", alias, e);
             }
         }
         // Wrap `lf` in an `Arc` to safely share it between threads
@@ -243,16 +243,30 @@ impl Histogrammer {
             if h.calculate {
                 let column_exists = available_columns.contains(&h.column_name);
                 if !column_exists {
-                    println!("Warning: Column '{}' does not exist for 1D histogram '{}'. Skipping.", h.column_name, h.name);
+                    log::error!("Warning: Column '{}' does not exist for 1D histogram '{}'. Skipping.", h.column_name, h.name);
                     return false;
                 }
                 for cut in &h.cuts {
                     match cut {
-                        Cut::Cut1D(_) => {
+                        Cut::Cut1D(cut1d) => {
+                            if let Some(conditions) = &cut1d.parsed_conditions {
+                                for condition in conditions {
+                                    if !available_columns.contains(&condition.column_name) {
+                                        log::error!(
+                                            "Warning: Cut column '{}' does not exist for 1D histogram '{}'. Skipping cut.",
+                                            condition.column_name, h.name
+                                        );
+                                        return false;
+                                    }
+                                }
+                            } else {
+                                log::error!("Warning: Failed to parse conditions for 1D cut '{}'. Skipping cut.", h.name);
+                                return false;
+                            }
                         }
-                        Cut::Cut2D(cut) => {
-                            if !available_columns.contains(&cut.x_column) {
-                                println!("Warning: Cut column '{}' does not exist for 1D histogram '{}'. Skipping cut.", cut.x_column, h.name);
+                        Cut::Cut2D(cut2d) => {
+                            if !available_columns.contains(&cut2d.x_column) {
+                                log::error!("Warning: Cut column '{}' does not exist for 1D histogram '{}'. Skipping cut.", cut2d.x_column, h.name);
                                 return false;
                             }
                         }
@@ -268,16 +282,30 @@ impl Histogrammer {
             if h.calculate {
                 let columns_exist = available_columns.contains(&h.x_column_name) && available_columns.contains(&h.y_column_name);
                 if !columns_exist {
-                    println!("Warning: Columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping.", h.x_column_name, h.y_column_name, h.name);
+                    log::error!("Warning: Columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping.", h.x_column_name, h.y_column_name, h.name);
                     return false;
                 }
                 for cut in &h.cuts {
                     match cut {
-                        Cut::Cut1D(_) => {
+                        Cut::Cut1D(cut1d) => {
+                            if let Some(conditions) = &cut1d.parsed_conditions {
+                                for condition in conditions {
+                                    if !available_columns.contains(&condition.column_name) {
+                                        log::error!(
+                                            "Warning: Cut column '{}' does not exist for 1D histogram '{}'. Skipping cut.",
+                                            condition.column_name, h.name
+                                        );
+                                        return false;
+                                    }
+                                }
+                            } else {
+                                log::error!("Warning: Failed to parse conditions for 1D cut '{}'. Skipping cut.", h.name);
+                                return false;
+                            }
                         }
                         Cut::Cut2D(cut) => {
                             if !available_columns.contains(&cut.x_column) || !available_columns.contains(&cut.y_column) {
-                                println!("Warning: Cut columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping cut.", cut.x_column, cut.y_column, h.name);
+                                log::error!("Warning: Cut columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping cut.", cut.x_column, cut.y_column, h.name);
                                 return false;
                             }
                         }
@@ -299,7 +327,11 @@ impl Histogrammer {
         for h in &hist1d_specs {
             for cut in &h.cuts {
                 match cut {
-                    Cut::Cut1D(_) => {}
+                    Cut::Cut1D(cut) => {
+                        for condition in cut.parsed_conditions.as_ref().unwrap() {
+                            column_names.push(condition.column_name.as_str());
+                        }
+                    }
                     Cut::Cut2D(cut) => {
                         column_names.push(cut.x_column.as_str());
                     }
@@ -500,7 +532,7 @@ impl Histogrammer {
                             }
                         });
 
-                        for (hist, meta) in &hist2d_map {
+                        for (hist, _meta) in &hist2d_map {
                             let mut hist = hist.lock().unwrap();
                             // hist.plot_settings.cuts.x_column = meta.x_column_name.clone();
                             // hist.plot_settings.cuts.y_column = meta.y_column_name.clone();

@@ -27,17 +27,10 @@ impl Cut {
     // Method to check if a cut is valid for a specific row in the DataFrame
     pub fn valid(&self, df: &DataFrame, row_idx: usize) -> bool {
         match self {
+            // Cut::Cut1D(cut1d) => cut1d.valid(df, row_idx),
             Cut::Cut1D(cut1d) => cut1d.valid(df, row_idx),
-            Cut::Cut2D(cut2d) => cut2d.valid(df, row_idx),
-        }
-    }
 
-    // Optional: Method to parse conditions if the cut is a Cut1D
-    pub fn parse_conditions(&self) -> Option<Vec<ParsedCondition>> {
-        if let Cut::Cut1D(cut1d) = self {
-            Some(cut1d.parse_conditions())
-        } else {
-            None
+            Cut::Cut2D(cut2d) => cut2d.valid(df, row_idx),
         }
     }
 
@@ -73,6 +66,13 @@ impl Cut {
         match self {
             Cut::Cut1D(cut1d) => cut1d.table_row(row),
             Cut::Cut2D(cut2d) => cut2d.table_row(row),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Cut::Cut1D(cut1d) => &cut1d.name,
+            Cut::Cut2D(cut2d) => &cut2d.polygon.name,
         }
     }
 }
@@ -213,7 +213,7 @@ impl Cut2D {
 }
 
 // Struct to hold each parsed condition
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ParsedCondition {
     pub column_name: String,
     pub operator: String,
@@ -224,6 +224,8 @@ pub struct ParsedCondition {
 pub struct Cut1D {
     pub name: String,
     pub expression: String, // Logical expression to evaluate, e.g., "X1 != -1e6 & X2 == -1e6"
+    #[serde(skip)] // Skip during serialization
+    pub parsed_conditions: Option<Vec<ParsedCondition>>, // Cache parsed conditions
 }
 
 impl Cut1D {
@@ -231,6 +233,7 @@ impl Cut1D {
         Self {
             name: name.to_string(),
             expression: expression.to_string(),
+            parsed_conditions: None,
         }
     }
 
@@ -265,53 +268,73 @@ impl Cut1D {
         );
     }
 
-    // Function to parse and return each condition as a vector of ParsedCondition structs
-    pub fn parse_conditions(&self) -> Vec<ParsedCondition> {
-        // Regex pattern to match "<column> <operator> <literal>"
-        let condition_re =
-            Regex::new(r"(?P<column>\w+)\s*(?P<op>>=|<=|!=|==|>|<)\s*(?P<value>-?\d+(\.\d+)?)")
-                .unwrap();
+    // Parse and cache conditions
+    pub fn parse_conditions(&mut self) {
+        self.parsed_conditions = None; // Reset parsed conditions
+
+        let condition_re = Regex::new(
+            r"(?P<column>\w+)\s*(?P<op>>=|<=|!=|==|>|<)\s*(?P<value>-?\d+(\.\d+)?(e-?\d+)?|nan|inf)"
+        ).unwrap();
 
         let mut conditions = Vec::new();
-
-        // Find all matches in the expression and parse them
         for caps in condition_re.captures_iter(&self.expression) {
-            // Extract the column name, operator, and value from the regex groups
             let column_name = caps["column"].to_string();
             let operator = caps["op"].to_string();
             let literal_value: f64 = caps["value"].parse().unwrap();
 
-            // Add the parsed condition to the vector
             conditions.push(ParsedCondition {
                 column_name,
                 operator,
                 literal_value,
             });
         }
+        self.parsed_conditions = Some(conditions);
 
-        println!("Parsed conditions: {:?}", conditions);
-
-        conditions
+        log::info!("Parsed conditions: {:?}", self.parsed_conditions);
     }
 
+    // Validate a row using cached conditions
     pub fn valid(&self, df: &DataFrame, row_idx: usize) -> bool {
-        self.parse_conditions();
-        false
-        // // Attempt to retrieve the x and y column values for the specified row
-        // if let (Ok(cut_x_values), Ok(cut_y_values)) = (
-        //     df.column(&self.x_column).and_then(|c| c.f64()),
-        //     df.column(&self.y_column).and_then(|c| c.f64()),
-        // ) {
-        //     // Retrieve the x and y values for the given row index
-        //     if let (Some(cut_x), Some(cut_y)) = (
-        //         cut_x_values.get(row_idx),
-        //         cut_y_values.get(row_idx),
-        //     ) {
-        //         // Check if the point (cut_x, cut_y) is inside the polygon
-        //         return self.is_inside(cut_x, cut_y);
-        //     }
-        // }
-        // // Return false if columns or row data were not found or if point is not inside polygon
-        // false
+        if let Some(conditions) = &self.parsed_conditions {
+            // Iterate through all parsed conditions
+            for condition in conditions {
+                if let Ok(column) = df.column(&condition.column_name).and_then(|c| c.f64()) {
+                    if let Some(value) = column.get(row_idx) {
+                        match condition.operator.as_str() {
+                            ">" => if value.partial_cmp(&condition.literal_value) != Some(std::cmp::Ordering::Greater) {
+                                return false;
+                            },
+                            "<" => if value.partial_cmp(&condition.literal_value) != Some(std::cmp::Ordering::Less) {
+                                return false;
+                            },
+                            ">=" => if value.partial_cmp(&condition.literal_value) == Some(std::cmp::Ordering::Less) {
+                                return false;
+                            },
+                            "<=" => if value.partial_cmp(&condition.literal_value) == Some(std::cmp::Ordering::Greater) {
+                                return false;
+                            },
+                            "==" => if value.partial_cmp(&condition.literal_value) != Some(std::cmp::Ordering::Equal) {
+                                return false;
+                            },
+                            "!=" => if value.partial_cmp(&condition.literal_value) == Some(std::cmp::Ordering::Equal) {
+                                return false;
+                            },
+                            _ => {
+                                log::error!("Unknown operator: {}", condition.operator);
+                                return false;
+                            }
+                        }                        
+                    } else {
+                        return false; // Missing value for row
+                    }
+                } else {
+                    log::error!("Column not found: {}", condition.column_name);
+                    return false; // Missing column
+                }
+            }
+            true // All conditions passed
+        } else {
+            false // Parsing failed or was not performed
+        }
     }
 }

@@ -1,5 +1,5 @@
 // use crate::cutter::Cut::HistogramCut;
-use crate::cutter::cuts::Cut;
+use crate::histoer::cuts::Cut;
 
 use crate::egui_plot_stuff::egui_plot_settings::EguiPlotSettings;
 
