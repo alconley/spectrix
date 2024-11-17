@@ -149,39 +149,6 @@ impl HistogramScript {
         ui.separator();
 
         // Add header controls
-        ui.horizontal(|ui| {
-            if ui.button("Add 1D Histogram").clicked() {
-                self.hist_configs.push(HistoConfig::Histo1D(Histo1DConfig {
-                    name: "".to_string(),
-                    column_name: "".to_string(),
-                    range: (0.0, 4096.0),
-                    bins: 512,
-                    cuts: vec![],
-                    calculate: true,
-                }));
-            }
-
-            if ui.button("Add 2D Histogram").clicked() {
-                self.hist_configs.push(HistoConfig::Histo2D(Histo2DConfig {
-                    name: "".to_string(),
-                    x_column_name: "".to_string(),
-                    y_column_name: "".to_string(),
-                    x_range: (0.0, 4096.0),
-                    y_range: (0.0, 4096.0),
-                    bins: (512, 512),
-                    cuts: vec![],
-                    calculate: true,
-                }));
-            }
-
-            ui.separator();
-
-            if ui.button("Remove All").clicked() {
-                self.hist_configs.clear();
-            }
-        });
-
-        ui.separator();
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -190,6 +157,8 @@ impl HistogramScript {
                 if ui.button("+").clicked() {
                     self.new_columns.push(("".to_string(), "".to_string()));
                 }
+
+                ui.separator();
 
                 if ui.button("Remove All").clicked() {
                     self.new_columns.clear();
@@ -273,6 +242,8 @@ impl HistogramScript {
                     }
                 }
 
+                ui.separator();
+
                 if ui.button("Remove All").clicked() {
                     self.cuts.clear();
                     for hist_config in &mut self.hist_configs {
@@ -288,9 +259,7 @@ impl HistogramScript {
                 }
             });
 
-            if self.cuts.is_empty() {
-                ui.label("No cuts loaded");
-            } else {
+            if !self.cuts.is_empty() {
                 let mut indices_to_remove_cut = Vec::new();
 
                 let mut cuts_1d = Vec::new();
@@ -382,7 +351,39 @@ impl HistogramScript {
 
             ui.separator();
 
-            ui.heading("Histograms");
+            ui.horizontal(|ui| {
+                ui.heading("Histograms");
+
+                if ui.button("+1D").clicked() {
+                    self.hist_configs.push(HistoConfig::Histo1D(Histo1DConfig {
+                        name: "".to_string(),
+                        column_name: "".to_string(),
+                        range: (0.0, 4096.0),
+                        bins: 512,
+                        cuts: vec![],
+                        calculate: true,
+                    }));
+                }
+
+                if ui.button("+2D").clicked() {
+                    self.hist_configs.push(HistoConfig::Histo2D(Histo2DConfig {
+                        name: "".to_string(),
+                        x_column_name: "".to_string(),
+                        y_column_name: "".to_string(),
+                        x_range: (0.0, 4096.0),
+                        y_range: (0.0, 4096.0),
+                        bins: (512, 512),
+                        cuts: vec![],
+                        calculate: true,
+                    }));
+                }
+
+                ui.separator();
+
+                if ui.button("Remove All").clicked() {
+                    self.hist_configs.clear();
+                }
+            });
 
             // Sorting controls
             ui.horizontal(|ui| {

@@ -45,13 +45,6 @@ impl eframe::App for Spectrix {
 
                 ui.separator();
 
-                ui.menu_button("Panels", |ui| {
-                    ui.checkbox(&mut self.left_side_panel_open, "Info Panel");
-                    ui.checkbox(&mut self.right_side_panel_open, "Histogram Script");
-                });
-
-                ui.separator();
-
                 if ui.button("Reset").clicked() {
                     self.processer.reset();
                 }
@@ -70,10 +63,54 @@ impl eframe::App for Spectrix {
             },
         );
 
-        egui::SidePanel::right("spectrix_right_panel")
-            // .resizable(false)
-            .show_animated(ctx, self.right_side_panel_open, |ui| {
+        // Secondary left panel for the toggle button
+        egui::SidePanel::left("spectrix_toggle_left_panel")
+            .resizable(false)
+            .show_separator_line(false)
+            .min_width(1.0)
+            .show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    ui.add_space(ui.available_height() / 2.0 - 10.0); // Center the button vertically
+                    if ui
+                        .small_button(if self.left_side_panel_open {
+                            "◀"
+                        } else {
+                            "▶"
+                        })
+                        .clicked()
+                    {
+                        self.left_side_panel_open = !self.left_side_panel_open;
+                    }
+                });
+            });
+
+        egui::SidePanel::right("spectrix_right_panel").show_animated(
+            ctx,
+            self.right_side_panel_open,
+            |ui| {
                 self.processer.histogram_script_ui(ui);
+            },
+        );
+
+        // Secondary left panel for the toggle button
+        egui::SidePanel::right("spectrix_toggle_right_panel")
+            .resizable(false)
+            .show_separator_line(false)
+            .min_width(1.0)
+            .show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    ui.add_space(ui.available_height() / 2.0 - 10.0); // Center the button vertically
+                    if ui
+                        .small_button(if self.right_side_panel_open {
+                            "▶"
+                        } else {
+                            "◀"
+                        })
+                        .clicked()
+                    {
+                        self.right_side_panel_open = !self.right_side_panel_open;
+                    }
+                });
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {

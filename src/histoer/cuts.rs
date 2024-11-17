@@ -301,29 +301,53 @@ impl Cut1D {
                 if let Ok(column) = df.column(&condition.column_name).and_then(|c| c.f64()) {
                     if let Some(value) = column.get(row_idx) {
                         match condition.operator.as_str() {
-                            ">" => if value.partial_cmp(&condition.literal_value) != Some(std::cmp::Ordering::Greater) {
-                                return false;
-                            },
-                            "<" => if value.partial_cmp(&condition.literal_value) != Some(std::cmp::Ordering::Less) {
-                                return false;
-                            },
-                            ">=" => if value.partial_cmp(&condition.literal_value) == Some(std::cmp::Ordering::Less) {
-                                return false;
-                            },
-                            "<=" => if value.partial_cmp(&condition.literal_value) == Some(std::cmp::Ordering::Greater) {
-                                return false;
-                            },
-                            "==" => if value.partial_cmp(&condition.literal_value) != Some(std::cmp::Ordering::Equal) {
-                                return false;
-                            },
-                            "!=" => if value.partial_cmp(&condition.literal_value) == Some(std::cmp::Ordering::Equal) {
-                                return false;
-                            },
+                            ">" => {
+                                if value.partial_cmp(&condition.literal_value)
+                                    != Some(std::cmp::Ordering::Greater)
+                                {
+                                    return false;
+                                }
+                            }
+                            "<" => {
+                                if value.partial_cmp(&condition.literal_value)
+                                    != Some(std::cmp::Ordering::Less)
+                                {
+                                    return false;
+                                }
+                            }
+                            ">=" => {
+                                if value.partial_cmp(&condition.literal_value)
+                                    == Some(std::cmp::Ordering::Less)
+                                {
+                                    return false;
+                                }
+                            }
+                            "<=" => {
+                                if value.partial_cmp(&condition.literal_value)
+                                    == Some(std::cmp::Ordering::Greater)
+                                {
+                                    return false;
+                                }
+                            }
+                            "==" => {
+                                if value.partial_cmp(&condition.literal_value)
+                                    != Some(std::cmp::Ordering::Equal)
+                                {
+                                    return false;
+                                }
+                            }
+                            "!=" => {
+                                if value.partial_cmp(&condition.literal_value)
+                                    == Some(std::cmp::Ordering::Equal)
+                                {
+                                    return false;
+                                }
+                            }
                             _ => {
                                 log::error!("Unknown operator: {}", condition.operator);
                                 return false;
                             }
-                        }                        
+                        }
                     } else {
                         return false; // Missing value for row
                     }
