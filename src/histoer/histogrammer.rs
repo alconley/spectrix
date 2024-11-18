@@ -532,10 +532,10 @@ impl Histogrammer {
                             }
                         });
 
-                        for (hist, _meta) in &hist2d_map {
+                        for (hist, meta) in &hist2d_map {
                             let mut hist = hist.lock().unwrap();
-                            // hist.plot_settings.cuts.x_column = meta.x_column_name.clone();
-                            // hist.plot_settings.cuts.y_column = meta.y_column_name.clone();
+                            hist.plot_settings.x_column = meta.x_column_name.clone();
+                            hist.plot_settings.y_column = meta.y_column_name.clone();
                             hist.plot_settings.recalculate_image = true;
                         }
 
@@ -667,7 +667,6 @@ impl Histogrammer {
         self.tree.ui(&mut self.behavior, ui);
     }
 
-    /// Main UI function to display the histogram selection panel and other components
     pub fn side_panel_ui(&mut self, ui: &mut egui::Ui) {
         self.behavior.ui(ui);
         ui.separator();

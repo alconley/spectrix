@@ -9,8 +9,8 @@ impl Histogram2D {
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::C)) {
-                self.plot_settings.cuts.new_2d_cut();
-            }
+                self.new_cut();
+            };
 
             if ui.input(|i| i.key_pressed(egui::Key::X)) {
                 self.plot_settings.projections.add_x_projection =

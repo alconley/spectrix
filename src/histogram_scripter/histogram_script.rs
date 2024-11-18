@@ -48,7 +48,6 @@ impl HistogramScript {
         }
     }
 
-    // Helper function to check if a histogram with the given name already exists
     fn histogram_exists(&self, name: &str) -> bool {
         self.hist_configs.iter().any(|config| match config {
             HistoConfig::Histo1D(hist) => hist.name == name,
@@ -56,14 +55,12 @@ impl HistogramScript {
         })
     }
 
-    // Helper function to check if a column with the given alias already exists
     fn column_exists(&self, alias: &str) -> bool {
         self.new_columns
             .iter()
             .any(|(_, col_alias)| col_alias == alias)
     }
 
-    // Sorting logic based on the selected SortOrder and reverse_sort flag
     fn sort_histograms(&mut self) {
         match self.sort_order {
             SortOrder::Name => {
@@ -102,7 +99,77 @@ impl HistogramScript {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    fn column_creation_ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.heading("Column Creation");
+
+            if ui.button("+").clicked() {
+                self.new_columns.push(("".to_string(), "".to_string()));
+            }
+
+            ui.separator();
+
+            if ui.button("Remove All").clicked() {
+                self.new_columns.clear();
+            }
+        });
+
+        if !self.new_columns.is_empty() {
+            let mut indices_to_remove_column = Vec::new();
+
+            TableBuilder::new(ui)
+                .id_salt("new_columns")
+                .column(Column::auto()) // expression
+                .column(Column::auto()) // alias
+                .column(Column::remainder()) // Actions
+                .striped(true)
+                .vscroll(false)
+                .header(20.0, |mut header| {
+                    header.col(|ui| {
+                        ui.label("Alias");
+                    });
+                    header.col(|ui| {
+                        ui.label("Expression");
+                    });
+                })
+                .body(|mut body| {
+                    for (index, (expression, alias)) in self.new_columns.iter_mut().enumerate() {
+                        body.row(18.0, |mut row| {
+                            row.col(|ui| {
+                                ui.add(
+                                    egui::TextEdit::singleline(alias)
+                                        .hint_text("Alias")
+                                        .clip_text(false),
+                                );
+                            });
+
+                            row.col(|ui| {
+                                ui.add(
+                                    egui::TextEdit::singleline(expression)
+                                        .hint_text("Expression")
+                                        .clip_text(false),
+                                );
+                            });
+
+                            row.col(|ui| {
+                                ui.horizontal(|ui| {
+                                    if ui.button("X").clicked() {
+                                        indices_to_remove_column.push(index);
+                                    }
+                                });
+                            });
+                        });
+                    }
+                });
+
+            // Remove indices in reverse order to prevent shifting issues
+            for &index in indices_to_remove_column.iter().rev() {
+                self.new_columns.remove(index);
+            }
+        }
+    }
+
+    fn histogram_script_ui(&mut self, ui: &mut egui::Ui) {
         ui.label("Custom Histogram Scripts");
         ui.horizontal(|ui| {
             if ui.button("SE-SPS").clicked() {
@@ -145,550 +212,467 @@ impl HistogramScript {
                 }
             }
         });
+    }
 
-        ui.separator();
+    fn cut_ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.heading("Cuts");
 
-        // Add header controls
+            if ui.button("+1D").clicked() {
+                // Add logic to create a new 1D cut and add it to `self.cuts`
+                // For example:
+                self.cuts.push(Cut::Cut1D(Cut1D::new("", "")));
+            }
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Column Creation");
-
-                if ui.button("+").clicked() {
-                    self.new_columns.push(("".to_string(), "".to_string()));
+            if ui.button("+2D").clicked() {
+                // Create a new instance of Cut2D and attempt to load it from a JSON file
+                let mut new_cut2d = Cut2D::default();
+                if new_cut2d.load_cut_from_json().is_ok() {
+                    // If successfully loaded, add it to the cuts vector as a Cuts::Cut2D variant
+                    self.cuts.push(Cut::Cut2D(new_cut2d));
+                } else {
+                    log::error!("Failed to load 2D cut from file.");
                 }
+            }
 
-                ui.separator();
+            ui.separator();
 
-                if ui.button("Remove All").clicked() {
-                    self.new_columns.clear();
+            if ui.button("Remove All").clicked() {
+                self.cuts.clear();
+                for hist_config in &mut self.hist_configs {
+                    match hist_config {
+                        HistoConfig::Histo1D(hist1d) => {
+                            hist1d.cuts.clear();
+                        }
+                        HistoConfig::Histo2D(hist2d) => {
+                            hist2d.cuts.clear();
+                        }
+                    }
                 }
-            });
+            }
+        });
 
-            if !self.new_columns.is_empty() {
-                let mut indices_to_remove_column = Vec::new();
+        if !self.cuts.is_empty() {
+            let mut indices_to_remove_cut = Vec::new();
 
+            let mut cuts_1d = Vec::new();
+            let mut cuts_2d = Vec::new();
+
+            self.cuts
+                .iter_mut()
+                .enumerate()
+                .for_each(|(i, cut)| match cut {
+                    Cut::Cut1D(_) => cuts_1d.push((i, cut)),
+                    Cut::Cut2D(cut2d) => cuts_2d.push((i, cut2d)),
+                });
+
+            // Render 1D Cuts Table
+            if !cuts_1d.is_empty() {
+                ui.label("1D Cuts");
                 TableBuilder::new(ui)
-                    .id_salt("new_columns")
-                    .column(Column::auto()) // expression
-                    .column(Column::auto()) // alias
+                    .id_salt("cuts_1d_table")
+                    .column(Column::auto()) // Name
+                    .column(Column::auto()) // Expression
                     .column(Column::remainder()) // Actions
                     .striped(true)
                     .vscroll(false)
                     .header(20.0, |mut header| {
                         header.col(|ui| {
-                            ui.label("Alias");
+                            ui.label("Name");
                         });
                         header.col(|ui| {
-                            ui.label("Expression");
+                            ui.label("Operation(s)");
                         });
                     })
                     .body(|mut body| {
-                        for (index, (expression, alias)) in self.new_columns.iter_mut().enumerate()
-                        {
+                        for (index, cut1d) in cuts_1d {
                             body.row(18.0, |mut row| {
-                                row.col(|ui| {
-                                    ui.add(
-                                        egui::TextEdit::singleline(alias)
-                                            .hint_text("Alias")
-                                            .clip_text(false),
-                                    );
-                                });
-
-                                row.col(|ui| {
-                                    ui.add(
-                                        egui::TextEdit::singleline(expression)
-                                            .hint_text("Expression")
-                                            .clip_text(false),
-                                    );
-                                });
-
+                                cut1d.table_row(&mut row);
                                 row.col(|ui| {
                                     ui.horizontal(|ui| {
                                         if ui.button("X").clicked() {
-                                            indices_to_remove_column.push(index);
+                                            indices_to_remove_cut.push(index);
                                         }
                                     });
                                 });
                             });
                         }
                     });
-
-                // Remove indices in reverse order to prevent shifting issues
-                for &index in indices_to_remove_column.iter().rev() {
-                    self.new_columns.remove(index);
-                }
             }
 
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                ui.heading("Cuts");
-
-                if ui.button("+1D").clicked() {
-                    // Add logic to create a new 1D cut and add it to `self.cuts`
-                    // For example:
-                    self.cuts.push(Cut::Cut1D(Cut1D::new("", "")));
-                }
-
-                if ui.button("+2D").clicked() {
-                    // Create a new instance of Cut2D and attempt to load it from a JSON file
-                    let mut new_cut2d = Cut2D::default();
-                    if new_cut2d.load_cut_from_json().is_ok() {
-                        // If successfully loaded, add it to the cuts vector as a Cuts::Cut2D variant
-                        self.cuts.push(Cut::Cut2D(new_cut2d));
-                    } else {
-                        log::error!("Failed to load 2D cut from file.");
-                    }
-                }
-
-                ui.separator();
-
-                if ui.button("Remove All").clicked() {
-                    self.cuts.clear();
-                    for hist_config in &mut self.hist_configs {
-                        match hist_config {
-                            HistoConfig::Histo1D(hist1d) => {
-                                hist1d.cuts.clear();
-                            }
-                            HistoConfig::Histo2D(hist2d) => {
-                                hist2d.cuts.clear();
-                            }
+            if !cuts_2d.is_empty() {
+                ui.label("2D Cuts");
+                TableBuilder::new(ui)
+                    .id_salt("cuts_2d_table")
+                    .column(Column::auto()) // Name
+                    .column(Column::auto()) // X Column
+                    .column(Column::auto()) // Y Column
+                    .column(Column::remainder()) // Actions
+                    .striped(true)
+                    .vscroll(false)
+                    .header(20.0, |mut header| {
+                        header.col(|ui| {
+                            ui.label("Name");
+                        });
+                        header.col(|ui| {
+                            ui.label("X Column");
+                        });
+                        header.col(|ui| {
+                            ui.label("Y Column");
+                        });
+                    })
+                    .body(|mut body| {
+                        for (index, cut2d) in cuts_2d {
+                            body.row(18.0, |mut row| {
+                                cut2d.table_row(&mut row);
+                                row.col(|ui| {
+                                    ui.horizontal(|ui| {
+                                        if ui.button("X").clicked() {
+                                            indices_to_remove_cut.push(index);
+                                        }
+                                    });
+                                });
+                            });
                         }
-                    }
-                }
-            });
-
-            if !self.cuts.is_empty() {
-                let mut indices_to_remove_cut = Vec::new();
-
-                let mut cuts_1d = Vec::new();
-                let mut cuts_2d = Vec::new();
-
-                self.cuts
-                    .iter_mut()
-                    .enumerate()
-                    .for_each(|(i, cut)| match cut {
-                        Cut::Cut1D(_) => cuts_1d.push((i, cut)),
-                        Cut::Cut2D(cut2d) => cuts_2d.push((i, cut2d)),
                     });
+            }
 
-                // Render 1D Cuts Table
-                if !cuts_1d.is_empty() {
-                    ui.label("1D Cuts");
-                    TableBuilder::new(ui)
-                        .id_salt("cuts_1d_table")
-                        .column(Column::auto()) // Name
-                        .column(Column::auto()) // Expression
-                        .column(Column::remainder()) // Actions
-                        .striped(true)
-                        .vscroll(false)
-                        .header(20.0, |mut header| {
-                            header.col(|ui| {
-                                ui.label("Name");
-                            });
-                            header.col(|ui| {
-                                ui.label("Operation(s)");
-                            });
-                        })
-                        .body(|mut body| {
-                            for (index, cut1d) in cuts_1d {
-                                body.row(18.0, |mut row| {
-                                    cut1d.table_row(&mut row);
-                                    row.col(|ui| {
-                                        ui.horizontal(|ui| {
-                                            if ui.button("X").clicked() {
-                                                indices_to_remove_cut.push(index);
-                                            }
-                                        });
-                                    });
-                                });
-                            }
-                        });
-                }
+            for &index in indices_to_remove_cut.iter().rev() {
+                self.cuts.remove(index);
+            }
+        }
+    }
 
-                if !cuts_2d.is_empty() {
-                    ui.label("2D Cuts");
-                    TableBuilder::new(ui)
-                        .id_salt("cuts_2d_table")
-                        .column(Column::auto()) // Name
-                        .column(Column::auto()) // X Column
-                        .column(Column::auto()) // Y Column
-                        .column(Column::remainder()) // Actions
-                        .striped(true)
-                        .vscroll(false)
-                        .header(20.0, |mut header| {
-                            header.col(|ui| {
-                                ui.label("Name");
-                            });
-                            header.col(|ui| {
-                                ui.label("X Column");
-                            });
-                            header.col(|ui| {
-                                ui.label("Y Column");
-                            });
-                        })
-                        .body(|mut body| {
-                            for (index, cut2d) in cuts_2d {
-                                body.row(18.0, |mut row| {
-                                    cut2d.table_row(&mut row);
-                                    row.col(|ui| {
-                                        ui.horizontal(|ui| {
-                                            if ui.button("X").clicked() {
-                                                indices_to_remove_cut.push(index);
-                                            }
-                                        });
-                                    });
-                                });
-                            }
-                        });
-                }
+    fn histogram_ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.heading("Histograms");
 
-                for &index in indices_to_remove_cut.iter().rev() {
-                    self.cuts.remove(index);
-                }
+            if ui.button("+1D").clicked() {
+                self.hist_configs.push(HistoConfig::Histo1D(Histo1DConfig {
+                    name: "".to_string(),
+                    column_name: "".to_string(),
+                    range: (0.0, 4096.0),
+                    bins: 512,
+                    cuts: vec![],
+                    calculate: true,
+                }));
+            }
+
+            if ui.button("+2D").clicked() {
+                self.hist_configs.push(HistoConfig::Histo2D(Histo2DConfig {
+                    name: "".to_string(),
+                    x_column_name: "".to_string(),
+                    y_column_name: "".to_string(),
+                    x_range: (0.0, 4096.0),
+                    y_range: (0.0, 4096.0),
+                    bins: (512, 512),
+                    cuts: vec![],
+                    calculate: true,
+                }));
             }
 
             ui.separator();
 
-            ui.horizontal(|ui| {
-                ui.heading("Histograms");
+            if ui.button("Remove All").clicked() {
+                self.hist_configs.clear();
+            }
+        });
 
-                if ui.button("+1D").clicked() {
-                    self.hist_configs.push(HistoConfig::Histo1D(Histo1DConfig {
-                        name: "".to_string(),
-                        column_name: "".to_string(),
-                        range: (0.0, 4096.0),
-                        bins: 512,
-                        cuts: vec![],
-                        calculate: true,
-                    }));
-                }
+        // Sorting controls
+        ui.horizontal(|ui| {
+            ui.label("Sort by:");
+            if ui.button("Name").clicked() {
+                self.sort_order = SortOrder::Name;
+                self.reverse_sort = !self.reverse_sort;
+                self.sort_histograms();
+            }
+            if ui.button("Column").clicked() {
+                self.sort_order = SortOrder::Column;
+                self.reverse_sort = !self.reverse_sort;
+                self.sort_histograms();
+            }
+            if ui.button("Type").clicked() {
+                self.sort_order = SortOrder::Type;
+                self.reverse_sort = !self.reverse_sort;
+                self.sort_histograms();
+            }
+        });
 
-                if ui.button("+2D").clicked() {
-                    self.hist_configs.push(HistoConfig::Histo2D(Histo2DConfig {
-                        name: "".to_string(),
-                        x_column_name: "".to_string(),
-                        y_column_name: "".to_string(),
-                        x_range: (0.0, 4096.0),
-                        y_range: (0.0, 4096.0),
-                        bins: (512, 512),
-                        cuts: vec![],
-                        calculate: true,
-                    }));
-                }
+        let mut indices_to_remove = Vec::new();
 
-                ui.separator();
+        // Create the table
+        TableBuilder::new(ui)
+            .id_salt("hist_configs")
+            .column(Column::auto()) // Type
+            .column(Column::auto()) // Name
+            .column(Column::auto()) // Columns
+            .column(Column::auto()) // Ranges
+            .column(Column::auto()) // Bins
+            .column(Column::auto()) // cuts
+            .column(Column::remainder()) // Actions
+            .striped(true)
+            .vscroll(false)
+            .header(20.0, |mut header| {
+                header.col(|ui| {
+                    ui.label(" # ");
+                });
+                header.col(|ui| {
+                    ui.label("Name");
+                });
+                header.col(|ui| {
+                    ui.label("Column(s)");
+                });
+                header.col(|ui| {
+                    ui.label("Range(s)");
+                });
+                header.col(|ui| {
+                    ui.label("Bins");
+                });
+                header.col(|ui| {
+                    ui.label("Cuts");
+                });
+                header.col(|ui| {
+                    ui.label("Actions");
+                });
+            })
+            .body(|mut body| {
+                for (index, config) in self.hist_configs.iter_mut().enumerate() {
+                    body.row(18.0, |mut row| {
+                        row.col(|ui| match config {
+                            HistoConfig::Histo1D(_) => {
+                                ui.label(format!("{index}"));
+                            }
+                            HistoConfig::Histo2D(_) => {
+                                ui.label(format!("{index}"));
+                            }
+                        });
 
-                if ui.button("Remove All").clicked() {
-                    self.hist_configs.clear();
-                }
-            });
+                        row.col(|ui| match config {
+                            HistoConfig::Histo1D(hist) => {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut hist.name)
+                                        .hint_text("Name")
+                                        .clip_text(false),
+                                );
+                            }
 
-            // Sorting controls
-            ui.horizontal(|ui| {
-                ui.label("Sort by:");
-                if ui.button("Name").clicked() {
-                    self.sort_order = SortOrder::Name;
-                    self.reverse_sort = !self.reverse_sort;
-                    self.sort_histograms();
-                }
-                if ui.button("Column").clicked() {
-                    self.sort_order = SortOrder::Column;
-                    self.reverse_sort = !self.reverse_sort;
-                    self.sort_histograms();
-                }
-                if ui.button("Type").clicked() {
-                    self.sort_order = SortOrder::Type;
-                    self.reverse_sort = !self.reverse_sort;
-                    self.sort_histograms();
-                }
-            });
+                            HistoConfig::Histo2D(hist) => {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut hist.name)
+                                        .hint_text("Name")
+                                        .clip_text(false),
+                                );
+                            }
+                        });
 
-            let mut indices_to_remove = Vec::new();
-
-            // Create the table
-            TableBuilder::new(ui)
-                .id_salt("hist_configs")
-                .column(Column::auto()) // Type
-                .column(Column::auto()) // Name
-                .column(Column::auto()) // Columns
-                .column(Column::auto()) // Ranges
-                .column(Column::auto()) // Bins
-                .column(Column::auto()) // cuts
-                .column(Column::remainder()) // Actions
-                .striped(true)
-                .vscroll(false)
-                .header(20.0, |mut header| {
-                    header.col(|ui| {
-                        ui.label(" # ");
-                    });
-                    header.col(|ui| {
-                        ui.label("Name");
-                    });
-                    header.col(|ui| {
-                        ui.label("Column(s)");
-                    });
-                    header.col(|ui| {
-                        ui.label("Range(s)");
-                    });
-                    header.col(|ui| {
-                        ui.label("Bins");
-                    });
-                    header.col(|ui| {
-                        ui.label("Cuts");
-                    });
-                    header.col(|ui| {
-                        ui.label("Actions");
-                    });
-                })
-                .body(|mut body| {
-                    for (index, config) in self.hist_configs.iter_mut().enumerate() {
-                        body.row(18.0, |mut row| {
-                            row.col(|ui| match config {
-                                HistoConfig::Histo1D(_) => {
-                                    ui.label(format!("{index}"));
-                                }
-                                HistoConfig::Histo2D(_) => {
-                                    ui.label(format!("{index}"));
-                                }
-                            });
-
-                            row.col(|ui| match config {
-                                HistoConfig::Histo1D(hist) => {
+                        row.col(|ui| match config {
+                            HistoConfig::Histo1D(hist) => {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut hist.column_name)
+                                        .hint_text("Column Name")
+                                        .clip_text(false),
+                                );
+                            }
+                            HistoConfig::Histo2D(hist) => {
+                                ui.vertical(|ui| {
                                     ui.add(
-                                        egui::TextEdit::singleline(&mut hist.name)
-                                            .hint_text("Name")
+                                        egui::TextEdit::singleline(&mut hist.x_column_name)
+                                            .hint_text("X Column Name")
                                             .clip_text(false),
                                     );
-                                }
-
-                                HistoConfig::Histo2D(hist) => {
                                     ui.add(
-                                        egui::TextEdit::singleline(&mut hist.name)
-                                            .hint_text("Name")
+                                        egui::TextEdit::singleline(&mut hist.y_column_name)
+                                            .hint_text("Y Column Name")
                                             .clip_text(false),
                                     );
-                                }
-                            });
+                                });
+                            }
+                        });
 
-                            row.col(|ui| match config {
-                                HistoConfig::Histo1D(hist) => {
+                        row.col(|ui| match config {
+                            HistoConfig::Histo1D(hist) => {
+                                ui.horizontal(|ui| {
                                     ui.add(
-                                        egui::TextEdit::singleline(&mut hist.column_name)
-                                            .hint_text("Column Name")
-                                            .clip_text(false),
+                                        egui::DragValue::new(&mut hist.range.0)
+                                            .speed(0.1)
+                                            .prefix("(")
+                                            .suffix(","),
                                     );
-                                }
-                                HistoConfig::Histo2D(hist) => {
-                                    ui.vertical(|ui| {
-                                        ui.add(
-                                            egui::TextEdit::singleline(&mut hist.x_column_name)
-                                                .hint_text("X Column Name")
-                                                .clip_text(false),
-                                        );
-                                        ui.add(
-                                            egui::TextEdit::singleline(&mut hist.y_column_name)
-                                                .hint_text("Y Column Name")
-                                                .clip_text(false),
-                                        );
-                                    });
-                                }
-                            });
-
-                            row.col(|ui| match config {
-                                HistoConfig::Histo1D(hist) => {
+                                    ui.add(
+                                        egui::DragValue::new(&mut hist.range.1)
+                                            .speed(0.1)
+                                            .prefix(" ")
+                                            .suffix(")"),
+                                    );
+                                });
+                            }
+                            HistoConfig::Histo2D(hist) => {
+                                ui.vertical(|ui| {
                                     ui.horizontal(|ui| {
                                         ui.add(
-                                            egui::DragValue::new(&mut hist.range.0)
-                                                .speed(0.1)
+                                            egui::DragValue::new(&mut hist.x_range.0)
+                                                .speed(1.0)
                                                 .prefix("(")
                                                 .suffix(","),
                                         );
                                         ui.add(
-                                            egui::DragValue::new(&mut hist.range.1)
-                                                .speed(0.1)
+                                            egui::DragValue::new(&mut hist.x_range.1)
+                                                .speed(1.0)
                                                 .prefix(" ")
                                                 .suffix(")"),
                                         );
                                     });
-                                }
-                                HistoConfig::Histo2D(hist) => {
-                                    ui.vertical(|ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.add(
-                                                egui::DragValue::new(&mut hist.x_range.0)
-                                                    .speed(1.0)
-                                                    .prefix("(")
-                                                    .suffix(","),
-                                            );
-                                            ui.add(
-                                                egui::DragValue::new(&mut hist.x_range.1)
-                                                    .speed(1.0)
-                                                    .prefix(" ")
-                                                    .suffix(")"),
-                                            );
-                                        });
-                                        ui.horizontal(|ui| {
-                                            ui.add(
-                                                egui::DragValue::new(&mut hist.y_range.0)
-                                                    .speed(1.0)
-                                                    .prefix("(")
-                                                    .suffix(","),
-                                            );
-                                            ui.add(
-                                                egui::DragValue::new(&mut hist.y_range.1)
-                                                    .speed(1.0)
-                                                    .prefix(" ")
-                                                    .suffix(")"),
-                                            );
-                                        });
+                                    ui.horizontal(|ui| {
+                                        ui.add(
+                                            egui::DragValue::new(&mut hist.y_range.0)
+                                                .speed(1.0)
+                                                .prefix("(")
+                                                .suffix(","),
+                                        );
+                                        ui.add(
+                                            egui::DragValue::new(&mut hist.y_range.1)
+                                                .speed(1.0)
+                                                .prefix(" ")
+                                                .suffix(")"),
+                                        );
                                     });
-                                }
-                            });
-
-                            row.col(|ui| match config {
-                                HistoConfig::Histo1D(hist) => {
-                                    ui.add(egui::DragValue::new(&mut hist.bins).speed(1));
-                                }
-                                HistoConfig::Histo2D(hist) => {
-                                    ui.vertical(|ui| {
-                                        ui.add(egui::DragValue::new(&mut hist.bins.0).speed(1));
-                                        ui.add(egui::DragValue::new(&mut hist.bins.1).speed(1));
-                                    });
-                                }
-                            });
-
-                            row.col(|ui| match config {
-                                HistoConfig::Histo1D(hist) => {
-                                    egui::ComboBox::from_id_salt(format!(
-                                        "cut_select_1d_{}",
-                                        index
-                                    ))
-                                    .selected_text("Select cuts")
-                                    .width(ui.available_width())
-                                    .show_ui(ui, |ui| {
-                                        for cut in &self.cuts {
-                                            let mut is_selected = hist
-                                                .cuts
-                                                .iter()
-                                                .any(|selected_cut| selected_cut == cut);
-                                            match cut {
-                                                Cut::Cut1D(cut1d) => {
-                                                    if ui
-                                                        .checkbox(&mut is_selected, &cut1d.name)
-                                                        .clicked()
-                                                    {
-                                                        if is_selected && !hist.cuts.contains(cut) {
-                                                            hist.cuts.push(cut.clone());
-                                                        } else if !is_selected {
-                                                            hist.cuts.retain(|selected_cut| {
-                                                                selected_cut != cut
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                                Cut::Cut2D(cut2d) => {
-                                                    if ui
-                                                        .checkbox(
-                                                            &mut is_selected,
-                                                            &cut2d.polygon.name,
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        if is_selected && !hist.cuts.contains(cut) {
-                                                            hist.cuts.push(cut.clone());
-                                                        } else if !is_selected {
-                                                            hist.cuts.retain(|selected_cut| {
-                                                                selected_cut != cut
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    });
-                                }
-                                HistoConfig::Histo2D(hist) => {
-                                    egui::ComboBox::from_id_salt(format!(
-                                        "cut_select_2d_{}",
-                                        index
-                                    ))
-                                    .selected_text("Select cuts")
-                                    .width(ui.available_width())
-                                    .show_ui(ui, |ui| {
-                                        for cut in &self.cuts {
-                                            let mut is_selected = hist
-                                                .cuts
-                                                .iter()
-                                                .any(|selected_cut| selected_cut == cut);
-                                            match cut {
-                                                Cut::Cut1D(cut1d) => {
-                                                    if ui
-                                                        .checkbox(&mut is_selected, &cut1d.name)
-                                                        .clicked()
-                                                    {
-                                                        if is_selected && !hist.cuts.contains(cut) {
-                                                            hist.cuts.push(cut.clone());
-                                                        } else if !is_selected {
-                                                            hist.cuts.retain(|selected_cut| {
-                                                                selected_cut != cut
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                                Cut::Cut2D(cut2d) => {
-                                                    if ui
-                                                        .checkbox(
-                                                            &mut is_selected,
-                                                            &cut2d.polygon.name,
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        if is_selected && !hist.cuts.contains(cut) {
-                                                            hist.cuts.push(cut.clone());
-                                                        } else if !is_selected {
-                                                            hist.cuts.retain(|selected_cut| {
-                                                                selected_cut != cut
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    });
-                                }
-                            });
-
-                            row.col(|ui| {
-                                ui.horizontal(|ui| {
-                                    match config {
-                                        HistoConfig::Histo1D(hist) => {
-                                            ui.checkbox(&mut hist.calculate, "");
-                                        }
-                                        HistoConfig::Histo2D(hist) => {
-                                            ui.checkbox(&mut hist.calculate, "");
-                                        }
-                                    }
-
-                                    ui.separator();
-
-                                    if ui.button("X").clicked() {
-                                        indices_to_remove.push(index);
-                                    }
                                 });
+                            }
+                        });
+
+                        row.col(|ui| match config {
+                            HistoConfig::Histo1D(hist) => {
+                                ui.add(egui::DragValue::new(&mut hist.bins).speed(1));
+                            }
+                            HistoConfig::Histo2D(hist) => {
+                                ui.vertical(|ui| {
+                                    ui.add(egui::DragValue::new(&mut hist.bins.0).speed(1));
+                                    ui.add(egui::DragValue::new(&mut hist.bins.1).speed(1));
+                                });
+                            }
+                        });
+
+                        row.col(|ui| match config {
+                            HistoConfig::Histo1D(hist) => {
+                                egui::ComboBox::from_id_salt(format!("cut_select_1d_{}", index))
+                                    .selected_text("Select cuts")
+                                    .width(ui.available_width())
+                                    .show_ui(ui, |ui| {
+                                        for cut in &self.cuts {
+                                            let mut is_selected = hist
+                                                .cuts
+                                                .iter()
+                                                .any(|selected_cut| selected_cut == cut);
+                                            match cut {
+                                                Cut::Cut1D(cut1d) => {
+                                                    if ui
+                                                        .checkbox(&mut is_selected, &cut1d.name)
+                                                        .clicked()
+                                                    {
+                                                        if is_selected && !hist.cuts.contains(cut) {
+                                                            hist.cuts.push(cut.clone());
+                                                        } else if !is_selected {
+                                                            hist.cuts.retain(|selected_cut| {
+                                                                selected_cut != cut
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                                Cut::Cut2D(cut2d) => {
+                                                    if ui
+                                                        .checkbox(
+                                                            &mut is_selected,
+                                                            &cut2d.polygon.name,
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        if is_selected && !hist.cuts.contains(cut) {
+                                                            hist.cuts.push(cut.clone());
+                                                        } else if !is_selected {
+                                                            hist.cuts.retain(|selected_cut| {
+                                                                selected_cut != cut
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
+                            }
+                            HistoConfig::Histo2D(hist) => {
+                                egui::ComboBox::from_id_salt(format!("cut_select_2d_{}", index))
+                                    .selected_text("Select cuts")
+                                    .width(ui.available_width())
+                                    .show_ui(ui, |ui| {
+                                        for cut in &self.cuts {
+                                            let mut is_selected = hist
+                                                .cuts
+                                                .iter()
+                                                .any(|selected_cut| selected_cut == cut);
+                                            match cut {
+                                                Cut::Cut1D(cut1d) => {
+                                                    if ui
+                                                        .checkbox(&mut is_selected, &cut1d.name)
+                                                        .clicked()
+                                                    {
+                                                        if is_selected && !hist.cuts.contains(cut) {
+                                                            hist.cuts.push(cut.clone());
+                                                        } else if !is_selected {
+                                                            hist.cuts.retain(|selected_cut| {
+                                                                selected_cut != cut
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                                Cut::Cut2D(cut2d) => {
+                                                    if ui
+                                                        .checkbox(
+                                                            &mut is_selected,
+                                                            &cut2d.polygon.name,
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        if is_selected && !hist.cuts.contains(cut) {
+                                                            hist.cuts.push(cut.clone());
+                                                        } else if !is_selected {
+                                                            hist.cuts.retain(|selected_cut| {
+                                                                selected_cut != cut
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
+                            }
+                        });
+
+                        row.col(|ui| {
+                            ui.horizontal(|ui| {
+                                match config {
+                                    HistoConfig::Histo1D(hist) => {
+                                        ui.checkbox(&mut hist.calculate, "");
+                                    }
+                                    HistoConfig::Histo2D(hist) => {
+                                        ui.checkbox(&mut hist.calculate, "");
+                                    }
+                                }
+
+                                ui.separator();
+
+                                if ui.button("X").clicked() {
+                                    indices_to_remove.push(index);
+                                }
                             });
                         });
-                    }
-                });
+                    });
+                }
+            });
 
-            // Remove indices in reverse order to prevent shifting issues
-            for &index in indices_to_remove.iter().rev() {
-                self.hist_configs.remove(index);
-            }
-        });
-
-        self.verify_cuts();
+        // Remove indices in reverse order to prevent shifting issues
+        for &index in indices_to_remove.iter().rev() {
+            self.hist_configs.remove(index);
+        }
     }
 
     fn verify_cuts(&mut self) {
@@ -729,7 +713,27 @@ impl HistogramScript {
         }
     }
 
-    pub fn save_histogram_script(&self) -> io::Result<()> {
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        self.histogram_script_ui(ui);
+
+        ui.separator();
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            self.column_creation_ui(ui);
+
+            ui.separator();
+
+            self.cut_ui(ui);
+
+            ui.separator();
+
+            self.histogram_ui(ui);
+        });
+
+        self.verify_cuts();
+    }
+
+    fn save_histogram_script(&self) -> io::Result<()> {
         if let Some(path) = FileDialog::new()
             .set_title("Save Histogram Script")
             .save_file()
@@ -743,8 +747,7 @@ impl HistogramScript {
         }
     }
 
-    // Function to load histogram configuration from a JSON file
-    pub fn load_histogram_script(&mut self) -> io::Result<()> {
+    fn load_histogram_script(&mut self) -> io::Result<()> {
         if let Some(path) = FileDialog::new()
             .set_title("Load Histogram Script")
             .pick_file()

@@ -30,7 +30,7 @@ impl Default for PlotSettings {
 }
 impl PlotSettings {
     pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
-        self.egui_settings.menu_button(ui);
+        // self.egui_settings.menu_button(ui);
         ui.checkbox(&mut self.stats_info, "Show Statistics");
         self.markers.menu_button(ui);
     }

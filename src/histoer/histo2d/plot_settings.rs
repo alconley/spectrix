@@ -1,5 +1,5 @@
 // use crate::cutter::Cut::HistogramCut;
-use crate::histoer::cuts::Cut;
+use crate::histoer::cuts::Cut2D;
 
 use crate::egui_plot_stuff::egui_plot_settings::EguiPlotSettings;
 
@@ -11,7 +11,9 @@ pub struct PlotSettings {
     #[serde(skip)]
     pub cursor_position: Option<egui_plot::PlotPoint>,
     pub egui_settings: EguiPlotSettings,
-    pub cuts: Cut,
+    pub x_column: String,
+    pub y_column: String,
+    pub cuts: Vec<Cut2D>,
     pub stats_info: bool,
     pub colormap: ColorMap,
     pub colormap_options: ColormapOptions,
@@ -29,7 +31,9 @@ impl Default for PlotSettings {
         PlotSettings {
             cursor_position: None,
             egui_settings: EguiPlotSettings::default(),
-            cuts: Cut::default(),
+            x_column: String::new(),
+            y_column: String::new(),
+            cuts: vec![],
             stats_info: false,
             colormap: ColorMap::default(),
             colormap_options: ColormapOptions::default(),
@@ -53,32 +57,30 @@ impl PlotSettings {
         ui.separator();
 
         ui.checkbox(&mut self.stats_info, "Show Statitics");
-        self.egui_settings.menu_button(ui);
+        // self.egui_settings.menu_button(ui);
 
         ui.separator();
 
         self.projections.menu_button(ui);
 
         ui.separator();
-
-        self.cuts.menu_button(ui);
-
-        // if any Cut are active temp disable double clicking to reset
-        // self.egui_settings.allow_double_click_reset = !self
-        //     .Cut
-        //     .Cut
-        //     .iter()
-        //     .any(|cut| cut.polygon.interactive_clicking);
     }
 
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
-        self.cuts.draw(plot_ui);
+        for cut in &mut self.cuts {
+            cut.draw(plot_ui);
+        }
         self.projections.draw(plot_ui);
     }
 
     pub fn interactive_response(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
         self.projections.interactive_dragging(plot_response);
-        self.cuts.interactive_response(plot_response);
+
+        for cut in &mut self.cuts {
+            self.egui_settings.allow_drag = !cut.is_dragging();
+            self.egui_settings.allow_double_click_reset = !cut.is_clicking();
+            cut.interactions(plot_response);
+        }
     }
 
     pub fn progress_ui(&mut self, ui: &mut egui::Ui) {
@@ -91,6 +93,4 @@ impl PlotSettings {
             );
         }
     }
-
-    // pub fn keybinds(&mut self, ui: &mut egui::Ui) {}
 }

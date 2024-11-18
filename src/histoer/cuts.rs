@@ -20,10 +20,6 @@ impl Default for Cut {
 }
 
 impl Cut {
-    pub fn new_2d_cut(&self) -> Self {
-        Cut::Cut2D(Cut2D::default())
-    }
-
     // Method to check if a cut is valid for a specific row in the DataFrame
     pub fn valid(&self, df: &DataFrame, row_idx: usize) -> bool {
         match self {
@@ -31,34 +27,6 @@ impl Cut {
             Cut::Cut1D(cut1d) => cut1d.valid(df, row_idx),
 
             Cut::Cut2D(cut2d) => cut2d.valid(df, row_idx),
-        }
-    }
-
-    pub fn menu_button(&mut self, ui: &mut egui::Ui) {
-        match self {
-            Cut::Cut1D(cut1d) => cut1d.menu_button(ui),
-            Cut::Cut2D(cut2d) => cut2d.menu_button(ui),
-        }
-    }
-
-    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
-        match self {
-            Cut::Cut1D(_) => {}
-            Cut::Cut2D(cut2d) => cut2d.polygon.draw(plot_ui),
-        }
-    }
-
-    pub fn interactive_response(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
-        match self {
-            Cut::Cut1D(_) => {}
-            Cut::Cut2D(cut2d) => cut2d.polygon.handle_interactions(plot_response),
-        }
-    }
-
-    pub fn is_dragging(&self) -> bool {
-        match self {
-            Cut::Cut1D(_) => false,
-            Cut::Cut2D(cut2d) => cut2d.polygon.is_dragging,
         }
     }
 
@@ -96,23 +64,18 @@ impl Default for Cut2D {
 
 impl Cut2D {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        ui.add(
-            egui::TextEdit::singleline(&mut self.polygon.name)
-                .hint_text("Name")
-                .clip_text(false),
-        );
+        if ui.button("Load").clicked() {
+            if let Err(e) = self.load_cut_from_json() {
+                log::error!("Error loading cut: {:?}", e);
+            }
+        }
 
-        ui.add(
-            egui::TextEdit::singleline(&mut self.x_column)
-                .hint_text("X Column Name")
-                .clip_text(false),
-        );
-
-        ui.add(
-            egui::TextEdit::singleline(&mut self.y_column)
-                .hint_text("Y Column Name")
-                .clip_text(false),
-        );
+        if ui.button("Save").clicked() {
+            if let Err(e) = self.save_cut_to_json() {
+                log::error!("Error saving cut: {:?}", e);
+            }
+        }
+        self.polygon.menu_button(ui);
     }
 
     pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>) {
@@ -209,6 +172,22 @@ impl Cut2D {
         let point = geo::Point::new(x, y);
         let polygon = self.to_geo_polygon();
         polygon.contains(&point)
+    }
+
+    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+        self.polygon.draw(plot_ui);
+    }
+
+    pub fn interactions(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
+        self.polygon.handle_interactions(plot_response);
+    }
+
+    pub fn is_dragging(&self) -> bool {
+        self.polygon.is_dragging
+    }
+
+    pub fn is_clicking(&self) -> bool {
+        self.polygon.interactive_clicking
     }
 }
 
