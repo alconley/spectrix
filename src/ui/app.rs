@@ -37,6 +37,15 @@ impl eframe::App for Spectrix {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Handle keybinds
+        let input = ctx.input(|state| state.clone()); // Get the input state
+        if input.key_pressed(egui::Key::Tab) {
+            self.left_side_panel_open = !self.left_side_panel_open;
+        }
+        if input.key_pressed(egui::Key::Tab) {
+            self.right_side_panel_open = !self.right_side_panel_open;
+        }
+
         egui::TopBottomPanel::top("spectrix_top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 egui::global_theme_preference_switch(ui);
