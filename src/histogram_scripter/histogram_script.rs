@@ -1,8 +1,9 @@
 // use super::configure_auxillary_detectors::AuxillaryDetectors;
 use super::manual_histogram_scripts::sps_histograms;
 
+use crate::histoer::configs::{Configs, Hist1DConfig, Hist2DConfig};
 use crate::histoer::cuts::{Cut, Cut1D, Cut2D};
-use crate::histoer::histogrammer::{Histo1DConfig, Histo2DConfig, Histogrammer};
+use crate::histoer::histogrammer::Histogrammer;
 use egui_extras::{Column, TableBuilder};
 use polars::prelude::*;
 use rfd::FileDialog;
@@ -10,31 +11,11 @@ use serde_json;
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter};
 
-// Enum for sorting options
-#[derive(Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, Default)]
-pub enum SortOrder {
-    #[default]
-    Name,
-    Column,
-    Type, // 1D or 2D
-}
-
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct HistogramScript {
-    pub hist_configs: Vec<HistoConfig>, // Unified vector for both 1D and 2D configurations
+    pub hist_configs: Vec<Configs>, // Unified vector for both 1D and 2D configurations
     pub new_columns: Vec<(String, String)>,
     pub cuts: Vec<Cut>,
-    #[serde(skip)]
-    pub sort_order: SortOrder,
-    #[serde(skip)]
-    pub reverse_sort: bool,
-}
-
-// Enum to encapsulate 1D and 2D histogram configurations
-#[derive(Clone, serde::Deserialize, serde::Serialize, Debug)]
-pub enum HistoConfig {
-    Histo1D(Histo1DConfig),
-    Histo2D(Histo2DConfig),
 }
 
 impl HistogramScript {
@@ -43,15 +24,13 @@ impl HistogramScript {
             hist_configs: vec![],
             new_columns: vec![],
             cuts: vec![],
-            sort_order: SortOrder::default(),
-            reverse_sort: false,
         }
     }
 
     fn histogram_exists(&self, name: &str) -> bool {
         self.hist_configs.iter().any(|config| match config {
-            HistoConfig::Histo1D(hist) => hist.name == name,
-            HistoConfig::Histo2D(hist) => hist.name == name,
+            Configs::Hist1D(hist) => hist.name == name,
+            Configs::Hist2D(hist) => hist.name == name,
         })
     }
 
@@ -59,44 +38,6 @@ impl HistogramScript {
         self.new_columns
             .iter()
             .any(|(_, col_alias)| col_alias == alias)
-    }
-
-    fn sort_histograms(&mut self) {
-        match self.sort_order {
-            SortOrder::Name => {
-                self.hist_configs.sort_by(|a, b| match (a, b) {
-                    (HistoConfig::Histo1D(h1), HistoConfig::Histo1D(h2)) => h1.name.cmp(&h2.name),
-                    (HistoConfig::Histo2D(h1), HistoConfig::Histo2D(h2)) => h1.name.cmp(&h2.name),
-                    _ => std::cmp::Ordering::Equal,
-                });
-            }
-            SortOrder::Column => {
-                self.hist_configs.sort_by(|a, b| match (a, b) {
-                    (HistoConfig::Histo1D(h1), HistoConfig::Histo1D(h2)) => {
-                        h1.column_name.cmp(&h2.column_name)
-                    }
-                    (HistoConfig::Histo2D(h1), HistoConfig::Histo2D(h2)) => h1
-                        .x_column_name
-                        .cmp(&h2.x_column_name)
-                        .then_with(|| h1.y_column_name.cmp(&h2.y_column_name)),
-                    _ => std::cmp::Ordering::Equal,
-                });
-            }
-            SortOrder::Type => {
-                self.hist_configs.sort_by(|a, b| match (a, b) {
-                    (HistoConfig::Histo1D(_), HistoConfig::Histo2D(_)) => std::cmp::Ordering::Less,
-                    (HistoConfig::Histo2D(_), HistoConfig::Histo1D(_)) => {
-                        std::cmp::Ordering::Greater
-                    }
-                    _ => std::cmp::Ordering::Equal,
-                });
-            }
-        }
-
-        // Reverse the order if reverse_sort is true
-        if self.reverse_sort {
-            self.hist_configs.reverse();
-        }
     }
 
     fn column_creation_ui(&mut self, ui: &mut egui::Ui) {
@@ -176,16 +117,14 @@ impl HistogramScript {
                 let (columns, histograms) = sps_histograms();
                 for histogram in histograms {
                     match &histogram {
-                        HistoConfig::Histo1D(histo1d) => {
+                        Configs::Hist1D(histo1d) => {
                             if !self.histogram_exists(&histo1d.name) {
-                                self.hist_configs
-                                    .push(HistoConfig::Histo1D(histo1d.clone()));
+                                self.hist_configs.push(Configs::Hist1D(histo1d.clone()));
                             }
                         }
-                        HistoConfig::Histo2D(histo2d) => {
+                        Configs::Hist2D(histo2d) => {
                             if !self.histogram_exists(&histo2d.name) {
-                                self.hist_configs
-                                    .push(HistoConfig::Histo2D(histo2d.clone()));
+                                self.hist_configs.push(Configs::Hist2D(histo2d.clone()));
                             }
                         }
                     }
@@ -241,10 +180,10 @@ impl HistogramScript {
                 self.cuts.clear();
                 for hist_config in &mut self.hist_configs {
                     match hist_config {
-                        HistoConfig::Histo1D(hist1d) => {
+                        Configs::Hist1D(hist1d) => {
                             hist1d.cuts.clear();
                         }
-                        HistoConfig::Histo2D(hist2d) => {
+                        Configs::Hist2D(hist2d) => {
                             hist2d.cuts.clear();
                         }
                     }
@@ -348,7 +287,7 @@ impl HistogramScript {
             ui.heading("Histograms");
 
             if ui.button("+1D").clicked() {
-                self.hist_configs.push(HistoConfig::Histo1D(Histo1DConfig {
+                self.hist_configs.push(Configs::Hist1D(Hist1DConfig {
                     name: "".to_string(),
                     column_name: "".to_string(),
                     range: (0.0, 4096.0),
@@ -359,7 +298,7 @@ impl HistogramScript {
             }
 
             if ui.button("+2D").clicked() {
-                self.hist_configs.push(HistoConfig::Histo2D(Histo2DConfig {
+                self.hist_configs.push(Configs::Hist2D(Hist2DConfig {
                     name: "".to_string(),
                     x_column_name: "".to_string(),
                     y_column_name: "".to_string(),
@@ -375,26 +314,6 @@ impl HistogramScript {
 
             if ui.button("Remove All").clicked() {
                 self.hist_configs.clear();
-            }
-        });
-
-        // Sorting controls
-        ui.horizontal(|ui| {
-            ui.label("Sort by:");
-            if ui.button("Name").clicked() {
-                self.sort_order = SortOrder::Name;
-                self.reverse_sort = !self.reverse_sort;
-                self.sort_histograms();
-            }
-            if ui.button("Column").clicked() {
-                self.sort_order = SortOrder::Column;
-                self.reverse_sort = !self.reverse_sort;
-                self.sort_histograms();
-            }
-            if ui.button("Type").clicked() {
-                self.sort_order = SortOrder::Type;
-                self.reverse_sort = !self.reverse_sort;
-                self.sort_histograms();
             }
         });
 
@@ -439,16 +358,16 @@ impl HistogramScript {
                 for (index, config) in self.hist_configs.iter_mut().enumerate() {
                     body.row(18.0, |mut row| {
                         row.col(|ui| match config {
-                            HistoConfig::Histo1D(_) => {
+                            Configs::Hist1D(_) => {
                                 ui.label(format!("{index}"));
                             }
-                            HistoConfig::Histo2D(_) => {
+                            Configs::Hist2D(_) => {
                                 ui.label(format!("{index}"));
                             }
                         });
 
                         row.col(|ui| match config {
-                            HistoConfig::Histo1D(hist) => {
+                            Configs::Hist1D(hist) => {
                                 ui.add(
                                     egui::TextEdit::singleline(&mut hist.name)
                                         .hint_text("Name")
@@ -456,7 +375,7 @@ impl HistogramScript {
                                 );
                             }
 
-                            HistoConfig::Histo2D(hist) => {
+                            Configs::Hist2D(hist) => {
                                 ui.add(
                                     egui::TextEdit::singleline(&mut hist.name)
                                         .hint_text("Name")
@@ -466,14 +385,14 @@ impl HistogramScript {
                         });
 
                         row.col(|ui| match config {
-                            HistoConfig::Histo1D(hist) => {
+                            Configs::Hist1D(hist) => {
                                 ui.add(
                                     egui::TextEdit::singleline(&mut hist.column_name)
                                         .hint_text("Column Name")
                                         .clip_text(false),
                                 );
                             }
-                            HistoConfig::Histo2D(hist) => {
+                            Configs::Hist2D(hist) => {
                                 ui.vertical(|ui| {
                                     ui.add(
                                         egui::TextEdit::singleline(&mut hist.x_column_name)
@@ -490,7 +409,7 @@ impl HistogramScript {
                         });
 
                         row.col(|ui| match config {
-                            HistoConfig::Histo1D(hist) => {
+                            Configs::Hist1D(hist) => {
                                 ui.horizontal(|ui| {
                                     ui.add(
                                         egui::DragValue::new(&mut hist.range.0)
@@ -506,7 +425,7 @@ impl HistogramScript {
                                     );
                                 });
                             }
-                            HistoConfig::Histo2D(hist) => {
+                            Configs::Hist2D(hist) => {
                                 ui.vertical(|ui| {
                                     ui.horizontal(|ui| {
                                         ui.add(
@@ -541,10 +460,10 @@ impl HistogramScript {
                         });
 
                         row.col(|ui| match config {
-                            HistoConfig::Histo1D(hist) => {
+                            Configs::Hist1D(hist) => {
                                 ui.add(egui::DragValue::new(&mut hist.bins).speed(1));
                             }
-                            HistoConfig::Histo2D(hist) => {
+                            Configs::Hist2D(hist) => {
                                 ui.vertical(|ui| {
                                     ui.add(egui::DragValue::new(&mut hist.bins.0).speed(1));
                                     ui.add(egui::DragValue::new(&mut hist.bins.1).speed(1));
@@ -553,7 +472,7 @@ impl HistogramScript {
                         });
 
                         row.col(|ui| match config {
-                            HistoConfig::Histo1D(hist) => {
+                            Configs::Hist1D(hist) => {
                                 egui::ComboBox::from_id_salt(format!("cut_select_1d_{}", index))
                                     .selected_text("Select cuts")
                                     .width(ui.available_width())
@@ -599,7 +518,7 @@ impl HistogramScript {
                                         }
                                     });
                             }
-                            HistoConfig::Histo2D(hist) => {
+                            Configs::Hist2D(hist) => {
                                 egui::ComboBox::from_id_salt(format!("cut_select_2d_{}", index))
                                     .selected_text("Select cuts")
                                     .width(ui.available_width())
@@ -650,10 +569,10 @@ impl HistogramScript {
                         row.col(|ui| {
                             ui.horizontal(|ui| {
                                 match config {
-                                    HistoConfig::Histo1D(hist) => {
+                                    Configs::Hist1D(hist) => {
                                         ui.checkbox(&mut hist.calculate, "");
                                     }
-                                    HistoConfig::Histo2D(hist) => {
+                                    Configs::Hist2D(hist) => {
                                         ui.checkbox(&mut hist.calculate, "");
                                     }
                                 }
@@ -679,7 +598,7 @@ impl HistogramScript {
         // Synchronize cuts after all UI interactions
         for hist_config in &mut self.hist_configs {
             match hist_config {
-                HistoConfig::Histo1D(hist1d) => {
+                Configs::Hist1D(hist1d) => {
                     for hist_cut in &mut hist1d.cuts {
                         if let Some(updated_cut) =
                             self.cuts.iter().find(|cut| cut.name() == hist_cut.name())
@@ -694,7 +613,7 @@ impl HistogramScript {
                         .cuts
                         .retain(|cut| self.cuts.iter().any(|c| c.name() == cut.name()));
                 }
-                HistoConfig::Histo2D(hist2d) => {
+                Configs::Hist2D(hist2d) => {
                     for hist_cut in &mut hist2d.cuts {
                         if let Some(updated_cut) =
                             self.cuts.iter().find(|cut| cut.name() == hist_cut.name())
@@ -773,7 +692,7 @@ impl HistogramScript {
         for config in &self.hist_configs {
             match config {
                 // 1D Histogram Configuration
-                HistoConfig::Histo1D(histo1d) => {
+                Configs::Hist1D(histo1d) => {
                     if histo1d.calculate {
                         if histo1d.name.contains("{}") {
                             // name has {} and column_name has a range pattern
@@ -842,7 +761,7 @@ impl HistogramScript {
                 }
 
                 // 2D Histogram Configuration
-                HistoConfig::Histo2D(histo2d) => {
+                Configs::Hist2D(histo2d) => {
                     if histo2d.calculate {
                         if histo2d.name.contains("{}") {
                             // Case 1: `{}` in `name`, `x_column_name` has a pattern

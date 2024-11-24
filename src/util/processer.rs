@@ -1,6 +1,5 @@
 use super::lazyframer::LazyFramer;
 use super::workspacer::Workspacer;
-// use crate::cutter::cut_handler::CutHandler;
 use crate::histoer::histogrammer::Histogrammer;
 use crate::histogram_scripter::histogram_script::HistogramScript;
 use pyo3::{prelude::*, types::PyModule};
@@ -12,9 +11,9 @@ pub struct Processer {
     pub workspacer: Workspacer,
     #[serde(skip)]
     pub lazyframer: Option<LazyFramer>,
-    // pub cut_handler: CutHandler,
     pub histogrammer: Histogrammer,
     pub histogram_script: HistogramScript,
+    pub show_histogram_script: bool,
 }
 
 impl Processer {
@@ -22,9 +21,9 @@ impl Processer {
         Self {
             workspacer: Workspacer::default(),
             lazyframer: None,
-            // cut_handler: CutHandler::default(),
             histogrammer: Histogrammer::default(),
             histogram_script: HistogramScript::new(),
+            show_histogram_script: true,
         }
     }
 
@@ -192,6 +191,10 @@ def get_2d_histograms(file_name):
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        if self.workspacer.options.root {
+            self.show_histogram_script = false;
+        }
+
         if !self.workspacer.options.root {
             ui.horizontal(|ui| {
                 if ui
@@ -208,6 +211,15 @@ def get_2d_histograms(file_name):
                 if self.histogrammer.calculating.load(Ordering::Relaxed) {
                     // Show spinner while `calculating` is true
                     ui.add(egui::widgets::Spinner::default());
+                }
+
+                ui.separator();
+
+                if ui
+                    .selectable_label(self.show_histogram_script, "Histograms")
+                    .clicked()
+                {
+                    self.show_histogram_script = !self.show_histogram_script;
                 }
             });
 

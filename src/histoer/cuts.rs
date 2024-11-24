@@ -43,6 +43,10 @@ impl Cut {
             Cut::Cut2D(cut2d) => &cut2d.polygon.name,
         }
     }
+
+    pub fn new_1d(name: &str, expression: &str) -> Self {
+        Cut::Cut1D(Cut1D::new(name, expression))
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]

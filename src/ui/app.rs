@@ -4,16 +4,14 @@ use crate::util::processer::Processer;
 #[serde(default)]
 pub struct Spectrix {
     processer: Processer,
-    left_side_panel_open: bool,
-    right_side_panel_open: bool,
+    workspace_panel_open: bool,
 }
 
 impl Default for Spectrix {
     fn default() -> Self {
         Self {
             processer: Processer::new(),
-            left_side_panel_open: true,
-            right_side_panel_open: true,
+            workspace_panel_open: true,
         }
     }
 }
@@ -40,10 +38,7 @@ impl eframe::App for Spectrix {
         // Handle keybinds
         let input = ctx.input(|state| state.clone()); // Get the input state
         if input.key_pressed(egui::Key::Tab) {
-            self.left_side_panel_open = !self.left_side_panel_open;
-        }
-        if input.key_pressed(egui::Key::Tab) {
-            self.right_side_panel_open = !self.right_side_panel_open;
+            self.workspace_panel_open = !self.workspace_panel_open;
         }
 
         egui::TopBottomPanel::top("spectrix_top_panel").show(ctx, |ui| {
@@ -60,15 +55,23 @@ impl eframe::App for Spectrix {
             });
         });
 
-        egui::SidePanel::left("spectrix_left_panel").show_animated(
+        egui::SidePanel::left("spectrix_workspace_panel").show_animated(
             ctx,
-            self.left_side_panel_open,
+            self.workspace_panel_open,
             |ui| {
                 egui::ScrollArea::vertical()
-                    .id_salt("LeftPanel")
+                    .id_salt("spectrix_workspace_panel_scroll")
                     .show(ui, |ui| {
                         self.processer.ui(ui);
                     });
+            },
+        );
+
+        egui::SidePanel::left("spectrix_histogram_panel").show_animated(
+            ctx,
+            self.processer.show_histogram_script && self.workspace_panel_open,
+            |ui| {
+                self.processer.histogram_script_ui(ui);
             },
         );
 
@@ -81,43 +84,14 @@ impl eframe::App for Spectrix {
                 ui.vertical(|ui| {
                     ui.add_space(ui.available_height() / 2.0 - 10.0); // Center the button vertically
                     if ui
-                        .small_button(if self.left_side_panel_open {
+                        .small_button(if self.workspace_panel_open {
                             "◀"
                         } else {
                             "▶"
                         })
                         .clicked()
                     {
-                        self.left_side_panel_open = !self.left_side_panel_open;
-                    }
-                });
-            });
-
-        egui::SidePanel::right("spectrix_right_panel").show_animated(
-            ctx,
-            self.right_side_panel_open,
-            |ui| {
-                self.processer.histogram_script_ui(ui);
-            },
-        );
-
-        // Secondary left panel for the toggle button
-        egui::SidePanel::right("spectrix_toggle_right_panel")
-            .resizable(false)
-            .show_separator_line(false)
-            .min_width(1.0)
-            .show(ctx, |ui| {
-                ui.vertical(|ui| {
-                    ui.add_space(ui.available_height() / 2.0 - 10.0); // Center the button vertically
-                    if ui
-                        .small_button(if self.right_side_panel_open {
-                            "▶"
-                        } else {
-                            "◀"
-                        })
-                        .clicked()
-                    {
-                        self.right_side_panel_open = !self.right_side_panel_open;
+                        self.workspace_panel_open = !self.workspace_panel_open;
                     }
                 });
             });
