@@ -1,19 +1,15 @@
-use crate::util::processer::Processer;
+use crate::util::processer::Processor;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct Spectrix {
-    processer: Processer,
-    left_side_panel_open: bool,
-    right_side_panel_open: bool,
+    processor: Processor,
 }
 
 impl Default for Spectrix {
     fn default() -> Self {
         Self {
-            processer: Processer::new(),
-            left_side_panel_open: true,
-            right_side_panel_open: true,
+            processor: Processor::new(),
         }
     }
 }
@@ -37,6 +33,12 @@ impl eframe::App for Spectrix {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Handle keybinds
+        let input = ctx.input(|state| state.clone()); // Get the input state
+        if input.key_pressed(egui::Key::Tab) {
+            self.processor.settings.dialog_open = !self.processor.settings.dialog_open;
+        }
+
         egui::TopBottomPanel::top("spectrix_top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 egui::global_theme_preference_switch(ui);
@@ -45,39 +47,16 @@ impl eframe::App for Spectrix {
 
                 ui.separator();
 
-                ui.menu_button("Panels", |ui| {
-                    ui.checkbox(&mut self.left_side_panel_open, "Info Panel");
-                    ui.checkbox(&mut self.right_side_panel_open, "Histogram Script");
-                });
+                if ui.button("Reset").clicked() {
+                    self.processor.reset();
+                }
 
                 ui.separator();
 
-                if ui.button("Reset").clicked() {
-                    self.processer.reset();
-                }
+                self.processor.histogrammer.menu_ui(ui);
             });
         });
 
-        egui::SidePanel::left("spectrix_left_panel").show_animated(
-            ctx,
-            self.left_side_panel_open,
-            |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("LeftPanel")
-                    .show(ui, |ui| {
-                        self.processer.ui(ui);
-                    });
-            },
-        );
-
-        egui::SidePanel::right("spectrix_right_panel")
-            // .resizable(false)
-            .show_animated(ctx, self.right_side_panel_open, |ui| {
-                self.processer.histogram_script_ui(ui);
-            });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            self.processer.histogrammer.ui(ui);
-        });
+        self.processor.ui(ctx);
     }
 }

@@ -173,6 +173,15 @@ impl Histogram {
             y: self.get_bin_counts_between(start_x, end_x),
         };
 
+        if !self
+            .plot_settings
+            .markers
+            .get_background_marker_positions()
+            .is_empty()
+        {
+            self.fit_background();
+        }
+
         let mut fitter = Fitter::new(data);
 
         let background_model = self.fits.settings.background_model.clone();
@@ -330,13 +339,6 @@ impl Histogram {
             }
 
             if self.plot_settings.egui_settings.reset_axis {
-                // let y_min = self.bins.iter().min().cloned().unwrap_or(0) as f64;
-                // let y_max = self.bins.iter().max().cloned().unwrap_or(0) as f64;
-                // let plot_bounds = egui_plot::PlotBounds::from_min_max(
-                //     [self.range.0 * 1.1, y_min * 1.1],
-                //     [self.range.1 * 1.1, y_max * 1.1],
-                // );
-                // plot_ui.set_plot_bounds(plot_bounds);
                 plot_ui.auto_bounds();
                 self.plot_settings.egui_settings.reset_axis = false;
             }

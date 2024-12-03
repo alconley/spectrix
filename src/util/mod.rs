@@ -1,6 +1,2 @@
-#[cfg(not(target_arch = "wasm32"))]
-pub mod lazyframer;
-#[cfg(not(target_arch = "wasm32"))]
+pub mod egui_file_dialog;
 pub mod processer;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod workspacer;

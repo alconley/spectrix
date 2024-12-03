@@ -1,5 +1,7 @@
-use super::histogram_script::HistoConfig;
-use crate::histoer::histogrammer::{Histo1DConfig, Histo2DConfig};
+use crate::histoer::{
+    // cuts::Cut,
+    configs::Configs,
+};
 use polars::prelude::*;
 use std::f64::consts::PI;
 
@@ -49,28 +51,7 @@ pub fn get_column_names_from_lazyframe(lazyframe: &LazyFrame) -> Vec<String> {
 
 #[rustfmt::skip]
 #[allow(clippy::all)]
-pub fn sps_histograms() -> (Vec<(String, String)>, Vec<HistoConfig>) {
-
-    // (col("DelayFrontRightEnergy") + col("DelayFrontLeftEnergy") / lit(2.0)).alias("DelayFrontAverageEnergy"),
-    // (col("DelayBackRightEnergy") + col("DelayBackLeftEnergy") / lit(2.0)).alias("DelayBackAverageEnergy"),
-    // (col("DelayFrontLeftTime") - col("AnodeFrontTime")).alias("DelayFrontLeftTime_AnodeFrontTime"),
-    // (col("DelayFrontRightTime") - col("AnodeFrontTime")).alias("DelayFrontRightTime_AnodeFrontTime"),
-    // (col("DelayBackLeftTime") - col("AnodeFrontTime")).alias("DelayBackLeftTime_AnodeFrontTime"),
-    // (col("DelayBackRightTime") - col("AnodeFrontTime")).alias("DelayBackRightTime_AnodeFrontTime"),
-    // (col("DelayFrontLeftTime") - col("AnodeBackTime")).alias("DelayFrontLeftTime_AnodeBackTime"),
-    // (col("DelayFrontRightTime") - col("AnodeBackTime")).alias("DelayFrontRightTime_AnodeBackTime"),
-    // (col("DelayBackLeftTime") - col("AnodeBackTime")).alias("DelayBackLeftTime_AnodeBackTime"),
-    // (col("DelayBackRightTime") - col("AnodeBackTime")).alias("DelayBackRightTime_AnodeBackTime"),
-    // (col("AnodeFrontTime") - col("AnodeBackTime")).alias("AnodeFrontTime_AnodeBackTime"),
-    // (col("AnodeBackTime") - col("AnodeFrontTime")).alias("AnodeBackTime_AnodeFrontTime"),
-    // (col("AnodeFrontTime") - col("ScintLeftTime")).alias("AnodeFrontTime_ScintLeftTime"),
-    // (col("AnodeBackTime") - col("ScintLeftTime")).alias("AnodeBackTime_ScintLeftTime"),
-    // (col("DelayFrontLeftTime") - col("ScintLeftTime")).alias("DelayFrontLeftTime_ScintLeftTime"),
-    // (col("DelayFrontRightTime") - col("ScintLeftTime")).alias("DelayFrontRightTime_ScintLeftTime"),
-    // (col("DelayBackLeftTime") - col("ScintLeftTime")).alias("DelayBackLeftTime_ScintLeftTime"),
-    // (col("DelayBackRightTime") - col("ScintLeftTime")).alias("DelayBackRightTime_ScintLeftTime"),
-    // (col("ScintRightTime") - col("ScintLeftTime")).alias("ScintRightTime_ScintLeftTime"),
-    // (lit(-0.013139237615)*col("Xavg")*col("Xavg") + lit(-13.80004977)*col("Xavg") + lit(9790.048149635)).alias("XavgEnergyCalibrated")
+pub fn sps_histograms() -> (Vec<(String, String)>, Vec<Configs>) {
 
     let mut new_columns = vec![];
     new_columns.push(("( DelayFrontRightEnergy + DelayFrontLeftEnergy ) / 2.0".into(), "DelayFrontAverageEnergy".into()));
@@ -93,88 +74,70 @@ pub fn sps_histograms() -> (Vec<(String, String)>, Vec<HistoConfig>) {
     new_columns.push(("DelayBackRightTime - ScintLeftTime".into(), "DelayBackRightTime_ScintLeftTime".into()));
     new_columns.push(("ScintRightTime - ScintLeftTime".into(), "ScintRightTime_ScintLeftTime".into()));
 
+    // let bothplanes_cut = Some(vec![Cut::new_1d("Both Planes", "X2 != -1e6 && X1 != -1e6")]);
+    // let only_x1_plane_cut = Some(vec![Cut::new_1d("Only X1 Plane", "X1 != -1e6 && X2 == -1e6")]);
+    // let only_x2_plane_cut = Some(vec![Cut::new_1d("Only X2 Plane", "X2 != -1e6 && X1 == -1e6")]);
 
     let mut histograms = vec![];
 
+    let fp_range = (-300.0, 300.0);
+    let fp_bins = 600;
+
+    let range = (0.0, 4096.0);
+    let bins = 512;
+
     // Focal plane histograms
-    histograms.push(HistoConfig::Histo1D(Histo1DConfig::new("SE-SPS/Focal Plane/X1", "X1", (-300.0, 300.0), 600)));
-    histograms.push(HistoConfig::Histo1D(Histo1DConfig::new("SE-SPS/Focal Plane/X2", "X2", (-300.0, 300.0), 600)));
-    histograms.push(HistoConfig::Histo1D(Histo1DConfig::new("SE-SPS/Focal Plane/Xavg", "Xavg", (-300.0, 300.0), 600)));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Focal Plane/X2 v X1", "X1", "X2", (-300.0, 300.0), (-300.0, 300.0), (600, 600))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Focal Plane/Theta v Xavg", "Xavg", "Theta", (-300.0, 300.0), (0.0, PI), (600, 600))));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/X1", "X1", fp_range, fp_bins, None));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/X2", "X2", fp_range, fp_bins, None));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Xavg", "Xavg", fp_range, fp_bins, None));
+    histograms.push(Configs::new_2d("SE-SPS/Focal Plane/X2 v X1", "X1", "X2", fp_range, fp_range, (fp_bins, fp_bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Focal Plane/Theta v Xavg", "Xavg", "Theta", fp_range, (0.0, PI), (fp_bins, fp_bins), None));
 
     // Particle Identification histograms
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification/AnodeBack v ScintLeft", "ScintLeftEnergy", "AnodeBackEnergy", (0.0, 4096.0), (0.0, 4096.0), (512,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification/AnodeFront v ScintLeft", "ScintLeftEnergy", "AnodeFrontEnergy", (0.0, 4096.0), (0.0, 4096.0), (512,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification/Cathode v ScintLeft", "ScintLeftEnergy", "CathodeEnergy", (0.0, 4096.0), (0.0, 4096.0), (512,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification/AnodeBack v ScintRight", "ScintRightEnergy", "AnodeBackEnergy", (0.0, 4096.0), (0.0, 4096.0), (512,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification/AnodeFront v ScintRight", "ScintRightEnergy", "AnodeFrontEnergy", (0.0, 4096.0), (0.0, 4096.0), (512,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification/Cathode v ScintRight", "ScintRightEnergy", "CathodeEnergy", (0.0, 4096.0), (0.0, 4096.0), (512,512))));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification/AnodeBack v ScintLeft", "ScintLeftEnergy", "AnodeBackEnergy", range, range, (bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification/AnodeFront v ScintLeft", "ScintLeftEnergy", "AnodeFrontEnergy", range, range, (bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification/Cathode v ScintLeft", "ScintLeftEnergy", "CathodeEnergy", range, range, (bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification/AnodeBack v ScintRight", "ScintRightEnergy", "AnodeBackEnergy", range, range, (bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification/AnodeFront v ScintRight", "ScintRightEnergy", "AnodeFrontEnergy", range, range, (bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification/Cathode v ScintRight", "ScintRightEnergy", "CathodeEnergy", range, range, (bins,bins), None));
 
     // Particle Identification vs Focal plane histograms
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/ScintLeft v X1", "X1", "ScintLeftEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/ScintLeft v X2", "X2", "ScintLeftEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/ScintLeft v Xavg", "Xavg", "ScintLeftEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/ScintRight v X1", "X1", "ScintRightEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/ScintRight v X2", "X2", "ScintRightEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/ScintRight v Xavg", "Xavg", "ScintRightEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/AnodeBack v X1", "X1", "AnodeBackEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/AnodeBack v X2", "X2", "AnodeBackEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/AnodeBack v Xavg", "Xavg", "AnodeBackEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/AnodeFront v X1", "X1", "AnodeFrontEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/AnodeFront v X2", "X2", "AnodeFrontEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/AnodeFront v Xavg", "Xavg", "AnodeFrontEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/Cathode v X1", "X1", "CathodeEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/Cathode v X2", "X2", "CathodeEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Particle Identification v Focal Plane/Cathode v Xavg", "Xavg", "CathodeEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/ScintLeft v X1", "X1", "ScintLeftEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/ScintLeft v X2", "X2", "ScintLeftEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/ScintLeft v Xavg", "Xavg", "ScintLeftEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/ScintRight v X1", "X1", "ScintRightEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/ScintRight v X2", "X2", "ScintRightEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/ScintRight v Xavg", "Xavg", "ScintRightEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/AnodeBack v X1", "X1", "AnodeBackEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/AnodeBack v X2", "X2", "AnodeBackEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/AnodeBack v Xavg", "Xavg", "AnodeBackEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/AnodeFront v X1", "X1", "AnodeFrontEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/AnodeFront v X2", "X2", "AnodeFrontEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/AnodeFront v Xavg", "Xavg", "AnodeFrontEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/Cathode v X1", "X1", "CathodeEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/Cathode v X2", "X2", "CathodeEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Particle Identification v Focal Plane/Cathode v Xavg", "Xavg", "CathodeEnergy", fp_range, range, (fp_bins,bins), None));
 
     // Delay lines vs Focal plane histograms
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Delay Lines v Focal Plane/DelayFrontRight v X1", "X1", "DelayFrontRightEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Delay Lines v Focal Plane/DelayFrontLeft v X1", "X1", "DelayFrontLeftEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Delay Lines v Focal Plane/DelayBackRight v X2", "X2", "DelayBackRightEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Delay Lines v Focal Plane/DelayBackLeft v X2", "X2", "DelayBackLeftEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Delay Lines v Focal Plane/DelayBackRight v Xavg", "Xavg", "DelayBackRightEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Delay Lines v Focal Plane/DelayBackLeft v Xavg", "Xavg", "DelayBackLeftEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Delay Lines v Focal Plane/DelayFrontRight v Xavg", "Xavg", "DelayFrontRightEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Delay Lines v Focal Plane/DelayFrontLeft v Xavg", "Xavg", "DelayFrontLeftEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Delay Lines v Focal Plane/DelayBackRight v X1", "X1", "DelayBackRightEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Delay Lines v Focal Plane/DelayBackLeft v X1", "X1", "DelayBackLeftEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Delay Lines v Focal Plane/DelayFrontRight v X2", "X2", "DelayFrontRightEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
-    histograms.push(HistoConfig::Histo2D(Histo2DConfig::new("SE-SPS/Delay Lines v Focal Plane/DelayFrontLeft v X2", "X2", "DelayFrontLeftEnergy", (-300.0, 300.0), (0.0, 4096.0), (600,512))));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayFrontRight v X1", "X1", "DelayFrontRightEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayFrontLeft v X1", "X1", "DelayFrontLeftEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayBackRight v X2", "X2", "DelayBackRightEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayBackLeft v X2", "X2", "DelayBackLeftEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayBackRight v Xavg", "Xavg", "DelayBackRightEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayBackLeft v Xavg", "Xavg", "DelayBackLeftEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayFrontRight v Xavg", "Xavg", "DelayFrontRightEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayFrontLeft v Xavg", "Xavg", "DelayFrontLeftEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayBackRight v X1", "X1", "DelayBackRightEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayBackLeft v X1", "X1", "DelayBackLeftEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayFrontRight v X2", "X2", "DelayFrontRightEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayFrontLeft v X2", "X2", "DelayFrontLeftEnergy", fp_range, range, (fp_bins,bins), None));
 
+
+    // Delay timing relative to anodes histograms
 
     (new_columns, histograms)
 }
 /*
-
-    let lf_sps = lf.with_columns(vec![
-            (col("DelayFrontRightEnergy") + col("DelayFrontLeftEnergy") / lit(2.0)).alias("DelayFrontAverageEnergy"),
-            (col("DelayBackRightEnergy") + col("DelayBackLeftEnergy") / lit(2.0)).alias("DelayBackAverageEnergy"),
-            (col("DelayFrontLeftTime") - col("AnodeFrontTime")).alias("DelayFrontLeftTime_AnodeFrontTime"),
-            (col("DelayFrontRightTime") - col("AnodeFrontTime")).alias("DelayFrontRightTime_AnodeFrontTime"),
-            (col("DelayBackLeftTime") - col("AnodeFrontTime")).alias("DelayBackLeftTime_AnodeFrontTime"),
-            (col("DelayBackRightTime") - col("AnodeFrontTime")).alias("DelayBackRightTime_AnodeFrontTime"),
-            (col("DelayFrontLeftTime") - col("AnodeBackTime")).alias("DelayFrontLeftTime_AnodeBackTime"),
-            (col("DelayFrontRightTime") - col("AnodeBackTime")).alias("DelayFrontRightTime_AnodeBackTime"),
-            (col("DelayBackLeftTime") - col("AnodeBackTime")).alias("DelayBackLeftTime_AnodeBackTime"),
-            (col("DelayBackRightTime") - col("AnodeBackTime")).alias("DelayBackRightTime_AnodeBackTime"),
-            (col("AnodeFrontTime") - col("AnodeBackTime")).alias("AnodeFrontTime_AnodeBackTime"),
-            (col("AnodeBackTime") - col("AnodeFrontTime")).alias("AnodeBackTime_AnodeFrontTime"),
-            (col("AnodeFrontTime") - col("ScintLeftTime")).alias("AnodeFrontTime_ScintLeftTime"),
-            (col("AnodeBackTime") - col("ScintLeftTime")).alias("AnodeBackTime_ScintLeftTime"),
-            (col("DelayFrontLeftTime") - col("ScintLeftTime")).alias("DelayFrontLeftTime_ScintLeftTime"),
-            (col("DelayFrontRightTime") - col("ScintLeftTime")).alias("DelayFrontRightTime_ScintLeftTime"),
-            (col("DelayBackLeftTime") - col("ScintLeftTime")).alias("DelayBackLeftTime_ScintLeftTime"),
-            (col("DelayBackRightTime") - col("ScintLeftTime")).alias("DelayBackRightTime_ScintLeftTime"),
-            (col("ScintRightTime") - col("ScintLeftTime")).alias("ScintRightTime_ScintLeftTime"),
-            // (lit(-0.013139237615)*col("Xavg")*col("Xavg") + lit(-13.80004977)*col("Xavg") + lit(9790.048149635)).alias("XavgEnergyCalibrated")
-        ]);
-
-        let lf_bothplanes = lf_sps.clone().filter(col("X1").neq(lit(-1e6))).filter(col("X2").neq(lit(-1e6)));
-        let lf_only_x1_plane = lf_sps.clone().filter(col("X1").neq(lit(-1e6))).filter(col("X2").eq(lit(-1e6)));
-        let lf_only_x2_plane = lf_sps.clone().filter(col("X2").neq(lit(-1e6))).filter(col("X1").eq(lit(-1e6)));
-
-
         // // // //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
         // Delay lines vs Focal plane histograms
         let lf_time_rel_backanode = lf_sps.clone().filter(col("AnodeBackTime").neq(lit(-1e6))).filter(col("ScintLeftTime").neq(lit(-1e6)));
@@ -187,14 +150,14 @@ pub fn sps_histograms() -> (Vec<(String, String)>, Vec<HistoConfig>) {
         h.add_fill_hist1d("SE-SPS/Timing/DelayBackLeftTime-ScintLeftTime", &lf_time_rel_backanode, "DelayBackLeftTime_ScintLeftTime", 1000, (-3000.0, 3000.0));
         h.add_fill_hist1d("SE-SPS/Timing/DelayBackRightTime-ScintLeftTime", &lf_time_rel_backanode, "DelayBackRightTime_ScintLeftTime", 1000, (-3000.0, 3000.0));
         h.add_fill_hist1d("SE-SPS/Timing/ScintRightTime-ScintLeftTime", &lf_time_rel_backanode, "ScintRightTime_ScintLeftTime", 1000, (-3000.0, 3000.0));
-        h.add_fill_hist2d("SE-SPS/Timing/ScintTimeDif v Xavg", &lf_time_rel_backanode, "Xavg", "ScintRightTime_ScintLeftTime", (600, 12800), ((-300.0, 300.0), (-3200.0, 3200.0)));
+        h.add_fill_hist2d("SE-SPS/Timing/ScintTimeDif v Xavg", &lf_time_rel_backanode, "Xavg", "ScintRightTime_ScintLeftTime", (600, 12800), (fp_range, (-3200.0, 3200.0)));
 
-        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayFrontAverage v X1", &lf_sps, "X1", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayBackAverage v X1", &lf_sps, "X1", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayFrontAverage v X2", &lf_sps, "X2", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayBackAverage v X2", &lf_sps, "X2", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayFrontAverage v Xavg", &lf_sps, "Xavg", "DelayFrontAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayBackAverage v Xavg", &lf_sps, "Xavg", "DelayBackAverageEnergy", (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayFrontAverage v X1", &lf_sps, "X1", "DelayFrontAverageEnergy", (600, 512), (fp_range, range));
+        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayBackAverage v X1", &lf_sps, "X1", "DelayBackAverageEnergy", (600, 512), (fp_range, range));
+        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayFrontAverage v X2", &lf_sps, "X2", "DelayFrontAverageEnergy", (600, 512), (fp_range, range));
+        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayBackAverage v X2", &lf_sps, "X2", "DelayBackAverageEnergy", (600, 512), (fp_range, range));
+        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayFrontAverage v Xavg", &lf_sps, "Xavg", "DelayFrontAverageEnergy", (600, 512), (fp_range, range));
+        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayBackAverage v Xavg", &lf_sps, "Xavg", "DelayBackAverageEnergy", (600, 512), (fp_range, range));
 
         //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
         // Delay timing relative to anodes histograms
@@ -231,7 +194,7 @@ pub fn pips1000(h: &mut Histogrammer, lf: LazyFrame) {
     );
 
     h.add_fill_hist1d("PIPS1000/Energy", &lf_pips, "PIPS1000Energy", 16384, (0.0, 16384.0));
-    // h.add_fill_hist2d("PIPS1000: PSD", &lf_pips, "PIPS1000Energy", "PIPS1000PSD", (512, 500), ((0.0, 4096.0), (0.0, 1.0)));
+    // h.add_fill_hist2d("PIPS1000: PSD", &lf_pips, "PIPS1000Energy", "PIPS1000PSD", (512, 500), (range, (0.0, 1.0)));
     h.add_fill_hist1d("PIPS1000/Energy Calibrated", &lf_pips, "PIPS1000EnergyCalibrated", 600, (0.0, 1200.0));
 
 }
@@ -270,8 +233,8 @@ pub fn cebra(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize, timecu
             ( ( col(&format!("Cebra{}Energy", i)) - col(&format!("Cebra{}Short", i)) )/ col(&format!("Cebra{}Energy", i) ) ).alias(&format!("Cebra{}PSD", i))
         );
 
-    h.add_fill_hist1d(&format!("CeBrA/Cebra{}/Cebra{}Energy", i, i), &lf_cebra, &format!("Cebra{}Energy", i), 512, (0.0, 4096.0));
-    h.add_fill_hist2d(&format!("CeBrA/Cebra{}/PSD v Energy", i), &lf_cebra, &format!("Cebra{}Energy", i), &format!("Cebra{}PSD", i), (512, 512), ((0.0, 4096.0), (0.0, 1.0)));
+    h.add_fill_hist1d(&format!("CeBrA/Cebra{}/Cebra{}Energy", i, i), &lf_cebra, &format!("Cebra{}Energy", i), 512, range);
+    h.add_fill_hist2d(&format!("CeBrA/Cebra{}/PSD v Energy", i), &lf_cebra, &format!("Cebra{}Energy", i), &format!("Cebra{}PSD", i), (512, 512), (range, (0.0, 1.0)));
 
 
     /*
@@ -296,7 +259,7 @@ pub fn cebra(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize, timecu
             // update column names to include the gain matched column
             column_names.push(format!("Cebra{}EnergyGM", i));
 
-            h.add_fill_hist1d(&format!("CeBrA/Cebra{}/Cebra{}EnergyGM", i, i), &lf, &format!("Cebra{}EnergyGM", i), 512, (0.0, 4096.0));
+            h.add_fill_hist1d(&format!("CeBrA/Cebra{}/Cebra{}EnergyGM", i, i), &lf, &format!("Cebra{}EnergyGM", i), 512, range);
 
             lf
         } else{
@@ -353,7 +316,7 @@ pub fn cebra(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize, timecu
 
     if sps {
         h.add_fill_hist1d(&format!("CeBrA/Cebra{}/Cebra{}RelTime", i, i), &lf_cebra, &format!("Cebra{}RelTime", i), 6400, (-3200.0, 3200.0));
-        h.add_fill_hist2d(&format!("CeBrA/Cebra{}/Cebra{}Energy v Xavg", i, i), &lf_cebra, "Xavg", &format!("Cebra{}Energy", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+        h.add_fill_hist2d(&format!("CeBrA/Cebra{}/Cebra{}Energy v Xavg", i, i), &lf_cebra, "Xavg", &format!("Cebra{}Energy", i), (600, 512), (fp_range, range));
         h.add_fill_hist2d(&format!("CeBrA/Cebra{}/Theta v Cebra{}RelTime ", i, i), &lf_cebra, &format!("Cebra{}RelTime", i), "Theta", (6400, 300), ((-3200.0, 3200.0), (0.0, PI)));
     }
 
@@ -370,33 +333,33 @@ pub fn cebra(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize, timecu
 
             h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}RelTime", i, i), &lf_timecut, &format!("Cebra{}RelTime", i), 6400, (-3200.0, 3200.0));
             h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}RelTimeShifted", i, i), &lf_timecut, &format!("Cebra{}RelTimeShifted", i), 100, (-50.0, 50.0));
-            h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}Energy", i, i), &lf_timecut, &format!("Cebra{}Energy", i), 512, (0.0, 4096.0));
-            h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/Xavg", i), &lf_timecut, "Xavg", 600, (-300.0, 300.0));
+            h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}Energy", i, i), &lf_timecut, &format!("Cebra{}Energy", i), 512, range);
+            h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/Xavg", i), &lf_timecut, "Xavg", 600, fp_range);
 
-            h.add_fill_hist1d("CeBrA/Xavg", &lf_timecut, "Xavg", 600, (-300.0, 300.0));
+            h.add_fill_hist1d("CeBrA/Xavg", &lf_timecut, "Xavg", 600, fp_range);
             h.add_fill_hist1d("CeBrA/CebraRelTimeShifted_TimeCut", &lf_timecut, &format!("Cebra{}RelTimeShifted", i), 100, (-50.0, 50.0));
 
-            h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}Energy v Xavg", i, i), &lf_timecut, "Xavg", &format!("Cebra{}Energy", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-            h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}Energy v X1", i, i), &lf_timecut, "X1", &format!("Cebra{}Energy", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+            h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}Energy v Xavg", i, i), &lf_timecut, "Xavg", &format!("Cebra{}Energy", i), (600, 512), (fp_range, range));
+            h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/Cebra{}Energy v X1", i, i), &lf_timecut, "X1", &format!("Cebra{}Energy", i), (600, 512), (fp_range, range));
 
             if column_names.contains(&format!("Cebra{}EnergyGM", i)) {
-                h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/GainMatched/Cebra{}EnergyGM", i, i), &lf_timecut, &format!("Cebra{}EnergyGM", i), 512, (0.0, 4096.0));
+                h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/GainMatched/Cebra{}EnergyGM", i, i), &lf_timecut, &format!("Cebra{}EnergyGM", i), 512, range);
 
-                h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/GainMatched/Cebra{}EnergyGM v Xavg", i, i), &lf_timecut, "Xavg", &format!("Cebra{}EnergyGM", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-                h.add_fill_hist2d("CeBrA/CebraEnergyGM v Xavg: TimeCut", &lf_timecut, "Xavg", &format!("Cebra{}EnergyGM", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+                h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/GainMatched/Cebra{}EnergyGM v Xavg", i, i), &lf_timecut, "Xavg", &format!("Cebra{}EnergyGM", i), (600, 512), (fp_range, range));
+                h.add_fill_hist2d("CeBrA/CebraEnergyGM v Xavg: TimeCut", &lf_timecut, "Xavg", &format!("Cebra{}EnergyGM", i), (600, 512), (fp_range, range));
 
-                h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/GainMatched/Cebra{}EnergyGM v X1", i, i), &lf_timecut, "X1", &format!("Cebra{}EnergyGM", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
-                h.add_fill_hist2d("CeBrA/CebraEnergyGM v X1: TimeCut", &lf_timecut, "X1", &format!("Cebra{}EnergyGM", i), (600, 512), ((-300.0, 300.0), (0.0, 4096.0)));
+                h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/GainMatched/Cebra{}EnergyGM v X1", i, i), &lf_timecut, "X1", &format!("Cebra{}EnergyGM", i), (600, 512), (fp_range, range));
+                h.add_fill_hist2d("CeBrA/CebraEnergyGM v X1: TimeCut", &lf_timecut, "X1", &format!("Cebra{}EnergyGM", i), (600, 512), (fp_range, range));
             }
 
             if let Some(ref ecal) = energy_calibration {
                 h.add_fill_hist1d(&format!("CeBrA/Cebra{}/TimeCut/Calibrated/Cebra{}EnergyCalibrated", i, i), &lf_timecut, &format!("Cebra{}EnergyCalibrated", i), ecal.bins, ecal.range);
 
-                h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/Calibrated/Cebra{}EnergyCalibrated v Xavg", i, i), &lf_timecut, "Xavg", &format!("Cebra{}EnergyCalibrated", i), (600, ecal.bins), ((-300.0, 300.0), ecal.range));
-                h.add_fill_hist2d("CeBrA/CebraEnergyCalibrated v Xavg: TimeCut", &lf_timecut, "Xavg", &format!("Cebra{}EnergyCalibrated", i), (600, ecal.bins), ((-300.0, 300.0), ecal.range));
+                h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/Calibrated/Cebra{}EnergyCalibrated v Xavg", i, i), &lf_timecut, "Xavg", &format!("Cebra{}EnergyCalibrated", i), (600, ecal.bins), (fp_range, ecal.range));
+                h.add_fill_hist2d("CeBrA/CebraEnergyCalibrated v Xavg: TimeCut", &lf_timecut, "Xavg", &format!("Cebra{}EnergyCalibrated", i), (600, ecal.bins), (fp_range, ecal.range));
 
-                h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/Calibrated/Cebra{}EnergyCalibrated v X1", i, i), &lf_timecut, "X1", &format!("Cebra{}EnergyCalibrated", i), (600, ecal.bins), ((-300.0, 300.0), ecal.range));
-                h.add_fill_hist2d("CeBrA/CebraEnergyCalibrated v X1: TimeCut", &lf_timecut, "X1", &format!("Cebra{}EnergyCalibrated", i), (600, ecal.bins), ((-300.0, 300.0), ecal.range));
+                h.add_fill_hist2d(&format!("CeBrA/Cebra{}/TimeCut/Calibrated/Cebra{}EnergyCalibrated v X1", i, i), &lf_timecut, "X1", &format!("Cebra{}EnergyCalibrated", i), (600, ecal.bins), (fp_range, ecal.range));
+                h.add_fill_hist2d("CeBrA/CebraEnergyCalibrated v X1: TimeCut", &lf_timecut, "X1", &format!("Cebra{}EnergyCalibrated", i), (600, ecal.bins), (fp_range, ecal.range));
             }
         }
     };
@@ -408,8 +371,8 @@ pub fn cebra(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize, timecu
 pub fn catrina(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize) {
     let i = detector_number;
 
-    h.add_fill_hist1d(&format!("Catrina/CATRINA{i}/Energy"), &lf, &format!("CATRINA{i}Energy"), 4096, (0.0, 4096.0));
-    h.add_fill_hist2d(&format!("Catrina/CATRINA{i}/PSD vs Energy"), &lf, &format!("CATRINA{i}Energy"), &format!("CATRINA{i}PSD"), (512, 500), ((0.0, 4096.0), (0.0, 1.0)));
+    h.add_fill_hist1d(&format!("Catrina/CATRINA{i}/Energy"), &lf, &format!("CATRINA{i}Energy"), 4096, range);
+    h.add_fill_hist2d(&format!("Catrina/CATRINA{i}/PSD vs Energy"), &lf, &format!("CATRINA{i}Energy"), &format!("CATRINA{i}PSD"), (512, 500), (range, (0.0, 1.0)));
 }
 
 

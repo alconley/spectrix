@@ -1,6 +1,6 @@
 # Spectrix
 
-Spectrix is a comprehensive software designed for nucelar spectrum analysis. It provides functionalities for histogramming, Gaussian fitting, and interactive data visualization of 1D and 2D histograms using crates: `egui`, `egui-tiles`, `egui_plot`, and `polars`. Additionally, using uproot, you can view 1d and 2d root histograms.
+Spectrix is a comprehensive software designed for nucelar spectrum analysis. It provides functionalities for histogramming, Gaussian fitting, and interactive data visualization of 1D and 2D histograms using crates: `egui`, `egui-tiles`, `egui_plot`, `egui_file`, and `polars`. Additionally, using uproot, you can view 1d and 2d root histograms.
 
 ### Running
 
