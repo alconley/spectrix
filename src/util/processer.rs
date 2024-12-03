@@ -1,35 +1,57 @@
-use super::lazyframer::LazyFramer;
-use super::workspacer::Workspacer;
 use crate::histoer::histogrammer::Histogrammer;
 use crate::histogram_scripter::histogram_script::HistogramScript;
 use pyo3::{prelude::*, types::PyModule};
 
+use super::egui_file_dialog::FileDialog;
+use polars::prelude::*;
+
 use std::sync::atomic::Ordering;
 
-#[derive(Default, serde::Deserialize, serde::Serialize)]
-pub struct Processer {
-    #[serde(skip)]
-    pub workspacer: Workspacer,
-    #[serde(skip)]
-    pub lazyframer: Option<LazyFramer>,
-    pub histogrammer: Histogrammer,
-    pub histogram_script: HistogramScript,
-    pub show_histogram_script: bool,
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct ProcessorSettings {
+    pub dialog_open: bool,
+    pub histogram_script_open: bool,
+    pub column_names: Vec<String>,
+    pub test: Vec<String>,
 }
 
-impl Processer {
+impl Default for ProcessorSettings {
+    fn default() -> Self {
+        Self {
+            dialog_open: true,
+            histogram_script_open: true,
+            column_names: Vec::new(),
+            test: Vec::new(),
+        }
+    }
+}
+
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+pub struct Processor {
+    #[serde(skip)]
+    pub file_dialog: Option<FileDialog>,
+    pub selected_files: Vec<std::path::PathBuf>,
+    #[serde(skip)]
+    pub lazyframe: Option<LazyFrame>,
+    pub histogrammer: Histogrammer,
+    pub histogram_script: HistogramScript,
+    pub settings: ProcessorSettings,
+}
+
+impl Processor {
     pub fn new() -> Self {
         Self {
-            workspacer: Workspacer::new(),
-            lazyframer: None,
+            file_dialog: None,
+            selected_files: Vec::new(),
+            lazyframe: None,
             histogrammer: Histogrammer::default(),
             histogram_script: HistogramScript::new(),
-            show_histogram_script: true,
+            settings: ProcessorSettings::default(),
         }
     }
 
     pub fn reset(&mut self) {
-        self.lazyframer = None;
+        self.lazyframe = None;
         self.histogrammer = Histogrammer::default();
     }
 
@@ -106,7 +128,13 @@ def get_2d_histograms(file_name):
             let module =
                 PyModule::from_code_bound(py, code, "uproot_functions.py", "uproot_functions")?;
 
-            for file in self.workspacer.selected_files.iter() {
+            let root_files = self
+                .selected_files
+                .iter()
+                .filter(|file| file.extension().unwrap() == "root")
+                .collect::<Vec<_>>();
+
+            for file in root_files.iter() {
                 let file_name = file.to_str().unwrap();
 
                 let result_1d = module.getattr("get_1d_histograms")?.call1((file_name,))?;
@@ -170,88 +198,171 @@ def get_2d_histograms(file_name):
     }
 
     fn create_lazyframe(&mut self) {
-        self.lazyframer = Some(LazyFramer::new(self.workspacer.selected_files.clone()));
+        // get all the parquet files from the selected files
+        let parquet_files: Vec<std::path::PathBuf> = self
+            .selected_files
+            .iter()
+            .filter(|file| file.extension().unwrap() == "parquet")
+            .cloned()
+            .collect();
+
+        // warn if no parquet files are selected
+        if parquet_files.is_empty() {
+            log::warn!("No Parquet files selected.");
+            return;
+        }
+
+        let files_arc: Arc<[std::path::PathBuf]> = Arc::from(parquet_files);
+        let args = ScanArgsParquet::default();
+        log::info!("Files {:?}", files_arc);
+
+        match LazyFrame::scan_parquet_files(files_arc, args) {
+            Ok(lf) => {
+                log::info!("Loaded Parquet files");
+                let column_names = Self::get_column_names_from_lazyframe(&lf);
+
+                self.lazyframe = Some(lf);
+                self.settings.column_names = column_names;
+            }
+            Err(e) => {
+                self.lazyframe = None; // Indicates that loading failed
+                log::error!("Failed to load Parquet files: {}", e);
+            }
+        }
+    }
+
+    fn get_column_names_from_lazyframe(lazyframe: &LazyFrame) -> Vec<String> {
+        let lf: LazyFrame = lazyframe.clone().limit(1);
+        let df: DataFrame = lf.collect().unwrap();
+        let columns: Vec<String> = df
+            .get_column_names_owned()
+            .into_iter()
+            .map(|name| name.to_string())
+            .collect();
+
+        columns
     }
 
     fn perform_histogrammer_from_lazyframe(&mut self) {
-        if let Some(lazyframer) = &self.lazyframer {
-            if let Some(lf) = &lazyframer.lazyframe {
-                self.histogram_script
-                    .add_histograms(&mut self.histogrammer, lf.clone());
-            } else {
-                log::error!("LazyFrame is not loaded");
-            }
+        if let Some(lf) = &self.lazyframe {
+            self.histogram_script
+                .add_histograms(&mut self.histogrammer, lf.clone());
         } else {
-            log::error!("LazyFramer is not initialized");
+            log::error!("Failed to preform histogrammer: LazyFrame is None.");
         }
     }
 
     pub fn calculate_histograms(&mut self) {
-        self.create_lazyframe();
-        self.perform_histogrammer_from_lazyframe();
-    }
-
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
-        if self.workspacer.options.root {
-            self.show_histogram_script = false;
-        }
-
-        if !self.workspacer.options.root {
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(
-                        !self.workspacer.selected_files.is_empty(),
-                        egui::Button::new("Calculate Histograms"),
-                    )
-                    .on_disabled_hover_text("No files selected.")
-                    .clicked()
-                {
-                    self.calculate_histograms();
-                }
-
-                if self.histogrammer.calculating.load(Ordering::Relaxed) {
-                    // Show spinner while `calculating` is true
-                    ui.add(egui::widgets::Spinner::default());
-                }
-
-                ui.separator();
-
-                if ui
-                    .selectable_label(self.show_histogram_script, "Histograms")
-                    .clicked()
-                {
-                    self.show_histogram_script = !self.show_histogram_script;
-                }
-            });
-
-            ui.separator();
-        } else if ui
-            .add_enabled(
-                !self.workspacer.selected_files.is_empty(),
-                egui::Button::new("Get Histograms"),
-            )
-            .on_disabled_hover_text("No files selected.")
-            .clicked()
+        // check if the files are parquet files
+        if self
+            .selected_files
+            .iter()
+            .any(|file| file.extension().unwrap() == "parquet")
+        {
+            self.create_lazyframe();
+            self.perform_histogrammer_from_lazyframe();
+        } else if self
+            .selected_files
+            .iter()
+            .any(|file| file.extension().unwrap() == "root")
         {
             let _ = self.get_histograms_from_root_files();
+        } else {
+            log::error!("No Parquet files or root files selected.");
         }
-
-        self.workspacer.workspace_ui(ui);
-
-        ui.separator();
-
-        if !self.workspacer.options.root {
-            if let Some(lazyframer) = &mut self.lazyframer {
-                lazyframer.ui(ui);
-
-                ui.separator();
-            }
-        }
-
-        self.histogrammer.side_panel_ui(ui);
     }
 
-    pub fn histogram_script_ui(&mut self, ui: &mut egui::Ui) {
-        self.histogram_script.ui(ui);
+    fn open_file_dialog(&mut self) {
+        self.file_dialog = Some(FileDialog::open_file(None).multi_select(true));
+        if let Some(dialog) = &mut self.file_dialog {
+            dialog.set_filter(".parquet");
+            dialog.open(); // Modify the dialog in-place to open it
+        }
+    }
+
+    pub fn left_side_panels_ui(&mut self, ctx: &egui::Context) {
+        egui::SidePanel::left("spectrix_processor_left_panel").show_animated(
+            ctx,
+            self.settings.dialog_open,
+            |ui| {
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            !self.selected_files.is_empty(),
+                            egui::Button::new("Calculate/Get Histograms"),
+                        )
+                        .on_disabled_hover_text("No files selected.")
+                        .clicked()
+                    {
+                        self.calculate_histograms();
+                    }
+
+                    if self.histogrammer.calculating.load(Ordering::Relaxed) {
+                        // Show spinner while `calculating` is true
+                        ui.add(egui::widgets::Spinner::default());
+                    }
+
+                    ui.separator();
+
+                    if ui
+                        .selectable_label(self.settings.histogram_script_open, "Histograms")
+                        .clicked()
+                    {
+                        self.settings.histogram_script_open = !self.settings.histogram_script_open;
+                    }
+                });
+
+                ui.separator();
+
+                if self.file_dialog.is_none() {
+                    self.open_file_dialog();
+                }
+
+                if let Some(dialog) = &mut self.file_dialog {
+                    dialog.ui_embeded(ui);
+                    self.selected_files = dialog.selected_file_paths();
+                }
+            },
+        );
+
+        egui::SidePanel::left("spectrix_histogram_panel").show_animated(
+            ctx,
+            self.settings.histogram_script_open && self.settings.dialog_open,
+            |ui| {
+                self.histogram_script.ui(ui);
+            },
+        );
+
+        // Secondary left panel for the toggle button
+        egui::SidePanel::left("spectrix_toggle_left_panel")
+            .resizable(false)
+            .show_separator_line(false)
+            .min_width(1.0)
+            .show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    ui.add_space(ui.available_height() / 2.0 - 10.0); // Center the button vertically
+                    if ui
+                        .small_button(if self.settings.dialog_open {
+                            "◀"
+                        } else {
+                            "▶"
+                        })
+                        .clicked()
+                    {
+                        self.settings.dialog_open = !self.settings.dialog_open;
+                    }
+                });
+            });
+    }
+
+    fn central_panel_ui(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            self.histogrammer.ui(ui);
+        });
+    }
+
+    pub fn ui(&mut self, ctx: &egui::Context) {
+        self.left_side_panels_ui(ctx);
+        self.central_panel_ui(ctx);
     }
 }

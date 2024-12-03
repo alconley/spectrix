@@ -611,15 +611,26 @@ impl Histogrammer {
         self.tree.ui(&mut self.behavior, ui);
     }
 
-    pub fn side_panel_ui(&mut self, ui: &mut egui::Ui) {
-        self.behavior.ui(ui);
-        ui.separator();
+    pub fn menu_ui(&mut self, ui: &mut egui::Ui) {
+        // self.behavior.ui(ui);
 
-        ui.collapsing("Histogrammer", |ui| {
+        ui.menu_button("Histogrammer", |ui| {
             if let Some(root) = self.tree.root() {
-                if ui.button("Reorganize").clicked() {
-                    self.reorganize();
-                }
+                ui.horizontal(|ui| {
+                    ui.heading("Tree");
+
+                    ui.separator();
+
+                    if ui.button("Reorganize").clicked() {
+                        self.reorganize();
+                    }
+                });
+                ui.separator();
+
+                self.behavior.ui(ui);
+
+                ui.separator();
+
                 tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
             }
         });

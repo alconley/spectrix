@@ -212,6 +212,7 @@ impl GaussianFitter {
             let code = r#"
 import numpy as np
 import lmfit
+# from sigfig import round
 
 def gaussian(x, amplitude, mean, sigma):
     return amplitude * np.exp(-(x - mean)**2 / (2 * sigma**2))
@@ -368,6 +369,18 @@ def MultipleGaussianFit(x_data: list, y_data: list, peak_markers: list, bin_widt
             amplitude, amplitude_uncertainty, mean, mean_uncertainty,
             sigma, sigma_uncertainty, fwhm, fwhm_uncertainty, area, area_uncertainty
         ))
+
+    # # Print Gaussian parameters in formatted table
+    # print("\nGaussian Fit Parameters:")
+    # print(f"{'Index':<5} {'Amplitude':<20} {'Mean':<20} {'Sigma':<20} {'FWHM':<20} {'Area':<20}")
+    # print("-" * 100)
+    # for i, params in enumerate(gaussian_params):
+    #     amplitude = round(params[0], params[1], notation="drake")
+    #     mean = round(params[2], params[3], notation="drake")
+    #     sigma = round(params[4], params[5], notation="drake")
+    #     fwhm = round(params[6], params[7], notation="drake")
+    #     area = round(params[8], params[9], notation="drake")
+    #     print(f"{i:<5} {amplitude:<20} {mean:<20} {sigma:<20} {fwhm:<20} {area:<20}")
 
     # Extract background parameters
     background_params = []

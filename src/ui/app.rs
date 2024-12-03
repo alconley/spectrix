@@ -1,17 +1,15 @@
-use crate::util::processer::Processer;
+use crate::util::processer::Processor;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct Spectrix {
-    processer: Processer,
-    workspace_panel_open: bool,
+    processor: Processor,
 }
 
 impl Default for Spectrix {
     fn default() -> Self {
         Self {
-            processer: Processer::new(),
-            workspace_panel_open: true,
+            processor: Processor::new(),
         }
     }
 }
@@ -38,7 +36,7 @@ impl eframe::App for Spectrix {
         // Handle keybinds
         let input = ctx.input(|state| state.clone()); // Get the input state
         if input.key_pressed(egui::Key::Tab) {
-            self.workspace_panel_open = !self.workspace_panel_open;
+            self.processor.settings.dialog_open = !self.processor.settings.dialog_open;
         }
 
         egui::TopBottomPanel::top("spectrix_top_panel").show(ctx, |ui| {
@@ -50,54 +48,15 @@ impl eframe::App for Spectrix {
                 ui.separator();
 
                 if ui.button("Reset").clicked() {
-                    self.processer.reset();
+                    self.processor.reset();
                 }
+
+                ui.separator();
+
+                self.processor.histogrammer.menu_ui(ui);
             });
         });
 
-        egui::SidePanel::left("spectrix_workspace_panel").show_animated(
-            ctx,
-            self.workspace_panel_open,
-            |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("spectrix_workspace_panel_scroll")
-                    .show(ui, |ui| {
-                        self.processer.ui(ui);
-                    });
-            },
-        );
-
-        egui::SidePanel::left("spectrix_histogram_panel").show_animated(
-            ctx,
-            self.processer.show_histogram_script && self.workspace_panel_open,
-            |ui| {
-                self.processer.histogram_script_ui(ui);
-            },
-        );
-
-        // Secondary left panel for the toggle button
-        egui::SidePanel::left("spectrix_toggle_left_panel")
-            .resizable(false)
-            .show_separator_line(false)
-            .min_width(1.0)
-            .show(ctx, |ui| {
-                ui.vertical(|ui| {
-                    ui.add_space(ui.available_height() / 2.0 - 10.0); // Center the button vertically
-                    if ui
-                        .small_button(if self.workspace_panel_open {
-                            "◀"
-                        } else {
-                            "▶"
-                        })
-                        .clicked()
-                    {
-                        self.workspace_panel_open = !self.workspace_panel_open;
-                    }
-                });
-            });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            self.processer.histogrammer.ui(ui);
-        });
+        self.processor.ui(ctx);
     }
 }
