@@ -8,6 +8,7 @@ use std::sync::atomic::Ordering;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Processer {
+    #[serde(skip)]
     pub workspacer: Workspacer,
     #[serde(skip)]
     pub lazyframer: Option<LazyFramer>,
@@ -19,7 +20,7 @@ pub struct Processer {
 impl Processer {
     pub fn new() -> Self {
         Self {
-            workspacer: Workspacer::default(),
+            workspacer: Workspacer::new(),
             lazyframer: None,
             histogrammer: Histogrammer::default(),
             histogram_script: HistogramScript::new(),

@@ -1,337 +1,73 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
-
-#[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq)]
-pub enum SortingOption {
-    #[default]
-    AlphabeticalAsc,
-    AlphabeticalDesc,
-    SizeAsc,
-    SizeDesc,
-    ModifiedTimeAsc,
-    ModifiedTimeDesc,
-    CreationTimeAsc,
-    CreationTimeDesc,
-}
+use super::egui_file_dialog::FileDialog;
+use std::path::PathBuf;
 
 #[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct WorkspacerOptions {
-    pub sorting_options: SortingOption,
-    pub save_with_scanning: bool,
-    pub suffix: String,
     pub root: bool,
 }
 
-#[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Default, Debug)]
 pub struct Workspacer {
-    pub directory: Option<PathBuf>,
-    pub files: Vec<PathBuf>,
     pub selected_files: Vec<PathBuf>,
+    pub file_dialog: Option<FileDialog>, // Not serialized or cloned
     pub options: WorkspacerOptions,
 }
 
-impl SortingOption {
-    fn display_name(&self) -> &str {
-        match self {
-            SortingOption::AlphabeticalAsc => "A-Z",
-            SortingOption::AlphabeticalDesc => "Z-A",
-            SortingOption::SizeAsc => "Size ⬆",
-            SortingOption::SizeDesc => "Size ⬇",
-            SortingOption::ModifiedTimeAsc => "Modified Time ⬆",
-            SortingOption::ModifiedTimeDesc => "Modified Time ⬇",
-            SortingOption::CreationTimeAsc => "Creation Time ⬆",
-            SortingOption::CreationTimeDesc => "Creation Time ⬇",
-        }
-    }
-}
-
 impl Workspacer {
-    fn select_directory(&mut self) {
-        let directory = rfd::FileDialog::new().pick_folder();
-        if let Some(dir) = directory {
-            self.directory = Some(dir.clone());
-            // After directory selection, automatically load .parquet files
-            self.get_files_in_directory(&dir);
-            self.validate_selected_files(); // Ensure selected_files are still valid
+    pub fn new() -> Self {
+        Self {
+            selected_files: Vec::new(),
+            options: WorkspacerOptions::default(),
+            file_dialog: None,
         }
     }
 
-    fn get_files_in_directory(&mut self, dir: &Path) {
-        let files = &mut self.files;
-        files.clear(); // Clear any existing files
-
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.filter_map(Result::ok) {
-                let path = entry.path();
-                if self.options.root {
-                    if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("root") {
-                        files.push(path);
-                    }
-                } else if path.is_file()
-                    && path.extension().and_then(|s| s.to_str()) == Some("parquet")
-                {
-                    files.push(path);
-                }
-            }
+    pub fn open_file_dialog(&mut self) {
+        self.file_dialog = Some(FileDialog::open_file(None).multi_select(true));
+        if let Some(dialog) = &mut self.file_dialog {
+            dialog.open(); // Modify the dialog in-place to open it
         }
     }
 
-    fn refresh_files(&mut self) {
-        if let Some(ref dir) = self.directory.clone() {
-            self.get_files_in_directory(dir);
-            self.validate_selected_files(); // Ensure selected_files are still valid
-        }
-    }
-
-    fn validate_selected_files(&mut self) {
-        let files = &mut self.files;
-        let selected_files = &mut self.selected_files;
-        selected_files.retain(|selected_file| files.contains(selected_file));
-    }
-
-    fn clear_selected_files(&mut self) {
-        self.selected_files.clear();
-    }
-
-    fn select_all_files(&mut self) {
-        let files = self.files.clone();
-        self.selected_files = files;
-    }
-
-    fn sort_files(&mut self) {
-        match self.options.sorting_options {
-            SortingOption::AlphabeticalAsc => self.alphabetize_files(false),
-            SortingOption::AlphabeticalDesc => self.alphabetize_files(true),
-            SortingOption::SizeAsc => self.size_sort_files(false),
-            SortingOption::SizeDesc => self.size_sort_files(true),
-            SortingOption::ModifiedTimeAsc => self.time_sort_files(false),
-            SortingOption::ModifiedTimeDesc => self.time_sort_files(true),
-            SortingOption::CreationTimeAsc => self.creation_time_sort_files(false),
-            SortingOption::CreationTimeDesc => self.creation_time_sort_files(true),
-        }
-    }
-
-    fn time_sort_files(&mut self, reverse: bool) {
-        self.files.sort_by(|a, b| {
-            let a_time = a.metadata().unwrap().modified().unwrap();
-            let b_time = b.metadata().unwrap().modified().unwrap();
-            if reverse {
-                b_time.cmp(&a_time)
-            } else {
-                a_time.cmp(&b_time)
-            }
-        });
-    }
-
-    fn alphabetize_files(&mut self, reverse: bool) {
-        if reverse {
-            self.files.sort_by(|a, b| b.cmp(a));
-        } else {
-            self.files.sort();
-        }
-    }
-
-    fn size_sort_files(&mut self, reverse: bool) {
-        self.files.sort_by(|a, b| {
-            let a_size = a.metadata().unwrap().len();
-            let b_size = b.metadata().unwrap().len();
-            if reverse {
-                b_size.cmp(&a_size)
-            } else {
-                a_size.cmp(&b_size)
-            }
-        });
-    }
-
-    fn creation_time_sort_files(&mut self, reverse: bool) {
-        self.files.sort_by(|a, b| {
-            let a_time = a.metadata().unwrap().created().unwrap_or(SystemTime::now());
-            let b_time = b.metadata().unwrap().created().unwrap_or(SystemTime::now());
-            if reverse {
-                b_time.cmp(&a_time)
-            } else {
-                a_time.cmp(&b_time)
-            }
-        });
-    }
-
-    fn get_directory(&self) -> Option<&PathBuf> {
-        self.directory.as_ref()
-    }
-
-    fn select_directory_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            let dir_name: String;
-            if let Some(dir) = self.get_directory() {
-                dir_name = format!("{:?}", dir);
-            } else {
-                dir_name = "No Directory is currently selected".to_string();
-            }
-
-            if ui
-                .button("Select Directory")
-                .on_hover_text(dir_name)
-                .clicked()
-            {
-                self.select_directory();
-            }
-
-            if let Some(_dir) = self.get_directory() {
-                if ui
-                    .button("↻")
-                    .on_hover_text("Refresh the directory")
-                    .clicked()
-                {
-                    self.refresh_files();
-                }
-            }
-        });
-    }
-
-    fn file_selection_settings_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            if ui
-                .small_button("Select All")
-                .on_hover_text("Select all files in the directory")
-                .clicked()
-            {
-                self.select_all_files();
-            }
-
-            if ui
-                .small_button("Clear")
-                .on_hover_text("Clear all selected files")
-                .clicked()
-            {
-                self.clear_selected_files();
-            }
-        });
-
-        ui.horizontal(|ui| {
-            let current_sorting_option = self.options.sorting_options.clone();
-            egui::ComboBox::from_label("Sorting")
-                .selected_text(current_sorting_option.display_name())
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_value(
-                            &mut self.options.sorting_options,
-                            SortingOption::AlphabeticalAsc,
-                            SortingOption::AlphabeticalAsc.display_name(),
-                        )
-                        .clicked()
-                    {
-                        self.sort_files();
-                    }
-                    if ui
-                        .selectable_value(
-                            &mut self.options.sorting_options,
-                            SortingOption::AlphabeticalDesc,
-                            SortingOption::AlphabeticalDesc.display_name(),
-                        )
-                        .clicked()
-                    {
-                        self.sort_files();
-                    }
-                    if ui
-                        .selectable_value(
-                            &mut self.options.sorting_options,
-                            SortingOption::SizeAsc,
-                            SortingOption::SizeAsc.display_name(),
-                        )
-                        .clicked()
-                    {
-                        self.sort_files();
-                    }
-                    if ui
-                        .selectable_value(
-                            &mut self.options.sorting_options,
-                            SortingOption::SizeDesc,
-                            SortingOption::SizeDesc.display_name(),
-                        )
-                        .clicked()
-                    {
-                        self.sort_files();
-                    }
-                    if ui
-                        .selectable_value(
-                            &mut self.options.sorting_options,
-                            SortingOption::ModifiedTimeAsc,
-                            SortingOption::ModifiedTimeAsc.display_name(),
-                        )
-                        .clicked()
-                    {
-                        self.sort_files();
-                    }
-                    if ui
-                        .selectable_value(
-                            &mut self.options.sorting_options,
-                            SortingOption::ModifiedTimeDesc,
-                            SortingOption::ModifiedTimeDesc.display_name(),
-                        )
-                        .clicked()
-                    {
-                        self.sort_files();
-                    }
-                    if ui
-                        .selectable_value(
-                            &mut self.options.sorting_options,
-                            SortingOption::CreationTimeAsc,
-                            SortingOption::CreationTimeAsc.display_name(),
-                        )
-                        .clicked()
-                    {
-                        self.sort_files();
-                    }
-                    if ui
-                        .selectable_value(
-                            &mut self.options.sorting_options,
-                            SortingOption::CreationTimeDesc,
-                            SortingOption::CreationTimeDesc.display_name(),
-                        )
-                        .clicked()
-                    {
-                        self.sort_files();
-                    }
-                });
-        });
-    }
-
-    fn file_selection_ui(&mut self, ui: &mut egui::Ui) {
-        if self.options.root {
-            ui.label(".root Files");
-        } else {
-            ui.label(".parquet Files");
-        }
-
-        let files = &mut self.files;
-        let selected_files = &mut self.selected_files;
-
-        ui.horizontal_wrapped(|ui| {
-            for file in files.iter() {
-                let file_stem = file.file_stem().unwrap_or_default().to_string_lossy();
-                let is_selected = selected_files.contains(file);
-
-                let response = ui.selectable_label(is_selected, file_stem);
-                if response.clicked() {
-                    if is_selected {
-                        selected_files.retain(|f| f != file);
-                    } else {
-                        selected_files.push(file.clone());
-                    }
-                }
-            }
-        });
-    }
-
+    /// Renders the workspace UI
     pub fn workspace_ui(&mut self, ui: &mut egui::Ui) {
-        ui.collapsing("Workspace", |ui| {
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.options.root, "Root Files");
+        // ui.collapsing("Workspace", |ui| {
+
+            // put this in a bottom panel
+            egui::TopBottomPanel::top("workspace_bottom_panel").show_inside(ui, |ui| {
+                // // Display selected files
+                // if !self.selected_files.is_empty() {
+                //     ui.label("Selected Files:");
+                //     for file in &self.selected_files {
+                //         ui.label(file.display().to_string());
+                //     }
+                // }
+
             });
-            self.select_directory_ui(ui);
-            self.file_selection_settings_ui(ui);
-            self.file_selection_ui(ui);
-        });
+
+            ui.checkbox(&mut self.options.root, "Root Files");
+
+            if self.file_dialog.is_none() {
+                self.open_file_dialog();
+            }
+
+            if let Some(dialog) = &mut self.file_dialog {
+                dialog.ui_embeded(ui);
+                self.selected_files = dialog.selected_file_paths();
+            } 
+            
+
+            // ui.checkbox(&mut self.options.root, "Root Files");
+
+            // if self.file_dialog.is_none() {
+            //     self.open_file_dialog();
+            // }
+
+            // if let Some(dialog) = &mut self.file_dialog {
+            //     dialog.ui_embeded(ui);
+            //     self.selected_files = dialog.selected_file_paths();
+            // } 
+            
+        // });
     }
 }
