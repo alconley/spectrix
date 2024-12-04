@@ -908,22 +908,16 @@ impl Histogrammer {
         log::info!("Reorganization complete.");
     }
 
-    pub fn retrieve_active_cuts(&self) {
-        // for (_id, tile) in self.tree.tiles.iter() {
-        //     if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-        //         let hist = hist.lock().unwrap();
-        //         let active_cuts = hist.plot_settings.cuts.clone();
-
-        //         // Update cuts with correct column names and avoid duplicates
-        //         for mut new_cut in active_cuts.cuts {
-        //             // Set the correct column names in the Cut struct
-        //             new_cut.x_column = hist.plot_settings.cuts.x_column.clone();
-        //             new_cut.y_column = hist.plot_settings.cuts.y_column.clone();
-
-        //             cut_handler.cuts.push(new_cut);
-        //         }
-        //     }
-        // }
+    pub fn retrieve_active_2d_cuts(&self) {
+        let mut active_cuts = Vec::new();
+        for (_id, tile) in self.tree.tiles.iter() {
+            if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
+                let hist = hist.lock().unwrap();
+                for cut in &hist.plot_settings.cuts {
+                    active_cuts.push(cut.clone());
+                }
+            }
+        }
     }
 }
 

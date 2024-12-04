@@ -1,7 +1,4 @@
-use crate::histoer::{
-    // cuts::Cut,
-    configs::Configs,
-};
+use crate::histoer::{configs::Configs, cuts::Cut};
 use polars::prelude::*;
 use std::f64::consts::PI;
 
@@ -51,7 +48,7 @@ pub fn get_column_names_from_lazyframe(lazyframe: &LazyFrame) -> Vec<String> {
 
 #[rustfmt::skip]
 #[allow(clippy::all)]
-pub fn sps_histograms() -> (Vec<(String, String)>, Vec<Configs>) {
+pub fn sps_histograms() -> (Vec<(String, String)>, Vec<Configs>, Vec<Cut>) {
 
     let mut new_columns = vec![];
     new_columns.push(("( DelayFrontRightEnergy + DelayFrontLeftEnergy ) / 2.0".into(), "DelayFrontAverageEnergy".into()));
@@ -78,6 +75,12 @@ pub fn sps_histograms() -> (Vec<(String, String)>, Vec<Configs>) {
     // let only_x1_plane_cut = Some(vec![Cut::new_1d("Only X1 Plane", "X1 != -1e6 && X2 == -1e6")]);
     // let only_x2_plane_cut = Some(vec![Cut::new_1d("Only X2 Plane", "X2 != -1e6 && X1 == -1e6")]);
 
+    let bothplanes_cut = Cut::new_1d("Both Planes", "X2 != -1e6 && X1 != -1e6");
+    let only_x1_plane_cut = Cut::new_1d("Only X1 Plane", "X1 != -1e6 && X2 == -1e6");
+    let only_x2_plane_cut = Cut::new_1d("Only X2 Plane", "X2 != -1e6 && X1 == -1e6");
+
+    let cuts = vec![bothplanes_cut, only_x1_plane_cut, only_x2_plane_cut];
+
     let mut histograms = vec![];
 
     let fp_range = (-300.0, 300.0);
@@ -92,6 +95,18 @@ pub fn sps_histograms() -> (Vec<(String, String)>, Vec<Configs>) {
     histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Xavg", "Xavg", fp_range, fp_bins, None));
     histograms.push(Configs::new_2d("SE-SPS/Focal Plane/X2 v X1", "X1", "X2", fp_range, fp_range, (fp_bins, fp_bins), None));
     histograms.push(Configs::new_2d("SE-SPS/Focal Plane/Theta v Xavg", "Xavg", "Theta", fp_range, (0.0, PI), (fp_bins, fp_bins), None));
+
+    let bothplanes_cut = Some(vec![Cut::new_1d("Both Planes", "X2 != -1e6 && X1 != -1e6")]);
+    let only_x1_plane_cut = Some(vec![Cut::new_1d("Only X1 Plane", "X1 != -1e6 && X2 == -1e6")]);
+    let only_x2_plane_cut = Some(vec![Cut::new_1d("Only X2 Plane", "X2 != -1e6 && X1 == -1e6")]);
+
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Xavg", "Xavg", fp_range, fp_bins, None));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Raw: X1", "X1", fp_range, fp_bins, None));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Both Planes: X1", "X1", fp_range, fp_bins, bothplanes_cut.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Only 1 Plane: X1", "X1", fp_range, fp_bins, only_x1_plane_cut.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Raw: X2", "X2", fp_range, fp_bins, None));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Both Planes: X2", "X2", fp_range, fp_bins, bothplanes_cut.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Only 1 Plane: X2", "X2", fp_range, fp_bins, only_x2_plane_cut.clone()));
 
     // Particle Identification histograms
     histograms.push(Configs::new_2d("SE-SPS/Particle Identification/AnodeBack v ScintLeft", "ScintLeftEnergy", "AnodeBackEnergy", range, range, (bins,bins), None));
@@ -135,7 +150,7 @@ pub fn sps_histograms() -> (Vec<(String, String)>, Vec<Configs>) {
 
     // Delay timing relative to anodes histograms
 
-    (new_columns, histograms)
+    (new_columns, histograms, cuts)
 }
 /*
         // // // //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....

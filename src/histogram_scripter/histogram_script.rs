@@ -114,7 +114,7 @@ impl HistogramScript {
         ui.label("Custom Histogram Scripts");
         ui.horizontal(|ui| {
             if ui.button("SE-SPS").clicked() {
-                let (columns, histograms) = sps_histograms();
+                let (columns, histograms, cuts) = sps_histograms();
                 for histogram in histograms {
                     match &histogram {
                         Configs::Hist1D(histo1d) => {
@@ -136,6 +136,8 @@ impl HistogramScript {
                         self.new_columns.push((expression, alias));
                     }
                 }
+
+                self.cuts = cuts;
             }
 
             ui.separator();
@@ -202,7 +204,7 @@ impl HistogramScript {
                 .enumerate()
                 .for_each(|(i, cut)| match cut {
                     Cut::Cut1D(_) => cuts_1d.push((i, cut)),
-                    Cut::Cut2D(cut2d) => cuts_2d.push((i, cut2d)),
+                    Cut::Cut2D(_) => cuts_2d.push((i, cut)),
                 });
 
             // Render 1D Cuts Table
@@ -227,8 +229,39 @@ impl HistogramScript {
                         for (index, cut1d) in cuts_1d {
                             body.row(18.0, |mut row| {
                                 cut1d.table_row(&mut row);
+
                                 row.col(|ui| {
                                     ui.horizontal(|ui| {
+                                        if ui.button("Apply to All").clicked() {
+                                            for hist_config in &mut self.hist_configs {
+                                                match hist_config {
+                                                    Configs::Hist1D(hist1d) => {
+                                                        if !hist1d.cuts.contains(cut1d) {
+                                                            hist1d.cuts.push(cut1d.clone());
+                                                        }
+                                                    }
+                                                    Configs::Hist2D(hist2d) => {
+                                                        if !hist2d.cuts.contains(cut1d) {
+                                                            hist2d.cuts.push(cut1d.clone());
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if ui.button("Remove from All").clicked() {
+                                            for hist_config in &mut self.hist_configs {
+                                                match hist_config {
+                                                    Configs::Hist1D(hist1d) => {
+                                                        hist1d.cuts.retain(|cut| cut != cut1d);
+                                                    }
+                                                    Configs::Hist2D(hist2d) => {
+                                                        hist2d.cuts.retain(|cut| cut != cut1d);
+                                                    }
+                                                }
+                                            }
+                                        }
+
                                         if ui.button("X").clicked() {
                                             indices_to_remove_cut.push(index);
                                         }
@@ -266,6 +299,36 @@ impl HistogramScript {
                                 cut2d.table_row(&mut row);
                                 row.col(|ui| {
                                     ui.horizontal(|ui| {
+                                        if ui.button("Apply to All").clicked() {
+                                            for hist_config in &mut self.hist_configs {
+                                                match hist_config {
+                                                    Configs::Hist1D(hist1d) => {
+                                                        if !hist1d.cuts.contains(cut2d) {
+                                                            hist1d.cuts.push(cut2d.clone());
+                                                        }
+                                                    }
+                                                    Configs::Hist2D(hist2d) => {
+                                                        if !hist2d.cuts.contains(cut2d) {
+                                                            hist2d.cuts.push(cut2d.clone());
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if ui.button("Remove from All").clicked() {
+                                            for hist_config in &mut self.hist_configs {
+                                                match hist_config {
+                                                    Configs::Hist1D(hist1d) => {
+                                                        hist1d.cuts.retain(|cut| cut != cut2d);
+                                                    }
+                                                    Configs::Hist2D(hist2d) => {
+                                                        hist2d.cuts.retain(|cut| cut != cut2d);
+                                                    }
+                                                }
+                                            }
+                                        }
+
                                         if ui.button("X").clicked() {
                                             indices_to_remove_cut.push(index);
                                         }

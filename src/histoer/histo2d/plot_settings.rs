@@ -1,4 +1,3 @@
-// use crate::cutter::Cut::HistogramCut;
 use crate::histoer::cuts::Cut2D;
 
 use crate::egui_plot_stuff::egui_plot_settings::EguiPlotSettings;
