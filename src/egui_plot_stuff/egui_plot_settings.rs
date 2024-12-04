@@ -145,7 +145,7 @@ impl EguiPlotSettings {
 
         let plot = if reset {
             self.reset_axis = false;
-            plot.reset()
+            plot.auto_bounds(egui::Vec2b::new(true, true))
         } else {
             plot
         };

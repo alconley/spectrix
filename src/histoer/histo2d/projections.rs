@@ -1,3 +1,5 @@
+use core::f64;
+
 use crate::egui_plot_stuff::egui_horizontal_line::EguiHorizontalLine;
 use crate::egui_plot_stuff::egui_vertical_line::EguiVerticalLine;
 use crate::histoer::histo1d::histogram1d::Histogram;
@@ -34,27 +36,30 @@ impl Histogram2D {
     }
 
     pub fn check_projections(&mut self) {
-        // check to see if the x/y values are the same as the current projection else add a new projection based off the naming scheme
-        // then you dont have to recalculate the bins if the projection is already calculated
-
         if self.plot_settings.projections.add_y_projection {
             let x1 = self.plot_settings.projections.y_projection_line_1.x_value;
             let x2 = self.plot_settings.projections.y_projection_line_2.x_value;
             let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) }; // sort the x values
 
             if self.plot_settings.projections.y_projection.is_some() {
-                //check the name of the current projection and update the bins if different
-                let name = self
-                    .plot_settings
-                    .projections
-                    .y_projection
-                    .as_ref()
-                    .unwrap()
-                    .name
-                    .clone();
-
-                if name != format!("Y-Projection of {}: x={:.2}-{:.2}", self.name, min_x, max_x) {
+                if self.plot_settings.projections.is_dragging() {
                     let bins = self.y_projection(min_x, max_x);
+
+                    self.plot_settings
+                        .projections
+                        .y_projection
+                        .as_mut()
+                        .unwrap()
+                        .plot_settings
+                        .rebin_factor = 1;
+
+                    self.plot_settings
+                        .projections
+                        .y_projection
+                        .as_mut()
+                        .unwrap()
+                        .rebin();
+
                     self.plot_settings
                         .projections
                         .y_projection
@@ -68,35 +73,19 @@ impl Histogram2D {
                         .as_mut()
                         .unwrap()
                         .original_bins = bins;
-
-                    self.plot_settings
-                        .projections
-                        .y_projection
-                        .as_mut()
-                        .unwrap()
-                        .name =
-                        format!("Y-Projection of {}: x={:.2}-{:.2}", self.name, min_x, max_x);
-
-                    self.plot_settings
-                        .projections
-                        .y_projection
-                        .as_mut()
-                        .unwrap()
-                        .plot_settings
-                        .egui_settings
-                        .reset_axis = true;
                 }
             } else {
                 // create a new histogram and set the bins
                 let mut y_histogram = Histogram::new(
-                    &format!("Y-Projection of {}: x={:.2}-{:.2}", self.name, min_x, max_x),
+                    &format!("Y-Projection of {}", self.name),
                     self.bins.y,
                     (self.range.y.min, self.range.y.max),
                 );
                 let bins = self.y_projection(min_x, max_x);
                 y_histogram.bins = bins.clone();
                 y_histogram.original_bins = bins;
-                y_histogram.plot_settings.egui_settings.reset_axis = true;
+                y_histogram.plot_settings.rebin_factor = 1;
+                y_histogram.rebin();
 
                 self.plot_settings.projections.y_projection = Some(y_histogram);
 
@@ -112,37 +101,8 @@ impl Histogram2D {
             let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) }; // sort the y values
 
             if self.plot_settings.projections.x_projection.is_some() {
-                //check the name of the current projection and update the bins if different
-                let name = self
-                    .plot_settings
-                    .projections
-                    .x_projection
-                    .as_ref()
-                    .unwrap()
-                    .name
-                    .clone();
-
-                if name != format!("X-Projection of {}: y={:.2}-{:.2}", self.name, min_y, max_y) {
+                if self.plot_settings.projections.is_dragging() {
                     let bins = self.x_projection(min_y, max_y);
-                    self.plot_settings
-                        .projections
-                        .x_projection
-                        .as_mut()
-                        .unwrap()
-                        .bins = bins.clone();
-                    self.plot_settings
-                        .projections
-                        .x_projection
-                        .as_mut()
-                        .unwrap()
-                        .original_bins = bins;
-                    self.plot_settings
-                        .projections
-                        .x_projection
-                        .as_mut()
-                        .unwrap()
-                        .name =
-                        format!("X-Projection of {}: y={:.2}-{:.2}", self.name, min_y, max_y);
 
                     self.plot_settings
                         .projections
@@ -150,19 +110,40 @@ impl Histogram2D {
                         .as_mut()
                         .unwrap()
                         .plot_settings
-                        .egui_settings
-                        .reset_axis = true;
+                        .rebin_factor = 1;
+
+                    self.plot_settings
+                        .projections
+                        .x_projection
+                        .as_mut()
+                        .unwrap()
+                        .rebin();
+
+                    self.plot_settings
+                        .projections
+                        .x_projection
+                        .as_mut()
+                        .unwrap()
+                        .bins = bins.clone();
+
+                    self.plot_settings
+                        .projections
+                        .x_projection
+                        .as_mut()
+                        .unwrap()
+                        .original_bins = bins;
                 }
             } else {
                 let mut x_histogram = Histogram::new(
-                    &format!("X-Projection of {}: y={:.2}-{:.2}", self.name, min_y, max_y),
+                    &format!("X-Projection of {}", self.name),
                     self.bins.x,
                     (self.range.x.min, self.range.x.max),
                 );
                 let bins = self.x_projection(min_y, max_y);
+                x_histogram.plot_settings.rebin_factor = 1;
+                x_histogram.rebin();
                 x_histogram.bins = bins.clone();
                 x_histogram.original_bins = bins;
-                x_histogram.plot_settings.egui_settings.reset_axis = true;
 
                 self.plot_settings.projections.x_projection = Some(x_histogram);
 
@@ -194,11 +175,13 @@ impl Projections {
             y_projection_line_1: EguiVerticalLine {
                 name: "Y Projection Line 1".to_string(),
                 mid_point_radius: 5.0,
+                x_value: f64::MIN,
                 ..EguiVerticalLine::default()
             },
             y_projection_line_2: EguiVerticalLine {
                 name: "Y Projection Line 2".to_string(),
                 mid_point_radius: 5.0,
+                x_value: f64::MAX,
                 ..EguiVerticalLine::default()
             },
 
@@ -207,11 +190,13 @@ impl Projections {
             x_projection_line_1: EguiHorizontalLine {
                 name: "X Projection Line 1".to_string(),
                 mid_point_radius: 5.0,
+                y_value: f64::MIN,
                 ..EguiHorizontalLine::default()
             },
             x_projection_line_2: EguiHorizontalLine {
                 name: "X Projection Line 2".to_string(),
                 mid_point_radius: 5.0,
+                y_value: f64::MAX,
                 ..EguiHorizontalLine::default()
             },
         }
@@ -231,6 +216,8 @@ impl Projections {
                     histogram.render(ui);
                 }
             });
+        } else {
+            self.y_projection = None;
         }
     }
 
@@ -248,6 +235,8 @@ impl Projections {
                     histogram.render(ui);
                 }
             });
+        } else {
+            self.x_projection = None;
         }
     }
 

@@ -1,10 +1,10 @@
 # Spectrix
 
-Spectrix is a comprehensive software designed for nucelar spectrum analysis. It provides functionalities for histogramming, Gaussian fitting, and interactive data visualization of 1D and 2D histograms using crates: `egui`, `egui-tiles`, `egui_plot`, `egui_file`, and `polars`. Additionally, using uproot, you can view 1d and 2d root histograms.
+Spectrix is a comprehensive software designed for nucelar spectrum analysis. It provides functionalities for histogramming, gaussian fitting, and interactive data visualization of 1D and 2D histograms using crates: `egui`, `egui-tiles`, `egui_plot`, and `polars`. Additionally, using uproot, you can view 1d and 2d root histograms.
 
 ### Running
 
-Currently have tested this on Apple Macbook Pro (Memory: 18 GB) running macOS Sonoma Version 14.6.1, Ubuntu 22.04.5 LTS, 
+Currently have tested this on Apple M3 Macbook Pro (Memory: 18 GB) running macOS Sonoma Version 14.6.1, Ubuntu 22.04.5 LTS, 
 
 Make sure you are using the latest version of stable rust by running `rustup update`. Rust is very easy to install on any computer. First, you'll need to install the Rust toolchain (compiler, cargo, etc). Go to the [Rust website](https://www.rust-lang.org/tools/install) and follow the instructions there.
 

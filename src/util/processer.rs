@@ -253,22 +253,32 @@ def get_2d_histograms(file_name):
     }
 
     pub fn calculate_histograms(&mut self) {
-        // check if the files are parquet files
+        // Check if the files are Parquet files
         if self
             .selected_files
             .iter()
-            .any(|file| file.extension().unwrap() == "parquet")
+            .any(|file| match file.extension() {
+                Some(ext) => ext == "parquet",
+                None => false,
+            })
         {
             self.create_lazyframe();
             self.perform_histogrammer_from_lazyframe();
-        } else if self
+        }
+        // Check if the files are ROOT files
+        else if self
             .selected_files
             .iter()
-            .any(|file| file.extension().unwrap() == "root")
+            .any(|file| match file.extension() {
+                Some(ext) => ext == "root",
+                None => false,
+            })
         {
             let _ = self.get_histograms_from_root_files();
-        } else {
-            log::error!("No Parquet files or root files selected.");
+        }
+        // No valid files selected
+        else {
+            log::error!("No Parquet files or ROOT files selected.");
         }
     }
 
