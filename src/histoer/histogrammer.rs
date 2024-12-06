@@ -1058,13 +1058,13 @@ def write_histograms(output_file, hist1d_data):
 
             let hist1d_data = self.hist1d_data();
 
-            let _result = module.getattr("get_1d_histograms")?.call1((output_file, hist1d_data))?;
-            
+            let _result = module
+                .getattr("get_1d_histograms")?
+                .call1((output_file, hist1d_data))?;
 
             Ok(())
         })
     }
-
 
     // # Write 2D histograms
     // for name, title, bins, range_x, range_y in hist2d_data:
@@ -1123,7 +1123,7 @@ def write_histograms(output_file, hist1d_data):
     //         fXaxis=fXaxis,
     //         fYaxis=fYaxis
     //     )
-        
+
     //     print(f"2D Histogram '{name}' written successfully.")
 }
 

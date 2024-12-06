@@ -196,7 +196,7 @@ def get_2d_histograms(file_name):
             Ok(())
         })
     }
-    
+
     fn create_lazyframe(&mut self) {
         // get all the parquet files from the selected files
         let parquet_files: Vec<std::path::PathBuf> = self
