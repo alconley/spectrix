@@ -4,6 +4,7 @@ use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
 use super::tree::TreeBehavior;
+use pyo3::{prelude::*, types::PyModule};
 
 use egui_tiles::TileId;
 use fnv::FnvHashMap;
@@ -607,6 +608,29 @@ impl Histogrammer {
         }
     }
 
+    pub fn hist1d_data(&self) -> Vec<(String, String, Vec<u64>, u64, u64, (f64, f64))> {
+        let mut data = Vec::new();
+        for (_id, tile) in self.tree.tiles.iter() {
+            if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+                let hist = hist.lock().unwrap();
+
+                // strip the last part of the name for the title
+                let name_parts: Vec<&str> = hist.name.split('/').collect();
+                let title = name_parts.last().unwrap().to_string();
+
+                data.push((
+                    hist.name.clone(),
+                    title,
+                    hist.bins.clone(),
+                    hist.underflow,
+                    hist.overflow,
+                    hist.range,
+                ));
+            }
+        }
+        data
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.tree.ui(&mut self.behavior, ui);
     }
@@ -632,6 +656,12 @@ impl Histogrammer {
                 ui.separator();
 
                 tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
+
+                ui.separator();
+
+                if ui.button("Create ROOT File").clicked() {
+                    let _ = self.histograms_to_root();
+                }
             }
         });
     }
@@ -919,6 +949,182 @@ impl Histogrammer {
             }
         }
     }
+
+    pub fn histograms_to_root(&mut self) -> PyResult<()> {
+        // python3 -m venv .venv
+        // source .venv/bin/activate
+        // export PYO3_PYTHON=$(pwd)/.venv/bin/python
+        // export PYTHONPATH=$(pwd)/.venv/lib/python3.12/site-packages
+        // cargo run --release
+
+        Python::with_gil(|py| {
+            let sys = py.import_bound("sys")?;
+            let version: String = sys.getattr("version")?.extract()?;
+            let executable: String = sys.getattr("executable")?.extract()?;
+            println!("Using Python version: {}", version);
+            println!("Python executable: {}", executable);
+
+            // Check if the `uproot` module can be imported
+            match py.import_bound("uproot") {
+                Ok(_) => {
+                    println!("Successfully imported `uproot` module.");
+                }
+                Err(_) => {
+                    eprintln!("Error: `uproot` module could not be found. Make sure you are using the correct Python environment with `uproot` installed.");
+                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                        "`uproot` module not available",
+                    ));
+                }
+            }
+
+            // Define the Python code as a module
+            let code = r#"
+import numpy as np
+import uproot
+
+def write_histograms(output_file, hist1d_data):
+    """
+    Writes 1D and 2D histograms to a ROOT file.
+
+    Parameters:
+        output_file (str): Path to the output ROOT file.
+        hist1d_data (list): List of tuples for 1D histograms. Each tuple contains:
+            - name (str): Histogram name.
+            - title (str): Histogram title.
+            - bins (list of int): Bin counts.
+            - underflow (int): Underflow count.
+            - overflow (int): Overflow count.
+            - range (tuple): Range of the histogram as (min, max).
+        hist2d_data (list): List of tuples for 2D histograms. Each tuple contains:
+            - name (str): Histogram name.
+            - title (str): Histogram title.
+            - bins (list of list of int): Bin counts (2D array).
+            - range_x (tuple): Range of the X-axis as (min, max).
+            - range_y (tuple): Range of the Y-axis as (min, max).
+    """
+    with uproot.recreate(output_file) as file:
+        for name, title, bins, underflow, overflow, range in hist1d_data:
+            # Create bin edges for the histogram
+            bin_edges = np.linspace(range[0], range[1], len(bins) + 1)
+            
+            # Include underflow and overflow in the data array
+            data = np.array([underflow] + bins + [overflow], dtype=np.float32)
+            bins_array = np.array(bins, dtype=np.float32)  # Convert bins to numpy array
+
+            # Define fXaxis using to_TAxis with positional arguments
+            fXaxis = uproot.writing.identify.to_TAxis(
+                fName="xaxis",         # Temporary name for the X-axis
+                fTitle="",       # Title of the X-axis
+                fNbins=len(bins),      # Number of bins
+                fXmin=range[0],       # Minimum X-axis value
+                fXmax=range[1],       # Maximum X-axis value
+                fXbins=bin_edges       # Bin edges
+            )
+
+            # Calculate metadata
+            fEntries = float(np.sum(bins))
+            fTsumw = float(np.sum(bins))
+            fTsumw2 = float(np.sum(bins_array**2))
+            fTsumwx = float(np.sum(bins_array * bin_edges[:-1]))
+            fTsumwx2 = float(np.sum(bins_array * bin_edges[:-1]**2))
+            fSumw2 = None
+
+            # Write the histogram using uproot.writing.identify.to_TH1x
+            file[name] = uproot.writing.identify.to_TH1x(
+                fName=None,
+                fTitle=title,
+                data=data,
+                fEntries=fEntries,
+                fTsumw=fTsumw,
+                fTsumw2=fTsumw2,
+                fTsumwx=fTsumwx,
+                fTsumwx2=fTsumwx2,
+                fSumw2=fSumw2,
+                fXaxis=fXaxis
+            )
+
+            print(f"1D Histogram '{name}' written successfully.")
+            
+
+            
+    print(f"All histograms written to '{output_file}'.")
+"#;
+
+            // Compile the Python code into a module
+            let module =
+                PyModule::from_code_bound(py, code, "write_histograms.py", "write_histograms")?;
+
+            let output_file = "output.root";
+
+            let hist1d_data = self.hist1d_data();
+
+            let _result = module.getattr("get_1d_histograms")?.call1((output_file, hist1d_data))?;
+            
+
+            Ok(())
+        })
+    }
+
+
+    // # Write 2D histograms
+    // for name, title, bins, range_x, range_y in hist2d_data:
+    //     bins = np.array(bins, dtype=np.float32)
+    //     # Flatten the 2D array with added underflow/overflow bins
+    //     bins_with_overflow = np.zeros((bins.shape[0] + 2, bins.shape[1] + 2), dtype=np.float32)
+    //     bins_with_overflow[1:-1, 1:-1] = bins
+    //     data = bins_with_overflow.flatten()
+
+    //     x_bin_edges = np.linspace(range_x[0], range_x[1], bins.shape[1] + 1)
+    //     y_bin_edges = np.linspace(range_y[0], range_y[1], bins.shape[0] + 1)
+
+    //     fXaxis = uproot.writing.identify.to_TAxis(
+    //         fName="xaxis",
+    //         fTitle="X-axis",
+    //         fNbins=bins.shape[1],
+    //         fXmin=range_x[0],
+    //         fXmax=range_x[1],
+    //         fXbins=x_bin_edges
+    //     )
+
+    //     fYaxis = uproot.writing.identify.to_TAxis(
+    //         fName="yaxis",
+    //         fTitle="Y-axis",
+    //         fNbins=bins.shape[0],
+    //         fXmin=range_y[0],
+    //         fXmax=range_y[1],
+    //         fXbins=y_bin_edges
+    //     )
+
+    //     # Compute required statistical sums
+    //     x_centers = (x_bin_edges[:-1] + x_bin_edges[1:]) / 2
+    //     y_centers = (y_bin_edges[:-1] + y_bin_edges[1:]) / 2
+
+    //     fTsumw = np.sum(bins)
+    //     fTsumw2 = np.sum(bins**2)
+    //     fTsumwx = np.sum(bins * x_centers[np.newaxis, :])
+    //     fTsumwx2 = np.sum(bins * (x_centers[np.newaxis, :]**2))
+    //     fTsumwy = np.sum(bins * y_centers[:, np.newaxis])
+    //     fTsumwy2 = np.sum(bins * (y_centers[:, np.newaxis]**2))
+    //     fTsumwxy = np.sum(bins * x_centers[np.newaxis, :] * y_centers[:, np.newaxis])
+
+    //     file[name] = uproot.writing.identify.to_TH2x(
+    //         fName=None,
+    //         fTitle=title,
+    //         data=data,
+    //         fEntries=fTsumw,
+    //         fTsumw=fTsumw,
+    //         fTsumw2=fTsumw2,
+    //         fTsumwx=fTsumwx,
+    //         fTsumwx2=fTsumwx2,
+    //         fTsumwy=fTsumwy,
+    //         fTsumwy2=fTsumwy2,
+    //         fTsumwxy=fTsumwxy,
+    //         fSumw2=None,
+    //         fXaxis=fXaxis,
+    //         fYaxis=fYaxis
+    //     )
+        
+    //     print(f"2D Histogram '{name}' written successfully.")
 }
 
 use regex::Regex;
