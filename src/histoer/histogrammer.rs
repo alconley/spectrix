@@ -608,6 +608,7 @@ impl Histogrammer {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn hist1d_data(&self) -> Vec<(String, String, Vec<u64>, u64, u64, (f64, f64))> {
         let mut data = Vec::new();
         for (_id, tile) in self.tree.tiles.iter() {
@@ -628,6 +629,48 @@ impl Histogrammer {
                 ));
             }
         }
+        data
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn hist2d_data(&self) -> Vec<(String, String, Vec<Vec<u64>>, (f64, f64), (f64, f64))> {
+        let mut data = Vec::new();
+
+        for (_id, tile) in self.tree.tiles.iter() {
+            if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
+                let hist = hist.lock().unwrap();
+
+                // Use backup bins if available
+                let bins = hist.backup_bins.as_ref().unwrap_or(&hist.bins);
+
+                let mut counts_2d = vec![vec![0; bins.x]; bins.y];
+
+                // Populate the counts, setting empty bins to 0
+                for ((x_idx, y_idx), &count) in &bins.counts {
+                    if *x_idx < bins.x && *y_idx < bins.y {
+                        counts_2d[*y_idx][*x_idx] = count;
+                    }
+                }
+
+                // Extract the range for x and y axes
+                let range_x = (hist.range.x.min, hist.range.x.max);
+                let range_y = (hist.range.y.min, hist.range.y.max);
+
+                // Create a human-readable title from the histogram name
+                let name_parts: Vec<&str> = hist.name.split('/').collect();
+                let title = name_parts.last().unwrap_or(&"").to_string();
+
+                // Add to the data vector
+                data.push((
+                    hist.name.clone(), // Full histogram name
+                    title,             // Human-readable title
+                    counts_2d,         // 2D bin counts
+                    range_x,           // Range for x-axis
+                    range_y,           // Range for y-axis
+                ));
+            }
+        }
+
         data
     }
 
@@ -660,7 +703,26 @@ impl Histogrammer {
                 ui.separator();
 
                 if ui.button("Create ROOT File").clicked() {
-                    let _ = self.histograms_to_root();
+                    // Use rfd to open a file save dialog
+                    let file_dialog = rfd::FileDialog::new()
+                        .set_title("Save ROOT File")
+                        .set_file_name("output.root")
+                        .add_filter("ROOT file", &["root"])
+                        .save_file();
+
+                    if let Some(path) = file_dialog {
+                        // Convert path to a string and call the function
+                        if let Some(output_file) = path.to_str() {
+                            match self.histograms_to_root(output_file) {
+                                Ok(_) => println!("ROOT file created at: {}", output_file),
+                                Err(e) => eprintln!("Error creating ROOT file: {:?}", e),
+                            }
+                        } else {
+                            eprintln!("Invalid file path selected.");
+                        }
+                    } else {
+                        println!("File save dialog canceled.");
+                    }
                 }
             }
         });
@@ -950,7 +1012,7 @@ impl Histogrammer {
         }
     }
 
-    pub fn histograms_to_root(&mut self) -> PyResult<()> {
+    pub fn histograms_to_root(&mut self, output_file: &str) -> PyResult<()> {
         // python3 -m venv .venv
         // source .venv/bin/activate
         // export PYO3_PYTHON=$(pwd)/.venv/bin/python
@@ -982,7 +1044,7 @@ impl Histogrammer {
 import numpy as np
 import uproot
 
-def write_histograms(output_file, hist1d_data):
+def write_histograms(output_file, hist1d_data, hist2d_data):
     """
     Writes 1D and 2D histograms to a ROOT file.
 
@@ -1042,10 +1104,64 @@ def write_histograms(output_file, hist1d_data):
                 fSumw2=fSumw2,
                 fXaxis=fXaxis
             )
-
-            print(f"1D Histogram '{name}' written successfully.")
             
+        # Write 2D histograms
+        for name, title, bins, range_x, range_y in hist2d_data:
+            bins = np.array(bins, dtype=np.float32)
+            # Flatten the 2D array with added underflow/overflow bins
+            bins_with_overflow = np.zeros((bins.shape[0] + 2, bins.shape[1] + 2), dtype=np.float32)
+            bins_with_overflow[1:-1, 1:-1] = bins
+            data = bins_with_overflow.flatten()
 
+            x_bin_edges = np.linspace(range_x[0], range_x[1], bins.shape[1] + 1)
+            y_bin_edges = np.linspace(range_y[0], range_y[1], bins.shape[0] + 1)
+
+            fXaxis = uproot.writing.identify.to_TAxis(
+                fName="xaxis",
+                fTitle="",
+                fNbins=bins.shape[1],
+                fXmin=range_x[0],
+                fXmax=range_x[1],
+                fXbins=x_bin_edges
+            )
+
+            fYaxis = uproot.writing.identify.to_TAxis(
+                fName="yaxis",
+                fTitle="",
+                fNbins=bins.shape[0],
+                fXmin=range_y[0],
+                fXmax=range_y[1],
+                fXbins=y_bin_edges
+            )
+
+            # Compute required statistical sums
+            x_centers = (x_bin_edges[:-1] + x_bin_edges[1:]) / 2
+            y_centers = (y_bin_edges[:-1] + y_bin_edges[1:]) / 2
+
+            fTsumw = np.sum(bins)
+            fTsumw2 = np.sum(bins**2)
+            fTsumwx = np.sum(bins * x_centers[np.newaxis, :])
+            fTsumwx2 = np.sum(bins * (x_centers[np.newaxis, :]**2))
+            fTsumwy = np.sum(bins * y_centers[:, np.newaxis])
+            fTsumwy2 = np.sum(bins * (y_centers[:, np.newaxis]**2))
+            fTsumwxy = np.sum(bins * x_centers[np.newaxis, :] * y_centers[:, np.newaxis])
+
+            file[name] = uproot.writing.identify.to_TH2x(
+                fName=None,
+                fTitle=title,
+                data=data,
+                fEntries=fTsumw,
+                fTsumw=fTsumw,
+                fTsumw2=fTsumw2,
+                fTsumwx=fTsumwx,
+                fTsumwx2=fTsumwx2,
+                fTsumwy=fTsumwy,
+                fTsumwy2=fTsumwy2,
+                fTsumwxy=fTsumwxy,
+                fSumw2=None,
+                fXaxis=fXaxis,
+                fYaxis=fYaxis
+            )
             
     print(f"All histograms written to '{output_file}'.")
 "#;
@@ -1054,77 +1170,20 @@ def write_histograms(output_file, hist1d_data):
             let module =
                 PyModule::from_code_bound(py, code, "write_histograms.py", "write_histograms")?;
 
-            let output_file = "output.root";
-
             let hist1d_data = self.hist1d_data();
+            let hist2d_data = self.hist2d_data();
 
-            let _result = module
-                .getattr("get_1d_histograms")?
-                .call1((output_file, hist1d_data))?;
+            match module
+                .getattr("write_histograms")?
+                .call1((output_file, hist1d_data, hist2d_data))
+            {
+                Ok(_) => println!("Histograms written successfully."),
+                Err(e) => eprintln!("Error in Python code: {:?}", e),
+            }
 
             Ok(())
         })
     }
-
-    // # Write 2D histograms
-    // for name, title, bins, range_x, range_y in hist2d_data:
-    //     bins = np.array(bins, dtype=np.float32)
-    //     # Flatten the 2D array with added underflow/overflow bins
-    //     bins_with_overflow = np.zeros((bins.shape[0] + 2, bins.shape[1] + 2), dtype=np.float32)
-    //     bins_with_overflow[1:-1, 1:-1] = bins
-    //     data = bins_with_overflow.flatten()
-
-    //     x_bin_edges = np.linspace(range_x[0], range_x[1], bins.shape[1] + 1)
-    //     y_bin_edges = np.linspace(range_y[0], range_y[1], bins.shape[0] + 1)
-
-    //     fXaxis = uproot.writing.identify.to_TAxis(
-    //         fName="xaxis",
-    //         fTitle="X-axis",
-    //         fNbins=bins.shape[1],
-    //         fXmin=range_x[0],
-    //         fXmax=range_x[1],
-    //         fXbins=x_bin_edges
-    //     )
-
-    //     fYaxis = uproot.writing.identify.to_TAxis(
-    //         fName="yaxis",
-    //         fTitle="Y-axis",
-    //         fNbins=bins.shape[0],
-    //         fXmin=range_y[0],
-    //         fXmax=range_y[1],
-    //         fXbins=y_bin_edges
-    //     )
-
-    //     # Compute required statistical sums
-    //     x_centers = (x_bin_edges[:-1] + x_bin_edges[1:]) / 2
-    //     y_centers = (y_bin_edges[:-1] + y_bin_edges[1:]) / 2
-
-    //     fTsumw = np.sum(bins)
-    //     fTsumw2 = np.sum(bins**2)
-    //     fTsumwx = np.sum(bins * x_centers[np.newaxis, :])
-    //     fTsumwx2 = np.sum(bins * (x_centers[np.newaxis, :]**2))
-    //     fTsumwy = np.sum(bins * y_centers[:, np.newaxis])
-    //     fTsumwy2 = np.sum(bins * (y_centers[:, np.newaxis]**2))
-    //     fTsumwxy = np.sum(bins * x_centers[np.newaxis, :] * y_centers[:, np.newaxis])
-
-    //     file[name] = uproot.writing.identify.to_TH2x(
-    //         fName=None,
-    //         fTitle=title,
-    //         data=data,
-    //         fEntries=fTsumw,
-    //         fTsumw=fTsumw,
-    //         fTsumw2=fTsumw2,
-    //         fTsumwx=fTsumwx,
-    //         fTsumwx2=fTsumwx2,
-    //         fTsumwy=fTsumwy,
-    //         fTsumwy2=fTsumwy2,
-    //         fTsumwxy=fTsumwxy,
-    //         fSumw2=None,
-    //         fXaxis=fXaxis,
-    //         fYaxis=fYaxis
-    //     )
-
-    //     print(f"2D Histogram '{name}' written successfully.")
 }
 
 use regex::Regex;
