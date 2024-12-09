@@ -14,7 +14,7 @@ impl Configs {
         column_name: &str,
         range: (f64, f64),
         bins: usize,
-        cuts: Option<Vec<Cut>>,
+        cuts: Option<Vec<Cut>>, // Accept owned cuts directly
     ) -> Self {
         let mut config = Hist1DConfig::new(name, column_name, range, bins);
         if let Some(cuts) = cuts {

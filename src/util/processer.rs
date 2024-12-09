@@ -63,23 +63,40 @@ impl Processor {
         // cargo run --release
 
         Python::with_gil(|py| {
-            let sys = py.import_bound("sys")?;
-            let version: String = sys.getattr("version")?.extract()?;
-            let executable: String = sys.getattr("executable")?.extract()?;
+            // Attempt to import Python modules and handle errors
+            let sys = py.import_bound("sys").map_err(|e| {
+                eprintln!("Error importing `sys` module: {:?}", e);
+                e
+            })?;
+            let version: String = sys
+                .getattr("version")
+                .map_err(|e| {
+                    eprintln!("Error retrieving Python version: {:?}", e);
+                    e
+                })?
+                .extract()
+                .map_err(|e| {
+                    eprintln!("Error extracting Python version as a string: {:?}", e);
+                    e
+                })?;
+            let executable: String = sys
+                .getattr("executable")
+                .map_err(|e| {
+                    eprintln!("Error retrieving Python executable: {:?}", e);
+                    e
+                })?
+                .extract()
+                .map_err(|e| {
+                    eprintln!("Error extracting Python executable as a string: {:?}", e);
+                    e
+                })?;
             println!("Using Python version: {}", version);
             println!("Python executable: {}", executable);
 
             // Check if the `uproot` module can be imported
-            match py.import_bound("uproot") {
-                Ok(_) => {
-                    println!("Successfully imported `uproot` module.");
-                }
-                Err(_) => {
-                    eprintln!("Error: `uproot` module could not be found. Make sure you are using the correct Python environment with `uproot` installed.");
-                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                        "`uproot` module not available",
-                    ));
-                }
+            if let Err(e) = py.import_bound("uproot") {
+                eprintln!("Error: `uproot` module could not be found. Ensure you have the correct Python environment with `uproot` installed.");
+                return Err(e);
             }
 
             // Define the Python code as a module
@@ -125,8 +142,15 @@ def get_2d_histograms(file_name):
 "#;
 
             // Compile the Python code into a module
+            // let module =
+            //     PyModule::from_code_bound(py, code, "uproot_functions.py", "uproot_functions")?;
+
             let module =
-                PyModule::from_code_bound(py, code, "uproot_functions.py", "uproot_functions")?;
+                PyModule::from_code_bound(py, code, "uproot_functions.py", "uproot_functions")
+                    .map_err(|e| {
+                        eprintln!("Error compiling Python code into a module: {:?}", e);
+                        e
+                    })?;
 
             let root_files = self
                 .selected_files
@@ -137,7 +161,22 @@ def get_2d_histograms(file_name):
             for file in root_files.iter() {
                 let file_name = file.to_str().unwrap();
 
-                let result_1d = module.getattr("get_1d_histograms")?.call1((file_name,))?;
+                // let result_1d = module.getattr("get_1d_histograms")?.call1((file_name,))?;
+
+                let result_1d = module
+                    .getattr("get_1d_histograms")
+                    .map_err(|e| {
+                        eprintln!("Error accessing `get_1d_histograms` function: {:?}", e);
+                        e
+                    })?
+                    .call1((file_name,))
+                    .map_err(|e| {
+                        eprintln!(
+                            "Error calling `get_1d_histograms` with file {}: {:?}",
+                            file_name, e
+                        );
+                        e
+                    })?;
 
                 // log::info!("File: {}", file_name);
                 // log::info!("Result 1D: {:?}", result_1d);
@@ -168,7 +207,22 @@ def get_2d_histograms(file_name):
                     );
                 }
 
-                let result_2d = module.getattr("get_2d_histograms")?.call1((file_name,))?;
+                // let result_2d = module.getattr("get_2d_histograms")?.call1((file_name,))?;
+                let result_2d = module
+                    .getattr("get_2d_histograms")
+                    .map_err(|e| {
+                        eprintln!("Error accessing `get_2d_histograms` function: {:?}", e);
+                        e
+                    })?
+                    .call1((file_name,))
+                    .map_err(|e| {
+                        eprintln!(
+                            "Error calling `get_2d_histograms` with file {}: {:?}",
+                            file_name, e
+                        );
+                        e
+                    })?;
+
                 let length_2d: usize = result_2d.len()?;
 
                 for i in 0..length_2d {

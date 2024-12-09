@@ -71,15 +71,16 @@ pub fn sps_histograms() -> (Vec<(String, String)>, Vec<Configs>, Vec<Cut>) {
     new_columns.push(("DelayBackRightTime - ScintLeftTime".into(), "DelayBackRightTime_ScintLeftTime".into()));
     new_columns.push(("ScintRightTime - ScintLeftTime".into(), "ScintRightTime_ScintLeftTime".into()));
 
-    // let bothplanes_cut = Some(vec![Cut::new_1d("Both Planes", "X2 != -1e6 && X1 != -1e6")]);
-    // let only_x1_plane_cut = Some(vec![Cut::new_1d("Only X1 Plane", "X1 != -1e6 && X2 == -1e6")]);
-    // let only_x2_plane_cut = Some(vec![Cut::new_1d("Only X2 Plane", "X2 != -1e6 && X1 == -1e6")]);
+    let mut cuts = vec![];
 
     let bothplanes_cut = Cut::new_1d("Both Planes", "X2 != -1e6 && X1 != -1e6");
-    let only_x1_plane_cut = Cut::new_1d("Only X1 Plane", "X1 != -1e6 && X2 == -1e6");
-    let only_x2_plane_cut = Cut::new_1d("Only X2 Plane", "X2 != -1e6 && X1 == -1e6");
+    cuts.push(bothplanes_cut.clone());
 
-    let cuts = vec![bothplanes_cut, only_x1_plane_cut, only_x2_plane_cut];
+    let only_x1_plane_cut = Cut::new_1d("Only X1 Plane", "X1 != -1e6 && X2 == -1e6");
+    cuts.push(only_x1_plane_cut.clone());
+
+    let only_x2_plane_cut = Cut::new_1d("Only X2 Plane", "X2 != -1e6 && X1 == -1e6");
+    cuts.push(only_x2_plane_cut.clone());
 
     let mut histograms = vec![];
 
@@ -96,17 +97,17 @@ pub fn sps_histograms() -> (Vec<(String, String)>, Vec<Configs>, Vec<Cut>) {
     histograms.push(Configs::new_2d("SE-SPS/Focal Plane/X2 v X1", "X1", "X2", fp_range, fp_range, (fp_bins, fp_bins), None));
     histograms.push(Configs::new_2d("SE-SPS/Focal Plane/Theta v Xavg", "Xavg", "Theta", fp_range, (0.0, PI), (fp_bins, fp_bins), None));
 
-    let bothplanes_cut = Some(vec![Cut::new_1d("Both Planes", "X2 != -1e6 && X1 != -1e6")]);
-    let only_x1_plane_cut = Some(vec![Cut::new_1d("Only X1 Plane", "X1 != -1e6 && X2 == -1e6")]);
-    let only_x2_plane_cut = Some(vec![Cut::new_1d("Only X2 Plane", "X2 != -1e6 && X1 == -1e6")]);
+    let cut_bothplanes = Some(vec![bothplanes_cut.clone()]);
+    let cut_only_x1_plane = Some(vec![only_x1_plane_cut.clone()]);
+    let cut_only_x2_plane = Some(vec![only_x2_plane_cut.clone()]);
 
     histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Xavg", "Xavg", fp_range, fp_bins, None));
-    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Raw: X1", "X1", fp_range, fp_bins, None));
-    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Both Planes: X1", "X1", fp_range, fp_bins, bothplanes_cut.clone()));
-    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Only 1 Plane: X1", "X1", fp_range, fp_bins, only_x1_plane_cut.clone()));
-    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Raw: X2", "X2", fp_range, fp_bins, None));
-    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Both Planes: X2", "X2", fp_range, fp_bins, bothplanes_cut.clone()));
-    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Only 1 Plane: X2", "X2", fp_range, fp_bins, only_x2_plane_cut.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Raw- X1", "X1", fp_range, fp_bins, None));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Both Planes- X1", "X1", fp_range, fp_bins, cut_bothplanes.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Only 1 Plane- X1", "X1", fp_range, fp_bins, cut_only_x1_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Raw- X2", "X2", fp_range, fp_bins, None));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Both Planes- X2", "X2", fp_range, fp_bins, cut_bothplanes.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Focal Plane/Checks/Only 1 Plane- X2", "X2", fp_range, fp_bins, cut_only_x2_plane.clone()));
 
     // Particle Identification histograms
     histograms.push(Configs::new_2d("SE-SPS/Particle Identification/AnodeBack v ScintLeft", "ScintLeftEnergy", "AnodeBackEnergy", range, range, (bins,bins), None));
@@ -147,59 +148,58 @@ pub fn sps_histograms() -> (Vec<(String, String)>, Vec<Configs>, Vec<Cut>) {
     histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayFrontRight v X2", "X2", "DelayFrontRightEnergy", fp_range, range, (fp_bins,bins), None));
     histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/DelayFrontLeft v X2", "X2", "DelayFrontLeftEnergy", fp_range, range, (fp_bins,bins), None));
 
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayFrontAverage v X1", "X1", "DelayFrontAverageEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayBackAverage v X1", "X1", "DelayBackAverageEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayFrontAverage v X2", "X2", "DelayFrontAverageEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayBackAverage v X2", "X2", "DelayBackAverageEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayFrontAverage v Xavg", "Xavg", "DelayFrontAverageEnergy", fp_range, range, (fp_bins,bins), None));
+    histograms.push(Configs::new_2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayBackAverage v Xavg", "Xavg", "DelayBackAverageEnergy", fp_range, range, (fp_bins,bins), None));
+
 
     // Delay timing relative to anodes histograms
+    let valid_sps_timing = Cut::new_1d("Valid SPS Timing", "AnodeBackTime != -1e6 && ScintLeftTime != -1e6");
+    cuts.push(valid_sps_timing.clone());
+
+    let cut_timing = Some(vec![valid_sps_timing.clone()]);
+
+    histograms.push(Configs::new_1d("SE-SPS/Timing/AnodeFrontTime-AnodeBackTime", "AnodeFrontTime_AnodeBackTime", (-3000.0, 3000.0), 1000, cut_timing.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/AnodeBackTime-AnodeFrontTime", "AnodeBackTime_AnodeFrontTime", (-3000.0, 3000.0), 1000, cut_timing.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/AnodeFrontTime-ScintLeftTime", "AnodeFrontTime_ScintLeftTime", (-3000.0, 3000.0), 1000, cut_timing.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/AnodeBackTime-ScintLeftTime", "AnodeBackTime_ScintLeftTime", (-3000.0, 3000.0), 1000, cut_timing.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/DelayFrontLeftTime-ScintLeftTime", "DelayFrontLeftTime_ScintLeftTime", (-3000.0, 3000.0), 1000, cut_timing.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/DelayFrontRightTime-ScintLeftTime", "DelayFrontRightTime_ScintLeftTime", (-3000.0, 3000.0), 1000, cut_timing.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/DelayBackLeftTime-ScintLeftTime", "DelayBackLeftTime_ScintLeftTime", (-3000.0, 3000.0), 1000, cut_timing.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/DelayBackRightTime-ScintLeftTime", "DelayBackRightTime_ScintLeftTime", (-3000.0, 3000.0), 1000, cut_timing.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/ScintRightTime-ScintLeftTime", "ScintRightTime_ScintLeftTime", (-3000.0, 3000.0), 1000, cut_timing.clone()));
+    histograms.push(Configs::new_2d("SE-SPS/Timing/ScintTimeDif v Xavg", "Xavg", "ScintRightTime_ScintLeftTime", fp_range, (-3200.0, 3200.0), (fp_bins, 12800), cut_timing.clone()));
+
+
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Both Planes/DelayFrontLeftTime-AnodeFrontTime", "DelayFrontLeftTime_AnodeFrontTime", (-4000.0, 4000.0), 8000, cut_bothplanes.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Both Planes/DelayFrontRightTime-AnodeFrontTime", "DelayFrontRightTime_AnodeFrontTime", (-4000.0, 4000.0), 8000, cut_bothplanes.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Both Planes/DelayBackLeftTime-AnodeBackTime", "DelayBackLeftTime_AnodeBackTime", (-4000.0, 4000.0), 8000, cut_bothplanes.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Both Planes/DelayBackRightTime-AnodeBackTime", "DelayBackRightTime_AnodeBackTime", (-4000.0, 4000.0), 8000, cut_bothplanes.clone()));
+
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X1 Plane/DelayFrontLeftTime-AnodeFrontTime", "DelayFrontLeftTime_AnodeFrontTime", (-4000.0, 4000.0), 8000, cut_only_x1_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X1 Plane/DelayFrontRightTime-AnodeFrontTime", "DelayFrontRightTime_AnodeFrontTime", (-4000.0, 4000.0), 8000, cut_only_x1_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X1 Plane/DelayBackLeftTime-AnodeFrontTime", "DelayBackLeftTime_AnodeFrontTime", (-4000.0, 4000.0), 8000, cut_only_x1_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X1 Plane/DelayBackRightTime-AnodeFrontTime", "DelayBackRightTime_AnodeFrontTime", (-4000.0, 4000.0), 8000, cut_only_x1_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X1 Plane/DelayFrontLeftTime-AnodeBackTime", "DelayFrontLeftTime_AnodeBackTime", (-4000.0, 4000.0), 8000, cut_only_x1_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X1 Plane/DelayFrontRightTime-AnodeBackTime", "DelayFrontRightTime_AnodeBackTime", (-4000.0, 4000.0), 8000, cut_only_x1_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X1 Plane/DelayBackLeftTime-AnodeBackTime", "DelayBackLeftTime_AnodeBackTime", (-4000.0, 4000.0), 8000, cut_only_x1_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X1 Plane/DelayBackRightTime-AnodeBackTime", "DelayBackRightTime_AnodeBackTime", (-4000.0, 4000.0), 8000, cut_only_x1_plane.clone()));
+
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X2 Plane/DelayFrontLeftTime-AnodeFrontTime", "DelayFrontLeftTime_AnodeFrontTime", (-4000.0, 4000.0), 8000, cut_only_x2_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X2 Plane/DelayFrontRightTime-AnodeFrontTime", "DelayFrontRightTime_AnodeFrontTime", (-4000.0, 4000.0), 8000, cut_only_x2_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X2 Plane/DelayBackLeftTime-AnodeFrontTime", "DelayBackLeftTime_AnodeFrontTime", (-4000.0, 4000.0), 8000, cut_only_x2_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X2 Plane/DelayBackRightTime-AnodeFrontTime", "DelayBackRightTime_AnodeFrontTime", (-4000.0, 4000.0), 8000, cut_only_x2_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X2 Plane/DelayFrontLeftTime-AnodeBackTime", "DelayFrontLeftTime_AnodeBackTime", (-4000.0, 4000.0), 8000, cut_only_x2_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X2 Plane/DelayFrontRightTime-AnodeBackTime", "DelayFrontRightTime_AnodeBackTime", (-4000.0, 4000.0), 8000, cut_only_x2_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X2 Plane/DelayBackLeftTime-AnodeBackTime", "DelayBackLeftTime_AnodeBackTime", (-4000.0, 4000.0), 8000, cut_only_x2_plane.clone()));
+    histograms.push(Configs::new_1d("SE-SPS/Timing/Only X2 Plane/DelayBackRightTime-AnodeBackTime", "DelayBackRightTime_AnodeBackTime", (-4000.0, 4000.0), 8000, cut_only_x2_plane.clone()));
 
     (new_columns, histograms, cuts)
 }
 /*
-        // // // //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
-        // Delay lines vs Focal plane histograms
-        let lf_time_rel_backanode = lf_sps.clone().filter(col("AnodeBackTime").neq(lit(-1e6))).filter(col("ScintLeftTime").neq(lit(-1e6)));
-        h.add_fill_hist1d("SE-SPS/Timing/AnodeFrontTime-AnodeBackTime", &lf_time_rel_backanode, "AnodeFrontTime_AnodeBackTime", 1000, (-3000.0, 3000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/AnodeBackTime-AnodeFrontTime", &lf_time_rel_backanode, "AnodeBackTime_AnodeFrontTime", 1000, (-3000.0, 3000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/AnodeFrontTime-ScintLeftTime", &lf_time_rel_backanode, "AnodeFrontTime_ScintLeftTime", 1000, (-3000.0, 3000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/AnodeBackTime-ScintLeftTime", &lf_time_rel_backanode, "AnodeBackTime_ScintLeftTime", 1000, (-3000.0, 3000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/DelayFrontLeftTime-ScintLeftTime", &lf_time_rel_backanode, "DelayFrontLeftTime_ScintLeftTime", 1000, (-3000.0, 3000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/DelayFrontRightTime-ScintLeftTime", &lf_time_rel_backanode, "DelayFrontRightTime_ScintLeftTime", 1000, (-3000.0, 3000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/DelayBackLeftTime-ScintLeftTime", &lf_time_rel_backanode, "DelayBackLeftTime_ScintLeftTime", 1000, (-3000.0, 3000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/DelayBackRightTime-ScintLeftTime", &lf_time_rel_backanode, "DelayBackRightTime_ScintLeftTime", 1000, (-3000.0, 3000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/ScintRightTime-ScintLeftTime", &lf_time_rel_backanode, "ScintRightTime_ScintLeftTime", 1000, (-3000.0, 3000.0));
-        h.add_fill_hist2d("SE-SPS/Timing/ScintTimeDif v Xavg", &lf_time_rel_backanode, "Xavg", "ScintRightTime_ScintLeftTime", (600, 12800), (fp_range, (-3200.0, 3200.0)));
-
-        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayFrontAverage v X1", &lf_sps, "X1", "DelayFrontAverageEnergy", (600, 512), (fp_range, range));
-        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayBackAverage v X1", &lf_sps, "X1", "DelayBackAverageEnergy", (600, 512), (fp_range, range));
-        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayFrontAverage v X2", &lf_sps, "X2", "DelayFrontAverageEnergy", (600, 512), (fp_range, range));
-        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayBackAverage v X2", &lf_sps, "X2", "DelayBackAverageEnergy", (600, 512), (fp_range, range));
-        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayFrontAverage v Xavg", &lf_sps, "Xavg", "DelayFrontAverageEnergy", (600, 512), (fp_range, range));
-        h.add_fill_hist2d("SE-SPS/Delay Lines v Focal Plane/Averages/DelayBackAverage v Xavg", &lf_sps, "Xavg", "DelayBackAverageEnergy", (600, 512), (fp_range, range));
-
-        //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
-        // Delay timing relative to anodes histograms
-        h.add_fill_hist1d("SE-SPS/Timing/Bothplanes/DelayFrontLeftTime-AnodeFrontTime: bothplanes", &lf_bothplanes, "DelayFrontLeftTime_AnodeFrontTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Bothplanes/DelayFrontRightTime-AnodeFrontTime: bothplanes", &lf_bothplanes, "DelayFrontRightTime_AnodeFrontTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Bothplanes/DelayBackLeftTime-AnodeBackTime: bothplanes", &lf_bothplanes, "DelayBackLeftTime_AnodeBackTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Bothplanes/DelayBackRightTime-AnodeBackTime: bothplanes", &lf_bothplanes, "DelayBackRightTime_AnodeBackTime", 8000, (-4000.0, 4000.0));
-
-        h.add_fill_hist1d("SE-SPS/Timing/Only X1/DelayFrontLeftTime-AnodeFrontTime: onlyX1", &lf_only_x1_plane, "DelayFrontLeftTime_AnodeFrontTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X1/DelayFrontRightTime-AnodeFrontTime: onlyX1", &lf_only_x1_plane, "DelayFrontRightTime_AnodeFrontTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X1/DelayBackLeftTime-AnodeFrontTime: onlyX1", &lf_only_x1_plane, "DelayBackLeftTime_AnodeFrontTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X1/DelayBackRightTime-AnodeFrontTime: onlyX1", &lf_only_x1_plane, "DelayBackRightTime_AnodeFrontTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X1/DelayFrontLeftTime-AnodeBackTime: onlyX1", &lf_only_x1_plane, "DelayFrontLeftTime_AnodeBackTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X1/DelayFrontRightTime-AnodeBackTime: onlyX1", &lf_only_x1_plane, "DelayFrontRightTime_AnodeBackTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X1/DelayBackLeftTime-AnodeBackTime: onlyX1", &lf_only_x1_plane, "DelayBackLeftTime_AnodeBackTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X1/DelayBackRightTime-AnodeBackTime: onlyX1", &lf_only_x1_plane, "DelayBackRightTime_AnodeBackTime", 8000, (-4000.0, 4000.0));
-
-        h.add_fill_hist1d("SE-SPS/Timing/Only X2/DelayFrontLeftTime-AnodeFrontTime: onlyX2", &lf_only_x2_plane, "DelayFrontLeftTime_AnodeFrontTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X2/DelayFrontRightTime-AnodeFrontTime: onlyX2", &lf_only_x2_plane, "DelayFrontRightTime_AnodeFrontTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X2/DelayBackLeftTime-AnodeFrontTime: onlyX2", &lf_only_x2_plane, "DelayBackLeftTime_AnodeFrontTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X2/DelayBackRightTime-AnodeFrontTime: onlyX2", &lf_only_x2_plane, "DelayBackRightTime_AnodeFrontTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X2/DelayFrontLeftTime-AnodeBackTime: onlyX2", &lf_only_x2_plane, "DelayFrontLeftTime_AnodeBackTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X2/DelayFrontRightTime-AnodeBackTime: onlyX2", &lf_only_x2_plane, "DelayFrontRightTime_AnodeBackTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X2/DelayBackLeftTime-AnodeBackTime: onlyX2", &lf_only_x2_plane, "DelayBackLeftTime_AnodeBackTime", 8000, (-4000.0, 4000.0));
-        h.add_fill_hist1d("SE-SPS/Timing/Only X2/DelayBackRightTime-AnodeBackTime: onlyX2", &lf_only_x2_plane, "DelayBackRightTime_AnodeBackTime", 8000, (-4000.0, 4000.0));
-}
-
 #[rustfmt::skip]
 #[allow(clippy::all)]
 pub fn pips1000(h: &mut Histogrammer, lf: LazyFrame) {

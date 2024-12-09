@@ -4,7 +4,7 @@ Spectrix is a comprehensive software designed for nucelar spectrum analysis. It 
 
 ### Running
 
-Currently have tested this on Apple M3 Macbook Pro (Memory: 18 GB) running macOS Sonoma Version 14.6.1, Ubuntu 22.04.5 LTS, 
+Currently have tested this on Apple M3 Macbook Pro (Memory: 18 GB) running macOS Sonoma Version 14.6.1 and Ubuntu 22.04.5 LTS. Both use python 3.13.
 
 Make sure you are using the latest version of stable rust by running `rustup update`. Rust is very easy to install on any computer. First, you'll need to install the Rust toolchain (compiler, cargo, etc). Go to the [Rust website](https://www.rust-lang.org/tools/install) and follow the instructions there.
 
