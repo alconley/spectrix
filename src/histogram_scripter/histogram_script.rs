@@ -357,6 +357,7 @@ impl HistogramScript {
                     bins: 512,
                     cuts: vec![],
                     calculate: true,
+                    enabled: true,
                 }));
             }
 
@@ -370,6 +371,7 @@ impl HistogramScript {
                     bins: (512, 512),
                     cuts: vec![],
                     calculate: true,
+                    enabled: true,
                 }));
             }
 
@@ -391,7 +393,8 @@ impl HistogramScript {
             .column(Column::auto()) // Ranges
             .column(Column::auto()) // Bins
             .column(Column::auto()) // cuts
-            .column(Column::remainder()) // Actions
+            .column(Column::auto()) // Actions
+            .column(Column::remainder()) // remove
             .striped(true)
             .vscroll(false)
             .header(20.0, |mut header| {
@@ -413,9 +416,6 @@ impl HistogramScript {
                 header.col(|ui| {
                     ui.label("Cuts");
                 });
-                header.col(|ui| {
-                    ui.label("Actions");
-                });
             })
             .body(|mut body| {
                 for (index, config) in self.hist_configs.iter_mut().enumerate() {
@@ -429,223 +429,12 @@ impl HistogramScript {
                             }
                         });
 
-                        row.col(|ui| match config {
-                            Configs::Hist1D(hist) => {
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut hist.name)
-                                        .hint_text("Name")
-                                        .clip_text(false),
-                                );
-                            }
-
-                            Configs::Hist2D(hist) => {
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut hist.name)
-                                        .hint_text("Name")
-                                        .clip_text(false),
-                                );
-                            }
-                        });
-
-                        row.col(|ui| match config {
-                            Configs::Hist1D(hist) => {
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut hist.column_name)
-                                        .hint_text("Column Name")
-                                        .clip_text(false),
-                                );
-                            }
-                            Configs::Hist2D(hist) => {
-                                ui.vertical(|ui| {
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut hist.x_column_name)
-                                            .hint_text("X Column Name")
-                                            .clip_text(false),
-                                    );
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut hist.y_column_name)
-                                            .hint_text("Y Column Name")
-                                            .clip_text(false),
-                                    );
-                                });
-                            }
-                        });
-
-                        row.col(|ui| match config {
-                            Configs::Hist1D(hist) => {
-                                ui.horizontal(|ui| {
-                                    ui.add(
-                                        egui::DragValue::new(&mut hist.range.0)
-                                            .speed(0.1)
-                                            .prefix("(")
-                                            .suffix(","),
-                                    );
-                                    ui.add(
-                                        egui::DragValue::new(&mut hist.range.1)
-                                            .speed(0.1)
-                                            .prefix(" ")
-                                            .suffix(")"),
-                                    );
-                                });
-                            }
-                            Configs::Hist2D(hist) => {
-                                ui.vertical(|ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.add(
-                                            egui::DragValue::new(&mut hist.x_range.0)
-                                                .speed(1.0)
-                                                .prefix("(")
-                                                .suffix(","),
-                                        );
-                                        ui.add(
-                                            egui::DragValue::new(&mut hist.x_range.1)
-                                                .speed(1.0)
-                                                .prefix(" ")
-                                                .suffix(")"),
-                                        );
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.add(
-                                            egui::DragValue::new(&mut hist.y_range.0)
-                                                .speed(1.0)
-                                                .prefix("(")
-                                                .suffix(","),
-                                        );
-                                        ui.add(
-                                            egui::DragValue::new(&mut hist.y_range.1)
-                                                .speed(1.0)
-                                                .prefix(" ")
-                                                .suffix(")"),
-                                        );
-                                    });
-                                });
-                            }
-                        });
-
-                        row.col(|ui| match config {
-                            Configs::Hist1D(hist) => {
-                                ui.add(egui::DragValue::new(&mut hist.bins).speed(1));
-                            }
-                            Configs::Hist2D(hist) => {
-                                ui.vertical(|ui| {
-                                    ui.add(egui::DragValue::new(&mut hist.bins.0).speed(1));
-                                    ui.add(egui::DragValue::new(&mut hist.bins.1).speed(1));
-                                });
-                            }
-                        });
-
-                        row.col(|ui| match config {
-                            Configs::Hist1D(hist) => {
-                                egui::ComboBox::from_id_salt(format!("cut_select_1d_{}", index))
-                                    .selected_text("Select cuts")
-                                    .width(ui.available_width())
-                                    .show_ui(ui, |ui| {
-                                        for cut in &self.cuts {
-                                            let mut is_selected = hist
-                                                .cuts
-                                                .iter()
-                                                .any(|selected_cut| selected_cut == cut);
-                                            match cut {
-                                                Cut::Cut1D(cut1d) => {
-                                                    if ui
-                                                        .checkbox(&mut is_selected, &cut1d.name)
-                                                        .clicked()
-                                                    {
-                                                        if is_selected && !hist.cuts.contains(cut) {
-                                                            hist.cuts.push(cut.clone());
-                                                        } else if !is_selected {
-                                                            hist.cuts.retain(|selected_cut| {
-                                                                selected_cut != cut
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                                Cut::Cut2D(cut2d) => {
-                                                    if ui
-                                                        .checkbox(
-                                                            &mut is_selected,
-                                                            &cut2d.polygon.name,
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        if is_selected && !hist.cuts.contains(cut) {
-                                                            hist.cuts.push(cut.clone());
-                                                        } else if !is_selected {
-                                                            hist.cuts.retain(|selected_cut| {
-                                                                selected_cut != cut
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    });
-                            }
-                            Configs::Hist2D(hist) => {
-                                egui::ComboBox::from_id_salt(format!("cut_select_2d_{}", index))
-                                    .selected_text("Select cuts")
-                                    .width(ui.available_width())
-                                    .show_ui(ui, |ui| {
-                                        for cut in &self.cuts {
-                                            let mut is_selected = hist
-                                                .cuts
-                                                .iter()
-                                                .any(|selected_cut| selected_cut == cut);
-                                            match cut {
-                                                Cut::Cut1D(cut1d) => {
-                                                    if ui
-                                                        .checkbox(&mut is_selected, &cut1d.name)
-                                                        .clicked()
-                                                    {
-                                                        if is_selected && !hist.cuts.contains(cut) {
-                                                            hist.cuts.push(cut.clone());
-                                                        } else if !is_selected {
-                                                            hist.cuts.retain(|selected_cut| {
-                                                                selected_cut != cut
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                                Cut::Cut2D(cut2d) => {
-                                                    if ui
-                                                        .checkbox(
-                                                            &mut is_selected,
-                                                            &cut2d.polygon.name,
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        if is_selected && !hist.cuts.contains(cut) {
-                                                            hist.cuts.push(cut.clone());
-                                                        } else if !is_selected {
-                                                            hist.cuts.retain(|selected_cut| {
-                                                                selected_cut != cut
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    });
-                            }
-                        });
+                        config.table_row(&mut row, &mut self.cuts);
 
                         row.col(|ui| {
-                            ui.horizontal(|ui| {
-                                match config {
-                                    Configs::Hist1D(hist) => {
-                                        ui.checkbox(&mut hist.calculate, "");
-                                    }
-                                    Configs::Hist2D(hist) => {
-                                        ui.checkbox(&mut hist.calculate, "");
-                                    }
-                                }
-
-                                ui.separator();
-
-                                if ui.button("X").clicked() {
-                                    indices_to_remove.push(index);
-                                }
-                            });
+                            if ui.button("X").clicked() {
+                                indices_to_remove.push(index);
+                            }
                         });
                     });
                 }

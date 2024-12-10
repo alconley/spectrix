@@ -1,3 +1,5 @@
+use egui_extras::TableRow;
+
 use super::cuts::Cut;
 
 // Enum to encapsulate 1D and 2D histogram configurations
@@ -40,6 +42,13 @@ impl Configs {
         }
         Configs::Hist2D(config)
     }
+
+    pub fn table_row(&mut self, row: &mut TableRow<'_, '_>, cuts: &mut Vec<Cut>) {
+        match self {
+            Configs::Hist1D(config) => config.table_row(row, cuts),
+            Configs::Hist2D(config) => config.table_row(row, cuts),
+        }
+    }
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
@@ -50,6 +59,7 @@ pub struct Hist1DConfig {
     pub bins: usize,         // Number of bins
     pub cuts: Vec<Cut>,      // Cuts for the histogram
     pub calculate: bool,     // Whether to calculate the histogram
+    pub enabled: bool,       // Whether to let the user interact with the histogram
 }
 
 impl Hist1DConfig {
@@ -61,7 +71,87 @@ impl Hist1DConfig {
             bins,
             cuts: Vec::new(),
             calculate: true,
+            enabled: true,
         }
+    }
+
+    pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>, cuts: &mut Vec<Cut>) {
+        row.col(|ui| {
+            ui.add_enabled(
+                self.enabled,
+                egui::TextEdit::singleline(&mut self.name)
+                    .hint_text("Name")
+                    .clip_text(false),
+            );
+        });
+
+        row.col(|ui| {
+            ui.add_enabled(
+                self.enabled,
+                egui::TextEdit::singleline(&mut self.column_name)
+                    .hint_text("Column Name")
+                    .clip_text(false),
+            );
+        });
+
+        row.col(|ui| {
+            ui.horizontal(|ui| {
+                ui.add_enabled(
+                    self.enabled,
+                    egui::DragValue::new(&mut self.range.0)
+                        .speed(0.1)
+                        .prefix("(")
+                        .suffix(","),
+                );
+                ui.add_enabled(
+                    self.enabled,
+                    egui::DragValue::new(&mut self.range.1)
+                        .speed(0.1)
+                        .prefix(" ")
+                        .suffix(")"),
+                );
+            });
+        });
+
+        row.col(|ui| {
+            ui.add_enabled(self.enabled, egui::DragValue::new(&mut self.bins).speed(1));
+        });
+
+        row.col(|ui| {
+            egui::ComboBox::from_id_salt(format!("cut_select_1d_{}", self.name))
+                .selected_text("Select cuts")
+                .width(ui.available_width())
+                .show_ui(ui, |ui| {
+                    for cut in cuts {
+                        let mut is_selected =
+                            self.cuts.iter().any(|selected_cut| selected_cut == cut);
+                        match cut {
+                            Cut::Cut1D(cut1d) => {
+                                if ui.checkbox(&mut is_selected, &cut1d.name).clicked() {
+                                    if is_selected && !self.cuts.contains(cut) {
+                                        self.cuts.push(cut.clone());
+                                    } else if !is_selected {
+                                        self.cuts.retain(|selected_cut| selected_cut != cut);
+                                    }
+                                }
+                            }
+                            Cut::Cut2D(cut2d) => {
+                                if ui.checkbox(&mut is_selected, &cut2d.polygon.name).clicked() {
+                                    if is_selected && !self.cuts.contains(cut) {
+                                        self.cuts.push(cut.clone());
+                                    } else if !is_selected {
+                                        self.cuts.retain(|selected_cut| selected_cut != cut);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+        });
+
+        row.col(|ui| {
+            ui.add_enabled(self.enabled, egui::Checkbox::new(&mut self.calculate, ""));
+        });
     }
 }
 
@@ -75,6 +165,7 @@ pub struct Hist2DConfig {
     pub bins: (usize, usize),  // Number of bins for X and Y axes
     pub cuts: Vec<Cut>,        // Cuts for the histogram
     pub calculate: bool,       // Whether to calculate the histogram
+    pub enabled: bool,         // Whether to let the user interact with the histogram
 }
 
 impl Hist2DConfig {
@@ -95,6 +186,121 @@ impl Hist2DConfig {
             bins,
             cuts: Vec::new(),
             calculate: true,
+            enabled: true,
         }
+    }
+
+    pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>, cuts: &mut Vec<Cut>) {
+        row.col(|ui| {
+            ui.add_enabled(
+                self.enabled,
+                egui::TextEdit::singleline(&mut self.name)
+                    .hint_text("Name")
+                    .clip_text(false),
+            );
+        });
+
+        row.col(|ui| {
+            ui.vertical(|ui| {
+                ui.add_enabled(
+                    self.enabled,
+                    egui::TextEdit::singleline(&mut self.x_column_name)
+                        .hint_text("X Column Name")
+                        .clip_text(false),
+                );
+                ui.add_enabled(
+                    self.enabled,
+                    egui::TextEdit::singleline(&mut self.y_column_name)
+                        .hint_text("Y Column Name")
+                        .clip_text(false),
+                );
+            });
+        });
+
+        row.col(|ui| {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.add_enabled(
+                        self.enabled,
+                        egui::DragValue::new(&mut self.x_range.0)
+                            .speed(0.1)
+                            .prefix("(")
+                            .suffix(","),
+                    );
+                    ui.add_enabled(
+                        self.enabled,
+                        egui::DragValue::new(&mut self.x_range.1)
+                            .speed(0.1)
+                            .prefix(" ")
+                            .suffix(")"),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.add_enabled(
+                        self.enabled,
+                        egui::DragValue::new(&mut self.y_range.0)
+                            .speed(0.1)
+                            .prefix("(")
+                            .suffix(","),
+                    );
+                    ui.add_enabled(
+                        self.enabled,
+                        egui::DragValue::new(&mut self.y_range.1)
+                            .speed(0.1)
+                            .prefix(" ")
+                            .suffix(")"),
+                    );
+                });
+            });
+        });
+
+        row.col(|ui| {
+            ui.vertical(|ui| {
+                ui.add_enabled(
+                    self.enabled,
+                    egui::DragValue::new(&mut self.bins.0).speed(1),
+                );
+                ui.add_enabled(
+                    self.enabled,
+                    egui::DragValue::new(&mut self.bins.1).speed(1),
+                );
+            });
+        });
+
+        row.col(|ui| {
+            egui::ComboBox::from_id_salt(format!("cut_select_1d_{}", self.name))
+                .selected_text("Select cuts")
+                .width(ui.available_width())
+                .show_ui(ui, |ui| {
+                    for cut in cuts {
+                        let mut is_selected =
+                            self.cuts.iter().any(|selected_cut| selected_cut == cut);
+                        match cut {
+                            Cut::Cut1D(cut1d) => {
+                                if ui.checkbox(&mut is_selected, &cut1d.name).clicked() {
+                                    if is_selected && !self.cuts.contains(cut) {
+                                        self.cuts.push(cut.clone());
+                                    } else if !is_selected {
+                                        self.cuts.retain(|selected_cut| selected_cut != cut);
+                                    }
+                                }
+                            }
+                            Cut::Cut2D(cut2d) => {
+                                if ui.checkbox(&mut is_selected, &cut2d.polygon.name).clicked() {
+                                    if is_selected && !self.cuts.contains(cut) {
+                                        self.cuts.push(cut.clone());
+                                    } else if !is_selected {
+                                        self.cuts.retain(|selected_cut| selected_cut != cut);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+        });
+
+        row.col(|ui| {
+            ui.add_enabled(self.enabled, egui::Checkbox::new(&mut self.calculate, ""));
+        });
     }
 }
