@@ -477,6 +477,51 @@ impl Histogrammer {
                             }
                         });
 
+                        // For histograms with vector columns
+                        hist2d_map.par_iter().for_each(|(hist, meta)| {
+                            if let (Ok(x_column), Ok(y_column)) = (
+                                df.column(&meta.x_column_name),
+                                df.column(&meta.y_column_name),
+                            ) {
+                                if let (Ok(x_list), Ok(y_list)) = (x_column.list(), y_column.list())
+                                {
+                                    let mut hist = hist.lock().unwrap();
+
+                                    // Iterate over nested vector rows
+                                    for (index, (x_row, y_row)) in
+                                        x_list.into_iter().zip(y_list.into_iter()).enumerate()
+                                    {
+                                        if let (Some(x_values), Some(y_values)) = (x_row, y_row) {
+                                            let x_values = x_values.f64().unwrap();
+                                            let y_values = y_values.f64().unwrap();
+
+                                            for (x, y) in x_values
+                                                .into_no_null_iter()
+                                                .zip(y_values.into_no_null_iter())
+                                            {
+                                                if x == -1e6 || y == -1e6 {
+                                                    continue;
+                                                }
+
+                                                // Evaluate cuts for the row
+                                                let mut passes_all_cuts = true;
+                                                for cut in &meta.cuts {
+                                                    if !cut.valid(&df, index) {
+                                                        passes_all_cuts = false;
+                                                        break;
+                                                    }
+                                                }
+
+                                                if passes_all_cuts {
+                                                    hist.fill(x, y);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        });
+
                         for (hist, meta) in &hist2d_map {
                             let mut hist = hist.lock().unwrap();
                             hist.plot_settings.x_column = meta.x_column_name.clone();
