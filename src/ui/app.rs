@@ -34,10 +34,10 @@ impl eframe::App for Spectrix {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Handle keybinds
-        let input = ctx.input(|state| state.clone()); // Get the input state
-        if input.key_pressed(egui::Key::Tab) {
-            self.processor.settings.dialog_open = !self.processor.settings.dialog_open;
-        }
+        // let input = ctx.input(|state| state.clone()); // Get the input state
+        // if input.key_pressed(egui::Key::Tab) {
+        //     self.processor.settings.dialog_open = !self.processor.settings.dialog_open;
+        // }
 
         egui::TopBottomPanel::top("spectrix_top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {

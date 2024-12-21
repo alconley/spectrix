@@ -1,26 +1,26 @@
+// External crates
+use egui_tiles::TileId;
+use fnv::FnvHashMap;
+use polars::prelude::*;
+use pyo3::{prelude::*, types::PyModule};
+use rayon::prelude::*;
+use regex::Regex;
+
+// Standard library
+use std::collections::HashMap;
+use std::convert::TryInto;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+
+// Project modules
 use super::configs::{Hist1DConfig, Hist2DConfig};
 use super::cuts::Cut;
 use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
 use super::tree::TreeBehavior;
-use pyo3::{prelude::*, types::PyModule};
-
-use egui_tiles::TileId;
-use fnv::FnvHashMap;
-
-use polars::prelude::col;
-use polars::prelude::*;
-
-use rayon::prelude::*;
-
-use std::convert::TryInto;
-
-use std::sync::{Arc, Mutex};
-
-use std::collections::HashMap;
-
-use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(serde::Deserialize, serde::Serialize, PartialEq, Debug)]
 pub enum ContainerType {
@@ -33,10 +33,10 @@ pub enum ContainerType {
 #[derive(serde::Deserialize, serde::Serialize, Debug)]
 pub struct ContainerInfo {
     container_type: ContainerType,
-    parent_id: Option<TileId>, // None if it's a top-level tab
-    children: Vec<TileId>,     // Child tile IDs
-    display_name: String,      // Display name for the tab
-    tab_id: TileId,            // ID for this tab
+    parent_id: Option<TileId>,
+    children: Vec<TileId>,
+    display_name: String,
+    tab_id: TileId,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -62,49 +62,106 @@ impl Default for Histogrammer {
 }
 
 impl Histogrammer {
+    fn find_existing_histogram(&self, name: &str) -> Option<TileId> {
+        self.tree.tiles.iter().find_map(|(id, tile)| {
+            match tile {
+                egui_tiles::Tile::Pane(Pane::Histogram(hist)) => {
+                    if hist.lock().unwrap().name == name {
+                        return Some(*id);
+                    }
+                }
+                egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) => {
+                    if hist.lock().unwrap().name == name {
+                        return Some(*id);
+                    }
+                }
+                _ => {}
+            }
+            None
+        })
+    }
+
+    fn _reset_histograms(&mut self) {
+        for (_id, tile) in self.tree.tiles.iter_mut() {
+            match tile {
+                egui_tiles::Tile::Pane(Pane::Histogram(hist)) => {
+                    hist.lock().unwrap().reset();
+                }
+                egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) => {
+                    hist.lock().unwrap().reset();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn reset_histogram(&mut self, pane_id: TileId) {
+        if let Some((_id, tile)) = self.tree.tiles.iter_mut().find(|(id, _)| **id == pane_id) {
+            match tile {
+                egui_tiles::Tile::Pane(Pane::Histogram(hist)) => {
+                    hist.lock().unwrap().reset();
+                }
+                egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) => {
+                    hist.lock().unwrap().reset();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn create_1d_pane(&mut self, name: &str, bins: usize, range: (f64, f64)) -> TileId {
+        let hist = Histogram::new(name, bins, range);
+        let pane = Pane::Histogram(Arc::new(Mutex::new(Box::new(hist))));
+        let pane_id = self.tree.tiles.insert_pane(pane);
+        self.format_pane_in_containers(name, pane_id);
+
+        pane_id
+    }
+
+    fn create_2d_pane(
+        &mut self,
+        name: &str,
+        bins: (usize, usize),
+        range: ((f64, f64), (f64, f64)),
+    ) -> TileId {
+        let hist = Histogram2D::new(name, bins, range);
+        let pane = Pane::Histogram2D(Arc::new(Mutex::new(Box::new(hist))));
+        let pane_id = self.tree.tiles.insert_pane(pane);
+        self.format_pane_in_containers(name, pane_id);
+
+        pane_id
+    }
+
+    fn format_pane_in_containers(&mut self, name: &str, pane_id: TileId) {
+        // Parse the name to determine its hierarchical structure (e.g., "Tab1/Tab2/Histogram")
+        let grid_id = self.create_tabs(name.to_string());
+
+        if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Grid(grid))) =
+            self.tree.tiles.get_mut(grid_id)
+        {
+            log::debug!("Adding pane '{}' to grid container ID {:?}", name, grid_id);
+            grid.add_child(pane_id);
+
+            self.histogram_map
+                .entry(name.to_string())
+                .and_modify(|container_info| container_info.children.push(pane_id));
+        } else {
+            log::error!("Failed to retrieve grid container for '{}'", name);
+        }
+    }
+
     pub fn add_hist1d(&mut self, name: &str, bins: usize, range: (f64, f64)) {
         log::debug!("Creating or updating 1D histogram '{}'", name);
 
-        let mut pane_id_to_update = None;
-        for (id, tile) in self.tree.tiles.iter_mut() {
-            if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                if hist.lock().unwrap().name == name {
-                    log::debug!("Resetting existing 1D histogram '{}'", name);
-                    hist.lock().unwrap().reset();
-                    pane_id_to_update = Some(*id);
-                    break;
-                }
-            }
-        }
-
-        if pane_id_to_update.is_none() {
+        if let Some(pane_id) = self.find_existing_histogram(name) {
+            log::debug!("Resetting existing 1D histogram '{}'", name);
+            self.reset_histogram(pane_id);
+        } else {
             log::debug!(
-                "No existing histogram found, creating new pane for '{}'",
+                "No existing histogram found; creating new 1D histogram '{}'",
                 name
             );
-            let hist = Histogram::new(name, bins, range);
-            let pane = Pane::Histogram(Arc::new(Mutex::new(Box::new(hist))));
-            let pane_id = self.tree.tiles.insert_pane(pane);
-
-            // Pass the full name directly to create_tabs to parse into tabs and grids
-            let grid_id = self.create_tabs(name.to_string());
-
-            if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Grid(grid))) =
-                self.tree.tiles.get_mut(grid_id)
-            {
-                log::debug!(
-                    "Adding histogram '{}' to grid container ID {:?}",
-                    name,
-                    grid_id
-                );
-                grid.add_child(pane_id);
-
-                self.histogram_map
-                    .entry(name.to_string())
-                    .and_modify(|tab_info| tab_info.children.push(pane_id));
-            } else {
-                log::error!("Failed to retrieve grid container for '{}'", name);
-            }
+            self.create_1d_pane(name, bins, range);
         }
     }
 
@@ -116,46 +173,15 @@ impl Histogrammer {
     ) {
         log::debug!("Creating or updating 2D histogram '{}'", name);
 
-        let mut pane_id_to_update = None;
-        for (id, tile) in self.tree.tiles.iter_mut() {
-            if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                if hist.lock().unwrap().name == name {
-                    log::debug!("Resetting existing 2D histogram '{}'", name);
-                    hist.lock().unwrap().reset();
-                    pane_id_to_update = Some(*id);
-                    break;
-                }
-            }
-        }
-
-        if pane_id_to_update.is_none() {
+        if let Some(pane_id) = self.find_existing_histogram(name) {
+            log::debug!("Resetting existing 2D histogram '{}'", name);
+            self.reset_histogram(pane_id);
+        } else {
             log::debug!(
-                "No existing histogram found, creating new pane for '{}'",
+                "No existing histogram found; creating new 2D histogram '{}'",
                 name
             );
-            let hist = Histogram2D::new(name, bins, range);
-            let pane = Pane::Histogram2D(Arc::new(Mutex::new(Box::new(hist))));
-            let pane_id = self.tree.tiles.insert_pane(pane);
-
-            // Pass the full name directly to create_tabs to parse into tabs and grids
-            let grid_id = self.create_tabs(name.to_string());
-
-            if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Grid(grid))) =
-                self.tree.tiles.get_mut(grid_id)
-            {
-                log::debug!(
-                    "Adding 2D histogram '{}' to grid container ID {:?}",
-                    name,
-                    grid_id
-                );
-                grid.add_child(pane_id);
-
-                self.histogram_map
-                    .entry(name.to_string())
-                    .and_modify(|tab_info| tab_info.children.push(pane_id));
-            } else {
-                log::error!("Failed to retrieve grid container for '{}'", name);
-            }
+            self.create_2d_pane(name, bins, range);
         }
     }
 
@@ -651,72 +677,6 @@ impl Histogrammer {
         } else {
             log::error!("2D histogram '{}' not found in the tree", name);
         }
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub fn hist1d_data(&self) -> Vec<(String, String, Vec<u64>, u64, u64, (f64, f64))> {
-        let mut data = Vec::new();
-        for (_id, tile) in self.tree.tiles.iter() {
-            if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                let hist = hist.lock().unwrap();
-
-                // strip the last part of the name for the title
-                let name_parts: Vec<&str> = hist.name.split('/').collect();
-                let title = name_parts.last().unwrap().to_string();
-
-                data.push((
-                    hist.name.clone(),
-                    title,
-                    hist.bins.clone(),
-                    hist.underflow,
-                    hist.overflow,
-                    hist.range,
-                ));
-            }
-        }
-        data
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub fn hist2d_data(&self) -> Vec<(String, String, Vec<Vec<u64>>, (f64, f64), (f64, f64))> {
-        let mut data = Vec::new();
-
-        for (_id, tile) in self.tree.tiles.iter() {
-            if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                let hist = hist.lock().unwrap();
-
-                // Use backup bins if available
-                let bins = hist.backup_bins.as_ref().unwrap_or(&hist.bins);
-
-                let mut counts_2d = vec![vec![0; bins.x]; bins.y];
-
-                // Populate the counts, setting empty bins to 0
-                for ((x_idx, y_idx), &count) in &bins.counts {
-                    if *x_idx < bins.x && *y_idx < bins.y {
-                        counts_2d[*y_idx][*x_idx] = count;
-                    }
-                }
-
-                // Extract the range for x and y axes
-                let range_x = (hist.range.x.min, hist.range.x.max);
-                let range_y = (hist.range.y.min, hist.range.y.max);
-
-                // Create a human-readable title from the histogram name
-                let name_parts: Vec<&str> = hist.name.split('/').collect();
-                let title = name_parts.last().unwrap_or(&"").to_string();
-
-                // Add to the data vector
-                data.push((
-                    hist.name.clone(), // Full histogram name
-                    title,             // Human-readable title
-                    counts_2d,         // 2D bin counts
-                    range_x,           // Range for x-axis
-                    range_y,           // Range for y-axis
-                ));
-            }
-        }
-
-        data
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
@@ -1215,8 +1175,61 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
             let module =
                 PyModule::from_code_bound(py, code, "write_histograms.py", "write_histograms")?;
 
-            let hist1d_data = self.hist1d_data();
-            let hist2d_data = self.hist2d_data();
+            let mut hist1d_data = Vec::new();
+            for (_id, tile) in self.tree.tiles.iter() {
+                if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+                    let hist = hist.lock().unwrap();
+
+                    // strip the last part of the name for the title
+                    let name_parts: Vec<&str> = hist.name.split('/').collect();
+                    let title = name_parts.last().unwrap().to_string();
+
+                    hist1d_data.push((
+                        hist.name.clone(),
+                        title,
+                        hist.bins.clone(),
+                        hist.underflow,
+                        hist.overflow,
+                        hist.range,
+                    ));
+                }
+            }
+
+            let mut hist2d_data = Vec::new();
+            for (_id, tile) in self.tree.tiles.iter() {
+                if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
+                    let hist = hist.lock().unwrap();
+
+                    // Use backup bins if available
+                    let bins = hist.backup_bins.as_ref().unwrap_or(&hist.bins);
+
+                    let mut counts_2d = vec![vec![0; bins.x]; bins.y];
+
+                    // Populate the counts, setting empty bins to 0
+                    for ((x_idx, y_idx), &count) in &bins.counts {
+                        if *x_idx < bins.x && *y_idx < bins.y {
+                            counts_2d[*y_idx][*x_idx] = count;
+                        }
+                    }
+
+                    // Extract the range for x and y axes
+                    let range_x = (hist.range.x.min, hist.range.x.max);
+                    let range_y = (hist.range.y.min, hist.range.y.max);
+
+                    // Create a human-readable title from the histogram name
+                    let name_parts: Vec<&str> = hist.name.split('/').collect();
+                    let title = name_parts.last().unwrap_or(&"").to_string();
+
+                    // Add to the data vector
+                    hist2d_data.push((
+                        hist.name.clone(), // Full histogram name
+                        title,             // Human-readable title
+                        counts_2d,         // 2D bin counts
+                        range_x,           // Range for x-axis
+                        range_y,           // Range for y-axis
+                    ));
+                }
+            }
 
             match module
                 .getattr("write_histograms")?
@@ -1230,8 +1243,6 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
         })
     }
 }
-
-use regex::Regex;
 
 fn expr_from_string(expression: &str) -> Result<Expr, PolarsError> {
     let re = Regex::new(r"(-?\d+\.?\d*|\w+|\*\*|[+*/()-])").unwrap();

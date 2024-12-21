@@ -12,7 +12,6 @@ pub struct ProcessorSettings {
     pub dialog_open: bool,
     pub histogram_script_open: bool,
     pub column_names: Vec<String>,
-    pub test: Vec<String>,
 }
 
 impl Default for ProcessorSettings {
@@ -21,7 +20,6 @@ impl Default for ProcessorSettings {
             dialog_open: true,
             histogram_script_open: true,
             column_names: Vec::new(),
-            test: Vec::new(),
         }
     }
 }
@@ -287,14 +285,18 @@ def get_2d_histograms(file_name):
 
     fn get_column_names_from_lazyframe(lazyframe: &LazyFrame) -> Vec<String> {
         let lf: LazyFrame = lazyframe.clone().limit(1);
-        let df: DataFrame = lf.collect().unwrap();
-        let columns: Vec<String> = df
-            .get_column_names_owned()
-            .into_iter()
-            .map(|name| name.to_string())
-            .collect();
 
-        columns
+        match lf.collect() {
+            Ok(df) => df
+                .get_column_names_owned()
+                .into_iter()
+                .map(|name| name.to_string())
+                .collect(),
+            Err(e) => {
+                eprintln!("Error collecting DataFrame: {:?}", e);
+                Vec::new() // Return an empty vector on error
+            }
+        }
     }
 
     fn perform_histogrammer_from_lazyframe(&mut self) {

@@ -1,7 +1,7 @@
 // use super::configure_auxillary_detectors::AuxillaryDetectors;
 use super::manual_histogram_scripts::sps_histograms;
 
-use crate::histoer::configs::{Configs, Hist1DConfig, Hist2DConfig};
+use crate::histoer::configs::{Config, Hist1DConfig, Hist2DConfig};
 use crate::histoer::cuts::{Cut, Cut1D, Cut2D};
 use crate::histoer::histogrammer::Histogrammer;
 use egui_extras::{Column, TableBuilder};
@@ -13,7 +13,7 @@ use std::io::{self, BufReader, BufWriter};
 
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct HistogramScript {
-    pub hist_configs: Vec<Configs>, // Unified vector for both 1D and 2D configurations
+    pub hist_configs: Vec<Config>, // Unified vector for both 1D and 2D configurations
     pub new_columns: Vec<(String, String)>,
     pub cuts: Vec<Cut>,
 }
@@ -29,8 +29,8 @@ impl HistogramScript {
 
     fn histogram_exists(&self, name: &str) -> bool {
         self.hist_configs.iter().any(|config| match config {
-            Configs::Hist1D(hist) => hist.name == name,
-            Configs::Hist2D(hist) => hist.name == name,
+            Config::Hist1D(hist) => hist.name == name,
+            Config::Hist2D(hist) => hist.name == name,
         })
     }
 
@@ -117,14 +117,14 @@ impl HistogramScript {
                 let (columns, histograms, cuts) = sps_histograms();
                 for histogram in histograms {
                     match &histogram {
-                        Configs::Hist1D(histo1d) => {
+                        Config::Hist1D(histo1d) => {
                             if !self.histogram_exists(&histo1d.name) {
-                                self.hist_configs.push(Configs::Hist1D(histo1d.clone()));
+                                self.hist_configs.push(Config::Hist1D(histo1d.clone()));
                             }
                         }
-                        Configs::Hist2D(histo2d) => {
+                        Config::Hist2D(histo2d) => {
                             if !self.histogram_exists(&histo2d.name) {
-                                self.hist_configs.push(Configs::Hist2D(histo2d.clone()));
+                                self.hist_configs.push(Config::Hist2D(histo2d.clone()));
                             }
                         }
                     }
@@ -182,10 +182,10 @@ impl HistogramScript {
                 self.cuts.clear();
                 for hist_config in &mut self.hist_configs {
                     match hist_config {
-                        Configs::Hist1D(hist1d) => {
+                        Config::Hist1D(hist1d) => {
                             hist1d.cuts.clear();
                         }
-                        Configs::Hist2D(hist2d) => {
+                        Config::Hist2D(hist2d) => {
                             hist2d.cuts.clear();
                         }
                     }
@@ -235,12 +235,12 @@ impl HistogramScript {
                                         if ui.button("Apply to All").clicked() {
                                             for hist_config in &mut self.hist_configs {
                                                 match hist_config {
-                                                    Configs::Hist1D(hist1d) => {
+                                                    Config::Hist1D(hist1d) => {
                                                         if !hist1d.cuts.contains(cut1d) {
                                                             hist1d.cuts.push(cut1d.clone());
                                                         }
                                                     }
-                                                    Configs::Hist2D(hist2d) => {
+                                                    Config::Hist2D(hist2d) => {
                                                         if !hist2d.cuts.contains(cut1d) {
                                                             hist2d.cuts.push(cut1d.clone());
                                                         }
@@ -252,10 +252,10 @@ impl HistogramScript {
                                         if ui.button("Remove from All").clicked() {
                                             for hist_config in &mut self.hist_configs {
                                                 match hist_config {
-                                                    Configs::Hist1D(hist1d) => {
+                                                    Config::Hist1D(hist1d) => {
                                                         hist1d.cuts.retain(|cut| cut != cut1d);
                                                     }
-                                                    Configs::Hist2D(hist2d) => {
+                                                    Config::Hist2D(hist2d) => {
                                                         hist2d.cuts.retain(|cut| cut != cut1d);
                                                     }
                                                 }
@@ -302,12 +302,12 @@ impl HistogramScript {
                                         if ui.button("Apply to All").clicked() {
                                             for hist_config in &mut self.hist_configs {
                                                 match hist_config {
-                                                    Configs::Hist1D(hist1d) => {
+                                                    Config::Hist1D(hist1d) => {
                                                         if !hist1d.cuts.contains(cut2d) {
                                                             hist1d.cuts.push(cut2d.clone());
                                                         }
                                                     }
-                                                    Configs::Hist2D(hist2d) => {
+                                                    Config::Hist2D(hist2d) => {
                                                         if !hist2d.cuts.contains(cut2d) {
                                                             hist2d.cuts.push(cut2d.clone());
                                                         }
@@ -319,10 +319,10 @@ impl HistogramScript {
                                         if ui.button("Remove from All").clicked() {
                                             for hist_config in &mut self.hist_configs {
                                                 match hist_config {
-                                                    Configs::Hist1D(hist1d) => {
+                                                    Config::Hist1D(hist1d) => {
                                                         hist1d.cuts.retain(|cut| cut != cut2d);
                                                     }
-                                                    Configs::Hist2D(hist2d) => {
+                                                    Config::Hist2D(hist2d) => {
                                                         hist2d.cuts.retain(|cut| cut != cut2d);
                                                     }
                                                 }
@@ -350,7 +350,7 @@ impl HistogramScript {
             ui.heading("Histograms");
 
             if ui.button("+1D").clicked() {
-                self.hist_configs.push(Configs::Hist1D(Hist1DConfig {
+                self.hist_configs.push(Config::Hist1D(Hist1DConfig {
                     name: "".to_string(),
                     column_name: "".to_string(),
                     range: (0.0, 4096.0),
@@ -362,7 +362,7 @@ impl HistogramScript {
             }
 
             if ui.button("+2D").clicked() {
-                self.hist_configs.push(Configs::Hist2D(Hist2DConfig {
+                self.hist_configs.push(Config::Hist2D(Hist2DConfig {
                     name: "".to_string(),
                     x_column_name: "".to_string(),
                     y_column_name: "".to_string(),
@@ -421,10 +421,10 @@ impl HistogramScript {
                 for (index, config) in self.hist_configs.iter_mut().enumerate() {
                     body.row(18.0, |mut row| {
                         row.col(|ui| match config {
-                            Configs::Hist1D(_) => {
+                            Config::Hist1D(_) => {
                                 ui.label(format!("{index}"));
                             }
-                            Configs::Hist2D(_) => {
+                            Config::Hist2D(_) => {
                                 ui.label(format!("{index}"));
                             }
                         });
@@ -450,7 +450,7 @@ impl HistogramScript {
         // Synchronize cuts after all UI interactions
         for hist_config in &mut self.hist_configs {
             match hist_config {
-                Configs::Hist1D(hist1d) => {
+                Config::Hist1D(hist1d) => {
                     for hist_cut in &mut hist1d.cuts {
                         if let Some(updated_cut) =
                             self.cuts.iter().find(|cut| cut.name() == hist_cut.name())
@@ -465,7 +465,7 @@ impl HistogramScript {
                         .cuts
                         .retain(|cut| self.cuts.iter().any(|c| c.name() == cut.name()));
                 }
-                Configs::Hist2D(hist2d) => {
+                Config::Hist2D(hist2d) => {
                     for hist_cut in &mut hist2d.cuts {
                         if let Some(updated_cut) =
                             self.cuts.iter().find(|cut| cut.name() == hist_cut.name())
@@ -544,7 +544,7 @@ impl HistogramScript {
         for config in &self.hist_configs {
             match config {
                 // 1D Histogram Configuration
-                Configs::Hist1D(histo1d) => {
+                Config::Hist1D(histo1d) => {
                     if histo1d.calculate {
                         if histo1d.name.contains("{}") {
                             // name has {} and column_name has a range pattern
@@ -613,7 +613,7 @@ impl HistogramScript {
                 }
 
                 // 2D Histogram Configuration
-                Configs::Hist2D(histo2d) => {
+                Config::Hist2D(histo2d) => {
                     if histo2d.calculate {
                         if histo2d.name.contains("{}") {
                             // Case 1: `{}` in `name`, `x_column_name` has a pattern

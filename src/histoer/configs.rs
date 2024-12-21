@@ -1,15 +1,15 @@
-use egui_extras::TableRow;
-
 use super::cuts::Cut;
+
+use egui_extras::{Column, TableBuilder, TableRow};
 
 // Enum to encapsulate 1D and 2D histogram configurations
 #[derive(Clone, serde::Deserialize, serde::Serialize, Debug)]
-pub enum Configs {
+pub enum Config {
     Hist1D(Hist1DConfig),
     Hist2D(Hist2DConfig),
 }
 
-impl Configs {
+impl Config {
     /// Create a new 1D histogram configuration.
     pub fn new_1d(
         name: &str,
@@ -22,7 +22,7 @@ impl Configs {
         if let Some(cuts) = cuts {
             config.cuts = cuts;
         }
-        Configs::Hist1D(config)
+        Config::Hist1D(config)
     }
 
     /// Create a new 2D histogram configuration.
@@ -40,17 +40,128 @@ impl Configs {
         if let Some(cuts) = cuts {
             config.cuts = cuts;
         }
-        Configs::Hist2D(config)
+        Config::Hist2D(config)
     }
 
     pub fn table_row(&mut self, row: &mut TableRow<'_, '_>, cuts: &mut Vec<Cut>) {
         match self {
-            Configs::Hist1D(config) => config.table_row(row, cuts),
-            Configs::Hist2D(config) => config.table_row(row, cuts),
+            Config::Hist1D(config) => config.table_row(row, cuts),
+            Config::Hist2D(config) => config.table_row(row, cuts),
         }
     }
 }
 
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+pub struct Configs {
+    pub configs: Vec<Config>,
+}
+
+impl Configs {
+    // pub fn validate_and_filter_columns(&mut self, lf_columns: Vec<String>) -> Vec<String> {
+
+    // }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui, cuts: &mut Vec<Cut>) {
+        ui.horizontal(|ui| {
+            ui.heading("Histograms");
+
+            if ui.button("+1D").clicked() {
+                self.configs.push(Config::Hist1D(Hist1DConfig {
+                    name: "".to_string(),
+                    column_name: "".to_string(),
+                    range: (0.0, 4096.0),
+                    bins: 512,
+                    cuts: vec![],
+                    calculate: true,
+                    enabled: true,
+                }));
+            }
+
+            if ui.button("+2D").clicked() {
+                self.configs.push(Config::Hist2D(Hist2DConfig {
+                    name: "".to_string(),
+                    x_column_name: "".to_string(),
+                    y_column_name: "".to_string(),
+                    x_range: (0.0, 4096.0),
+                    y_range: (0.0, 4096.0),
+                    bins: (512, 512),
+                    cuts: vec![],
+                    calculate: true,
+                    enabled: true,
+                }));
+            }
+
+            ui.separator();
+
+            if ui.button("Remove All").clicked() {
+                self.configs.clear();
+            }
+        });
+
+        let mut indices_to_remove = Vec::new();
+
+        // Create the table
+        TableBuilder::new(ui)
+            .id_salt("hist_configs")
+            .column(Column::auto()) // Type
+            .column(Column::auto()) // Name
+            .column(Column::auto()) // Columns
+            .column(Column::auto()) // Ranges
+            .column(Column::auto()) // Bins
+            .column(Column::auto()) // cuts
+            .column(Column::auto()) // Actions
+            .column(Column::remainder()) // remove
+            .striped(true)
+            .vscroll(false)
+            .header(20.0, |mut header| {
+                header.col(|ui| {
+                    ui.label(" # ");
+                });
+                header.col(|ui| {
+                    ui.label("Name");
+                });
+                header.col(|ui| {
+                    ui.label("Column(s)");
+                });
+                header.col(|ui| {
+                    ui.label("Range(s)");
+                });
+                header.col(|ui| {
+                    ui.label("Bins");
+                });
+                header.col(|ui| {
+                    ui.label("Cuts");
+                });
+            })
+            .body(|mut body| {
+                for (index, config) in self.configs.iter_mut().enumerate() {
+                    body.row(18.0, |mut row| {
+                        row.col(|ui| match config {
+                            Config::Hist1D(_) => {
+                                ui.label(format!("{index}"));
+                            }
+                            Config::Hist2D(_) => {
+                                ui.label(format!("{index}"));
+                            }
+                        });
+
+                        config.table_row(&mut row, cuts);
+
+                        row.col(|ui| {
+                            if ui.button("X").clicked() {
+                                indices_to_remove.push(index);
+                            }
+                        });
+                    });
+                }
+            });
+
+        // Remove indices in reverse order to prevent shifting issues
+        for &index in indices_to_remove.iter().rev() {
+            self.configs.remove(index);
+        }
+    }
+}
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 pub struct Hist1DConfig {
     pub name: String,        // Histogram display name

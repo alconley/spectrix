@@ -23,9 +23,7 @@ impl Cut {
     // Method to check if a cut is valid for a specific row in the DataFrame
     pub fn valid(&self, df: &DataFrame, row_idx: usize) -> bool {
         match self {
-            // Cut::Cut1D(cut1d) => cut1d.valid(df, row_idx),
             Cut::Cut1D(cut1d) => cut1d.valid(df, row_idx),
-
             Cut::Cut2D(cut2d) => cut2d.valid(df, row_idx),
         }
     }
