@@ -73,6 +73,15 @@ impl Histogram2D {
                         .as_mut()
                         .unwrap()
                         .original_bins = bins;
+
+                    self.plot_settings
+                        .projections
+                        .y_projection
+                        .as_mut()
+                        .unwrap()
+                        .plot_settings
+                        .egui_settings
+                        .reset_axis = true;
                 }
             } else {
                 // create a new histogram and set the bins
@@ -132,6 +141,15 @@ impl Histogram2D {
                         .as_mut()
                         .unwrap()
                         .original_bins = bins;
+
+                    self.plot_settings
+                        .projections
+                        .x_projection
+                        .as_mut()
+                        .unwrap()
+                        .plot_settings
+                        .egui_settings
+                        .reset_axis = true;
                 }
             } else {
                 let mut x_histogram = Histogram::new(

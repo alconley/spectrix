@@ -1,10 +1,10 @@
 // External crates
 use egui_tiles::TileId;
 use fnv::FnvHashMap;
+use indicatif::{ProgressBar, ProgressStyle};
 use polars::prelude::*;
 use pyo3::{prelude::*, types::PyModule};
 use rayon::prelude::*;
-use regex::Regex;
 
 // Standard library
 use std::collections::HashMap;
@@ -15,8 +15,7 @@ use std::sync::{
 };
 
 // Project modules
-use super::configs::{Hist1DConfig, Hist2DConfig};
-use super::cuts::Cut;
+use super::configs::{Config, Configs};
 use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
@@ -46,6 +45,8 @@ pub struct Histogrammer {
     pub behavior: TreeBehavior,
     #[serde(skip)]
     pub calculating: Arc<AtomicBool>, // Use AtomicBool for thread-safe status tracking
+    #[serde(skip)]
+    pub abort_flag: Arc<AtomicBool>, // Use AtomicBool for thread-safe abort flag
     pub histogram_map: HashMap<String, ContainerInfo>, // Map full path to TabInfo
 }
 
@@ -56,13 +57,14 @@ impl Default for Histogrammer {
             tree: egui_tiles::Tree::empty("Empty tree"),
             behavior: Default::default(),
             calculating: Arc::new(AtomicBool::new(false)),
+            abort_flag: Arc::new(AtomicBool::new(false)),
             histogram_map: HashMap::new(),
         }
     }
 }
 
 impl Histogrammer {
-    fn find_existing_histogram(&self, name: &str) -> Option<TileId> {
+    pub fn find_existing_histogram(&self, name: &str) -> Option<TileId> {
         self.tree.tiles.iter().find_map(|(id, tile)| {
             match tile {
                 egui_tiles::Tile::Pane(Pane::Histogram(hist)) => {
@@ -81,7 +83,7 @@ impl Histogrammer {
         })
     }
 
-    fn _reset_histograms(&mut self) {
+    pub fn reset_histograms(&mut self) {
         for (_id, tile) in self.tree.tiles.iter_mut() {
             match tile {
                 egui_tiles::Tile::Pane(Pane::Histogram(hist)) => {
@@ -187,220 +189,92 @@ impl Histogrammer {
 
     pub fn fill_histograms(
         &mut self,
-        hist1d_specs: Vec<Hist1DConfig>,
-        hist2d_specs: Vec<Hist2DConfig>,
+        mut configs: Configs,
         lf: &LazyFrame,
-        new_columns: Vec<(String, String)>,
-        max_rows_per_batch: usize,
+        estimated_memory: f64, // chuck size in GB
     ) {
-        let mut lf = lf.clone();
-        for (expression, alias) in new_columns {
-            if let Err(e) = Self::add_computed_column(&mut lf, &expression, &alias) {
-                log::error!("Error adding computed column '{}': {}", alias, e);
-            }
-        }
-        // Wrap `lf` in an `Arc` to safely share it between threads
-        let lf = Arc::new(lf.clone());
         let calculating = Arc::clone(&self.calculating);
+        let abort_flag = Arc::clone(&self.abort_flag);
 
         // Set calculating to true at the start
         calculating.store(true, Ordering::SeqCst);
+        abort_flag.store(false, Ordering::SeqCst);
 
-        // Collect available column names
-        let available_columns = self.get_column_names_from_lazyframe(&lf);
+        let mut lf = lf.clone();
 
-        // Filter and validate histograms based on existing columns
-        let hist1d_specs: Vec<_> = hist1d_specs.into_iter().filter(|h| {
-            if h.calculate {
-                let column_exists = available_columns.contains(&h.column_name);
-                if !column_exists {
-                    log::error!("Warning: Column '{}' does not exist for 1D histogram '{}'. Skipping.", h.column_name, h.name);
-                    return false;
-                }
-                for cut in &h.cuts {
-                    match cut {
-                        Cut::Cut1D(cut1d) => {
-                            if let Some(conditions) = &cut1d.parsed_conditions {
-                                for condition in conditions {
-                                    if !available_columns.contains(&condition.column_name) {
-                                        log::error!(
-                                            "Warning: Cut column '{}' does not exist for 1D histogram '{}'. Skipping cut.",
-                                            condition.column_name, h.name
-                                        );
-                                        return false;
-                                    }
-                                }
-                            } else {
-                                log::error!("Warning: Failed to parse conditions for 1D cut '{}'. Skipping cut.", h.name);
-                                return false;
-                            }
-                        }
-                        Cut::Cut2D(cut2d) => {
-                            if !available_columns.contains(&cut2d.x_column) {
-                                log::error!("Warning: Cut column '{}' does not exist for 1D histogram '{}'. Skipping cut.", cut2d.x_column, h.name);
-                                return false;
-                            }
-                        }
-                    }
-                }
-                true
-            } else {
-                false
-            }
-        }).collect();
+        let row_count = lf
+            .clone()
+            .select([len().alias("count")])
+            .collect()
+            .unwrap()
+            .column("count")
+            .unwrap()
+            .u32()
+            .unwrap()
+            .get(0)
+            .unwrap();
 
-        let hist2d_specs: Vec<_> = hist2d_specs.into_iter().filter(|h| {
-            if h.calculate {
-                let columns_exist = available_columns.contains(&h.x_column_name) && available_columns.contains(&h.y_column_name);
-                if !columns_exist {
-                    log::error!("Warning: Columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping.", h.x_column_name, h.y_column_name, h.name);
-                    return false;
-                }
-                for cut in &h.cuts {
-                    match cut {
-                        Cut::Cut1D(cut1d) => {
-                            if let Some(conditions) = &cut1d.parsed_conditions {
-                                for condition in conditions {
-                                    if !available_columns.contains(&condition.column_name) {
-                                        log::error!(
-                                            "Warning: Cut column '{}' does not exist for 1D histogram '{}'. Skipping cut.",
-                                            condition.column_name, h.name
-                                        );
-                                        return false;
-                                    }
-                                }
-                            } else {
-                                log::error!("Warning: Failed to parse conditions for 1D cut '{}'. Skipping cut.", h.name);
-                                return false;
-                            }
-                        }
-                        Cut::Cut2D(cut) => {
-                            if !available_columns.contains(&cut.x_column) || !available_columns.contains(&cut.y_column) {
-                                log::error!("Warning: Cut columns '{}' or '{}' do not exist for 2D histogram '{}'. Skipping cut.", cut.x_column, cut.y_column, h.name);
-                                return false;
-                            }
-                        }
-                    }
-                }
-                true
-            } else {
-                false
-            }
-        }).collect();
+        // Validate configurations and prepare histograms
+        let valid_configs = configs.valid_configs(&mut lf);
+        valid_configs.check_and_add_panes(self);
 
-        // Collect column names for the remaining histograms
-        let mut column_names: Vec<&str> = hist1d_specs
-            .iter()
-            .map(|h| h.column_name.as_str())
-            .collect();
+        // Select required columns from the LazyFrame
+        let used_columns = valid_configs.get_used_columns();
+        let selected_columns: Vec<_> = used_columns.iter().map(col).collect();
 
-        // Include columns required for cuts in both 1D and 2D histograms
-        for h in &hist1d_specs {
-            for cut in &h.cuts {
-                match cut {
-                    Cut::Cut1D(cut) => {
-                        for condition in cut.parsed_conditions.as_ref().unwrap() {
-                            column_names.push(condition.column_name.as_str());
-                        }
-                    }
-                    Cut::Cut2D(cut) => {
-                        column_names.push(cut.x_column.as_str());
-                    }
-                }
-            }
-        }
+        let columns = used_columns.len() as u64;
+        let rows = row_count as u64;
+        let estimated_gb = estimate_gb(rows, columns);
 
-        for h in &hist2d_specs {
-            column_names.push(h.x_column_name.as_str());
-            column_names.push(h.y_column_name.as_str());
+        // Estimate rows per chunk
+        let bytes_per_row = columns as f64 * 8.0; // Each f64 is 8 bytes
+        let chunk_size_bytes = estimated_memory * 1_073_741_824.0;
+        let rows_per_chunk = (chunk_size_bytes / bytes_per_row).floor() as usize;
 
-            for cut in &h.cuts {
-                match cut {
-                    Cut::Cut1D(_) => {}
-                    Cut::Cut2D(cut) => {
-                        column_names.push(cut.x_column.as_str());
-                        column_names.push(cut.y_column.as_str());
-                    }
-                }
-            }
-        }
+        let progress_bar = ProgressBar::new(row_count as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "[{elapsed_precise}] {bar:40.cyan/blue} {percent}% ({pos}/{len}) ETA: {eta}",
+                )
+                .expect("Failed to set progress bar template")
+                .progress_chars("#>-"),
+        );
+        progress_bar.println(format!("Processing ~{:.2} GB of raw data", estimated_gb));
 
-        column_names.sort_unstable();
-        column_names.dedup();
+        // Apply the selection to the LazyFrame
+        let lf = Arc::new(lf.clone().select(selected_columns.clone()));
 
-        // Map column names to expressions for LazyFrame selection
-        let selected_columns: Vec<_> = column_names.iter().map(|&col_name| col(col_name)).collect();
-
-        // Prepare collections for histograms
+        // Initialize histogram maps
         let mut hist1d_map = Vec::new();
         let mut hist2d_map = Vec::new();
-        let mut missing_1d = Vec::new();
-        let mut missing_2d = Vec::new();
 
-        // Identify and reset existing histograms, collect missing ones
-        for h in &hist1d_specs {
-            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
-                self.tree.tiles.iter_mut().find(|(_id, tile)| {
-                    if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                        hist.lock().unwrap().name == h.name
-                    } else {
-                        false
+        for config in &valid_configs.configs {
+            match config {
+                Config::Hist1D(hist1d) => {
+                    if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
+                        self.tree.tiles.iter_mut().find(|(_id, tile)| match tile {
+                            egui_tiles::Tile::Pane(Pane::Histogram(h)) => {
+                                h.lock().unwrap().name == hist1d.name
+                            }
+                            _ => false,
+                        })
+                    {
+                        hist1d_map.push((Arc::clone(hist), hist1d.clone()));
                     }
-                })
-            {
-                hist.lock().unwrap().reset(); // Reset histogram counts
-                hist1d_map.push((Arc::clone(hist), h.clone()));
-            } else {
-                missing_1d.push(h.clone());
-            }
-        }
-
-        for h in &hist2d_specs {
-            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
-                self.tree.tiles.iter_mut().find(|(_id, tile)| {
-                    if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                        hist.lock().unwrap().name == h.name
-                    } else {
-                        false
+                }
+                Config::Hist2D(hist2d) => {
+                    if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
+                        self.tree.tiles.iter_mut().find(|(_id, tile)| match tile {
+                            egui_tiles::Tile::Pane(Pane::Histogram2D(h)) => {
+                                h.lock().unwrap().name == hist2d.name
+                            }
+                            _ => false,
+                        })
+                    {
+                        hist2d_map.push((Arc::clone(hist), hist2d.clone()));
                     }
-                })
-            {
-                hist.lock().unwrap().reset(); // Reset histogram counts
-                hist2d_map.push((Arc::clone(hist), h.clone()));
-            } else {
-                missing_2d.push(h.clone());
-            }
-        }
-
-        // Add missing 1D histograms outside of the mutable borrow loop
-        for h in missing_1d {
-            self.add_hist1d(&h.name, h.bins, h.range);
-            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
-                self.tree.tiles.iter_mut().find(|(_id, tile)| {
-                    if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                        hist.lock().unwrap().name == h.name
-                    } else {
-                        false
-                    }
-                })
-            {
-                hist1d_map.push((Arc::clone(hist), h));
-            }
-        }
-
-        // Add missing 2D histograms outside of the mutable borrow loop
-        for h in missing_2d {
-            self.add_hist2d(&h.name, h.bins, (h.x_range, h.y_range));
-            if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
-                self.tree.tiles.iter_mut().find(|(_id, tile)| {
-                    if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                        hist.lock().unwrap().name == h.name
-                    } else {
-                        false
-                    }
-                })
-            {
-                hist2d_map.push((Arc::clone(hist), h));
+                }
             }
         }
 
@@ -408,191 +282,166 @@ impl Histogrammer {
         rayon::spawn({
             let calculating = Arc::clone(&calculating);
             let lf = Arc::clone(&lf); // Clone lf to move into the spawn closure
+            let progress_bar = progress_bar.clone();
+
             move || {
                 let mut row_start = 0;
                 loop {
-                    // Borrow the `LazyFrame` inside the Arc without moving it
+                    if abort_flag.load(Ordering::SeqCst) {
+                        println!("Processing aborted by user.");
+                        break;
+                    }
+                    // Slice the LazyFrame into batches
                     let batch_lf = lf
                         .as_ref()
                         .clone()
-                        .slice(row_start as i64, max_rows_per_batch.try_into().unwrap());
-                    let lf_selected = batch_lf.select(selected_columns.clone());
+                        .slice(row_start as i64, rows_per_chunk.try_into().unwrap());
 
-                    // Break if no more rows are left to process
-                    if lf_selected.clone().limit(1).collect().unwrap().height() == 0 {
+                    // Break if no rows are left to process
+                    if batch_lf.clone().limit(1).collect().unwrap().height() == 0 {
                         break;
                     }
 
-                    // No need for an inner handle; use `par_iter` for parallel execution within this batch
-                    if let Ok(df) = lf_selected.collect() {
+                    if let Ok(df) = batch_lf.collect() {
                         let height = df.height();
 
-                        // Parallel filling of 1D histograms
-                        hist1d_map.par_iter().for_each(|(hist, meta)| {
-                            if let Ok(col_idx) = df.column(&meta.column_name) {
-                                if let Ok(col_values) = col_idx.f64() {
-                                    let mut hist = hist.lock().unwrap();
-
-                                    // Loop over each row, matching the row index in the DataFrame with the cut columns
-                                    for (index, value) in col_values.into_no_null_iter().enumerate()
-                                    {
-                                        if value == -1e6 {
-                                            continue;
-                                        }
-
-                                        // Track if this point passes all cuts for this histogram
-                                        let mut passes_all_cuts = true;
-
-                                        // Evaluate each cut for the current point
-                                        for cut in &meta.cuts {
-                                            // Call point_is_inside to check if this point satisfies the cut
-                                            if !cut.valid(&df, index) {
-                                                passes_all_cuts = false;
-                                                break;
+                        // Cache bin values for 1D histograms
+                        let cached_bins_1d: Vec<Vec<f64>> = hist1d_map
+                            .par_iter()
+                            .map(|(_, meta)| {
+                                if let Ok(col) = df.column(&meta.column_name).and_then(|c| c.f64())
+                                {
+                                    col.into_no_null_iter()
+                                        .enumerate()
+                                        .filter_map(|(index, value)| {
+                                            if value != -1e6 && meta.cuts.valid(&df, index) {
+                                                Some(value)
+                                            } else {
+                                                None
                                             }
-                                        }
-
-                                        // Fill histogram only if all cuts pass for this point
-                                        if passes_all_cuts {
-                                            hist.fill(value);
-                                        }
-
-                                        hist.plot_settings.progress = Some(
-                                            (row_start as f32 + index as f32)
-                                                / (df.height() as f32),
-                                        );
-                                    }
+                                        })
+                                        .collect()
+                                } else {
+                                    Vec::new()
                                 }
-                            }
-                        });
+                            })
+                            .collect();
 
-                        hist2d_map.par_iter().for_each(|(hist, meta)| {
-                            if let (Ok(x_values), Ok(y_values)) = (
-                                df.column(&meta.x_column_name).and_then(|c| c.f64()),
-                                df.column(&meta.y_column_name).and_then(|c| c.f64()),
-                            ) {
-                                let mut hist = hist.lock().unwrap();
-
-                                // Loop over each row, matching the row index in the DataFrame with the cut columns
-                                for (index, (x, y)) in x_values
-                                    .into_no_null_iter()
-                                    .zip(y_values.into_no_null_iter())
-                                    .enumerate()
-                                {
-                                    if x == -1e6 || y == -1e6 {
-                                        continue;
-                                    }
-
-                                    // Track if this point passes all cuts for this histogram
-                                    let mut passes_all_cuts = true;
-
-                                    // Evaluate each cut for the current point
-                                    for cut in &meta.cuts {
-                                        // Call point_is_inside to check if this point satisfies the cut
-                                        if !cut.valid(&df, index) {
-                                            passes_all_cuts = false;
-                                            break;
-                                        }
-                                    }
-
-                                    // Fill histogram only if all cuts pass for this point
-                                    if passes_all_cuts {
-                                        hist.fill(x, y);
-                                    }
-                                }
-                            }
-                        });
-
-                        // For histograms with vector columns
-                        hist2d_map.par_iter().for_each(|(hist, meta)| {
-                            if let (Ok(x_column), Ok(y_column)) = (
-                                df.column(&meta.x_column_name),
-                                df.column(&meta.y_column_name),
-                            ) {
-                                if let (Ok(x_list), Ok(y_list)) = (x_column.list(), y_column.list())
-                                {
-                                    let mut hist = hist.lock().unwrap();
-
-                                    // Iterate over nested vector rows
-                                    for (index, (x_row, y_row)) in
-                                        x_list.into_iter().zip(y_list.into_iter()).enumerate()
-                                    {
-                                        if let (Some(x_values), Some(y_values)) = (x_row, y_row) {
-                                            let x_values = x_values.f64().unwrap();
-                                            let y_values = y_values.f64().unwrap();
-
-                                            for (x, y) in x_values
-                                                .into_no_null_iter()
-                                                .zip(y_values.into_no_null_iter())
+                        // Cache bin values for 2D histograms
+                        let cached_bins_2d: Vec<Vec<(f64, f64)>> = hist2d_map
+                            .par_iter()
+                            .map(|(_, meta)| {
+                                if let (Ok(x_col), Ok(y_col)) = (
+                                    df.column(&meta.x_column_name).and_then(|c| c.f64()),
+                                    df.column(&meta.y_column_name).and_then(|c| c.f64()),
+                                ) {
+                                    x_col
+                                        .into_no_null_iter()
+                                        .zip(y_col.into_no_null_iter())
+                                        .enumerate()
+                                        .filter_map(|(index, (x, y))| {
+                                            if x != -1e6 && y != -1e6 && meta.cuts.valid(&df, index)
                                             {
-                                                if x == -1e6 || y == -1e6 {
-                                                    continue;
-                                                }
-
-                                                // Evaluate cuts for the row
-                                                let mut passes_all_cuts = true;
-                                                for cut in &meta.cuts {
-                                                    if !cut.valid(&df, index) {
-                                                        passes_all_cuts = false;
-                                                        break;
-                                                    }
-                                                }
-
-                                                if passes_all_cuts {
-                                                    hist.fill(x, y);
-                                                }
+                                                Some((x, y))
+                                            } else {
+                                                None
                                             }
-                                        }
-                                    }
+                                        })
+                                        .collect()
+                                } else {
+                                    Vec::new()
                                 }
-                            }
-                        });
+                            })
+                            .collect();
 
-                        for (hist, meta) in &hist2d_map {
-                            let mut hist = hist.lock().unwrap();
-                            hist.plot_settings.x_column = meta.x_column_name.clone();
-                            hist.plot_settings.y_column = meta.y_column_name.clone();
-                            hist.plot_settings.recalculate_image = true;
-                        }
+                        // fill nested vector columns
+                        let cached_nested_bins_2d: Vec<Vec<(f64, f64)>> = hist2d_map
+                            .par_iter()
+                            .map(|(_, meta)| {
+                                if let (Ok(x_col), Ok(y_col)) = (
+                                    df.column(&meta.x_column_name),
+                                    df.column(&meta.y_column_name),
+                                ) {
+                                    if let (Ok(x_list), Ok(y_list)) = (x_col.list(), y_col.list()) {
+                                        x_list
+                                            .into_iter()
+                                            .zip(y_list)
+                                            .enumerate()
+                                            .flat_map(|(index, (x_row, y_row))| {
+                                                if let (Some(x_values), Some(y_values)) =
+                                                    (x_row, y_row)
+                                                {
+                                                    let x_values = x_values.f64().unwrap();
+                                                    let y_values = y_values.f64().unwrap();
 
-                        for hist in &hist1d_map {
-                            let mut hist = hist.0.lock().unwrap();
-                            hist.plot_settings.progress = None;
-                        }
+                                                    x_values
+                                                        .into_no_null_iter()
+                                                        .zip(y_values.into_no_null_iter())
+                                                        .filter_map(|(x, y)| {
+                                                            if x != -1e6
+                                                                && y != -1e6
+                                                                && meta.cuts.valid(&df, index)
+                                                            {
+                                                                Some((x, y))
+                                                            } else {
+                                                                None
+                                                            }
+                                                        })
+                                                        .collect::<Vec<_>>()
+                                                } else {
+                                                    Vec::new()
+                                                }
+                                            })
+                                            .collect()
+                                    } else {
+                                        Vec::new()
+                                    }
+                                } else {
+                                    Vec::new()
+                                }
+                            })
+                            .collect();
 
-                        println!("\tProcessed rows {} to {}", row_start, row_start + height);
+                        // Fill 1D histograms
+                        hist1d_map
+                            .par_iter()
+                            .zip(cached_bins_1d)
+                            .for_each(|((hist, _), bins)| {
+                                let mut hist = hist.lock().unwrap();
+                                bins.into_iter().for_each(|value| hist.fill(value));
+                                hist.plot_settings.egui_settings.reset_axis = true;
+                            });
+
+                        // Fill 2D histograms
+                        hist2d_map.par_iter().zip(cached_bins_2d).for_each(
+                            |((hist, meta), bins)| {
+                                let mut hist = hist.lock().unwrap();
+                                bins.into_iter().for_each(|(x, y)| hist.fill(x, y));
+                                hist.plot_settings.x_column = meta.x_column_name.clone();
+                                hist.plot_settings.y_column = meta.y_column_name.clone();
+                                hist.plot_settings.recalculate_image = true;
+                            },
+                        );
+
+                        // Fill nested 2D histograms
+                        hist2d_map.par_iter().zip(cached_nested_bins_2d).for_each(
+                            |((hist, _), bins)| {
+                                let mut hist = hist.lock().unwrap();
+                                bins.into_iter().for_each(|(x, y)| hist.fill(x, y));
+                            },
+                        );
+
+                        progress_bar.inc(height as u64);
                     }
 
-                    row_start += max_rows_per_batch;
+                    row_start += rows_per_chunk;
                 }
-                println!("Finished processing all rows\n");
 
+                progress_bar.finish_with_message("Processing complete.");
                 // Set calculating to false when processing is complete
                 calculating.store(false, Ordering::SeqCst);
             }
         });
-    }
-
-    fn add_computed_column(
-        lf: &mut LazyFrame,
-        expression: &str,
-        alias: &str,
-    ) -> Result<(), PolarsError> {
-        let computed_expr = expr_from_string(expression)?;
-        *lf = lf.clone().with_column(computed_expr.alias(alias)); // Use alias for the new column name
-        Ok(())
-    }
-
-    pub fn get_column_names_from_lazyframe(&self, lazyframe: &LazyFrame) -> Vec<String> {
-        let lf: LazyFrame = lazyframe.clone().limit(1);
-        let df: DataFrame = lf.collect().unwrap();
-        let columns: Vec<String> = df
-            .get_column_names_owned()
-            .into_iter()
-            .map(|name| name.to_string())
-            .collect();
-
-        columns
     }
 
     pub fn add_hist1d_with_bin_values(
@@ -695,6 +544,10 @@ impl Histogrammer {
 
                     if ui.button("Reorganize").clicked() {
                         self.reorganize();
+                    }
+
+                    if ui.button("Reset").clicked() {
+                        *self = Default::default();
                     }
                 });
                 ui.separator();
@@ -1244,116 +1097,6 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
     }
 }
 
-fn expr_from_string(expression: &str) -> Result<Expr, PolarsError> {
-    let re = Regex::new(r"(-?\d+\.?\d*|\w+|\*\*|[+*/()-])").unwrap();
-    let tokens: Vec<String> = re
-        .find_iter(expression)
-        .map(|m| m.as_str().to_string())
-        .collect();
-
-    let mut expr_stack: Vec<Expr> = Vec::new();
-    let mut op_stack: Vec<String> = Vec::new();
-    let mut is_first_token = true;
-
-    log::debug!("Starting evaluation of expression: '{}'", expression);
-    log::debug!("Tokens: {:?}", tokens);
-
-    for token in tokens {
-        match token.as_str() {
-            "+" | "-" | "*" | "/" | "**" => {
-                while let Some(op) = op_stack.last() {
-                    // Pop operators with higher or equal precedence
-                    if precedence(op) > precedence(&token)
-                        || (precedence(op) == precedence(&token) && is_left_associative(&token))
-                    {
-                        apply_op(&mut expr_stack, op_stack.pop().unwrap().as_str());
-                    } else {
-                        break;
-                    }
-                }
-                op_stack.push(token);
-                is_first_token = false;
-            }
-            "(" => {
-                op_stack.push(token);
-                is_first_token = false;
-            }
-            ")" => {
-                while let Some(op) = op_stack.pop() {
-                    if op == "(" {
-                        break;
-                    }
-                    apply_op(&mut expr_stack, &op);
-                }
-            }
-            _ if token.parse::<f64>().is_ok() => {
-                let number = token.parse::<f64>().unwrap();
-                if number < 0.0 && !is_first_token {
-                    op_stack.push("+".to_string());
-                }
-                expr_stack.push(lit(number));
-                is_first_token = false;
-            }
-            _ => {
-                expr_stack.push(col(&token));
-                is_first_token = false;
-            }
-        }
-    }
-
-    while let Some(op) = op_stack.pop() {
-        apply_op(&mut expr_stack, &op);
-    }
-
-    if expr_stack.len() == 1 {
-        Ok(expr_stack.pop().unwrap())
-    } else {
-        log::error!("Error: Stack ended with more than one expression, invalid expression");
-        Err(PolarsError::ComputeError("Invalid expression".into()))
-    }
-}
-
-fn precedence(op: &str) -> i32 {
-    match op {
-        "+" | "-" => 1,
-        "*" | "/" => 2,
-        "**" => 3,
-        _ => 0,
-    }
-}
-
-fn is_left_associative(op: &str) -> bool {
-    match op {
-        "+" | "-" | "*" | "/" => true,
-        "**" => false, // Exponentiation is right-associative
-        _ => false,
-    }
-}
-
-fn apply_op(expr_stack: &mut Vec<Expr>, operator: &str) {
-    if expr_stack.len() < 2 {
-        log::warn!("Error: Not enough operands for '{}'", operator);
-        return;
-    }
-
-    let right = expr_stack.pop().unwrap();
-    let left = expr_stack.pop().unwrap();
-
-    let result = match operator {
-        "+" => left + right,
-        "-" => left - right,
-        "*" => left * right,
-        "/" => left / right,
-        "**" => left.pow(right),
-        _ => {
-            log::error!("Unknown operator: '{}'", operator);
-            return;
-        }
-    };
-
-    expr_stack.push(result);
-}
-
 fn tree_ui(
     ui: &mut egui::Ui,
     behavior: &mut dyn egui_tiles::Behavior<Pane>,
@@ -1407,4 +1150,11 @@ fn tree_ui(
 
     // Put the tile back
     tiles.insert(tile_id, tile);
+}
+
+fn estimate_gb(rows: u64, columns: u64) -> f64 {
+    // Each f64 takes 8 bytes
+    let total_bytes = rows * columns * 8;
+    // Convert bytes to gigabytes
+    total_bytes as f64 / 1024.0 / 1024.0 / 1024.0
 }

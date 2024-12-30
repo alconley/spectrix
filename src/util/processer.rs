@@ -2,24 +2,26 @@ use crate::histoer::histogrammer::Histogrammer;
 use crate::histogram_scripter::histogram_script::HistogramScript;
 use pyo3::{prelude::*, types::PyModule};
 
-use super::egui_file_dialog::FileDialog;
+use egui_file_dialog::FileDialog;
 use polars::prelude::*;
 
 use std::sync::atomic::Ordering;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct ProcessorSettings {
-    pub dialog_open: bool,
+    pub left_panel_open: bool,
     pub histogram_script_open: bool,
     pub column_names: Vec<String>,
+    pub estimated_memory: f64,
 }
 
 impl Default for ProcessorSettings {
     fn default() -> Self {
         Self {
-            dialog_open: true,
+            left_panel_open: true,
             histogram_script_open: true,
             column_names: Vec::new(),
+            estimated_memory: 4.0,
         }
     }
 }
@@ -27,7 +29,7 @@ impl Default for ProcessorSettings {
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Processor {
     #[serde(skip)]
-    pub file_dialog: Option<FileDialog>,
+    pub file_dialog: FileDialog,
     pub selected_files: Vec<std::path::PathBuf>,
     #[serde(skip)]
     pub lazyframe: Option<LazyFrame>,
@@ -39,7 +41,7 @@ pub struct Processor {
 impl Processor {
     pub fn new() -> Self {
         Self {
-            file_dialog: None,
+            file_dialog: FileDialog::new(),
             selected_files: Vec::new(),
             lazyframe: None,
             histogrammer: Histogrammer::default(),
@@ -301,8 +303,11 @@ def get_2d_histograms(file_name):
 
     fn perform_histogrammer_from_lazyframe(&mut self) {
         if let Some(lf) = &self.lazyframe {
-            self.histogram_script
-                .add_histograms(&mut self.histogrammer, lf.clone());
+            self.histogram_script.add_histograms(
+                &mut self.histogrammer,
+                lf.clone(),
+                self.settings.estimated_memory,
+            );
         } else {
             log::error!("Failed to preform histogrammer: LazyFrame is None.");
         }
@@ -338,36 +343,62 @@ def get_2d_histograms(file_name):
         }
     }
 
-    fn open_file_dialog(&mut self) {
-        self.file_dialog = Some(FileDialog::open_file(None).multi_select(true));
-        if let Some(dialog) = &mut self.file_dialog {
-            dialog.set_filter(".parquet");
-            dialog.open(); // Modify the dialog in-place to open it
-        }
-    }
-
     pub fn left_side_panels_ui(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("spectrix_processor_left_panel").show_animated(
             ctx,
-            self.settings.dialog_open,
+            self.settings.left_panel_open,
             |ui| {
                 ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(
-                            !self.selected_files.is_empty(),
-                            egui::Button::new("Calculate/Get Histograms"),
-                        )
-                        .on_disabled_hover_text("No files selected.")
-                        .clicked()
-                    {
-                        self.calculate_histograms();
+                    if ui.button("Get Files").clicked() {
+                        self.file_dialog.pick_multiple();
                     }
 
-                    if self.histogrammer.calculating.load(Ordering::Relaxed) {
-                        // Show spinner while `calculating` is true
-                        ui.add(egui::widgets::Spinner::default());
+                    if let Some(files) = self.file_dialog.take_picked_multiple() {
+                        self.selected_files.extend(files.clone());
+
+                        if let Some(path) = files.first() {
+                            self.file_dialog =
+                                FileDialog::new().initial_directory(path.to_path_buf());
+                        }
                     }
 
+                    ui.separator();
+
+                    ui.vertical(|ui| {
+
+                        ui.label("Processor");
+
+                        if ui
+                            .add_enabled(
+                                !self.selected_files.is_empty(),
+                                egui::Button::new("Calculate/Get Histograms"),
+                            )
+                            .on_disabled_hover_text("No files selected.")
+                            .clicked()
+                        {
+                            self.calculate_histograms();
+                        }
+
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings.estimated_memory)
+                                .range(0.1..=f64::INFINITY)
+                                .speed(1)
+                                .prefix("Estimated Memory: ")
+                                .suffix(" GB"),
+                        ).on_hover_text("Estimated memory in GB. This is an approximation based off the rows and columns in a lazyframe, so set it lower that the actual memory to avoid crashes.");
+
+                        if self.histogrammer.calculating.load(Ordering::Relaxed) {
+                            // Show spinner while `calculating` is true
+                            ui.horizontal(|ui| {
+                                ui.label("Calculating");
+                                ui.add(egui::widgets::Spinner::default());
+                                ui.separator();
+                                if ui.button("Cancel").clicked() {
+                                    self.histogrammer.abort_flag.store(true, Ordering::Relaxed);
+                                }
+                            });
+                        }
+                    });
                     ui.separator();
 
                     if ui
@@ -380,20 +411,19 @@ def get_2d_histograms(file_name):
 
                 ui.separator();
 
-                if self.file_dialog.is_none() {
-                    self.open_file_dialog();
+                ui.label("Selected files:");
+                if ui.button("Clear").clicked() {
+                    self.selected_files.clear();
                 }
-
-                if let Some(dialog) = &mut self.file_dialog {
-                    dialog.ui_embeded(ui);
-                    self.selected_files = dialog.selected_file_paths();
+                for file in self.selected_files.iter() {
+                    ui.label(file.to_str().unwrap());
                 }
             },
         );
 
         egui::SidePanel::left("spectrix_histogram_panel").show_animated(
             ctx,
-            self.settings.histogram_script_open && self.settings.dialog_open,
+            self.settings.histogram_script_open && self.settings.left_panel_open,
             |ui| {
                 self.histogram_script.ui(ui);
             },
@@ -408,14 +438,14 @@ def get_2d_histograms(file_name):
                 ui.vertical(|ui| {
                     ui.add_space(ui.available_height() / 2.0 - 10.0); // Center the button vertically
                     if ui
-                        .small_button(if self.settings.dialog_open {
+                        .small_button(if self.settings.left_panel_open {
                             "◀"
                         } else {
                             "▶"
                         })
                         .clicked()
                     {
-                        self.settings.dialog_open = !self.settings.dialog_open;
+                        self.settings.left_panel_open = !self.settings.left_panel_open;
                     }
                 });
             });
@@ -430,5 +460,7 @@ def get_2d_histograms(file_name):
     pub fn ui(&mut self, ctx: &egui::Context) {
         self.left_side_panels_ui(ctx);
         self.central_panel_ui(ctx);
+
+        self.file_dialog.update(ctx);
     }
 }

@@ -6,6 +6,7 @@ use std::io::{BufReader, Write};
 use polars::prelude::*;
 
 use crate::egui_plot_stuff::egui_polygon::EguiPolygon;
+use egui_extras::{Column, TableBuilder};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum Cut {
@@ -42,16 +43,196 @@ impl Cut {
         }
     }
 
+    /// Returns the column(s) required by the cut
+    pub fn required_columns(&self) -> Vec<String> {
+        match self {
+            Cut::Cut1D(cut1d) => cut1d.required_columns(),
+            Cut::Cut2D(cut2d) => cut2d.required_columns(),
+        }
+    }
+
     pub fn new_1d(name: &str, expression: &str) -> Self {
         Cut::Cut1D(Cut1D::new(name, expression))
     }
 }
 
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default)]
+pub struct Cuts {
+    pub cuts: Vec<Cut>,
+}
+
+impl Cuts {
+    pub fn new(cuts: Vec<Cut>) -> Self {
+        Self { cuts }
+    }
+
+    // Add a new cut
+    pub fn add_cut(&mut self, cut: Cut) {
+        if self.cuts.iter().any(|c| c.name() == cut.name()) {
+            log::error!("Cut with name '{}' already exists.", cut.name());
+        } else {
+            self.cuts.push(cut);
+        }
+    }
+
+    // Remove a cut by name
+    pub fn remove_cut(&mut self, name: &str) {
+        if let Some(pos) = self.cuts.iter().position(|cut| cut.name() == name) {
+            self.cuts.remove(pos);
+        } else {
+            log::error!("No cut with name '{}' found.", name);
+        }
+    }
+
+    pub fn merge(&mut self, other: &Self) {
+        for cut in &other.cuts {
+            if !self.cuts.iter().any(|c| c.name() == cut.name()) {
+                self.cuts.push(cut.clone());
+            }
+        }
+    }
+
+    pub fn parse_conditions(&mut self) {
+        for cut in &mut self.cuts {
+            match cut {
+                Cut::Cut1D(cut1d) => cut1d.parse_conditions(),
+                Cut::Cut2D(_) => {}
+            }
+        }
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.heading("Cuts");
+
+            if ui.button("+1D").clicked() {
+                self.cuts.push(Cut::Cut1D(Cut1D::new("", "")));
+            }
+
+            if ui.button("+2D").clicked() {
+                // Create a new instance of Cut2D and attempt to load it from a JSON file
+                let mut new_cut2d = Cut2D::default();
+                if new_cut2d.load_cut_from_json().is_ok() {
+                    // If successfully loaded, add it to the cuts vector as a Cuts::Cut2D variant
+                    self.cuts.push(Cut::Cut2D(new_cut2d));
+                } else {
+                    log::error!("Failed to load 2D cut from file.");
+                }
+            }
+
+            ui.separator();
+
+            if ui.button("Remove All").clicked() {
+                self.cuts.clear();
+            }
+        });
+
+        if !self.cuts.is_empty() {
+            let mut indices_to_remove_cut = Vec::new();
+
+            let mut cuts_1d = Vec::new();
+            let mut cuts_2d = Vec::new();
+
+            self.cuts
+                .iter_mut()
+                .enumerate()
+                .for_each(|(i, cut)| match cut {
+                    Cut::Cut1D(_) => cuts_1d.push((i, cut)),
+                    Cut::Cut2D(_) => cuts_2d.push((i, cut)),
+                });
+
+            // Render 1D Cuts Table
+            if !cuts_1d.is_empty() {
+                ui.label("1D Cuts");
+                TableBuilder::new(ui)
+                    .id_salt("cuts_1d_table")
+                    .column(Column::auto()) // Name
+                    .column(Column::auto()) // Expression
+                    .column(Column::auto()) // Active
+                    .column(Column::remainder()) // Actions
+                    .striped(true)
+                    .vscroll(false)
+                    .header(20.0, |mut header| {
+                        header.col(|ui| {
+                            ui.label("Name");
+                        });
+                        header.col(|ui| {
+                            ui.label("Operation(s)");
+                        });
+                    })
+                    .body(|mut body| {
+                        for (index, cut1d) in cuts_1d {
+                            body.row(18.0, |mut row| {
+                                cut1d.table_row(&mut row);
+
+                                row.col(|ui| {
+                                    if ui.button("X").clicked() {
+                                        indices_to_remove_cut.push(index);
+                                    }
+                                });
+                            });
+                        }
+                    });
+            }
+
+            if !cuts_2d.is_empty() {
+                ui.label("2D Cuts");
+                TableBuilder::new(ui)
+                    .id_salt("cuts_2d_table")
+                    .column(Column::auto()) // Name
+                    .column(Column::auto()) // X Column
+                    .column(Column::auto()) // Y Column
+                    .column(Column::remainder()) // Actions
+                    .striped(true)
+                    .vscroll(false)
+                    .header(20.0, |mut header| {
+                        header.col(|ui| {
+                            ui.label("Name");
+                        });
+                        header.col(|ui| {
+                            ui.label("X Column");
+                        });
+                        header.col(|ui| {
+                            ui.label("Y Column");
+                        });
+                    })
+                    .body(|mut body| {
+                        for (index, cut2d) in cuts_2d {
+                            body.row(18.0, |mut row| {
+                                cut2d.table_row(&mut row);
+                                row.col(|ui| {
+                                    if ui.button("X").clicked() {
+                                        indices_to_remove_cut.push(index);
+                                    }
+                                });
+                            });
+                        }
+                    });
+            }
+
+            for &index in indices_to_remove_cut.iter().rev() {
+                self.cuts.remove(index);
+            }
+        }
+    }
+
+    pub fn valid(&self, df: &DataFrame, row_idx: usize) -> bool {
+        self.cuts.iter().all(|cut| cut.valid(df, row_idx))
+    }
+
+    pub fn required_columns(&self) -> Vec<String> {
+        self.cuts
+            .iter()
+            .flat_map(|cut| cut.required_columns())
+            .collect()
+    }
+}
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct Cut2D {
     pub polygon: EguiPolygon,
     pub x_column: String,
     pub y_column: String,
+    pub active: bool,
 }
 
 impl Default for Cut2D {
@@ -60,6 +241,7 @@ impl Default for Cut2D {
             polygon: EguiPolygon::default(),
             x_column: "".to_string(),
             y_column: "".to_string(),
+            active: true,
         }
     }
 }
@@ -101,6 +283,9 @@ impl Cut2D {
                     .hint_text("Y Column")
                     .clip_text(false),
             );
+        });
+        row.col(|ui| {
+            ui.add(egui::Checkbox::new(&mut self.active, ""));
         });
     }
 
@@ -191,6 +376,10 @@ impl Cut2D {
     pub fn is_clicking(&self) -> bool {
         self.polygon.interactive_clicking
     }
+
+    pub fn required_columns(&self) -> Vec<String> {
+        vec![self.x_column.clone(), self.y_column.clone()]
+    }
 }
 
 // Struct to hold each parsed condition
@@ -205,6 +394,7 @@ pub struct ParsedCondition {
 pub struct Cut1D {
     pub name: String,
     pub expression: String, // Logical expression to evaluate, e.g., "X1 != -1e6 & X2 == -1e6"
+    pub active: bool,
     #[serde(skip)] // Skip during serialization
     pub parsed_conditions: Option<Vec<ParsedCondition>>, // Cache parsed conditions
 }
@@ -214,6 +404,7 @@ impl Cut1D {
         Self {
             name: name.to_string(),
             expression: expression.to_string(),
+            active: true,
             parsed_conditions: None,
         }
     }
@@ -233,6 +424,9 @@ impl Cut1D {
                     .clip_text(false),
             );
         });
+        row.col(|ui| {
+            ui.add(egui::Checkbox::new(&mut self.active, ""));
+        });
     }
 
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
@@ -247,6 +441,17 @@ impl Cut1D {
                 .hint_text("Expression")
                 .clip_text(false),
         );
+    }
+
+    pub fn required_columns(&self) -> Vec<String> {
+        self.parsed_conditions
+            .as_ref()
+            .map_or(vec![], |conditions| {
+                conditions
+                    .iter()
+                    .map(|cond| cond.column_name.clone())
+                    .collect()
+            })
     }
 
     // Parse and cache conditions
@@ -339,6 +544,7 @@ impl Cut1D {
             }
             true // All conditions passed
         } else {
+            log::error!("No parsed conditions for Cut1D '{}'", self.name);
             false // Parsing failed or was not performed
         }
     }

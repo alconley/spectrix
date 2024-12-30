@@ -16,12 +16,12 @@ pub enum ColorMap {
 
 #[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ColormapOptions {
-    log_norm: bool,
-    reverse: bool,
-    custom_display_range: bool,
-    remove: bool,
-    display_min: u64,
-    display_max: u64,
+    pub log_norm: bool,
+    pub reverse: bool,
+    pub custom_display_range: bool,
+    pub remove: bool,
+    pub display_min: u64,
+    pub display_max: u64,
 }
 
 impl Default for ColormapOptions {
@@ -156,6 +156,22 @@ impl ColorMap {
         if new_colormap != *self {
             *recalculate_image = true;
         }
+    }
+
+    pub fn next_colormap(&mut self) {
+        *self = match self {
+            ColorMap::Viridis => ColorMap::Fast,
+            ColorMap::Fast => ColorMap::SmoothCoolWarm,
+            ColorMap::SmoothCoolWarm => ColorMap::BentCoolWarm,
+            ColorMap::BentCoolWarm => ColorMap::Plasma,
+            ColorMap::Plasma => ColorMap::Blackbody,
+            ColorMap::Blackbody => ColorMap::Inferno,
+            ColorMap::Inferno => ColorMap::Kindlmann,
+            ColorMap::Kindlmann => ColorMap::ExtendedKindlmann,
+            ColorMap::ExtendedKindlmann => ColorMap::Turbo,
+            ColorMap::Turbo => ColorMap::Jet,
+            ColorMap::Jet => ColorMap::Viridis,
+        };
     }
 
     fn colormap(

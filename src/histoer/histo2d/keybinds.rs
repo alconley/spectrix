@@ -21,6 +21,23 @@ impl Histogram2D {
                 self.plot_settings.projections.add_y_projection =
                     !self.plot_settings.projections.add_y_projection;
             }
+
+            if ui.input(|i| i.key_pressed(egui::Key::Z)) {
+                self.plot_settings.colormap_options.log_norm =
+                    !self.plot_settings.colormap_options.log_norm;
+                self.plot_settings.recalculate_image = true;
+            }
+
+            if ui.input(|i| i.key_pressed(egui::Key::R)) {
+                self.plot_settings.colormap_options.reverse =
+                    !self.plot_settings.colormap_options.reverse;
+                self.plot_settings.recalculate_image = true;
+            }
+
+            if ui.input(|i| i.key_pressed(egui::Key::M)) {
+                self.plot_settings.colormap.next_colormap();
+                self.plot_settings.recalculate_image = true;
+            }
         }
     }
 }

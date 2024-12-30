@@ -1,5 +1,4 @@
 use crate::util::processer::Processor;
-
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct Spectrix {
@@ -16,13 +15,14 @@ impl Default for Spectrix {
 
 impl Spectrix {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // Load previous app state (if any).
-        // Note that you must enable the `persistence` feature for this to work.
         if let Some(storage) = cc.storage {
             return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
         }
-
         Default::default()
+    }
+
+    pub fn reset_to_default(&mut self) {
+        *self = Default::default();
     }
 }
 
@@ -47,13 +47,13 @@ impl eframe::App for Spectrix {
 
                 ui.separator();
 
-                if ui.button("Reset").clicked() {
-                    self.processor.reset();
-                }
-
-                ui.separator();
-
                 self.processor.histogrammer.menu_ui(ui);
+
+                ui.add_space(ui.available_width() - 50.0);
+
+                if ui.button("Reset").clicked() {
+                    self.reset_to_default();
+                }
             });
         });
 
