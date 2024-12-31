@@ -25,7 +25,7 @@ serde = { version = "1.0.217", features = ["derive"] }
 egui_plot = {version = "0.30", features = ["serde"] }
 egui_tiles = "0.11"
 egui_extras = {version = "0.30", features = ["syntect"] }
-egui_file = "0.19"
+egui_file = "0.20.0"
 epaint = "0.30"
 env_logger = "0.11.6"
 polars = { version = "0.45.0", features = ["lazy", "parquet", "performant"] }

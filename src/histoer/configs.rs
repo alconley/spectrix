@@ -360,7 +360,7 @@ impl Configs {
 
     pub fn config_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading("Histograms");
+            ui.label("Histograms");
 
             if ui.button("+1D").clicked() {
                 self.configs.push(Config::Hist1D(Hist1DConfig {
@@ -464,7 +464,7 @@ impl Configs {
 
     pub fn column_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading("Column Creation");
+            ui.label("Column Creation");
 
             if ui.button("+").clicked() {
                 self.columns.push(("".to_string(), "".to_string()));
@@ -1053,30 +1053,48 @@ fn expr_from_string(expression: &str) -> Result<Expr, PolarsError> {
 
     let mut expr_stack: Vec<Expr> = Vec::new();
     let mut op_stack: Vec<String> = Vec::new();
-    let mut is_first_token = true;
 
     log::debug!("Starting evaluation of expression: '{}'", expression);
     log::debug!("Tokens: {:?}", tokens);
 
-    for token in tokens {
+    let mut i = 0;
+    while i < tokens.len() {
+        let token = &tokens[i];
         match token.as_str() {
             "+" | "-" | "*" | "/" | "**" => {
+                // Handle consecutive operators like "- -" or "- +"
+                if i < tokens.len() - 1 && (tokens[i + 1] == "-" || tokens[i + 1] == "+") {
+                    // Collapse consecutive operators into one
+                    let mut sign = if *token == "-" { -1.0 } else { 1.0 };
+                    let mut j = i + 1;
+                    while j < tokens.len() && (tokens[j] == "-" || tokens[j] == "+") {
+                        sign *= if tokens[j] == "-" { -1.0 } else { 1.0 };
+                        j += 1;
+                    }
+
+                    if j < tokens.len() && tokens[j].parse::<f64>().is_ok() {
+                        // Combine the collapsed operators with the number
+                        let number = tokens[j].parse::<f64>().unwrap();
+                        expr_stack.push(lit(sign * number));
+                        i = j; // Skip to the next token after the number
+                        continue;
+                    }
+                }
+
+                // Normal operator precedence handling
                 while let Some(op) = op_stack.last() {
-                    // Pop operators with higher or equal precedence
-                    if precedence(op) > precedence(&token)
-                        || (precedence(op) == precedence(&token) && is_left_associative(&token))
+                    if precedence(op) > precedence(token)
+                        || (precedence(op) == precedence(token) && is_left_associative(token))
                     {
                         apply_op(&mut expr_stack, op_stack.pop().unwrap().as_str());
                     } else {
                         break;
                     }
                 }
-                op_stack.push(token);
-                is_first_token = false;
+                op_stack.push(token.clone());
             }
             "(" => {
-                op_stack.push(token);
-                is_first_token = false;
+                op_stack.push(token.clone());
             }
             ")" => {
                 while let Some(op) = op_stack.pop() {
@@ -1088,17 +1106,13 @@ fn expr_from_string(expression: &str) -> Result<Expr, PolarsError> {
             }
             _ if token.parse::<f64>().is_ok() => {
                 let number = token.parse::<f64>().unwrap();
-                if number < 0.0 && !is_first_token {
-                    op_stack.push("+".to_string());
-                }
                 expr_stack.push(lit(number));
-                is_first_token = false;
             }
             _ => {
-                expr_stack.push(col(&token));
-                is_first_token = false;
+                expr_stack.push(col(token));
             }
         }
+        i += 1;
     }
 
     while let Some(op) = op_stack.pop() {
@@ -1160,6 +1174,7 @@ fn add_computed_column(
     alias: &str,
 ) -> Result<(), PolarsError> {
     let computed_expr = expr_from_string(expression)?;
+    log::info!("Computed expression: {:?}", computed_expr);
     *lf = lf.clone().with_column(computed_expr.alias(alias)); // Use alias for the new column name
     Ok(())
 }

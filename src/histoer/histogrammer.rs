@@ -47,6 +47,8 @@ pub struct Histogrammer {
     pub calculating: Arc<AtomicBool>, // Use AtomicBool for thread-safe status tracking
     #[serde(skip)]
     pub abort_flag: Arc<AtomicBool>, // Use AtomicBool for thread-safe abort flag
+    #[serde(skip)]
+    pub progress: Arc<Mutex<f32>>,
     pub histogram_map: HashMap<String, ContainerInfo>, // Map full path to TabInfo
 }
 
@@ -58,6 +60,7 @@ impl Default for Histogrammer {
             behavior: Default::default(),
             calculating: Arc::new(AtomicBool::new(false)),
             abort_flag: Arc::new(AtomicBool::new(false)),
+            progress: Arc::new(Mutex::new(0.0)),
             histogram_map: HashMap::new(),
         }
     }
@@ -191,10 +194,11 @@ impl Histogrammer {
         &mut self,
         mut configs: Configs,
         lf: &LazyFrame,
-        estimated_memory: f64, // chuck size in GB
+        estimated_memory: f64, // chunk size in GB
     ) {
         let calculating = Arc::clone(&self.calculating);
         let abort_flag = Arc::clone(&self.abort_flag);
+        let progress = Arc::clone(&self.progress);
 
         // Set calculating to true at the start
         calculating.store(true, Ordering::SeqCst);
@@ -246,43 +250,50 @@ impl Histogrammer {
         let lf = Arc::new(lf.clone().select(selected_columns.clone()));
 
         // Initialize histogram maps
-        let mut hist1d_map = Vec::new();
-        let mut hist2d_map = Vec::new();
+        let hist1d_map: Vec<_> = valid_configs
+            .configs
+            .iter()
+            .filter_map(|config| {
+                if let Config::Hist1D(hist1d) = config {
+                    self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
+                        egui_tiles::Tile::Pane(Pane::Histogram(hist))
+                            if hist.lock().unwrap().name == hist1d.name =>
+                        {
+                            Some((Arc::clone(hist), hist1d.clone()))
+                        }
+                        _ => None,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-        for config in &valid_configs.configs {
-            match config {
-                Config::Hist1D(hist1d) => {
-                    if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
-                        self.tree.tiles.iter_mut().find(|(_id, tile)| match tile {
-                            egui_tiles::Tile::Pane(Pane::Histogram(h)) => {
-                                h.lock().unwrap().name == hist1d.name
-                            }
-                            _ => false,
-                        })
-                    {
-                        hist1d_map.push((Arc::clone(hist), hist1d.clone()));
-                    }
+        let hist2d_map: Vec<_> = valid_configs
+            .configs
+            .iter()
+            .filter_map(|config| {
+                if let Config::Hist2D(hist2d) = config {
+                    self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
+                        egui_tiles::Tile::Pane(Pane::Histogram2D(hist))
+                            if hist.lock().unwrap().name == hist2d.name =>
+                        {
+                            Some((Arc::clone(hist), hist2d.clone()))
+                        }
+                        _ => None,
+                    })
+                } else {
+                    None
                 }
-                Config::Hist2D(hist2d) => {
-                    if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
-                        self.tree.tiles.iter_mut().find(|(_id, tile)| match tile {
-                            egui_tiles::Tile::Pane(Pane::Histogram2D(h)) => {
-                                h.lock().unwrap().name == hist2d.name
-                            }
-                            _ => false,
-                        })
-                    {
-                        hist2d_map.push((Arc::clone(hist), hist2d.clone()));
-                    }
-                }
-            }
-        }
+            })
+            .collect();
 
         // Spawn the batch processing task asynchronously
         rayon::spawn({
             let calculating = Arc::clone(&calculating);
             let lf = Arc::clone(&lf); // Clone lf to move into the spawn closure
             let progress_bar = progress_bar.clone();
+            let total_rows = row_count as f32;
 
             move || {
                 let mut row_start = 0;
@@ -305,137 +316,61 @@ impl Histogrammer {
                     if let Ok(df) = batch_lf.collect() {
                         let height = df.height();
 
-                        // Cache bin values for 1D histograms
-                        let cached_bins_1d: Vec<Vec<f64>> = hist1d_map
-                            .par_iter()
-                            .map(|(_, meta)| {
-                                if let Ok(col) = df.column(&meta.column_name).and_then(|c| c.f64())
-                                {
-                                    col.into_no_null_iter()
-                                        .enumerate()
-                                        .filter_map(|(index, value)| {
-                                            if value != -1e6 && meta.cuts.valid(&df, index) {
-                                                Some(value)
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect()
-                                } else {
-                                    Vec::new()
-                                }
-                            })
-                            .collect();
-
-                        // Cache bin values for 2D histograms
-                        let cached_bins_2d: Vec<Vec<(f64, f64)>> = hist2d_map
-                            .par_iter()
-                            .map(|(_, meta)| {
-                                if let (Ok(x_col), Ok(y_col)) = (
-                                    df.column(&meta.x_column_name).and_then(|c| c.f64()),
-                                    df.column(&meta.y_column_name).and_then(|c| c.f64()),
-                                ) {
-                                    x_col
-                                        .into_no_null_iter()
-                                        .zip(y_col.into_no_null_iter())
-                                        .enumerate()
-                                        .filter_map(|(index, (x, y))| {
-                                            if x != -1e6 && y != -1e6 && meta.cuts.valid(&df, index)
-                                            {
-                                                Some((x, y))
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect()
-                                } else {
-                                    Vec::new()
-                                }
-                            })
-                            .collect();
-
-                        // fill nested vector columns
-                        let cached_nested_bins_2d: Vec<Vec<(f64, f64)>> = hist2d_map
-                            .par_iter()
-                            .map(|(_, meta)| {
-                                if let (Ok(x_col), Ok(y_col)) = (
-                                    df.column(&meta.x_column_name),
-                                    df.column(&meta.y_column_name),
-                                ) {
-                                    if let (Ok(x_list), Ok(y_list)) = (x_col.list(), y_col.list()) {
-                                        x_list
-                                            .into_iter()
-                                            .zip(y_list)
-                                            .enumerate()
-                                            .flat_map(|(index, (x_row, y_row))| {
-                                                if let (Some(x_values), Some(y_values)) =
-                                                    (x_row, y_row)
-                                                {
-                                                    let x_values = x_values.f64().unwrap();
-                                                    let y_values = y_values.f64().unwrap();
-
-                                                    x_values
-                                                        .into_no_null_iter()
-                                                        .zip(y_values.into_no_null_iter())
-                                                        .filter_map(|(x, y)| {
-                                                            if x != -1e6
-                                                                && y != -1e6
-                                                                && meta.cuts.valid(&df, index)
-                                                            {
-                                                                Some((x, y))
-                                                            } else {
-                                                                None
-                                                            }
-                                                        })
-                                                        .collect::<Vec<_>>()
-                                                } else {
-                                                    Vec::new()
-                                                }
-                                            })
-                                            .collect()
-                                    } else {
-                                        Vec::new()
-                                    }
-                                } else {
-                                    Vec::new()
-                                }
-                            })
-                            .collect();
-
-                        // Fill 1D histograms
-                        hist1d_map
-                            .par_iter()
-                            .zip(cached_bins_1d)
-                            .for_each(|((hist, _), bins)| {
+                        // Fill 1D histograms in parallel
+                        hist1d_map.par_iter().for_each(|(hist, meta)| {
+                            if let Ok(column) = df.column(&meta.column_name).and_then(|c| c.f64()) {
                                 let mut hist = hist.lock().unwrap();
-                                bins.into_iter().for_each(|value| hist.fill(value));
-                                hist.plot_settings.egui_settings.reset_axis = true;
-                            });
+                                column.into_no_null_iter().enumerate().for_each(
+                                    |(index, value)| {
+                                        if value != -1e6 && meta.cuts.valid(&df, index) {
+                                            hist.fill(value);
+                                            hist.plot_settings.egui_settings.reset_axis = true;
+                                        }
+                                    },
+                                );
+                            }
+                        });
 
-                        // Fill 2D histograms
-                        hist2d_map.par_iter().zip(cached_bins_2d).for_each(
-                            |((hist, meta), bins)| {
+                        // Fill 2D histograms in parallel
+                        hist2d_map.par_iter().for_each(|(hist, meta)| {
+                            if let (Ok(x_col), Ok(y_col)) = (
+                                df.column(&meta.x_column_name).and_then(|c| c.f64()),
+                                df.column(&meta.y_column_name).and_then(|c| c.f64()),
+                            ) {
                                 let mut hist = hist.lock().unwrap();
-                                bins.into_iter().for_each(|(x, y)| hist.fill(x, y));
-                                hist.plot_settings.x_column = meta.x_column_name.clone();
-                                hist.plot_settings.y_column = meta.y_column_name.clone();
-                                hist.plot_settings.recalculate_image = true;
-                            },
-                        );
+                                x_col
+                                    .into_no_null_iter()
+                                    .zip(y_col.into_no_null_iter())
+                                    .enumerate()
+                                    .for_each(|(index, (x, y))| {
+                                        if x != -1e6 && y != -1e6 && meta.cuts.valid(&df, index) {
+                                            hist.fill(x, y);
+                                        }
+                                    });
+                            }
+                        });
 
-                        // Fill nested 2D histograms
-                        hist2d_map.par_iter().zip(cached_nested_bins_2d).for_each(
-                            |((hist, _), bins)| {
-                                let mut hist = hist.lock().unwrap();
-                                bins.into_iter().for_each(|(x, y)| hist.fill(x, y));
-                            },
-                        );
+                        hist2d_map.par_iter().for_each(|(hist, _)| {
+                            let mut hist = hist.lock().unwrap();
+                            hist.plot_settings.recalculate_image = true;
+                        });
 
                         progress_bar.inc(height as u64);
+
+                        // Update progress as a percentage
+                        let completed_rows = row_start as f32 + height as f32;
+                        let percentage = completed_rows / total_rows;
+                        {
+                            let mut progress_lock = progress.lock().unwrap();
+                            *progress_lock = percentage;
+                        }
                     }
 
                     row_start += rows_per_chunk;
                 }
+
+                let mut progress_lock = progress.lock().unwrap();
+                *progress_lock = 1.0;
 
                 progress_bar.finish_with_message("Processing complete.");
                 // Set calculating to false when processing is complete
@@ -545,6 +480,8 @@ impl Histogrammer {
                     if ui.button("Reorganize").clicked() {
                         self.reorganize();
                     }
+
+                    ui.separator();
 
                     if ui.button("Reset").clicked() {
                         *self = Default::default();

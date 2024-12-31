@@ -41,7 +41,15 @@ pub struct Processor {
 impl Processor {
     pub fn new() -> Self {
         Self {
-            file_dialog: FileDialog::new(),
+            file_dialog: FileDialog::new()
+                .add_file_filter(
+                    "Root files",
+                    Arc::new(|p| p.extension().unwrap_or_default() == "root"),
+                )
+                .add_file_filter(
+                    "Parquet files",
+                    Arc::new(|p| p.extension().unwrap_or_default() == "parquet"),
+                ),
             selected_files: Vec::new(),
             lazyframe: None,
             histogrammer: Histogrammer::default(),
@@ -51,8 +59,7 @@ impl Processor {
     }
 
     pub fn reset(&mut self) {
-        self.lazyframe = None;
-        self.histogrammer = Histogrammer::default();
+        *self = Self::new();
     }
 
     pub fn get_histograms_from_root_files(&mut self) -> PyResult<()> {
@@ -415,9 +422,12 @@ def get_2d_histograms(file_name):
                 if ui.button("Clear").clicked() {
                     self.selected_files.clear();
                 }
-                for file in self.selected_files.iter() {
-                    ui.label(file.to_str().unwrap());
-                }
+                // scrollable list of selected files
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for file in self.selected_files.iter() {
+                        ui.label(file.to_str().unwrap());
+                    }
+                });
             },
         );
 
@@ -451,6 +461,21 @@ def get_2d_histograms(file_name):
             });
     }
 
+    pub fn bottom_panel(&mut self, ctx: &egui::Context) {
+        if self.histogrammer.calculating.load(Ordering::Relaxed) {
+            egui::TopBottomPanel::bottom("spectrix_bottom_panel").show(ctx, |ui| {
+                ui.add(
+                    egui::widgets::ProgressBar::new(match self.histogrammer.progress.lock() {
+                        Ok(x) => *x,
+                        Err(_) => 0.0,
+                    })
+                    .animate(true)
+                    .show_percentage(),
+                );
+            });
+        }
+    }
+
     fn central_panel_ui(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             self.histogrammer.ui(ui);
@@ -459,6 +484,7 @@ def get_2d_histograms(file_name):
 
     pub fn ui(&mut self, ctx: &egui::Context) {
         self.left_side_panels_ui(ctx);
+        self.bottom_panel(ctx);
         self.central_panel_ui(ctx);
 
         self.file_dialog.update(ctx);

@@ -2,6 +2,7 @@ use geo::Contains;
 use regex::Regex;
 use std::fs::File;
 use std::io::{BufReader, Write};
+use std::ops::BitAnd;
 
 use polars::prelude::*;
 
@@ -66,6 +67,23 @@ impl Cuts {
         Self { cuts }
     }
 
+    pub fn get_active_cuts(&self) -> Cuts {
+        let active_cuts = self
+            .cuts
+            .iter()
+            .filter(|cut| match cut {
+                Cut::Cut1D(cut1d) => cut1d.active,
+                Cut::Cut2D(cut2d) => cut2d.active,
+            })
+            .cloned()
+            .collect();
+        Cuts::new(active_cuts)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cuts.is_empty()
+    }
+
     // Add a new cut
     pub fn add_cut(&mut self, cut: Cut) {
         if self.cuts.iter().any(|c| c.name() == cut.name()) {
@@ -103,7 +121,7 @@ impl Cuts {
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading("Cuts");
+            ui.label("Cuts");
 
             if ui.button("+1D").clicked() {
                 self.cuts.push(Cut::Cut1D(Cut1D::new("", "")));
@@ -182,6 +200,7 @@ impl Cuts {
                     .column(Column::auto()) // Name
                     .column(Column::auto()) // X Column
                     .column(Column::auto()) // Y Column
+                    .column(Column::auto()) // Active
                     .column(Column::remainder()) // Actions
                     .striped(true)
                     .vscroll(false)
@@ -220,11 +239,40 @@ impl Cuts {
         self.cuts.iter().all(|cut| cut.valid(df, row_idx))
     }
 
+    pub fn create_combined_mask(
+        &self,
+        df: &DataFrame,
+        cuts: &[&Cut],
+    ) -> Result<BooleanChunked, PolarsError> {
+        let masks: Vec<BooleanChunked> = cuts
+            .iter()
+            .map(|cut| match cut {
+                Cut::Cut1D(cut1d) => cut1d.create_mask(df),
+                Cut::Cut2D(cut2d) => cut2d.create_mask(df),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Combine all masks with a logical AND
+        let combined_mask = masks
+            .into_iter()
+            .reduce(|a, b| a.bitand(b))
+            .unwrap_or_else(|| BooleanChunked::from_slice("".into(), &[]));
+
+        Ok(combined_mask)
+    }
+
     pub fn required_columns(&self) -> Vec<String> {
         self.cuts
             .iter()
             .flat_map(|cut| cut.required_columns())
             .collect()
+    }
+
+    pub fn generate_key(&self) -> String {
+        let mut cut_names: Vec<String> =
+            self.cuts.iter().map(|cut| cut.name().to_string()).collect();
+        cut_names.sort(); // Ensure consistent ordering
+        cut_names.join(",") // Create a comma-separated key
     }
 }
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -321,6 +369,21 @@ impl Cut2D {
         }
         // Return false if columns or row data were not found or if point is not inside polygon
         false
+    }
+
+    pub fn create_mask(&self, df: &DataFrame) -> Result<BooleanChunked, PolarsError> {
+        let polygon = self.to_geo_polygon();
+        let x_col = df.column(&self.x_column)?.f64()?;
+        let y_col = df.column(&self.y_column)?.f64()?;
+
+        // Create mask by checking if each point is inside the polygon
+        let mask = x_col
+            .into_no_null_iter()
+            .zip(y_col.into_no_null_iter())
+            .map(|(x, y)| polygon.contains(&geo::Point::new(x, y)))
+            .collect::<BooleanChunked>();
+
+        Ok(mask)
     }
 
     pub fn save_cut_to_json(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -546,6 +609,40 @@ impl Cut1D {
         } else {
             log::error!("No parsed conditions for Cut1D '{}'", self.name);
             false // Parsing failed or was not performed
+        }
+    }
+
+    pub fn create_mask(&self, df: &DataFrame) -> Result<BooleanChunked, PolarsError> {
+        if let Some(conditions) = &self.parsed_conditions {
+            let mut masks = Vec::new();
+            for condition in conditions {
+                let column = df.column(&condition.column_name)?.f64()?;
+                let mask = match condition.operator.as_str() {
+                    ">" => column.gt(condition.literal_value),
+                    "<" => column.lt(condition.literal_value),
+                    ">=" => column.gt_eq(condition.literal_value),
+                    "<=" => column.lt_eq(condition.literal_value),
+                    "==" => column.equal(condition.literal_value),
+                    "!=" => column.not_equal(condition.literal_value),
+                    _ => {
+                        return Err(PolarsError::ComputeError(
+                            format!("Unknown operator: {}", condition.operator).into(),
+                        ))
+                    }
+                };
+                masks.push(mask);
+            }
+
+            // Combine all masks with a logical AND
+            let combined_mask = masks
+                .into_iter()
+                .reduce(|a, b| a.bitand(b))
+                .unwrap_or_else(|| BooleanChunked::from_slice("".into(), &[]));
+            Ok(combined_mask)
+        } else {
+            Err(PolarsError::ComputeError(
+                "Conditions not parsed for Cut1D".into(),
+            ))
         }
     }
 }
