@@ -62,7 +62,7 @@ impl CustomConfigs {
         }
     }
 
-    pub fn merge_active_configs(&self) -> Configs {
+    pub fn merge_active_configs(&mut self) -> Configs {
         let mut configs = Configs::default();
 
         if self.sps.active {
@@ -73,6 +73,9 @@ impl CustomConfigs {
 
         if self.cebra.active {
             // get the updated configs from cebra
+            if self.sps.active {
+                self.cebra.sps_config = self.sps.clone();
+            }
             let cebra_configs = self.cebra.get_configs();
             configs.merge(cebra_configs.clone()); // Ensure `merge` handles in-place modifications
         }
@@ -96,7 +99,7 @@ impl CustomConfigs {
 
         self.cebra.active = true;
         self.cebra.sps_config = self.sps.clone();
-        self.cebra.cr52dp_experiment();
+        self.cebra.cr52dp_experiment(self.sps.clone());
     }
 }
 
@@ -656,7 +659,7 @@ impl CeBrAConfig {
             configs
         } else {
             let mut updated_configs = Configs::default();
-            let sps_cuts = self.sps_config.cuts.clone();
+            let sps_cuts = self.sps_config.cuts.get_active_cuts();
 
             for config in &mut configs.configs {
                 match config {
@@ -716,15 +719,18 @@ impl CeBrAConfig {
             updated_configs.columns = configs.columns.clone();
             updated_configs.cuts = configs.cuts.clone();
 
+            if !sps_cuts.is_empty() {
+                updated_configs.cuts.merge(&sps_cuts.clone());
+            }
+
             updated_configs
         }
     }
 
-    pub fn cr52dp_experiment(&mut self) {
+    pub fn cr52dp_experiment(&mut self, sps_config: SPSConfig) {
         self.detectors.clear();
-        self.sps_config.active = true;
 
-        let mut detector_0 = Cebr3::new(0, self.sps_config.clone());
+        let mut detector_0 = Cebr3::new(0, sps_config.clone());
 
         detector_0.energy_calibration.active = true;
         detector_0.energy_calibration.a = 0.0;
@@ -738,7 +744,7 @@ impl CeBrAConfig {
 
         self.detectors.push(detector_0);
 
-        let mut detector_1 = Cebr3::new(1, self.sps_config.clone());
+        let mut detector_1 = Cebr3::new(1, sps_config.clone());
 
         detector_1.energy_calibration.active = true;
         detector_1.energy_calibration.a = 0.0;
@@ -752,7 +758,7 @@ impl CeBrAConfig {
 
         self.detectors.push(detector_1);
 
-        let mut detector_2 = Cebr3::new(2, self.sps_config.clone());
+        let mut detector_2 = Cebr3::new(2, sps_config.clone());
 
         detector_2.gainmatch.active = false;
 
@@ -768,7 +774,7 @@ impl CeBrAConfig {
 
         self.detectors.push(detector_2);
 
-        let mut detector_3 = Cebr3::new(3, self.sps_config.clone());
+        let mut detector_3 = Cebr3::new(3, sps_config.clone());
 
         detector_3.energy_calibration.active = true;
         detector_3.energy_calibration.a = 0.0;
@@ -782,7 +788,7 @@ impl CeBrAConfig {
 
         self.detectors.push(detector_3);
 
-        let mut detector_4 = Cebr3::new(4, self.sps_config.clone());
+        let mut detector_4 = Cebr3::new(4, sps_config.clone());
 
         detector_4.energy_calibration.active = true;
         detector_4.energy_calibration.a = 0.0;
