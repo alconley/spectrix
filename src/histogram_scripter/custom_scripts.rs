@@ -652,7 +652,72 @@ impl CeBrAConfig {
             configs.merge(detector.config());
         }
 
-        configs
+        if !self.sps_config.active {
+            configs
+        } else {
+            let mut updated_configs = Configs::default();
+            let sps_cuts = self.sps_config.cuts.clone();
+
+            for config in &mut configs.configs {
+                match config {
+                    Config::Hist1D(hist) => {
+                        let mut cuts = hist.cuts.clone();
+
+                        updated_configs.hist1d(
+                            &format!("No Cuts/{}", hist.name),
+                            &hist.column_name,
+                            hist.range,
+                            hist.bins,
+                            Some(cuts.clone()),
+                        );
+
+                        cuts.merge(&sps_cuts.clone());
+
+                        if !sps_cuts.is_empty() {
+                            updated_configs.hist1d(
+                                &format!("Cuts/{}", hist.name),
+                                &hist.column_name,
+                                hist.range,
+                                hist.bins,
+                                Some(cuts.clone()),
+                            );
+                        }
+                    }
+                    Config::Hist2D(hist) => {
+                        let mut cuts = hist.cuts.clone();
+
+                        updated_configs.hist2d(
+                            &format!("No Cuts/{}", hist.name),
+                            &hist.x_column_name,
+                            &hist.y_column_name,
+                            hist.x_range,
+                            hist.y_range,
+                            hist.bins,
+                            Some(cuts.clone()),
+                        );
+
+                        cuts.merge(&sps_cuts.clone());
+
+                        if !sps_cuts.is_empty() {
+                            updated_configs.hist2d(
+                                &format!("Cuts/{}", hist.name),
+                                &hist.x_column_name,
+                                &hist.y_column_name,
+                                hist.x_range,
+                                hist.y_range,
+                                hist.bins,
+                                Some(cuts.clone()),
+                            );
+                        }
+                    }
+                }
+            }
+
+            updated_configs.columns = configs.columns.clone();
+            updated_configs.cuts = configs.cuts.clone();
+
+            updated_configs
+        }
     }
 
     pub fn cr52dp_experiment(&mut self) {
@@ -957,7 +1022,7 @@ impl SPSConfig {
                     let mut cuts = hist.cuts.clone();
 
                     updated_configs.hist1d(
-                        &hist.name.replacen("SE-SPS", "No Cuts/SE-SPS", 1),
+                        &format!("No Cuts/{}", hist.name),
                         &hist.column_name,
                         hist.range,
                         hist.bins,
@@ -968,7 +1033,7 @@ impl SPSConfig {
 
                     if !active_cuts.is_empty() {
                         updated_configs.hist1d(
-                            &hist.name.replacen("SE-SPS", "Cuts/SE-SPS", 1),
+                            &format!("Cuts/{}", hist.name),
                             &hist.column_name,
                             hist.range,
                             hist.bins,
@@ -980,7 +1045,7 @@ impl SPSConfig {
                     let mut cuts = hist.cuts.clone();
 
                     updated_configs.hist2d(
-                        &hist.name.replacen("SE-SPS", "No Cuts/SE-SPS", 1),
+                        &format!("No Cuts/{}", hist.name),
                         &hist.x_column_name,
                         &hist.y_column_name,
                         hist.x_range,
@@ -993,7 +1058,7 @@ impl SPSConfig {
 
                     if !active_cuts.is_empty() {
                         updated_configs.hist2d(
-                            &hist.name.replacen("SE-SPS", "Cuts/SE-SPS", 1),
+                            &format!("Cuts/{}", hist.name),
                             &hist.x_column_name,
                             &hist.y_column_name,
                             hist.x_range,
