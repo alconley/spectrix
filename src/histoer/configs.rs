@@ -358,6 +358,10 @@ impl Configs {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.configs.is_empty()
+    }
+
     pub fn config_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Histograms");

@@ -222,6 +222,13 @@ impl Histogrammer {
         let valid_configs = configs.valid_configs(&mut lf);
         valid_configs.check_and_add_panes(self);
 
+        // if valid configs is empty, return early
+        if valid_configs.is_empty() {
+            calculating.store(false, Ordering::SeqCst);
+            log::error!("No valid configurations found for histograms.");
+            return;
+        }
+
         // Select required columns from the LazyFrame
         let used_columns = valid_configs.get_used_columns();
         let selected_columns: Vec<_> = used_columns.iter().map(col).collect();

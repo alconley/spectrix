@@ -18,6 +18,8 @@ pub struct EguiPlotSettings {
     pub allow_double_click_reset: bool,
     pub limit_scrolling: bool,
     pub reset_axis: bool,
+    pub x_label: String,
+    pub y_label: String,
 }
 
 impl Default for EguiPlotSettings {
@@ -41,6 +43,8 @@ impl Default for EguiPlotSettings {
             allow_double_click_reset: true,
             limit_scrolling: false,
             reset_axis: false,
+            x_label: String::new(),
+            y_label: String::new(),
         }
     }
 }
@@ -68,6 +72,8 @@ impl EguiPlotSettings {
                     &mut self.allow_double_click_reset,
                     "Allow Double Click to Reset",
                 );
+                ui.text_edit_singleline(&mut self.x_label);
+                ui.text_edit_singleline(&mut self.y_label);
                 ui.checkbox(&mut self.limit_scrolling, "Limit Scrolling"); // custom setting
 
                 if ui.button("Reset Axis").clicked() {
@@ -104,6 +110,8 @@ impl EguiPlotSettings {
             .show_background(self.show_background)
             .auto_bounds(egui::Vec2b::new(true, true))
             .allow_double_click_reset(self.allow_double_click_reset)
+            .x_axis_label(self.x_label.clone())
+            .y_axis_label(self.y_label.clone())
             .label_formatter(move |name, value| {
                 let x = if log_x {
                     10.0f64.powf(value.x)

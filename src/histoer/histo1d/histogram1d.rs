@@ -249,6 +249,8 @@ impl Histogram {
             self.plot_settings.cursor_position = None;
         }
 
+        // self.plot_settings.egui_settings.y_label = format!("Counts/{:.}", self.bin_width);
+
         self.limit_scrolling(plot_ui);
     }
 
