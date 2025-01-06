@@ -148,7 +148,13 @@ impl Configs {
         }
 
         // Get the column names from the LazyFrame
-        let column_names = get_column_names_from_lazyframe(lf);
+        let column_names = match get_column_names_from_lazyframe(lf) {
+            Ok(names) => names,
+            Err(e) => {
+                log::error!("Failed to retrieve column names: {:?}", e);
+                return Configs::default(); // Return default Configs on error
+            }
+        };
 
         // Ensure 1D cuts have their expressions parsed
         self.cuts.parse_conditions();
@@ -1172,25 +1178,71 @@ fn apply_op(expr_stack: &mut Vec<Expr>, operator: &str) {
     expr_stack.push(result);
 }
 
+// fn add_computed_column(
+//     lf: &mut LazyFrame,
+//     expression: &str,
+//     alias: &str,
+// ) -> Result<(), PolarsError> {
+//     let computed_expr = expr_from_string(expression)?;
+//     log::info!("Computed expression: {:?}", computed_expr);
+//     *lf = lf.clone().with_column(computed_expr.alias(alias)); // Use alias for the new column name
+//     Ok(())
+// }
+
 fn add_computed_column(
     lf: &mut LazyFrame,
     expression: &str,
     alias: &str,
 ) -> Result<(), PolarsError> {
-    let computed_expr = expr_from_string(expression)?;
-    log::info!("Computed expression: {:?}", computed_expr);
-    *lf = lf.clone().with_column(computed_expr.alias(alias)); // Use alias for the new column name
+    // Attempt to create the computed expression
+    let computed_expr = expr_from_string(expression).map_err(|err| {
+        log::error!(
+            "Failed to parse expression: {}. Error: {:?}",
+            expression,
+            err
+        );
+        PolarsError::ComputeError(format!("Error parsing expression: {}", expression).into())
+    })?;
+
+    // Safely add the computed column to the LazyFrame
+    log::info!(
+        "Adding computed column '{}' with expression '{}'",
+        alias,
+        expression
+    );
+    *lf = lf.clone().with_column(computed_expr.alias(alias));
+    log::info!("Successfully added computed column '{}'", alias);
+
     Ok(())
 }
 
-pub fn get_column_names_from_lazyframe(lf: &LazyFrame) -> Vec<String> {
+// pub fn get_column_names_from_lazyframe(lf: &LazyFrame) -> Vec<String> {
+//     let lf: LazyFrame = lf.clone().limit(1);
+//     let df: DataFrame = lf.collect().unwrap();
+//     let columns: Vec<String> = df
+//         .get_column_names_owned()
+//         .into_iter()
+//         .map(|name| name.to_string())
+//         .collect();
+
+//     columns
+// }
+
+pub fn get_column_names_from_lazyframe(lf: &LazyFrame) -> Result<Vec<String>, PolarsError> {
     let lf: LazyFrame = lf.clone().limit(1);
-    let df: DataFrame = lf.collect().unwrap();
+
+    // Attempt to collect the LazyFrame into a DataFrame
+    let df: DataFrame = lf.collect().map_err(|err| {
+        log::error!("Failed to collect LazyFrame: {:?}", err);
+        err
+    })?;
+
+    // Get column names
     let columns: Vec<String> = df
         .get_column_names_owned()
         .into_iter()
         .map(|name| name.to_string())
         .collect();
 
-    columns
+    Ok(columns)
 }

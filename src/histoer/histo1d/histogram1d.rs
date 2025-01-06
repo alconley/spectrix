@@ -3,7 +3,6 @@ use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::common::Data;
 use crate::fitter::fit_handler::Fits;
 use crate::fitter::main_fitter::{FitModel, Fitter};
-use egui::Vec2b;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Histogram {
@@ -58,10 +57,6 @@ impl Histogram {
         } else {
             self.underflow += 1;
         }
-    }
-
-    pub fn auto_axis_lims(&mut self, plot_ui: &mut egui_plot::PlotUi) {
-        plot_ui.set_auto_bounds(Vec2b::new(true, true));
     }
 
     pub fn set_counts(&mut self, counts: Vec<u64>) {
@@ -249,9 +244,13 @@ impl Histogram {
             self.plot_settings.cursor_position = None;
         }
 
-        // self.plot_settings.egui_settings.y_label = format!("Counts/{:.}", self.bin_width);
+        if self.plot_settings.egui_settings.reset_axis {
+            self.plot_settings.egui_settings.reset_axis_lims(plot_ui);
+        } else {
+            self.limit_scrolling(plot_ui);
+        }
 
-        self.limit_scrolling(plot_ui);
+        // self.plot_settings.egui_settings.y_label = format!("Counts/{:.}", self.bin_width);
     }
 
     pub fn draw_other_histograms(

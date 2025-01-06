@@ -21,9 +21,6 @@ pub struct PlotSettings {
     pub rebin_y_factor: usize,
     #[serde(skip)]
     pub recalculate_image: bool,
-
-    #[serde(skip)] // Skip serialization for progress
-    pub progress: Option<f32>, // Optional progress tracking
 }
 impl Default for PlotSettings {
     fn default() -> Self {
@@ -40,7 +37,6 @@ impl Default for PlotSettings {
             rebin_x_factor: 1,
             rebin_y_factor: 1,
             recalculate_image: false,
-            progress: None,
         }
     }
 }
@@ -79,17 +75,6 @@ impl PlotSettings {
             self.egui_settings.allow_drag = !cut.is_dragging();
             self.egui_settings.allow_double_click_reset = !cut.is_clicking();
             cut.interactions(plot_response);
-        }
-    }
-
-    pub fn progress_ui(&mut self, ui: &mut egui::Ui) {
-        if let Some(progress) = self.progress {
-            ui.add(
-                egui::ProgressBar::new(progress)
-                    .show_percentage()
-                    .animate(true)
-                    .text(format!("{:.0}%", progress * 100.0)),
-            );
         }
     }
 }

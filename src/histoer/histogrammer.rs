@@ -360,8 +360,14 @@ impl Histogrammer {
                         hist2d_map.par_iter().for_each(|(hist, meta)| {
                             let mut hist = hist.lock().unwrap();
                             hist.plot_settings.recalculate_image = true;
+                            hist.plot_settings.egui_settings.reset_axis = true;
                             hist.plot_settings.x_column = meta.x_column_name.clone();
                             hist.plot_settings.y_column = meta.y_column_name.clone();
+                        });
+
+                        hist1d_map.par_iter().for_each(|(hist, _)| {
+                            let mut hist = hist.lock().unwrap();
+                            hist.plot_settings.egui_settings.reset_axis = true;
                         });
 
                         progress_bar.inc(height as u64);

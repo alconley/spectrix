@@ -93,7 +93,6 @@ impl EguiPlotSettings {
     pub fn apply_to_plot<'a>(&mut self, plot: egui_plot::Plot<'a>) -> egui_plot::Plot<'a> {
         let log_x = self.log_x;
         let log_y = self.log_y;
-        let reset = self.reset_axis;
 
         let plot = plot
             .show_x(self.show_x_value)
@@ -151,14 +150,14 @@ impl EguiPlotSettings {
             plot
         };
 
-        let plot = if reset {
-            self.reset_axis = false;
-            plot.reset().auto_bounds(egui::Vec2b::new(true, true))
-        } else {
-            plot
-        };
-
         plot
+    }
+
+    pub fn reset_axis_lims(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+        if self.reset_axis {
+            self.reset_axis = false;
+            plot_ui.set_auto_bounds(egui::Vec2b::new(true, true));
+        }
     }
 }
 

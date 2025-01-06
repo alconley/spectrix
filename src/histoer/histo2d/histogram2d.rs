@@ -207,18 +207,17 @@ impl Histogram2D {
 
         self.plot_settings.draw(plot_ui);
 
-        self.plot_settings.egui_settings.allow_drag = !self.plot_settings.projections.is_dragging();
+        self.plot_settings.egui_settings.allow_drag = !self.plot_settings.projections.dragging;
 
-        if self.plot_settings.egui_settings.limit_scrolling {
+        if self.plot_settings.egui_settings.reset_axis {
+            self.plot_settings.egui_settings.reset_axis_lims(plot_ui);
+        } else if self.plot_settings.egui_settings.limit_scrolling {
             self.limit_scrolling(plot_ui);
         }
     }
 
     // Render the histogram using egui_plot
     pub fn render(&mut self, ui: &mut egui::Ui) {
-        // add the progress bar if it's being tracked
-        self.plot_settings.progress_ui(ui);
-
         // Recalculate the image if the settings have changed, like the colormap
         if self.plot_settings.recalculate_image {
             self.calculate_image(ui);
