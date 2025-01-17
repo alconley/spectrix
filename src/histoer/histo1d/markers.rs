@@ -131,11 +131,11 @@ impl FitMarkers {
         self.peak_markers.retain(|peak| {
             self.region_markers
                 .first()
-                .map_or(false, |start| peak.x_value >= start.x_value)
+                .is_some_and(|start| peak.x_value >= start.x_value)
                 && self
                     .region_markers
                     .get(1)
-                    .map_or(false, |end| peak.x_value <= end.x_value)
+                    .is_some_and(|end| peak.x_value <= end.x_value)
         });
     }
 
