@@ -59,6 +59,7 @@ impl Histogram {
 
             if ui.input(|i| i.key_pressed(egui::Key::L)) {
                 self.plot_settings.egui_settings.log_y = !self.plot_settings.egui_settings.log_y;
+                self.plot_settings.egui_settings.reset_axis = true;
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::O)) {
