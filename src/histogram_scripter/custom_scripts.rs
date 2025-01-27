@@ -9,6 +9,7 @@ use std::f64::consts::PI;
 pub struct CustomConfigs {
     pub sps: SPSConfig,
     pub cebra: CeBrAConfig,
+    pub icespice: ICESPICEConfig,
 }
 
 impl Default for CustomConfigs {
@@ -16,6 +17,7 @@ impl Default for CustomConfigs {
         Self {
             sps: SPSConfig::new(),
             cebra: CeBrAConfig::default(),
+            icespice: ICESPICEConfig::default(),
         }
     }
 }
@@ -26,6 +28,7 @@ impl CustomConfigs {
             ui.label("Custom: ");
             ui.checkbox(&mut self.sps.active, "SPS");
             ui.checkbox(&mut self.cebra.active, "CeBrA");
+            ui.checkbox(&mut self.icespice.active, "ICESPICE");
         });
 
         ui.horizontal(|ui| {
@@ -50,12 +53,25 @@ impl CustomConfigs {
 
         if self.cebra.active {
             ui.collapsing("CeBrA", |ui| {
-                self.cebra.ui(ui);
+                self.cebra.ui(ui, &self.sps);
                 ui.horizontal(|ui| {
                     ui.add_space(ui.available_width() - 40.0);
                     if ui.button("Reset").clicked() {
                         self.cebra = CeBrAConfig::default();
                         self.cebra.active = true;
+                    }
+                });
+            });
+        }
+
+        if self.icespice.active {
+            ui.collapsing("ICESPICE", |ui| {
+                self.icespice.ui(ui, &mut self.cebra, &mut self.sps);
+                ui.horizontal(|ui| {
+                    ui.add_space(ui.available_width() - 40.0);
+                    if ui.button("Reset").clicked() {
+                        self.icespice = ICESPICEConfig::default();
+                        self.icespice.active = true;
                     }
                 });
             });
@@ -72,12 +88,13 @@ impl CustomConfigs {
         }
 
         if self.cebra.active {
-            // get the updated configs from cebra
-            if self.sps.active {
-                self.cebra.sps_config = self.sps.clone();
-            }
-            let cebra_configs = self.cebra.get_configs();
+            let cebra_configs = self.cebra.get_configs(&self.sps);
             configs.merge(cebra_configs.clone()); // Ensure `merge` handles in-place modifications
+        }
+
+        if self.icespice.active {
+            let icespice_configs = self.icespice.get_configs(&mut self.cebra, &mut self.sps);
+            configs.merge(icespice_configs.clone()); // Ensure `merge` handles in-place modifications
         }
 
         configs
@@ -98,8 +115,7 @@ impl CustomConfigs {
         };
 
         self.cebra.active = true;
-        self.cebra.sps_config = self.sps.clone();
-        self.cebra.cr52dp_experiment(self.sps.clone());
+        self.cebra.cr52dp_experiment();
     }
 }
 
@@ -172,24 +188,24 @@ pub struct TimeCut {
 impl TimeCut {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.label("Time Cut: ");
-            if self.active {
-                ui.add(
-                    egui::DragValue::new(&mut self.mean)
-                        .speed(0.01)
-                        .prefix("Mean: "),
-                );
-                ui.add(
-                    egui::DragValue::new(&mut self.low)
-                        .speed(0.01)
-                        .prefix("Low: "),
-                );
-                ui.add(
-                    egui::DragValue::new(&mut self.high)
-                        .speed(0.01)
-                        .prefix("High: "),
-                );
-            }
+            ui.add_enabled(
+                self.active,
+                egui::DragValue::new(&mut self.mean)
+                    .speed(0.01)
+                    .prefix("Mean: "),
+            );
+            ui.add_enabled(
+                self.active,
+                egui::DragValue::new(&mut self.low)
+                    .speed(0.01)
+                    .prefix("Low: "),
+            );
+            ui.add_enabled(
+                self.active,
+                egui::DragValue::new(&mut self.high)
+                    .speed(0.01)
+                    .prefix("High: "),
+            );
             ui.checkbox(&mut self.active, "Active");
         });
     }
@@ -201,18 +217,22 @@ pub struct Cebr3 {
     pub timecut: TimeCut,
     pub gainmatch: Calibration,
     pub energy_calibration: Calibration,
-    pub sps_config: SPSConfig,
+    pub pips1000_timecut: TimeCut,
+    pub pips500_timecut: TimeCut,
+    pub pips300_timecut: TimeCut,
+    pub pips100_timecut: TimeCut,
+    pub active: bool,
 }
 
 impl Cebr3 {
-    pub fn new(number: usize, sps_config: SPSConfig) -> Self {
+    pub fn new(number: usize) -> Self {
         Self {
             number,
             timecut: TimeCut {
                 mean: 0.0,
                 low: -3000.0,
                 high: 3000.0,
-                active: sps_config.active,
+                active: false,
             },
             gainmatch: Calibration {
                 a: 0.0,
@@ -230,18 +250,46 @@ impl Cebr3 {
                 range: (0.0, 4096.0),
                 active: false,
             },
-            sps_config,
+            pips1000_timecut: TimeCut {
+                mean: 0.0,
+                low: -3000.0,
+                high: 3000.0,
+                active: false,
+            },
+            pips500_timecut: TimeCut {
+                mean: 0.0,
+                low: -3000.0,
+                high: 3000.0,
+                active: false,
+            },
+            pips300_timecut: TimeCut {
+                mean: 0.0,
+                low: -3000.0,
+                high: 3000.0,
+                active: false,
+            },
+            pips100_timecut: TimeCut {
+                mean: 0.0,
+                low: -3000.0,
+                high: 3000.0,
+                active: false,
+            },
+            active: true,
         }
     }
 
     #[rustfmt::skip]
     #[allow(clippy::all)]
-    pub fn config(&self) -> Configs {
+    pub fn config(&self, sps_config: SPSConfig) -> Configs {
+
+        if !self.active {
+            return Configs::default();
+        }
 
         let mut configs = Configs::default();
 
         let range = (0.0, 4096.0);
-        let bins = 512;
+        let bins = 4096;
 
         configs.hist1d(&format!("CeBrA/Cebra{}/Cebra{}Energy", self.number, self.number), &format!("Cebra{}Energy", self.number), range, bins, None);
 
@@ -262,7 +310,7 @@ impl Cebr3 {
             configs.hist1d(&"CeBrA/CeBrA/Energy Calibrated", &format!("Cebra{}EnergyCalibrated", self.number), self.energy_calibration.range, self.energy_calibration.bins, None);
         }
 
-        if self.sps_config.active {
+        if sps_config.active {
             configs.hist1d(&format!("CeBrA/Cebra{}/Cebra{}RelTime", self.number, self.number), &format!("Cebra{}RelTime", self.number), (-3200.0, 3200.0), 6400, None);
             configs.hist2d(&format!("CeBrA/Cebra{}/Cebra{}Energy v Xavg", self.number, self.number), &format!("Xavg"), &format!("Cebra{}Energy", self.number), (-300.0, 300.0), (0.0, 4096.0), (600, 512), None);
             configs.hist2d(&format!("CeBrA/Cebra{}/Cebra{}RelTime v Xavg", self.number, self.number), &format!("Xavg"), &format!("Cebra{}RelTime", self.number), (-300.0, 300.0), (-3200.0, 3200.0), (600, 6400), None);
@@ -297,9 +345,9 @@ impl Cebr3 {
                     configs.hist2d(&format!("CeBrA/CeBrA/Time Cut/CeBrA Gain Matched v Xavg"), &format!("Xavg"), &format!("Cebra{}Energy", self.number), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), tcut.clone());
                     configs.hist2d(&format!("CeBrA/CeBrA/Time Cut/CeBrA Gain Matched v X1"), &format!("X1"), &format!("Cebra{}Energy", self.number), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), tcut.clone());   
 
-                    if self.sps_config.xavg.active {
-                        configs.hist2d(&format!("CeBrA/Cebra{}/Time Cut/Cebra{} v Xavg- Gain Matched", self.number, self.number), &format!("XavgEnergyCalibrated"), &format!("Cebra{}GainMatched", self.number), self.sps_config.xavg.range, self.gainmatch.range, (self.sps_config.xavg.bins, self.gainmatch.bins), tcut.clone());
-                        configs.hist2d(&format!("CeBrA/CeBrA/Time Cut/CeBrA v Xavg- Gain Matched"), &format!("XavgEnergyCalibrated"), &format!("Cebra{}GainMatched", self.number), self.sps_config.xavg.range, self.gainmatch.range, (self.sps_config.xavg.bins, self.gainmatch.bins), tcut.clone());
+                    if sps_config.xavg.active {
+                        configs.hist2d(&format!("CeBrA/Cebra{}/Time Cut/Cebra{} v Xavg- Gain Matched", self.number, self.number), &format!("XavgEnergyCalibrated"), &format!("Cebra{}GainMatched", self.number), sps_config.xavg.range, self.gainmatch.range, (sps_config.xavg.bins, self.gainmatch.bins), tcut.clone());
+                        configs.hist2d(&format!("CeBrA/CeBrA/Time Cut/CeBrA v Xavg- Gain Matched"), &format!("XavgEnergyCalibrated"), &format!("Cebra{}GainMatched", self.number), sps_config.xavg.range, self.gainmatch.range, (sps_config.xavg.bins, self.gainmatch.bins), tcut.clone());
                     }
                 }
                 if self.energy_calibration.active {
@@ -307,9 +355,9 @@ impl Cebr3 {
                     configs.hist2d(&format!("CeBrA/Cebra{}/Time Cut/Cebra{} Energy Calibrated v Xavg", self.number, self.number), &format!("Xavg"), &format!("Cebra{}EnergyCalibrated", self.number), (-300.0, 300.0), self.energy_calibration.range, (600, self.energy_calibration.bins), tcut.clone());
                     configs.hist2d(&format!("CeBrA/Cebra{}/Time Cut/Cebra{} Energy Calibrated v X1", self.number, self.number), &format!("X1"), &format!("Cebra{}EnergyCalibrated", self.number), (-300.0, 300.0), self.energy_calibration.range, (600, self.energy_calibration.bins), tcut.clone());
 
-                    if self.sps_config.xavg.active {
-                        configs.hist2d(&format!("CeBrA/Cebra{}/Time Cut/Cebra{} v Xavg- Energy Calibrated", self.number, self.number), &format!("XavgEnergyCalibrated"), &format!("Cebra{}EnergyCalibrated", self.number), self.sps_config.xavg.range, self.energy_calibration.range, (self.sps_config.xavg.bins, self.energy_calibration.bins), tcut.clone());
-                        configs.hist2d(&format!("CeBrA/CeBrA/Time Cut/CeBrA v Xavg- Energy Calibrated"), &format!("XavgEnergyCalibrated"), &format!("Cebra{}EnergyCalibrated", self.number), self.sps_config.xavg.range, self.energy_calibration.range, (self.sps_config.xavg.bins, self.energy_calibration.bins), tcut.clone());
+                    if sps_config.xavg.active {
+                        configs.hist2d(&format!("CeBrA/Cebra{}/Time Cut/Cebra{} v Xavg- Energy Calibrated", self.number, self.number), &format!("XavgEnergyCalibrated"), &format!("Cebra{}EnergyCalibrated", self.number), sps_config.xavg.range, self.energy_calibration.range, (sps_config.xavg.bins, self.energy_calibration.bins), tcut.clone());
+                        configs.hist2d(&format!("CeBrA/CeBrA/Time Cut/CeBrA v Xavg- Energy Calibrated"), &format!("XavgEnergyCalibrated"), &format!("Cebra{}EnergyCalibrated", self.number), sps_config.xavg.range, self.energy_calibration.range, (sps_config.xavg.bins, self.energy_calibration.bins), tcut.clone());
                     }
 
                     configs.hist1d(&format!("CeBrA/CeBrA/Time Cut/CeBrA Energy Calibrated"), &format!("Cebra{}EnergyCalibrated", self.number), self.energy_calibration.range, self.energy_calibration.bins, tcut.clone());
@@ -327,19 +375,17 @@ impl Cebr3 {
 pub struct CeBrAConfig {
     pub active: bool,
     pub detectors: Vec<Cebr3>,
-    pub sps_config: SPSConfig,
 }
 
 impl CeBrAConfig {
     pub fn add_detector(&mut self, number: usize) {
-        self.detectors
-            .push(Cebr3::new(number, self.sps_config.clone()));
+        self.detectors.push(Cebr3::new(number));
     }
 
     pub fn time_cut_ui(&mut self, ui: &mut egui::Ui) {
-        let mut indices_to_remove = Vec::new();
+        ui.separator();
 
-        ui.label("Time Cuts");
+        ui.label("SE-SPS Time Cuts");
         // Create the table
         TableBuilder::new(ui)
             .id_salt("cebra_timecuts") // Unique identifier for the table
@@ -347,8 +393,7 @@ impl CeBrAConfig {
             .column(Column::auto()) // Mean
             .column(Column::auto()) // Low
             .column(Column::auto()) // High
-            .column(Column::auto()) // Active
-            .column(Column::remainder()) // Actions (Remove)
+            .column(Column::remainder()) // Active
             .striped(true) // Optional for better readability
             .vscroll(false) // Disable vertical scrolling for compact tables
             .header(20.0, |mut header| {
@@ -367,12 +412,9 @@ impl CeBrAConfig {
                 header.col(|ui| {
                     ui.label("Active");
                 });
-                header.col(|ui| {
-                    ui.label("Actions");
-                });
             })
             .body(|mut body| {
-                for (index, detector) in self.detectors.iter_mut().enumerate() {
+                for detector in &mut self.detectors {
                     body.row(18.0, |mut row| {
                         // Detector Number
                         row.col(|ui| {
@@ -381,38 +423,35 @@ impl CeBrAConfig {
 
                         // Mean
                         row.col(|ui| {
-                            ui.add(egui::DragValue::new(&mut detector.timecut.mean).speed(0.01));
+                            ui.add_enabled(
+                                detector.timecut.active,
+                                egui::DragValue::new(&mut detector.timecut.mean).speed(0.01),
+                            );
                         });
 
                         // Low
                         row.col(|ui| {
-                            ui.add(egui::DragValue::new(&mut detector.timecut.low).speed(0.01));
+                            ui.add_enabled(
+                                detector.timecut.active,
+                                egui::DragValue::new(&mut detector.timecut.low).speed(0.01),
+                            );
                         });
 
                         // High
                         row.col(|ui| {
-                            ui.add(egui::DragValue::new(&mut detector.timecut.high).speed(0.01));
+                            ui.add_enabled(
+                                detector.timecut.active,
+                                egui::DragValue::new(&mut detector.timecut.high).speed(0.01),
+                            );
                         });
 
                         // Active
                         row.col(|ui| {
                             ui.checkbox(&mut detector.timecut.active, "");
                         });
-
-                        // Actions
-                        row.col(|ui| {
-                            if ui.button("Remove").clicked() {
-                                indices_to_remove.push(index);
-                            }
-                        });
                     });
                 }
             });
-
-        // Remove detectors marked for deletion
-        for &index in indices_to_remove.iter().rev() {
-            self.detectors.remove(index);
-        }
     }
 
     pub fn gain_matching_ui(&mut self, ui: &mut egui::Ui) {
@@ -630,7 +669,7 @@ impl CeBrAConfig {
             });
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, sps_config: &SPSConfig) {
         ui.horizontal(|ui| {
             if ui.button("Add Detector").clicked() {
                 self.add_detector(self.detectors.len());
@@ -639,27 +678,46 @@ impl CeBrAConfig {
 
         ui.separator();
 
-        self.time_cut_ui(ui);
+        // add selectable labels for each detector. If clicked, activate the detector
+        let mut indices_to_remove = Vec::new();
+
+        for (index, detector) in self.detectors.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut detector.active, format!("Cebra{}", detector.number));
+                if ui.button("X").clicked() {
+                    indices_to_remove.push(index);
+                }
+            });
+        }
+
+        for &index in indices_to_remove.iter().rev() {
+            self.detectors.remove(index);
+        }
+
+        // check if there are detectors to configure
+        if self.detectors.is_empty() {
+            return;
+        }
+
+        if sps_config.active {
+            self.time_cut_ui(ui);
+        }
         self.gain_matching_ui(ui);
         self.energy_calibration_ui(ui);
-
-        for detector in &mut self.detectors {
-            detector.sps_config = self.sps_config.clone();
-        }
     }
 
-    pub fn get_configs(&self) -> Configs {
+    pub fn get_configs(&self, sps_config: &SPSConfig) -> Configs {
         let mut configs = Configs::default();
 
         for detector in &self.detectors {
-            configs.merge(detector.config());
+            configs.merge(detector.config(sps_config.clone()));
         }
 
-        if !self.sps_config.active {
+        if !sps_config.active {
             configs
         } else {
             let mut updated_configs = Configs::default();
-            let sps_cuts = self.sps_config.cuts.get_active_cuts();
+            let sps_cuts = sps_config.cuts.get_active_cuts();
 
             for config in &mut configs.configs {
                 match config {
@@ -727,10 +785,10 @@ impl CeBrAConfig {
         }
     }
 
-    pub fn cr52dp_experiment(&mut self, sps_config: SPSConfig) {
+    pub fn cr52dp_experiment(&mut self) {
         self.detectors.clear();
 
-        let mut detector_0 = Cebr3::new(0, sps_config.clone());
+        let mut detector_0 = Cebr3::new(0);
 
         detector_0.energy_calibration.active = true;
         detector_0.energy_calibration.a = 0.0;
@@ -744,7 +802,7 @@ impl CeBrAConfig {
 
         self.detectors.push(detector_0);
 
-        let mut detector_1 = Cebr3::new(1, sps_config.clone());
+        let mut detector_1 = Cebr3::new(1);
 
         detector_1.energy_calibration.active = true;
         detector_1.energy_calibration.a = 0.0;
@@ -758,7 +816,7 @@ impl CeBrAConfig {
 
         self.detectors.push(detector_1);
 
-        let mut detector_2 = Cebr3::new(2, sps_config.clone());
+        let mut detector_2 = Cebr3::new(2);
 
         detector_2.gainmatch.active = false;
 
@@ -774,7 +832,7 @@ impl CeBrAConfig {
 
         self.detectors.push(detector_2);
 
-        let mut detector_3 = Cebr3::new(3, sps_config.clone());
+        let mut detector_3 = Cebr3::new(3);
 
         detector_3.energy_calibration.active = true;
         detector_3.energy_calibration.a = 0.0;
@@ -788,7 +846,7 @@ impl CeBrAConfig {
 
         self.detectors.push(detector_3);
 
-        let mut detector_4 = Cebr3::new(4, sps_config.clone());
+        let mut detector_4 = Cebr3::new(4);
 
         detector_4.energy_calibration.active = true;
         detector_4.energy_calibration.a = 0.0;
@@ -809,6 +867,282 @@ impl CeBrAConfig {
         }
     }
 }
+
+/*************************** ICESPICE Custom Struct ***************************/
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub struct PIPS {
+    pub name: String, // Naming convention is either 1000, 500, 300, 100 for now
+    pub sps_timecut: TimeCut,
+    pub energy_calibration: Calibration,
+    pub active: bool,
+}
+
+impl Default for PIPS {
+    fn default() -> Self {
+        Self {
+            name: "1000".to_string(),
+            sps_timecut: TimeCut {
+                mean: 0.0,
+                low: -3000.0,
+                high: 3000.0,
+                active: false,
+            },
+            energy_calibration: Calibration {
+                a: 0.0,
+                b: 1.0,
+                c: 0.0,
+                bins: 512,
+                range: (0.0, 4096.0),
+                active: false,
+            },
+            active: false,
+        }
+    }
+}
+
+impl PIPS {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            sps_timecut: TimeCut {
+                mean: 0.0,
+                low: -3000.0,
+                high: 3000.0,
+                active: false,
+            },
+            energy_calibration: Calibration {
+                a: 0.0,
+                b: 1.0,
+                c: 0.0,
+                bins: 512,
+                range: (0.0, 4096.0),
+                active: false,
+            },
+            active: false,
+        }
+    }
+
+    #[rustfmt::skip]
+    #[allow(clippy::all)]
+    pub fn configs(&self, cebra_config: CeBrAConfig, _sps_config: &mut SPSConfig) -> Configs {
+        
+        let mut configs = Configs::default();
+
+        let pips_range = (0.0, 16384.0);
+        let pips_bins = 8192;
+
+        let energy = format!("PIPS{}Energy", self.name);
+        let energy_calibrated = format!("PIPS{}EnergyCalibrated", self.name);
+        let time = format!("PIPS{}Time", self.name);
+
+        configs.hist1d(&format!("ICESPICE/PIPS{}/PIPS{}Energy", self.name, self.name), &energy, pips_range, pips_bins, None);
+
+        if self.energy_calibration.active {
+            configs.columns.push(self.energy_calibration.new_column(&energy, &format!("PIPS{}EnergyCalibrated", self.name)));
+            configs.hist1d(&format!("ICESPICE/PIPS{}/PIPS{}EnergyCalibrated", self.name, self.name), &format!("PIPS{}EnergyCalibrated", self.name), self.energy_calibration.range, self.energy_calibration.bins, None);
+        }
+
+        if cebra_config.active {
+            for cebr3 in cebra_config.detectors.iter() {
+                if cebr3.active {
+                    let cebr3_energy = format!("Cebra{}Energy", cebr3.number);
+                    let cebr3_energy_calibrated = format!("Cebra{}EnergyCalibrated", cebr3.number);
+                    let cebr3_time = format!("Cebra{}Time", cebr3.number);
+
+                    let cebr3_range = (0.0, 4096.0);
+                    let cebr3_bins = 4096;
+
+                    // create the time difference column
+                    configs.columns.push((format!("{} - {}", time, cebr3_time), format!("PIPS{}TimeRelToCebra{}Time", self.name, cebr3.number)));
+
+                    configs.hist1d(&format!("ICESPICE/PIPS{}/PIPS{}TimeRelToCebra{}Time", self.name, self.name, cebr3.number), &format!("PIPS{}TimeRelToCebra{}Time", self.name, cebr3.number), (-3200.0, 3200.0), 6400, None);
+                    configs.hist2d(&format!("ICESPICE/PIPS{}/PIPS{}Energy v Cebra{}Energy", self.name, self.name, cebr3.number), &cebr3_energy, &energy, cebr3_range, pips_range, (cebr3_bins, pips_bins), None);
+                    configs.hist2d(&format!("ICESPICE/PIPS{}/PIPS{}RelToCebra{} v Cebra{}Energy", self.name, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}Time", self.name, cebr3.number), &cebr3_energy, (-3200.0, 3200.0), cebr3_range, (6400, cebr3_bins), None);
+
+
+                    // energy calibrated histograms
+                    if self.energy_calibration.active {
+                        configs.hist2d(&format!("ICESPICE/PIPS{}/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}Energy", self.name, self.name, cebr3.number), &cebr3_energy, &energy_calibrated, cebr3_range, self.energy_calibration.range, (cebr3_bins, self.energy_calibration.bins), None);
+                    }
+                    if cebr3.energy_calibration.active & self.energy_calibration.active {
+                        configs.hist2d(&format!("ICESPICE/PIPS{}/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}EnergyCalibrated", self.name, self.name, cebr3.number), &cebr3_energy_calibrated, &energy_calibrated, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), None);
+                    } 
+                    if cebr3.energy_calibration.active {
+                        configs.hist2d(&format!("ICESPICE/PIPS{}/Energy Calibrated/PIPS{}TimeRelToCebra{}Time v Cebra{}EnergyCalibrated", self.name, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}Time", self.name, cebr3.number), &cebr3_energy_calibrated, (-3200.0, 3200.0), cebr3.energy_calibration.range, (6400, cebr3.energy_calibration.bins), None);
+                    }
+
+                    // check time cuts for the correct detector
+                    if cebr3.pips1000_timecut.active && self.name == "1000" {
+                        let min = cebr3.pips1000_timecut.low;
+                        let max = cebr3.pips1000_timecut.high;
+                        let mean = cebr3.pips1000_timecut.mean;
+
+                        let min_range = -100.0;
+                        let max_range = 100.0;
+
+                        let time_range = (min_range, max_range);
+                        let time_bins = (max_range - min_range) as usize;
+
+                        // add column for the time cut to shift the time
+                        configs.columns.push((format!("{} - {} - {}", time, cebr3_time, mean), format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number)));
+
+                        // add the time cut
+                        let pips_cebra_tcut = Cut::new_1d(&format!("PIPS{}+Cebra{} Time Cut", self.name, cebr3.number), &format!("PIPS{}TimeRelToCebra{}Time >= {} && PIPS{}TimeRelToCebra{}Time <= {}", self.name, cebr3.number, min, self.name, cebr3.number, max));
+                        configs.cuts.add_cut(pips_cebra_tcut.clone());
+                        let tcut = Some(Cuts::new(vec![pips_cebra_tcut.clone()]));
+
+                        configs.hist1d(&format!("ICESPICE/PIPS{}/Time Cut/PIPS{}TimeRelToCebra{}TimeShifted", self.name, self.name, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), time_range, time_bins, tcut.clone());
+                        configs.hist2d(&format!("ICESPICE/PIPS{}/Time Cut/PIPS{}Energy v Cebra{}Energy", self.name, self.name, cebr3.number), &cebr3_energy, &energy, cebr3_range, pips_range, (cebr3_bins, pips_bins), tcut.clone());
+                        configs.hist2d(&format!("ICESPICE/PIPS{}/Time Cut/PIPS{}RelToCebra{}Shifted v Cebra{}Energy", self.name, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy, time_range, cebr3_range, (time_bins, cebr3_bins), tcut.clone());
+    
+    
+                        // energy calibrated histograms
+                        if self.energy_calibration.active {
+                            configs.hist2d(&format!("ICESPICE/PIPS{}/Time Cut/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}Energy", self.name, self.name, cebr3.number), &cebr3_energy, &energy_calibrated, cebr3_range, self.energy_calibration.range, (cebr3_bins, self.energy_calibration.bins), tcut.clone());
+                        }
+                        if cebr3.energy_calibration.active & self.energy_calibration.active {
+                            configs.hist2d(&format!("ICESPICE/PIPS{}/Time Cut/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}EnergyCalibrated", self.name, self.name, cebr3.number), &cebr3_energy_calibrated, &energy_calibrated, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), tcut.clone());
+                        } 
+                        if cebr3.energy_calibration.active {
+                            configs.hist2d(&format!("ICESPICE/PIPS{}/Time Cut/Energy Calibrated/PIPS{}TimeRelToCebra{}TimeShifted v Cebra{}EnergyCalibrated", self.name, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated, time_range, cebr3.energy_calibration.range, (time_bins, cebr3.energy_calibration.bins), tcut.clone());
+                        }
+
+                    }   
+                    
+                }
+            }
+
+        }
+
+        configs
+    }
+
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        cebra_config: &mut CeBrAConfig,
+        sps_config: &mut SPSConfig,
+    ) {
+        if self.active {
+            // collapsing header
+            ui.collapsing(format!("PIPS{}", self.name), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Energy Calibration: ");
+                    self.energy_calibration.ui(ui);
+                });
+
+                if sps_config.active {
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        ui.label("SE-SPS Time Cut: ");
+                        self.sps_timecut.ui(ui);
+                    });
+                    ui.separator();
+                }
+
+                if cebra_config.active {
+                    for cebr3 in &mut cebra_config.detectors {
+                        if cebr3.active {
+                            ui.horizontal(|ui| {
+                                ui.label(&format!("Cebra{} Time Cut: ", cebr3.number));
+                                if self.name == "1000" {
+                                    cebr3.pips1000_timecut.ui(ui);
+                                } else if self.name == "500" {
+                                    cebr3.pips500_timecut.ui(ui);
+                                } else if self.name == "300" {
+                                    cebr3.pips300_timecut.ui(ui);
+                                } else if self.name == "100" {
+                                    cebr3.pips100_timecut.ui(ui);
+                                }
+                            });
+                        }
+                    }
+                }
+            });
+        }
+    }
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub struct ICESPICEConfig {
+    pub pips1000: PIPS,
+    pub pips500: PIPS,
+    pub pips300: PIPS,
+    pub pips100: PIPS,
+    pub active: bool,
+}
+
+impl Default for ICESPICEConfig {
+    fn default() -> Self {
+        Self {
+            pips1000: PIPS::new("1000"),
+            pips500: PIPS::new("500"),
+            pips300: PIPS::new("300"),
+            pips100: PIPS::new("100"),
+            active: false,
+        }
+    }
+}
+
+impl ICESPICEConfig {
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        cebra_config: &mut CeBrAConfig,
+        sps_config: &mut SPSConfig,
+    ) {
+        if !self.active {
+            return;
+        }
+
+        ui.separator();
+
+        ui.label("PIPS Detectors");
+
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.pips1000.active, "PIPS1000");
+            ui.checkbox(&mut self.pips500.active, "PIPS500");
+            ui.checkbox(&mut self.pips300.active, "PIPS300");
+            ui.checkbox(&mut self.pips100.active, "PIPS100");
+        });
+
+        ui.separator();
+
+        self.pips1000.ui(ui, cebra_config, sps_config);
+        self.pips500.ui(ui, cebra_config, sps_config);
+        self.pips300.ui(ui, cebra_config, sps_config);
+        self.pips100.ui(ui, cebra_config, sps_config);
+    }
+
+    pub fn get_configs(
+        &self,
+        cebra_config: &mut CeBrAConfig,
+        sps_config: &mut SPSConfig,
+    ) -> Configs {
+        let mut configs = Configs::default();
+
+        if self.pips1000.active {
+            configs.merge(self.pips1000.configs(cebra_config.clone(), sps_config));
+        }
+
+        if self.pips500.active {
+            configs.merge(self.pips500.configs(cebra_config.clone(), sps_config));
+        }
+
+        if self.pips300.active {
+            configs.merge(self.pips300.configs(cebra_config.clone(), sps_config));
+        }
+
+        if self.pips100.active {
+            configs.merge(self.pips100.configs(cebra_config.clone(), sps_config));
+        }
+
+        configs
+    }
+}
+
 /*************************** SE-SPS Custom Struct ***************************/
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct SPSConfig {
@@ -1085,62 +1419,3 @@ impl SPSConfig {
         updated_configs
     }
 }
-
-/*
-
-#[rustfmt::skip]
-#[allow(clippy::all)]
-pub fn catrina(h: &mut Histogrammer, lf: LazyFrame, detector_number: usize) {
-    let i = detector_number;
-
-    h.add_fill_hist1d(&format!("Catrina/CATRINA{i}/Energy"), &lf, &format!("CATRINA{i}Energy"), 4096, range);
-    h.add_fill_hist2d(&format!("Catrina/CATRINA{i}/PSD vs Energy"), &lf, &format!("CATRINA{i}Energy"), &format!("CATRINA{i}PSD"), (512, 500), (range, (0.0, 1.0)));
-}
-
-
-*/
-
-// pips1000(h, lf);
-//....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo....
-
-// sps_histograms(h, lf.clone());
-
-// For 52Cr(d,pg)53Cr
-// let det_0_timecut = TimeCut { mean: -1155.6, low: -1158.0, high: -1152.0};
-// let det_1_timecut = TimeCut { mean: -1153.9, low: -1159.0, high: -1147.0};
-// let det_2_timecut = TimeCut { mean: -1154.0, low: -1158.0, high: -1151.0};
-// let det_3_timecut = TimeCut { mean: -1152.0, low: -1158.0, high: -1148.0};
-// let det_4_timecut = TimeCut { mean: -1123.1, low: -1127.0, high: -1118.0};
-
-// // These values were gain match to detector 0
-// // let det_0_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
-// // let det_1_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
-// // let det_2_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
-// // let det_3_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
-// // let det_4_gain_match_values = GainMatch { a: 0.0, b: 1.0, c: 0.0};
-
-// let det_0_energy_calibration = EnergyCalibration { a: 0.0, b: 1.7551059351549314, c: -12.273506897222896, bins: 1024, range: (0.0, 16384.0) };
-// let det_1_energy_calibration = EnergyCalibration { a: 0.0, b: 1.9510278378962256, c: -16.0245754973971, bins: 1024, range: (0.0, 16384.0) };
-// let det_2_energy_calibration = EnergyCalibration { a: 0.0, b: 1.917190081718234, c: 16.430212777833802, bins: 1024, range: (0.0, 16384.0) };
-// let det_3_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6931918955746692, c: 12.021258506937766, bins: 1024, range: (0.0, 16384.0) };
-// let det_4_energy_calibration = EnergyCalibration { a: 0.0, b: 1.6373533248536343, c: 13.091030061910748, bins: 1024, range: (0.0, 16384.0) };
-
-// cebra(h, lf.clone(), 0, Some(det_0_timecut), None, Some(det_0_energy_calibration));
-// cebra(h, lf.clone(), 1, Some(det_1_timecut), None, Some(det_1_energy_calibration));
-// cebra(h, lf.clone(), 2, Some(det_2_timecut), None, Some(det_2_energy_calibration));
-// cebra(h, lf.clone(), 3, Some(det_3_timecut), None, Some(det_3_energy_calibration));
-// cebra(h, lf.clone(), 4, Some(det_4_timecut), None, Some(det_4_energy_calibration));
-
-// #[rustfmt::skip]
-// #[allow(clippy::all)]
-// pub fn pips1000(h: &mut Histogrammer, lf: LazyFrame) {
-//     let lf_pips = lf.with_columns( vec![
-//         // ( ( col("PIPS1000Energy") - col("PIPS1000Short") )/ col("PIPS1000Energy") ).alias("PIPS1000PSD"),
-//         (lit(-1.77049e-06)*col("PIPS1000Energy")*col("PIPS1000Energy") + lit(0.544755003513083)*col("PIPS1000Energy") + lit(-1.36822594543883)).alias("PIPS1000EnergyCalibrated") ]
-//     );
-
-//     h.add_fill_hist1d("PIPS1000/Energy", &lf_pips, "PIPS1000Energy", 16384, (0.0, 16384.0));
-//     // h.add_fill_hist2d("PIPS1000: PSD", &lf_pips, "PIPS1000Energy", "PIPS1000PSD", (512, 500), (range, (0.0, 1.0)));
-//     h.add_fill_hist1d("PIPS1000/Energy Calibrated", &lf_pips, "PIPS1000EnergyCalibrated", 600, (0.0, 1200.0));
-
-// }
