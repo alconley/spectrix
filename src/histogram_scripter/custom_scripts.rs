@@ -926,7 +926,6 @@ impl PIPS {
     #[rustfmt::skip]
     #[allow(clippy::all)]
     pub fn configs(&self, cebra_config: CeBrAConfig, _sps_config: &mut SPSConfig) -> Configs {
-        
         let mut configs = Configs::default();
 
         let pips_range = (0.0, 16384.0);
@@ -967,7 +966,7 @@ impl PIPS {
                     }
                     if cebr3.energy_calibration.active & self.energy_calibration.active {
                         configs.hist2d(&format!("ICESPICE/PIPS{}/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}EnergyCalibrated", self.name, self.name, cebr3.number), &cebr3_energy_calibrated, &energy_calibrated, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), None);
-                    } 
+                    }
                     if cebr3.energy_calibration.active {
                         configs.hist2d(&format!("ICESPICE/PIPS{}/Energy Calibrated/PIPS{}TimeRelToCebra{}Time v Cebra{}EnergyCalibrated", self.name, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}Time", self.name, cebr3.number), &cebr3_energy_calibrated, (-3200.0, 3200.0), cebr3.energy_calibration.range, (6400, cebr3.energy_calibration.bins), None);
                     }
@@ -995,21 +994,17 @@ impl PIPS {
                         configs.hist1d(&format!("ICESPICE/PIPS{}/Time Cut/PIPS{}TimeRelToCebra{}TimeShifted", self.name, self.name, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), time_range, time_bins, tcut.clone());
                         configs.hist2d(&format!("ICESPICE/PIPS{}/Time Cut/PIPS{}Energy v Cebra{}Energy", self.name, self.name, cebr3.number), &cebr3_energy, &energy, cebr3_range, pips_range, (cebr3_bins, pips_bins), tcut.clone());
                         configs.hist2d(&format!("ICESPICE/PIPS{}/Time Cut/PIPS{}RelToCebra{}Shifted v Cebra{}Energy", self.name, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy, time_range, cebr3_range, (time_bins, cebr3_bins), tcut.clone());
-    
-    
                         // energy calibrated histograms
                         if self.energy_calibration.active {
                             configs.hist2d(&format!("ICESPICE/PIPS{}/Time Cut/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}Energy", self.name, self.name, cebr3.number), &cebr3_energy, &energy_calibrated, cebr3_range, self.energy_calibration.range, (cebr3_bins, self.energy_calibration.bins), tcut.clone());
                         }
                         if cebr3.energy_calibration.active & self.energy_calibration.active {
                             configs.hist2d(&format!("ICESPICE/PIPS{}/Time Cut/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}EnergyCalibrated", self.name, self.name, cebr3.number), &cebr3_energy_calibrated, &energy_calibrated, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), tcut.clone());
-                        } 
+                        }
                         if cebr3.energy_calibration.active {
                             configs.hist2d(&format!("ICESPICE/PIPS{}/Time Cut/Energy Calibrated/PIPS{}TimeRelToCebra{}TimeShifted v Cebra{}EnergyCalibrated", self.name, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated, time_range, cebr3.energy_calibration.range, (time_bins, cebr3.energy_calibration.bins), tcut.clone());
                         }
-
-                    }   
-                    
+                    }
                 }
             }
 
@@ -1046,7 +1041,7 @@ impl PIPS {
                     for cebr3 in &mut cebra_config.detectors {
                         if cebr3.active {
                             ui.horizontal(|ui| {
-                                ui.label(&format!("Cebra{} Time Cut: ", cebr3.number));
+                                ui.label(format!("Cebra{} Time Cut: ", cebr3.number));
                                 if self.name == "1000" {
                                     cebr3.pips1000_timecut.ui(ui);
                                 } else if self.name == "500" {
