@@ -119,20 +119,61 @@ impl Histogram {
         })
     }
 
+    // pub fn fit_background(&mut self) {
+    //     log::info!("Fitting background for histogram: {}", self.name);
+    //     self.fits.temp_fit = None;
+
+    //     let marker_positions = self.plot_settings.markers.get_background_marker_positions();
+    //     if marker_positions.len() < 2 {
+    //         log::error!("Need to set at least two background markers to fit the histogram");
+    //         return;
+    //     }
+
+    //     let (x_data, y_data): (Vec<f64>, Vec<f64>) = marker_positions
+    //         .iter()
+    //         .filter_map(|&pos| self.get_bin_count_and_center(pos))
+    //         .unzip();
+
+    //     let mut fitter = Fitter::new(Data {
+    //         x: x_data,
+    //         y: y_data,
+    //     });
+
+    //     fitter.background_model = self.fits.settings.background_model.clone();
+
+    //     fitter.fit_background();
+
+    //     fitter.name = format!("{} Temp Fit", self.name);
+    //     fitter.set_name(self.name.clone());
+
+    //     self.fits.temp_fit = Some(fitter);
+    // }
+
     pub fn fit_background(&mut self) {
         log::info!("Fitting background for histogram: {}", self.name);
         self.fits.temp_fit = None;
 
         let marker_positions = self.plot_settings.markers.get_background_marker_positions();
-        if marker_positions.len() < 2 {
-            log::error!("Need to set at least two background markers to fit the histogram");
+        if marker_positions.is_empty() {
+            log::error!("Need to set at least one background marker pair to fit the histogram");
             return;
         }
 
-        let (x_data, y_data): (Vec<f64>, Vec<f64>) = marker_positions
-            .iter()
-            .filter_map(|&pos| self.get_bin_count_and_center(pos))
-            .unzip();
+        let mut x_data = Vec::new();
+        let mut y_data = Vec::new();
+
+        for (start_x, end_x) in marker_positions {
+            let bin_centers = self.get_bin_centers_between(start_x, end_x);
+            let bin_counts = self.get_bin_counts_between(start_x, end_x);
+
+            x_data.extend(bin_centers);
+            y_data.extend(bin_counts);
+        }
+
+        if x_data.is_empty() || y_data.is_empty() {
+            log::error!("No valid data points found between background markers.");
+            return;
+        }
 
         let mut fitter = Fitter::new(Data {
             x: x_data,
@@ -140,7 +181,6 @@ impl Histogram {
         });
 
         fitter.background_model = self.fits.settings.background_model.clone();
-
         fitter.fit_background();
 
         fitter.name = format!("{} Temp Fit", self.name);
@@ -214,6 +254,58 @@ impl Histogram {
         self.fits.temp_fit = Some(fitter);
     }
 
+    pub fn update_background_pair_lines(&mut self) {
+        // Extract bin edges and counts **before** modifying anything
+        let bin_edges = self.get_bin_edges();
+        let bin_counts = self.bins.clone();
+
+        // Extract immutable background marker positions first
+        let marker_positions: Vec<(f64, f64)> = self
+            .plot_settings
+            .markers
+            .background_markers
+            .iter()
+            .map(|bg_pair| (bg_pair.start.x_value, bg_pair.end.x_value))
+            .collect();
+
+        // Compute bin indices based on marker positions **before** modifying anything
+        let bin_indices: Vec<(usize, usize)> = marker_positions
+            .iter()
+            .map(|&(start_x, end_x)| {
+                let start_bin = self.get_bin_index(start_x).unwrap_or(0);
+                let end_bin = self
+                    .get_bin_index(end_x)
+                    .unwrap_or(self.bins.len().saturating_sub(1));
+                (start_bin, end_bin)
+            })
+            .collect();
+
+        // Now, modify `background_markers` without conflicting borrows
+        for (bg_pair, &(start_bin, end_bin)) in self
+            .plot_settings
+            .markers
+            .background_markers
+            .iter_mut()
+            .zip(bin_indices.iter())
+        {
+            bg_pair.histogram_line.points.clear(); // Clear previous points
+
+            // Collect the **actual bin edges** and counts in the correct range
+            for i in start_bin..=end_bin {
+                if i < bin_edges.len() - 1 {
+                    // Ensure no out-of-bounds access
+                    let x_start = bin_edges[i]; // Start of the bin
+                    let x_end = bin_edges[i + 1]; // End of the bin
+                    let y = bin_counts[i] as f64; // Bin count
+
+                    // Add both edges of the bin to the histogram line
+                    bg_pair.histogram_line.points.push([x_start, y]);
+                    bg_pair.histogram_line.points.push([x_end, y]);
+                }
+            }
+        }
+    }
+
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
         // update the histogram and fit lines with the log setting and draw
         let log_y = self.plot_settings.egui_settings.log_y;
@@ -229,6 +321,12 @@ impl Histogram {
         self.show_stats(plot_ui);
 
         self.plot_settings.markers.draw_all_markers(plot_ui);
+        self.update_background_pair_lines();
+        for bg_pair in &mut self.plot_settings.markers.background_markers {
+            bg_pair.histogram_line.log_x = log_x;
+            bg_pair.histogram_line.log_y = log_y;
+        }
+
         // Check if markers are being dragged
         if self.plot_settings.markers.is_dragging() {
             // Disable dragging if a marker is being dragged

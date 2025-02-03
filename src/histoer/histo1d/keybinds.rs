@@ -13,9 +13,12 @@ impl Histogram {
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::B)) {
+                // self.plot_settings
+                //     .markers
+                //     .add_background_marker(cursor_position.x);
                 self.plot_settings
                     .markers
-                    .add_background_marker(cursor_position.x);
+                    .add_background_pair(cursor_position.x, self.bin_width);
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::R)) {

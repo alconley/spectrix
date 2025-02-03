@@ -16,6 +16,7 @@ pub struct EguiLine {
     pub color: Color32,
     pub reference_fill: bool,
     pub fill: f32,
+    pub fill_alpha: f32,
 
     #[serde(skip)]
     pub style: Option<LineStyle>,
@@ -41,6 +42,7 @@ impl Default for EguiLine {
             color: Color32::from_rgb(120, 47, 64),
             reference_fill: false,
             fill: 0.0,
+            fill_alpha: 0.3,
             style: Some(LineStyle::Solid),
             style_length: 15.0,
             points: vec![],
@@ -108,6 +110,7 @@ impl EguiLine {
 
             if self.reference_fill {
                 line = line.fill(self.fill);
+                line = line.fill_alpha(self.fill_alpha);
             }
 
             if self.style.is_some() {
@@ -143,6 +146,12 @@ impl EguiLine {
                             DragValue::new(&mut self.fill)
                                 .speed(1.0)
                                 .prefix("Fill Reference: "),
+                        );
+                        ui.add(
+                            DragValue::new(&mut self.fill_alpha)
+                                .speed(0.01)
+                                .range(0.0..=1.0)
+                                .prefix("Fill Alpha: "),
                         );
                     }
                 });

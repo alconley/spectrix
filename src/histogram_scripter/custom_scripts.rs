@@ -287,6 +287,27 @@ pub struct PIPSTimeCuts {
     pub pips100: TimeCut,
 }
 
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub struct GammaGates {
+    pub name: String,
+    pub low: f64,
+    pub high: f64,
+}
+
+impl GammaGates {
+    pub fn create_1d_cut(&self, detector: usize) -> Cut {
+        Cut::new_1d(
+            &self.name,
+            &format!(
+                "Cebra{}EnergyCalibrated >= {} && Cebra{}EnergyCalibrated <= {}",
+                detector, self.low, detector, self.high
+            ),
+        )
+    }
+}
+
+
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Cebr3 {
     pub number: usize,
@@ -294,6 +315,7 @@ pub struct Cebr3 {
     pub gainmatch: Calibration,
     pub energy_calibration: Calibration,
     pub pips_timecuts: PIPSTimeCuts,
+    pub gamma_gates: Vec<GammaGates>,
     pub active: bool,
 }
 
@@ -305,6 +327,7 @@ impl Cebr3 {
             gainmatch: Calibration::default(),
             energy_calibration: Calibration::default(),
             pips_timecuts: PIPSTimeCuts::default(),
+            gamma_gates: vec![],
             active: false,
         }
     }
@@ -339,6 +362,14 @@ impl Cebr3 {
             }
             configs.hist1d(&format!("CeBrA/Cebra{}/Cebra{} Energy Calibrated", self.number, self.number), &format!("Cebra{}EnergyCalibrated", self.number), self.energy_calibration.range, self.energy_calibration.bins, None);
             configs.hist1d(&"CeBrA/CeBrA/Energy Calibrated", &format!("Cebra{}EnergyCalibrated", self.number), self.energy_calibration.range, self.energy_calibration.bins, None);
+        
+            for gate in &self.gamma_gates {
+                // needs further devolopment
+                let cut = gate.create_1d_cut(self.number);
+                configs.cuts.add_cut(cut.clone());
+                // configs.hist1d(&format!("CeBrA/Cebra{}/Cebra{} Energy Calibrated {}", self.number, self.number, gate.name), &format!("Cebra{}EnergyCalibrated", self.number), self.energy_calibration.range, self.energy_calibration.bins, Some(Cuts::new(vec![cut])));
+            }
+        
         }
 
         if sps_config.active {
@@ -922,35 +953,6 @@ impl CeBrAConfig {
 /*************************** ICESPICE Custom Struct ***************************/
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
-pub struct Cebr3Gate {
-    pub name: String,
-    pub low: f64,
-    pub high: f64,
-}
-
-impl Cebr3Gate {
-    pub fn create_1d_cut(&self, detector: usize, energy_calibrated: bool) -> Cut {
-        if energy_calibrated {
-            Cut::new_1d(
-                &self.name,
-                &format!(
-                    "Cebra{}EnergyCalibrated >= {} && Cebra{}EnergyCalibrated <= {}",
-                    detector, self.low, detector, self.high
-                ),
-            )
-        } else {
-            Cut::new_1d(
-                &self.name,
-                &format!(
-                    "Cebra{}Energy >= {} && Cebra{}Energy <= {}",
-                    detector, self.low, detector, self.high
-                ),
-            )
-        }
-    }
-}
-
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct PIPS {
     pub name: String, // Naming convention is either 1000, 500, 300, 100 for now
     pub sps_timecut: TimeCut,
@@ -958,7 +960,6 @@ pub struct PIPS {
     pub active: bool,
     pub range: (f64, f64),
     pub bins: usize,
-    pub gamma_gates: Vec<Cebr3Gate>,
 }
 
 impl Default for PIPS {
@@ -970,7 +971,6 @@ impl Default for PIPS {
             active: false,
             range: (0.0, 4096.0),
             bins: 512,
-            gamma_gates: vec![],
         }
     }
 }
@@ -984,7 +984,6 @@ impl PIPS {
             active: false,
             range: (0.0, 4096.0),
             bins: 512,
-            gamma_gates: vec![],
         }
     }
 

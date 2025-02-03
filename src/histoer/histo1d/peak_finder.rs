@@ -6,91 +6,91 @@ use super::histogram1d::Histogram;
 impl Histogram {
     // Add a function to find peaks
     pub fn find_peaks(&mut self) {
-        // Clear the peak markers
-        self.plot_settings.markers.clear_peak_markers();
+        // // Clear the peak markers
+        // self.plot_settings.markers.clear_peak_markers();
 
-        let region_marker_positions = self.plot_settings.markers.get_region_marker_positions();
-        let mut background_marker_positions =
-            self.plot_settings.markers.get_background_marker_positions();
+        // let region_marker_positions = self.plot_settings.markers.get_region_marker_positions();
+        // let mut background_marker_positions =
+        //     self.plot_settings.markers.get_background_marker_positions();
 
-        // Sort background markers
-        background_marker_positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // // Sort background markers
+        // background_marker_positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-        let mut peaks_found_with_background = false;
-        let mut peaks_found_with_region = false;
+        // let mut peaks_found_with_background = false;
+        // let mut peaks_found_with_region = false;
 
-        // Determine x_data and y_data before borrowing temp_fit as mutable
-        let (x_data, y_data) = if background_marker_positions.len() >= 2 {
-            self.fit_background();
+        // // Determine x_data and y_data before borrowing temp_fit as mutable
+        // let (x_data, y_data) = if background_marker_positions.len() >= 2 {
+        //     self.fit_background();
 
-            // if there are region markers, use the data between them
-            let (start_x, end_x) = if region_marker_positions.len() == 2 {
-                peaks_found_with_region = true;
-                (region_marker_positions[0], region_marker_positions[1])
-            } else {
-                peaks_found_with_background = true;
-                (
-                    background_marker_positions[0],
-                    background_marker_positions[background_marker_positions.len() - 1],
-                )
-            };
+        //     // if there are region markers, use the data between them
+        //     let (start_x, end_x) = if region_marker_positions.len() == 2 {
+        //         peaks_found_with_region = true;
+        //         (region_marker_positions[0], region_marker_positions[1])
+        //     } else {
+        //         peaks_found_with_background = true;
+        //         (
+        //             background_marker_positions[0],
+        //             background_marker_positions[background_marker_positions.len() - 1],
+        //         )
+        //     };
 
-            // Retrieve x_data and y_data without holding a mutable reference
-            let x_data = self.get_bin_centers_between(start_x, end_x);
-            let y_data = self.get_bin_counts_between(start_x, end_x);
-            (Some(x_data), Some(y_data))
-        } else if region_marker_positions.len() == 2 {
-            let (start_x, end_x) = (region_marker_positions[0], region_marker_positions[1]);
-            peaks_found_with_region = true;
-            let counts = self.get_bin_counts_between(start_x, end_x);
-            (None, Some(counts))
-        } else {
-            (
-                None,
-                Some(self.bins.iter().map(|&count| count as f64).collect()),
-            )
-        };
+        //     // Retrieve x_data and y_data without holding a mutable reference
+        //     let x_data = self.get_bin_centers_between(start_x, end_x);
+        //     let y_data = self.get_bin_counts_between(start_x, end_x);
+        //     (Some(x_data), Some(y_data))
+        // } else if region_marker_positions.len() == 2 {
+        //     let (start_x, end_x) = (region_marker_positions[0], region_marker_positions[1]);
+        //     peaks_found_with_region = true;
+        //     let counts = self.get_bin_counts_between(start_x, end_x);
+        //     (None, Some(counts))
+        // } else {
+        //     (
+        //         None,
+        //         Some(self.bins.iter().map(|&count| count as f64).collect()),
+        //     )
+        // };
 
-        // If x_data and y_data were retrieved, perform background subtraction
-        let y_data = if let (Some(x_data), Some(y_data)) = (&x_data, &y_data) {
-            if let Some(temp_fit) = &mut self.fits.temp_fit {
-                temp_fit.subtract_background(x_data.clone(), y_data.clone())
-            } else {
-                log::error!("Failed to fit background");
-                return;
-            }
-        } else {
-            y_data.clone() // Clone to avoid moving y_data
-        };
+        // // If x_data and y_data were retrieved, perform background subtraction
+        // let y_data = if let (Some(x_data), Some(y_data)) = (&x_data, &y_data) {
+        //     if let Some(temp_fit) = &mut self.fits.temp_fit {
+        //         temp_fit.subtract_background(x_data.clone(), y_data.clone())
+        //     } else {
+        //         log::error!("Failed to fit background");
+        //         return;
+        //     }
+        // } else {
+        //     y_data.clone() // Clone to avoid moving y_data
+        // };
 
-        if let Some(y_data) = y_data {
-            let peaks = self.plot_settings.find_peaks_settings.find_peaks(y_data);
-            // Add peak markers at detected peaks
-            for peak in &peaks {
-                let peak_position = peak.middle_position();
-                log::info!("Peak at position: {}", peak_position);
-                // Adjust peak position relative to the first background marker
-                if peaks_found_with_background {
-                    let adjusted_peak_position =
-                        self.bin_width * peak_position as f64 + background_marker_positions[0];
-                    self.plot_settings
-                        .markers
-                        .add_peak_marker(adjusted_peak_position);
-                } else if peaks_found_with_region {
-                    let adjusted_peak_position =
-                        self.bin_width * peak_position as f64 + region_marker_positions[0];
-                    self.plot_settings
-                        .markers
-                        .add_peak_marker(adjusted_peak_position);
-                } else {
-                    let adjusted_peak_position =
-                        self.bin_width * peak_position as f64 + self.range.0;
-                    self.plot_settings
-                        .markers
-                        .add_peak_marker(adjusted_peak_position);
-                }
-            }
-        }
+        // if let Some(y_data) = y_data {
+        //     let peaks = self.plot_settings.find_peaks_settings.find_peaks(y_data);
+        //     // Add peak markers at detected peaks
+        //     for peak in &peaks {
+        //         let peak_position = peak.middle_position();
+        //         log::info!("Peak at position: {}", peak_position);
+        //         // Adjust peak position relative to the first background marker
+        //         if peaks_found_with_background {
+        //             let adjusted_peak_position =
+        //                 self.bin_width * peak_position as f64 + background_marker_positions[0];
+        //             self.plot_settings
+        //                 .markers
+        //                 .add_peak_marker(adjusted_peak_position);
+        //         } else if peaks_found_with_region {
+        //             let adjusted_peak_position =
+        //                 self.bin_width * peak_position as f64 + region_marker_positions[0];
+        //             self.plot_settings
+        //                 .markers
+        //                 .add_peak_marker(adjusted_peak_position);
+        //         } else {
+        //             let adjusted_peak_position =
+        //                 self.bin_width * peak_position as f64 + self.range.0;
+        //             self.plot_settings
+        //                 .markers
+        //                 .add_peak_marker(adjusted_peak_position);
+        //         }
+        //     }
+        // }
     }
 }
 

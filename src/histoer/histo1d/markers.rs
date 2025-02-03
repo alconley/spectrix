@@ -1,17 +1,92 @@
-use crate::egui_plot_stuff::egui_vertical_line::EguiVerticalLine;
+use crate::egui_plot_stuff::{egui_line::EguiLine, egui_vertical_line::EguiVerticalLine};
 use egui_plot::{PlotPoint, PlotUi};
 
 #[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FitMarkers {
     pub region_markers: Vec<EguiVerticalLine>,
     pub peak_markers: Vec<EguiVerticalLine>,
-    pub background_markers: Vec<EguiVerticalLine>,
+    pub background_markers: Vec<BackgroundPair>,
 
     #[serde(skip)]
     pub cursor_position: Option<PlotPoint>,
 
     #[serde(skip)]
     pub manual_marker_position: f64,
+}
+
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BackgroundPair {
+    pub start: EguiVerticalLine,
+    pub end: EguiVerticalLine,
+    pub histogram_line: EguiLine,
+}
+
+impl BackgroundPair {
+    pub fn is_dragging(&self) -> bool {
+        self.start.is_dragging || self.end.is_dragging
+    }
+
+    pub fn new(start: EguiVerticalLine, end: EguiVerticalLine) -> Self {
+        let mut line = EguiLine::new(egui::Color32::from_rgb(0, 200, 0));
+        line.name = "Background Pair".to_string();
+        line.reference_fill = true;
+        line.fill = 0.0;
+        line.width = 0.0;
+        line.fill_alpha = 0.05;
+
+        line.points.push([start.x_value, 0.0]);
+        line.points.push([end.x_value, 0.0]);
+
+        Self {
+            start,
+            end,
+            histogram_line: line,
+        }
+    }
+
+    pub fn average_x(&self) -> f64 {
+        (self.start.x_value + self.end.x_value) / 2.0
+    }
+
+    pub fn draw(&mut self, plot_ui: &mut PlotUi) {
+        self.start.draw(plot_ui);
+        self.end.draw(plot_ui);
+        self.histogram_line.draw(plot_ui);
+    }
+
+    pub fn interactive_dragging(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
+        self.start.interactive_dragging(plot_response);
+        self.end.interactive_dragging(plot_response);
+    }
+
+    /// Updates the `histogram_line` to match the histogram bins within this background pair
+    pub fn update_histogram_line(&mut self, bin_edges: &[f64], bin_counts: &[u32]) {
+        let start_x = self.start.x_value;
+        let end_x = self.end.x_value;
+
+        let mut line_points = Vec::new();
+
+        for (i, &edge) in bin_edges.iter().enumerate() {
+            if edge >= start_x && edge <= end_x {
+                let y_value = if i < bin_counts.len() {
+                    bin_counts[i] as f64
+                } else {
+                    0.0
+                };
+                line_points.push([edge, y_value]);
+            }
+        }
+
+        // Ensure the last point is included at the end marker
+        if let Some(last_edge) = bin_edges.last() {
+            if *last_edge <= end_x {
+                let last_count = *bin_counts.last().unwrap_or(&0) as f64;
+                line_points.push([*last_edge, last_count]);
+            }
+        }
+
+        self.histogram_line.points = line_points;
+    }
 }
 
 impl FitMarkers {
@@ -22,7 +97,7 @@ impl FitMarkers {
     pub fn is_dragging(&self) -> bool {
         self.region_markers.iter().any(|m| m.is_dragging)
             || self.peak_markers.iter().any(|m| m.is_dragging)
-            || self.background_markers.iter().any(|m| m.is_dragging)
+            || self.background_markers.iter().any(|m| m.is_dragging())
     }
 
     pub fn add_region_marker(&mut self, x: f64) {
@@ -51,15 +126,21 @@ impl FitMarkers {
             .sort_by(|a, b| a.x_value.partial_cmp(&b.x_value).unwrap());
     }
 
-    pub fn add_background_marker(&mut self, x: f64) {
-        let mut marker = EguiVerticalLine::new(x, egui::Color32::from_rgb(0, 200, 0));
+    pub fn add_background_pair(&mut self, x: f64, bin_width: f64) {
+        let mut marker_start = EguiVerticalLine::new(x, egui::Color32::from_rgb(0, 200, 0));
+        let mut marker_end = EguiVerticalLine::new(x, egui::Color32::from_rgb(0, 200, 0));
 
-        marker.width = 0.5;
-        marker.name = format!("Background Marker (x={:.2})", x);
+        marker_start.width = 0.5;
+        marker_end.width = 0.5;
 
-        self.background_markers.push(marker);
-        self.background_markers
-            .sort_by(|a, b| a.x_value.partial_cmp(&b.x_value).unwrap());
+        marker_start.name = format!("Background Pair {} Start", self.background_markers.len());
+        marker_end.name = format!("Background Pair {} End", self.background_markers.len());
+
+        marker_start.x_value = x;
+        marker_end.x_value = x + bin_width;
+
+        let markers = BackgroundPair::new(marker_start, marker_end);
+        self.background_markers.push(markers);
     }
 
     pub fn clear_region_markers(&mut self) {
@@ -86,10 +167,16 @@ impl FitMarkers {
 
             all_markers.extend(self.region_markers.iter().map(|x| (x.x_value, "region")));
             all_markers.extend(self.peak_markers.iter().map(|x| (x.x_value, "peak")));
+            // all_markers.extend(
+            //     self.background_markers
+            //         .iter()
+            //         .map(|x| (x.x_value, "background")),
+            // );
+
             all_markers.extend(
                 self.background_markers
                     .iter()
-                    .map(|x| (x.x_value, "background")),
+                    .map(|x| (x.average_x(), "background")),
             );
 
             if let Some(&(closest_marker, marker_type)) =
@@ -103,7 +190,9 @@ impl FitMarkers {
                     "region" => Self::delete_marker(&mut self.region_markers, closest_marker),
                     "peak" => Self::delete_marker(&mut self.peak_markers, closest_marker),
                     "background" => {
-                        Self::delete_marker(&mut self.background_markers, closest_marker)
+                        // Self::delete_marker(&mut self.background_markers, closest_marker)
+                        self.background_markers
+                            .retain(|x| x.average_x() != closest_marker);
                     }
                     _ => {}
                 }
@@ -123,8 +212,12 @@ impl FitMarkers {
         Self::get_marker_positions(&self.peak_markers)
     }
 
-    pub fn get_background_marker_positions(&self) -> Vec<f64> {
-        Self::get_marker_positions(&self.background_markers)
+    pub fn get_background_marker_positions(&self) -> Vec<(f64, f64)> {
+        // Self::get_marker_positions(&self.background_markers)
+        self.background_markers
+            .iter()
+            .map(|m| (m.start.x_value, m.end.x_value))
+            .collect()
     }
 
     pub fn remove_peak_markers_outside_region(&mut self) {
@@ -184,7 +277,7 @@ impl FitMarkers {
                     ui.separator();
 
                     if ui.button("Background").clicked() {
-                        self.add_background_marker(self.manual_marker_position);
+                        self.add_background_pair(self.manual_marker_position, 1.0);
                     }
 
                     ui.separator();
@@ -233,8 +326,10 @@ impl FitMarkers {
                     marker.menu_button(ui);
                 }
 
-                for marker in &mut self.background_markers {
-                    marker.menu_button(ui);
+                for pair in &mut self.background_markers {
+                    pair.start.menu_button(ui);
+                    pair.end.menu_button(ui);
+                    pair.histogram_line.menu_button(ui);
                 }
             });
         });
