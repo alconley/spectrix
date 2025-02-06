@@ -62,7 +62,7 @@ impl EguiVerticalLine {
         }
     }
 
-    pub fn draw(&self, plot_ui: &mut PlotUi) {
+    pub fn draw(&self, plot_ui: &mut PlotUi<'_>) {
         if self.draw {
             let mut line = VLine::new(self.x_value)
                 .highlight(self.highlighted)

@@ -351,7 +351,7 @@ impl Fitter {
     }
 
     // Draw the background, decomposition, and composition lines
-    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi) {
+    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         for line in &self.decomposition_lines {
             line.draw(plot_ui);
         }

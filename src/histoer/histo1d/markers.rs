@@ -48,7 +48,7 @@ impl BackgroundPair {
         (self.start.x_value + self.end.x_value) / 2.0
     }
 
-    pub fn draw(&mut self, plot_ui: &mut PlotUi) {
+    pub fn draw(&mut self, plot_ui: &mut PlotUi<'_>) {
         self.start.draw(plot_ui);
         self.end.draw(plot_ui);
         self.histogram_line.draw(plot_ui);
@@ -232,7 +232,7 @@ impl FitMarkers {
         });
     }
 
-    pub fn draw_all_markers(&mut self, plot_ui: &mut PlotUi) {
+    pub fn draw_all_markers(&mut self, plot_ui: &mut PlotUi<'_>) {
         for marker in &mut self.background_markers {
             marker.draw(plot_ui);
         }

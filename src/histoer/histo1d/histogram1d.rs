@@ -119,36 +119,6 @@ impl Histogram {
         })
     }
 
-    // pub fn fit_background(&mut self) {
-    //     log::info!("Fitting background for histogram: {}", self.name);
-    //     self.fits.temp_fit = None;
-
-    //     let marker_positions = self.plot_settings.markers.get_background_marker_positions();
-    //     if marker_positions.len() < 2 {
-    //         log::error!("Need to set at least two background markers to fit the histogram");
-    //         return;
-    //     }
-
-    //     let (x_data, y_data): (Vec<f64>, Vec<f64>) = marker_positions
-    //         .iter()
-    //         .filter_map(|&pos| self.get_bin_count_and_center(pos))
-    //         .unzip();
-
-    //     let mut fitter = Fitter::new(Data {
-    //         x: x_data,
-    //         y: y_data,
-    //     });
-
-    //     fitter.background_model = self.fits.settings.background_model.clone();
-
-    //     fitter.fit_background();
-
-    //     fitter.name = format!("{} Temp Fit", self.name);
-    //     fitter.set_name(self.name.clone());
-
-    //     self.fits.temp_fit = Some(fitter);
-    // }
-
     pub fn fit_background(&mut self) {
         log::info!("Fitting background for histogram: {}", self.name);
         self.fits.temp_fit = None;
@@ -306,7 +276,7 @@ impl Histogram {
         }
     }
 
-    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         // update the histogram and fit lines with the log setting and draw
         let log_y = self.plot_settings.egui_settings.log_y;
         let log_x = self.plot_settings.egui_settings.log_x;
@@ -354,7 +324,7 @@ impl Histogram {
 
     pub fn draw_other_histograms(
         &mut self,
-        plot_ui: &mut egui_plot::PlotUi,
+        plot_ui: &mut egui_plot::PlotUi<'_>,
         histograms: &[Histogram],
     ) {
         for histogram in histograms {
@@ -363,7 +333,7 @@ impl Histogram {
         }
     }
 
-    pub fn limit_scrolling(&self, plot_ui: &mut egui_plot::PlotUi) {
+    pub fn limit_scrolling(&self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         let plot_bounds = plot_ui.plot_bounds();
 
         let current_x_min = plot_bounds.min()[0];

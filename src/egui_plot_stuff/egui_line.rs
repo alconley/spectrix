@@ -77,7 +77,7 @@ impl EguiLine {
         self.points.push([x, y]);
     }
 
-    pub fn draw(&self, plot_ui: &mut PlotUi) {
+    pub fn draw(&self, plot_ui: &mut PlotUi<'_>) {
         if self.draw {
             let plot_points: Vec<PlotPoint> = self
                 .points
@@ -200,7 +200,7 @@ impl EguiLine {
                             .map(|point| format!("{}, {}", point[0], point[1]))
                             .collect::<Vec<String>>()
                             .join("\n");
-                        ui.output_mut(|o| o.copied_text = points_str);
+                        ui.ctx().copy_text(points_str);
                     }
 
                     egui::ScrollArea::vertical().show(ui, |ui| {

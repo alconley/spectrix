@@ -153,7 +153,7 @@ impl EguiPolygon {
         self.vertices.clear();
     }
 
-    pub fn draw(&mut self, plot_ui: &mut PlotUi) {
+    pub fn draw(&mut self, plot_ui: &mut PlotUi<'_>) {
         if self.draw {
             // draw the temp vertex
             if let Some(temp_vertex) = &self.temp_vertex {

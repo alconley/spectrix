@@ -148,7 +148,7 @@ impl Histogram2D {
         self.image.get_texture(ui, color_image);
     }
 
-    fn limit_scrolling(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+    fn limit_scrolling(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         let plot_bounds = plot_ui.plot_bounds();
 
         let current_x_min = plot_bounds.min()[0];
@@ -189,7 +189,7 @@ impl Histogram2D {
     }
 
     // Draw the histogram on the plot
-    fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+    fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         self.show_stats(plot_ui);
 
         let heatmap_image = self.image.get_plot_image_from_texture();

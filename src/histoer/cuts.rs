@@ -424,7 +424,7 @@ impl Cut2D {
         polygon.contains(&point)
     }
 
-    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         self.polygon.draw(plot_ui);
     }
 

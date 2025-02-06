@@ -61,7 +61,7 @@ impl PlotSettings {
         ui.separator();
     }
 
-    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         for cut in &mut self.cuts {
             cut.draw(plot_ui);
         }

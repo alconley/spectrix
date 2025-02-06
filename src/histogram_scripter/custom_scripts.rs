@@ -287,7 +287,6 @@ pub struct PIPSTimeCuts {
     pub pips100: TimeCut,
 }
 
-
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct GammaGates {
     pub name: String,
@@ -306,7 +305,6 @@ impl GammaGates {
         )
     }
 }
-
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Cebr3 {
@@ -362,14 +360,13 @@ impl Cebr3 {
             }
             configs.hist1d(&format!("CeBrA/Cebra{}/Cebra{} Energy Calibrated", self.number, self.number), &format!("Cebra{}EnergyCalibrated", self.number), self.energy_calibration.range, self.energy_calibration.bins, None);
             configs.hist1d(&"CeBrA/CeBrA/Energy Calibrated", &format!("Cebra{}EnergyCalibrated", self.number), self.energy_calibration.range, self.energy_calibration.bins, None);
-        
+
             for gate in &self.gamma_gates {
                 // needs further devolopment
                 let cut = gate.create_1d_cut(self.number);
                 configs.cuts.add_cut(cut.clone());
                 // configs.hist1d(&format!("CeBrA/Cebra{}/Cebra{} Energy Calibrated {}", self.number, self.number, gate.name), &format!("Cebra{}EnergyCalibrated", self.number), self.energy_calibration.range, self.energy_calibration.bins, Some(Cuts::new(vec![cut])));
             }
-        
         }
 
         if sps_config.active {
@@ -1024,7 +1021,6 @@ impl PIPS {
 
                     let valid_time_cut = Cut::new_1d(&format!("Valid PIPS{} Cebra{} Time Cut", self.name, cebr3.number), &format!("PIPS{}Energy > 0.0 && Cebra{}Energy > 0.0", self.name, cebr3.number));
                     configs.cuts.add_cut(valid_time_cut.clone());
-                    
                     let tcut = Some(Cuts::new(vec![valid_time_cut.clone()]));
 
                     configs.hist1d(&format!("{}/PIPS{}TimeRelToCebra{}Time", base_path, self.name, cebr3.number), &format!("PIPS{}TimeRelToCebra{}Time", self.name, cebr3.number), cebr3.pips_timecuts.pips1000.no_cut_range, cebr3.pips_timecuts.pips1000.no_cut_bins, tcut.clone());

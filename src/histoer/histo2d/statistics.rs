@@ -90,7 +90,7 @@ impl Histogram2D {
     }
 
     // Show statistics on the plot
-    pub fn show_stats(&self, plot_ui: &mut egui_plot::PlotUi) {
+    pub fn show_stats(&self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         if !self.plot_settings.stats_info {
             return;
         }

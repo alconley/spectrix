@@ -143,7 +143,7 @@ impl Fits {
         self.temp_fit = None;
     }
 
-    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         self.apply_visibility_settings();
 
         if let Some(temp_fit) = &self.temp_fit {

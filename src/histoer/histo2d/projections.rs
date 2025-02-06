@@ -333,7 +333,7 @@ impl Projections {
         self.show_x_projection(ui);
     }
 
-    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         if self.add_y_projection {
             self.y_projection_line_1.draw(plot_ui);
             self.y_projection_line_2.draw(plot_ui);

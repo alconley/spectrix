@@ -115,7 +115,7 @@ impl EguiImage {
         }
     }
 
-    pub fn draw(&self, plot_ui: &mut PlotUi, mut image: PlotImage) {
+    pub fn draw(&self, plot_ui: &mut PlotUi<'_>, mut image: PlotImage) {
         image = image
             .highlight(self.highlighted)
             .uv(self.uv)

@@ -295,8 +295,14 @@ impl Histogrammer {
             })
             .collect();
 
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4) // choose a number lower than the total core count
+            .build()
+            .unwrap();
+
         // Spawn the batch processing task asynchronously
-        rayon::spawn({
+        // rayon::spawn({
+        pool.spawn({
             let calculating = Arc::clone(&calculating);
             let lf = Arc::clone(&lf); // Clone lf to move into the spawn closure
             let progress_bar = progress_bar.clone();

@@ -105,7 +105,6 @@ impl EguiPlotSettings {
             .allow_scroll(self.allow_scroll)
             .clamp_grid(self.clamp_grid)
             .show_grid(self.show_grid)
-            .sharp_grid_lines(self.sharp_grid_lines)
             .show_background(self.show_background)
             .auto_bounds(egui::Vec2b::new(true, true))
             .allow_double_click_reset(self.allow_double_click_reset)
@@ -153,7 +152,7 @@ impl EguiPlotSettings {
         plot
     }
 
-    pub fn reset_axis_lims(&mut self, plot_ui: &mut egui_plot::PlotUi) {
+    pub fn reset_axis_lims(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         if self.reset_axis {
             self.reset_axis = false;
             plot_ui.set_auto_bounds(egui::Vec2b::new(true, true));
