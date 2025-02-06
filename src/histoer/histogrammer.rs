@@ -295,14 +295,14 @@ impl Histogrammer {
             })
             .collect();
 
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(4) // choose a number lower than the total core count
-            .build()
-            .unwrap();
+        // let pool = rayon::ThreadPoolBuilder::new()
+        //     .num_threads(4) // choose a number lower than the total core count
+        //     .build()
+        //     .unwrap();
 
         // Spawn the batch processing task asynchronously
-        // rayon::spawn({
-        pool.spawn({
+        rayon::spawn({
+            // pool.spawn({
             let calculating = Arc::clone(&calculating);
             let lf = Arc::clone(&lf); // Clone lf to move into the spawn closure
             let progress_bar = progress_bar.clone();
@@ -337,6 +337,8 @@ impl Histogrammer {
                                     |(index, value)| {
                                         if value != -1e6 && meta.cuts.valid(&df, index) {
                                             hist.fill(value);
+                                        }
+                                        if index == height || index == 0 {
                                             hist.plot_settings.egui_settings.reset_axis = true;
                                         }
                                     },
@@ -359,21 +361,16 @@ impl Histogrammer {
                                         if x != -1e6 && y != -1e6 && meta.cuts.valid(&df, index) {
                                             hist.fill(x, y);
                                         }
+                                        if index == height {
+                                            hist.plot_settings.recalculate_image = true;
+                                            hist.plot_settings.egui_settings.reset_axis = true;
+                                            hist.plot_settings.x_column =
+                                                meta.x_column_name.clone();
+                                            hist.plot_settings.y_column =
+                                                meta.y_column_name.clone();
+                                        }
                                     });
                             }
-                        });
-
-                        hist2d_map.par_iter().for_each(|(hist, meta)| {
-                            let mut hist = hist.lock().unwrap();
-                            hist.plot_settings.recalculate_image = true;
-                            hist.plot_settings.egui_settings.reset_axis = true;
-                            hist.plot_settings.x_column = meta.x_column_name.clone();
-                            hist.plot_settings.y_column = meta.y_column_name.clone();
-                        });
-
-                        hist1d_map.par_iter().for_each(|(hist, _)| {
-                            let mut hist = hist.lock().unwrap();
-                            hist.plot_settings.egui_settings.reset_axis = true;
                         });
 
                         progress_bar.inc(height as u64);

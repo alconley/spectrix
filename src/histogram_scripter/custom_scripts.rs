@@ -1057,7 +1057,7 @@ impl PIPS {
                         let tcut = Some(Cuts::new(vec![pips_cebra_tcut.clone(), valid_time_cut.clone()]));
 
                         configs.hist1d(&format!("{}/Time Cut/PIPS{}TimeRelToCebra{}TimeShifted", base_path, self.name, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), time_range, time_bins, tcut.clone());
-                        configs.hist1d(&format!("ICESPICE/PIPS{}/Time Cut - PIPS{}TimeRelToCeBrA", self.name, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), time_range, time_bins, tcut.clone());
+                        configs.hist1d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut - PIPS{}TimeRelToCeBrA", self.name, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), time_range, time_bins, tcut.clone());
 
                         configs.hist2d(&format!("{}/Time Cut/PIPS{}Energy v Cebra{}Energy", base_path, self.name, cebr3.number), &cebr3_energy, &energy, cebr3_range, pips_range, (cebr3_bins, pips_bins), tcut.clone());
                         configs.hist2d(&format!("{}/Time Cut/PIPS{}RelToCebra{}Shifted v Cebra{}Energy", base_path, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy, time_range, cebr3_range, (time_bins, cebr3_bins), tcut.clone());
@@ -1071,7 +1071,7 @@ impl PIPS {
                         }
                         if cebr3.energy_calibration.active {
                             configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}TimeRelToCebra{}TimeShifted v Cebra{}EnergyCalibrated", base_path, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated, time_range, cebr3.energy_calibration.range, (time_bins, cebr3.energy_calibration.bins), tcut.clone());
-                            configs.hist2d(&format!("ICESPICE/PIPS{}/Time Cut - PIPS{}TimeRelToCeBrA v CeBrA", base_path, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated, time_range, cebr3.energy_calibration.range, (time_bins, cebr3.energy_calibration.bins), tcut.clone());
+                            configs.hist2d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut - PIPS{}TimeRelToCeBrA v CeBrA", self.name, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated, time_range, cebr3.energy_calibration.range, (time_bins, cebr3.energy_calibration.bins), tcut.clone());
 
                         }
                     }
