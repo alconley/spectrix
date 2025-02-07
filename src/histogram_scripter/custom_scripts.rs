@@ -441,7 +441,7 @@ impl Default for CeBrAConfig {
         Self {
             active: false,
             // 9 detectors
-            detectors: (0..9).map(|i| Cebr3::new(i)).collect(),
+            detectors: (0..9).map(Cebr3::new).collect(),
         }
     }
 }
@@ -1230,21 +1230,11 @@ impl ICESPICEConfig {
 }
 
 /*************************** SE-SPS Custom Struct ***************************/
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Default, Clone, serde::Deserialize, serde::Serialize)]
 pub struct SPSConfig {
     active: bool,
     xavg: Calibration,
     cuts: Cuts,
-}
-
-impl Default for SPSConfig {
-    fn default() -> Self {
-        Self {
-            active: false,
-            xavg: Calibration::default(),
-            cuts: Cuts::default(),
-        }
-    }
 }
 
 impl SPSConfig {

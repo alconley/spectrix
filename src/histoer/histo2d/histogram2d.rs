@@ -104,36 +104,29 @@ impl Histogram2D {
         Some(bin_index)
     }
 
-    // Convert histogram data to a ColorImage in parallel using Rayon
     fn data_2_image(&self) -> egui::ColorImage {
         let width = ((self.range.x.max - self.range.x.min) / self.bins.x_width) as usize;
         let height = ((self.range.y.max - self.range.y.min) / self.bins.y_width) as usize;
-
         let colormap_options = self.plot_settings.colormap_options;
 
-        // Parallelize over rows, and for each row, compute pixel colors for all columns
-        let pixels: Vec<_> = (0..height)
-            .into_par_iter()
-            .map(|y| {
-                (0..width)
-                    .map(|x| {
-                        let count = self
-                            .bins
-                            .counts
-                            .get(&(x, height - y - 1))
-                            .cloned()
-                            .unwrap_or(0);
-                        self.plot_settings.colormap.color(
-                            count,
-                            self.bins.min_count,
-                            self.bins.max_count,
-                            colormap_options,
-                        )
-                    })
-                    .collect::<Vec<_>>() // Collect each row as a `Vec<Color32>`
-            })
-            .flatten() // Flatten the rows into a single Vec<Color32> for pixels
-            .collect();
+        // Preallocate a flat buffer for the pixel data.
+        let total_pixels = width * height;
+        let mut pixels = vec![egui::Color32::default(); total_pixels];
+
+        // Fill the pixel buffer in parallel.
+        pixels.par_iter_mut().enumerate().for_each(|(i, pixel)| {
+            // Compute the 2D coordinate.
+            // (x, y) where we reverse the y coordinate so that y=0 is at the bottom.
+            let x = i % width;
+            let y = height - 1 - (i / width);
+            let count = self.bins.counts.get(&(x, y)).cloned().unwrap_or(0);
+            *pixel = self.plot_settings.colormap.color(
+                count,
+                self.bins.min_count,
+                self.bins.max_count,
+                colormap_options,
+            );
+        });
 
         egui::ColorImage {
             size: [width, height],
