@@ -329,50 +329,6 @@ impl Histogrammer {
                     if let Ok(df) = batch_lf.collect() {
                         let height = df.height();
 
-                        // // Fill 1D histograms in parallel
-                        // hist1d_map.par_iter().for_each(|(hist, meta)| {
-                        //     if let Ok(column) = df.column(&meta.column_name).and_then(|c| c.f64()) {
-                        //         let mut hist = hist.lock().unwrap();
-                        //         column.into_no_null_iter().enumerate().for_each(
-                        //             |(index, value)| {
-                        //                 if value != -1e6 && meta.cuts.valid(&df, index) {
-                        //                     hist.fill(value);
-                        //                 }
-                        //                 if index == height || index == 0 {
-                        //                     hist.plot_settings.egui_settings.reset_axis = true;
-                        //                 }
-                        //             },
-                        //         );
-                        //     }
-                        // });
-
-                        // // Fill 2D histograms in parallel
-                        // hist2d_map.par_iter().for_each(|(hist, meta)| {
-                        //     if let (Ok(x_col), Ok(y_col)) = (
-                        //         df.column(&meta.x_column_name).and_then(|c| c.f64()),
-                        //         df.column(&meta.y_column_name).and_then(|c| c.f64()),
-                        //     ) {
-                        //         let mut hist = hist.lock().unwrap();
-                        //         x_col
-                        //             .into_no_null_iter()
-                        //             .zip(y_col.into_no_null_iter())
-                        //             .enumerate()
-                        //             .for_each(|(index, (x, y))| {
-                        //                 if x != -1e6 && y != -1e6 && meta.cuts.valid(&df, index) {
-                        //                     hist.fill(x, y);
-                        //                 }
-                        //                 if index == height {
-                        //                     hist.plot_settings.recalculate_image = true;
-                        //                     hist.plot_settings.egui_settings.reset_axis = true;
-                        //                     hist.plot_settings.x_column =
-                        //                         meta.x_column_name.clone();
-                        //                     hist.plot_settings.y_column =
-                        //                         meta.y_column_name.clone();
-                        //                 }
-                        //             });
-                        //     }
-                        // });
-
                         // --- Process 1D histograms ---
                         hist1d_map.par_iter().for_each(|(hist, meta)| {
                             if let Ok(column) = df.column(&meta.column_name).and_then(|c| c.f64()) {

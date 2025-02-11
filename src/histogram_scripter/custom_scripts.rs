@@ -964,7 +964,14 @@ impl Default for PIPS {
         Self {
             name: "1000".to_string(),
             sps_timecut: TimeCut::default(),
-            energy_calibration: Calibration::default(),
+            energy_calibration: Calibration {
+                a: 0.0,
+                b: 1.0,
+                c: 0.0,
+                active: false,
+                range: (0.0, 2000.0),
+                bins: 2000,
+            },
             active: false,
             range: (0.0, 4096.0),
             bins: 512,
@@ -986,7 +993,7 @@ impl PIPS {
 
     #[rustfmt::skip]
     #[allow(clippy::all)]
-    pub fn configs(&self, cebra_config: CeBrAConfig, _sps_config: &mut SPSConfig) -> Configs {
+    pub fn configs(&self, cebra_config: CeBrAConfig, sps_config: &mut SPSConfig) -> Configs {
         let mut configs = Configs::default();
 
         let pips_range = self.range;
@@ -1001,6 +1008,7 @@ impl PIPS {
         if self.energy_calibration.active {
             configs.columns.push(self.energy_calibration.new_column(&energy, &format!("PIPS{}EnergyCalibrated", self.name)));
             configs.hist1d(&format!("ICESPICE/PIPS{}/PIPS{}EnergyCalibrated", self.name, self.name), &format!("PIPS{}EnergyCalibrated", self.name), self.energy_calibration.range, self.energy_calibration.bins, None);
+            configs.hist1d(&format!("ICESPICE/PIPS/PIPSEnergyCalibrated"), &format!("PIPS{}EnergyCalibrated", self.name), self.energy_calibration.range, self.energy_calibration.bins, None);
         }
 
         if cebra_config.active {
@@ -1062,23 +1070,48 @@ impl PIPS {
                         configs.hist2d(&format!("{}/Time Cut/PIPS{}Energy v Cebra{}Energy", base_path, self.name, cebr3.number), &cebr3_energy, &energy, cebr3_range, pips_range, (cebr3_bins, pips_bins), tcut.clone());
                         configs.hist2d(&format!("{}/Time Cut/PIPS{}RelToCebra{}Shifted v Cebra{}Energy", base_path, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy, time_range, cebr3_range, (time_bins, cebr3_bins), tcut.clone());
                         // energy calibrated histograms
-                        if self.energy_calibration.active {
+                        if self.energy_calibration.active & !cebr3.energy_calibration.active {
                             configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}Energy", base_path, self.name, cebr3.number), &cebr3_energy, &energy_calibrated, cebr3_range, self.energy_calibration.range, (cebr3_bins, self.energy_calibration.bins), tcut.clone());
-                        }
-                        if cebr3.energy_calibration.active & self.energy_calibration.active {
+                        } else if cebr3.energy_calibration.active & self.energy_calibration.active {
                             configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}EnergyCalibrated", base_path, self.name, cebr3.number), &cebr3_energy_calibrated, &energy_calibrated, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), tcut.clone());
                             configs.hist2d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut- PIPS{}EnergyCalibrated v CeBrA", self.name, self.name), &cebr3_energy_calibrated, &energy_calibrated, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), tcut.clone());
                         }
                         if cebr3.energy_calibration.active {
                             configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}TimeRelToCebra{}TimeShifted v Cebra{}EnergyCalibrated", base_path, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated, time_range, cebr3.energy_calibration.range, (time_bins, cebr3.energy_calibration.bins), tcut.clone());
                             configs.hist2d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut - PIPS{}TimeRelToCeBrA v CeBrA", self.name, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated, time_range, cebr3.energy_calibration.range, (time_bins, cebr3.energy_calibration.bins), tcut.clone());
-
                         }
                     }
                 }
             }
 
         }
+
+        if sps_config.active {
+            let rel_time_column = format!("PIPS{}RelTime", self.name); // PIPS{}Time - ScintLeftTime -> Column is made in the eventbuilder with the anode condition too
+            let pips_energy = format!("PIPS{}Energy", self.name);
+
+            // rel time histogram
+            configs.hist1d(&format!("ICESPICE/PIPS{}/SPS/PIPS{}RelTime", self.name, self.name), &rel_time_column, self.sps_timecut.no_cut_range, self.sps_timecut.no_cut_bins, None);
+
+            // rel time vs xavg
+            configs.hist2d(&format!("ICESPICE/PIPS{}/SPS/PIPS{}RelTime v Xavg", self.name, self.name), &rel_time_column, &format!("Xavg"), self.sps_timecut.no_cut_range, (-300.0, 300.0), (self.sps_timecut.no_cut_bins, 600), None);
+
+            // pips energy vs xavg
+            configs.hist2d(&format!("ICESPICE/PIPS{}/SPS/PIPS{}Energy v Xavg", self.name, self.name), &format!("Xavg"), &pips_energy,(-300.0, 300.0), pips_range, (pips_bins, 600), None);
+
+            if sps_config.xavg.active {
+                // rel time vs xavg energy calibrated
+                configs.hist2d(&format!("ICESPICE/PIPS{}/SPS/PIPS{}RelTime v XavgEnergyCalibrated", self.name, self.name), &rel_time_column, &format!("XavgEnergyCalibrated"), self.sps_timecut.no_cut_range, sps_config.xavg.range, (self.sps_timecut.no_cut_bins, sps_config.xavg.bins), None);
+
+                // pips energy vs xavg energy calibrated
+                configs.hist2d(&format!("ICESPICE/PIPS{}/SPS/PIPS{}Energy v XavgEnergyCalibrated", self.name, self.name), &format!("XavgEnergyCalibrated"), &pips_energy, sps_config.xavg.range, pips_range, (pips_bins, sps_config.xavg.bins), None);
+            }
+
+            // if self.energy_calibration.active {
+
+            // }
+        }
+
 
         configs
     }
