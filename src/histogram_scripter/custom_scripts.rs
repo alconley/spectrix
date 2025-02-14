@@ -140,7 +140,7 @@ impl Default for Calibration {
 }
 
 impl Calibration {
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, bins: bool) {
         ui.horizontal(|ui| {
             if self.active {
                 ui.horizontal(|ui| {
@@ -149,25 +149,27 @@ impl Calibration {
                     ui.add(egui::DragValue::new(&mut self.c).speed(0.01).prefix("c: "));
                 });
 
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut self.bins)
-                            .speed(1)
-                            .prefix("Bins: "),
-                    );
-                    ui.add(
-                        egui::DragValue::new(&mut self.range.0)
-                            .speed(1)
-                            .prefix("Range: (")
-                            .suffix(", "),
-                    );
-                    ui.add(
-                        egui::DragValue::new(&mut self.range.1)
-                            .speed(1)
-                            .suffix(") [keV]"),
-                    );
-                });
+                if bins {
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut self.bins)
+                                .speed(1)
+                                .prefix("Bins: "),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut self.range.0)
+                                .speed(1)
+                                .prefix("Range: (")
+                                .suffix(", "),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut self.range.1)
+                                .speed(1)
+                                .suffix(") [keV]"),
+                        );
+                    });
+                }
 
                 // ui.label(format!(
                 //     "keV/bin: {:.2}",
@@ -1126,29 +1128,8 @@ impl PIPS {
             // collapsing header
             ui.collapsing(format!("PIPS{}", self.name), |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Default Histogram Values:");
-                    ui.add(
-                        egui::DragValue::new(&mut self.range.0)
-                            .speed(1.0)
-                            .prefix("Range: ("),
-                    );
-                    ui.add(
-                        egui::DragValue::new(&mut self.range.1)
-                            .speed(1.0)
-                            .suffix(")"),
-                    );
-
-                    ui.separator();
-
-                    ui.add(
-                        egui::DragValue::new(&mut self.bins)
-                            .speed(1)
-                            .prefix("Bins: "),
-                    );
-                });
-                ui.horizontal(|ui| {
                     ui.label("Energy Calibration: ");
-                    self.energy_calibration.ui(ui);
+                    self.energy_calibration.ui(ui, false);
                 });
 
                 if sps_config.active {
@@ -1227,6 +1208,88 @@ impl ICESPICEConfig {
             ui.checkbox(&mut self.pips100.active, "PIPS100");
         });
 
+        // Default Histogram Values
+        ui.horizontal(|ui| {
+            ui.label("Default Histogram Values:");
+            ui.add(
+                egui::DragValue::new(&mut self.pips1000.range.0)
+                    .speed(1.0)
+                    .prefix("Range: ("),
+            );
+            ui.add(
+                egui::DragValue::new(&mut self.pips1000.range.1)
+                    .speed(1.0)
+                    .suffix(")"),
+            );
+
+            ui.add(
+                egui::DragValue::new(&mut self.pips1000.bins)
+                    .speed(1)
+                    .prefix("Bins: "),
+            );
+
+            // set the other pips detectors to the same range and bins
+            self.pips500.range = self.pips1000.range;
+            self.pips500.bins = self.pips1000.bins;
+
+            self.pips300.range = self.pips1000.range;
+            self.pips300.bins = self.pips1000.bins;
+
+            self.pips100.range = self.pips1000.range;
+            self.pips100.bins = self.pips1000.bins;
+        });
+
+        // Energy Calibration Values
+        ui.horizontal(|ui| {
+            ui.label("Energy Calibration Values:");
+            ui.add(
+                egui::DragValue::new(&mut self.pips1000.energy_calibration.range.0)
+                    .speed(1.0)
+                    .prefix("Range: ("),
+            );
+            ui.add(
+                egui::DragValue::new(&mut self.pips1000.energy_calibration.range.1)
+                    .speed(1.0)
+                    .suffix(")"),
+            );
+
+            ui.add(
+                egui::DragValue::new(&mut self.pips1000.energy_calibration.bins)
+                    .speed(1)
+                    .prefix("Bins: "),
+            );
+
+            // set the other pips detectors to the same range and bins
+            self.pips500.energy_calibration.range = self.pips1000.energy_calibration.range;
+            self.pips500.energy_calibration.bins = self.pips1000.energy_calibration.bins;
+
+            self.pips300.energy_calibration.range = self.pips1000.energy_calibration.range;
+            self.pips300.energy_calibration.bins = self.pips1000.energy_calibration.bins;
+
+            self.pips100.energy_calibration.range = self.pips1000.energy_calibration.range;
+            self.pips100.energy_calibration.bins = self.pips1000.energy_calibration.bins;
+        });
+
+        // CeBrA Time Cut Values
+        if cebra_config.active {
+            for cebr3 in &mut cebra_config.detectors {
+                if cebr3.active {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Cebra{} Time Cut Values:", cebr3.number));
+                        if self.pips1000.active {
+                            cebr3.pips_timecuts.pips1000.ui(ui);
+                        } else if self.pips500.active {
+                            cebr3.pips_timecuts.pips500.ui(ui);
+                        } else if self.pips300.active {
+                            cebr3.pips_timecuts.pips300.ui(ui);
+                        } else if self.pips100.active {
+                            cebr3.pips_timecuts.pips100.ui(ui);
+                        }
+                    });
+                }
+            }
+        }
+
         ui.separator();
 
         self.pips1000.ui(ui, cebra_config, sps_config);
@@ -1282,7 +1345,7 @@ impl SPSConfig {
 
         ui.horizontal(|ui| {
             ui.label("Xavg: ");
-            self.xavg.ui(ui);
+            self.xavg.ui(ui, true);
         });
         ui.separator();
 
