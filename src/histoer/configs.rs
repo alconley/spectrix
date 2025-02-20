@@ -23,12 +23,12 @@ impl Configs {
         column_name: &str,
         range: (f64, f64),
         bins: usize,
-        cuts: Option<Cuts>,
+        cuts: &Option<Cuts>,
     ) {
         let mut config = Hist1DConfig::new(name, column_name, range, bins);
 
         if let Some(cuts) = cuts {
-            config.cuts = cuts;
+            config.cuts = cuts.clone();
         }
 
         self.configs.push(Config::Hist1D(config))
@@ -43,13 +43,13 @@ impl Configs {
         x_range: (f64, f64),
         y_range: (f64, f64),
         bins: (usize, usize),
-        cuts: Option<Cuts>,
+        cuts: &Option<Cuts>,
     ) {
         let mut config =
             Hist2DConfig::new(name, x_column_name, y_column_name, x_range, y_range, bins);
 
         if let Some(cuts) = cuts {
-            config.cuts = cuts;
+            config.cuts = cuts.clone();
         }
 
         self.configs.push(Config::Hist2D(config));
