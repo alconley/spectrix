@@ -5,6 +5,7 @@ use pyo3::{prelude::*, types::PyModule};
 use egui_file_dialog::FileDialog;
 use polars::prelude::*;
 
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -30,7 +31,7 @@ impl Default for ProcessorSettings {
 pub struct Processor {
     #[serde(skip)]
     pub file_dialog: FileDialog,
-    pub selected_files: Vec<std::path::PathBuf>,
+    pub selected_files: Vec<(PathBuf, bool)>, // Vec preserves order
     #[serde(skip)]
     pub lazyframe: Option<LazyFrame>,
     pub histogrammer: Histogrammer,
@@ -62,7 +63,7 @@ impl Processor {
         *self = Self::new();
     }
 
-    pub fn get_histograms_from_root_files(&mut self) -> PyResult<()> {
+    pub fn get_histograms_from_root_files(&mut self, checked_files: &[PathBuf]) -> PyResult<()> {
         // python3 -m venv .venv
         // source .venv/bin/activate
         // export PYO3_PYTHON=$(pwd)/.venv/bin/python
@@ -159,11 +160,10 @@ def get_2d_histograms(file_name):
                         e
                     })?;
 
-            let root_files = self
-                .selected_files
+            let root_files: Vec<_> = checked_files
                 .iter()
-                .filter(|file| file.extension().unwrap() == "root")
-                .collect::<Vec<_>>();
+                .filter(|file| file.extension().map_or(false, |ext| ext == "root"))
+                .collect();
 
             for file in root_files.iter() {
                 let file_name = file.to_str().unwrap();
@@ -258,28 +258,27 @@ def get_2d_histograms(file_name):
         })
     }
 
-    fn create_lazyframe(&mut self) {
-        // get all the parquet files from the selected files
-        let parquet_files: Vec<std::path::PathBuf> = self
-            .selected_files
+    fn create_lazyframe(&mut self, checked_files: &[PathBuf]) {
+        // Get all the checked parquet files
+        let parquet_files: Vec<PathBuf> = checked_files
             .iter()
-            .filter(|file| file.extension().unwrap() == "parquet")
+            .filter(|file| file.extension().map_or(false, |ext| ext == "parquet"))
             .cloned()
             .collect();
 
-        // warn if no parquet files are selected
+        // Warn if no checked parquet files are selected
         if parquet_files.is_empty() {
-            log::warn!("No Parquet files selected.");
+            log::warn!("No selected Parquet files to process.");
             return;
         }
 
-        let files_arc: Arc<[std::path::PathBuf]> = Arc::from(parquet_files);
+        let files_arc: Arc<[PathBuf]> = Arc::from(parquet_files);
         let args = ScanArgsParquet::default();
-        log::info!("Files {:?}", files_arc);
+        log::info!("Processing Parquet files: {:?}", files_arc);
 
         match LazyFrame::scan_parquet_files(files_arc, args) {
             Ok(lf) => {
-                log::info!("Loaded Parquet files");
+                log::info!("Successfully loaded selected Parquet files.");
                 let column_names = Self::get_column_names_from_lazyframe(&lf);
 
                 self.lazyframe = Some(lf);
@@ -287,7 +286,7 @@ def get_2d_histograms(file_name):
             }
             Err(e) => {
                 self.lazyframe = None; // Indicates that loading failed
-                log::error!("Failed to load Parquet files: {}", e);
+                log::error!("Failed to load selected Parquet files: {}", e);
             }
         }
     }
@@ -321,28 +320,35 @@ def get_2d_histograms(file_name):
     }
 
     pub fn calculate_histograms(&mut self) {
-        // Check if the files are Parquet files
-        if self
+        let checked_files: Vec<_> = self
             .selected_files
             .iter()
-            .any(|file| match file.extension() {
-                Some(ext) => ext == "parquet",
-                None => false,
-            })
+            .filter(|(_, checked)| *checked)
+            .map(|(file, _)| file.clone())
+            .collect();
+
+        if checked_files.is_empty() {
+            log::error!("No files selected for histogram calculation.");
+            return;
+        }
+
+        // Check if any of the selected files are Parquet files
+        if checked_files
+            .iter()
+            .any(|file| file.extension().map_or(false, |ext| ext == "parquet"))
         {
-            self.create_lazyframe();
+            self.create_lazyframe(&checked_files);
             self.perform_histogrammer_from_lazyframe();
         }
-        // Check if the files are ROOT files
-        else if self
-            .selected_files
+        // Check if any of the selected files are ROOT files
+        else if checked_files
             .iter()
-            .any(|file| match file.extension() {
-                Some(ext) => ext == "root",
-                None => false,
-            })
+            .any(|file| file.extension().map_or(false, |ext| ext == "root"))
         {
-            let _ = self.get_histograms_from_root_files();
+            self.get_histograms_from_root_files(&checked_files)
+                .unwrap_or_else(|e| {
+                    log::error!("Error processing ROOT files: {:?}", e);
+                });
         }
         // No valid files selected
         else {
@@ -356,17 +362,45 @@ def get_2d_histograms(file_name):
             self.settings.left_panel_open,
             |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Get Files").clicked() {
-                        self.file_dialog.pick_multiple();
-                    }
 
-                    if let Some(files) = self.file_dialog.take_picked_multiple() {
-                        self.selected_files.extend(files.clone());
-
-                        if let Some(path) = files.first() {
-                            self.file_dialog =
-                                FileDialog::new().initial_directory(path.to_path_buf());
+                    ui.vertical(|ui| {
+                        if ui.button("Get Files").clicked() {
+                            self.file_dialog.pick_multiple();
                         }
+
+                        if ui
+                            .selectable_label(self.settings.histogram_script_open, "Histograms")
+                            .clicked()
+                            {
+                                self.settings.histogram_script_open = !self.settings.histogram_script_open;
+                            }
+                    });
+
+
+                    if let Some(paths) = self.file_dialog.take_picked_multiple() {
+                        for path in paths {
+                            if path.is_dir() {
+                                self.file_dialog = FileDialog::new().initial_directory(path.to_path_buf());
+                                if let Ok(entries) = std::fs::read_dir(&path) {
+                                    for entry in entries.flatten() {
+                                        let file_path = entry.path();
+                                        if let Some(ext) = file_path.extension() {
+                                            if (ext == "parquet" || ext == "root") && !self.selected_files.iter().any(|(f, _)| f == &file_path) {
+                                                self.selected_files.push((file_path, true)); // Default to selected
+                                            }
+                                        }
+                                    }
+                                }
+                            } else if let Some(ext) = path.extension() {
+                                // If it's a file, check if it's a valid type
+                                if (ext == "parquet" || ext == "root") && !self.selected_files.iter().any(|(f, _)| f == &path) {
+                                    self.selected_files.push((path, true)); // Default to selected
+                                }
+                            }
+                        }
+
+                        // Sort the selected files by name
+                        self.selected_files.sort_by(|a, b| a.0.cmp(&b.0));
                     }
 
                     ui.separator();
@@ -406,28 +440,69 @@ def get_2d_histograms(file_name):
                             });
                         }
                     });
-                    ui.separator();
-
-                    if ui
-                        .selectable_label(self.settings.histogram_script_open, "Histograms")
-                        .clicked()
-                    {
-                        self.settings.histogram_script_open = !self.settings.histogram_script_open;
-                    }
                 });
 
                 ui.separator();
 
                 ui.label("Selected files:");
-                if ui.button("Clear").clicked() {
-                    self.selected_files.clear();
-                }
-                // scrollable list of selected files
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for file in self.selected_files.iter() {
-                        ui.label(file.to_str().unwrap());
+                ui.horizontal(|ui| {
+                    if ui.button("De/Select All").clicked() {
+                        let all_selected = self.selected_files.iter().all(|(_, checked)| *checked);
+                        for (_, checked) in self.selected_files.iter_mut() {
+                            *checked = !all_selected;
+                        }
+                    }
+                    if ui.button("Clear").clicked() {
+                        self.selected_files.clear();
                     }
                 });
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if !self.selected_files.is_empty() {
+                        // Clone the paths beforehand to avoid borrowing conflicts
+                        let file_parents: Vec<_> = self.selected_files.iter()
+                            .filter_map(|(file, _)| file.parent().map(|p| p.to_path_buf()))
+                            .collect();
+                        // Check if all parent directories are the same
+                        let common_path = file_parents
+                            .first()
+                            .filter(|&first_path| file_parents.iter().all(|p| p == first_path))
+                            .cloned();
+                        // Show common directory label if applicable
+                        if let Some(ref common_dir) = common_path {
+                            ui.separator();
+                            ui.label(format!("Directory: {}", common_dir.to_string_lossy())); // Show common directory
+                        }
+                        // Track indices of files to remove
+                        let mut to_remove = Vec::new();
+                        // Iterate over files and track index
+                        for (index, (file, checked)) in self.selected_files.iter_mut().enumerate() {
+                            ui.horizontal(|ui| {
+                                let display_text = if let Some(ref common_dir) = common_path {
+                                    if file.parent() == Some(common_dir.as_path()) {
+                                        file.file_name().unwrap_or_default().to_string_lossy() // Show only filename
+                                    } else {
+                                        file.to_string_lossy() // Show full path for outliers
+                                    }
+                                } else {
+                                    file.to_string_lossy() // Show full path if no common directory
+                                };
+                                if ui.selectable_label(*checked, display_text).clicked() {
+                                    *checked = !*checked; // Toggle selection
+                                }
+                                // "❌" button to mark for removal
+                                if ui.button("❌").clicked() {
+                                    to_remove.push(index);
+                                }
+                            });
+                        }
+                        // Remove files after iteration (to avoid borrowing issues)
+                        for &index in to_remove.iter().rev() {
+                            self.selected_files.remove(index);
+                        }
+                    }
+                });
+
             },
         );
 

@@ -77,17 +77,15 @@ impl SPSConfig {
             configs.columns.push(self.xavg.new_column("Xavg", "XavgEnergyCalibrated"));
         }
 
-        let mut cuts = Cuts::default();
-
         let bothplanes_cut = Cut::new_1d("Both Planes", "X2 != -1e6 && X1 != -1e6");
         let only_x1_plane_cut = Cut::new_1d("Only X1 Plane", "X1 != -1e6 && X2 == -1e6");
         let only_x2_plane_cut = Cut::new_1d("Only X2 Plane", "X2 != -1e6 && X1 == -1e6");
         let valid_sps_timing = Cut::new_1d("Valid SPS Timing", "AnodeBackTime != -1e6 && ScintLeftTime != -1e6");
 
-        cuts.add_cut(bothplanes_cut.clone());
-        cuts.add_cut(only_x1_plane_cut.clone());
-        cuts.add_cut(only_x2_plane_cut.clone());
-        cuts.add_cut(valid_sps_timing.clone());
+        configs.cuts.add_cut(bothplanes_cut.clone());
+        configs.cuts.add_cut(only_x1_plane_cut.clone());
+        configs.cuts.add_cut(only_x2_plane_cut.clone());
+        configs.cuts.add_cut(valid_sps_timing.clone());
 
 
         // Typical 1d cuts for SPS
@@ -251,9 +249,6 @@ impl SPSConfig {
             configs.hist1d(&format!("{base_path}/Timing/Only X2 Plane/DelayBackLeftTime-AnodeBackTime"), "DelayBackLeftTime_AnodeBackTime", (-4000.0, 4000.0), 8000, &cut_only_x2_plane);
             configs.hist1d(&format!("{base_path}/Timing/Only X2 Plane/DelayBackRightTime-AnodeBackTime"), "DelayBackRightTime_AnodeBackTime", (-4000.0, 4000.0), 8000, &cut_only_x2_plane);
         }
-
-        configs.cuts = cuts;
-
         configs
     }
 }

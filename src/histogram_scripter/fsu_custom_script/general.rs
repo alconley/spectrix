@@ -6,7 +6,6 @@ pub struct Calibration {
     pub bins: usize,
     pub range: (f64, f64),
     pub active: bool,
-    pub original_column: String,
 }
 
 impl Default for Calibration {
@@ -18,24 +17,11 @@ impl Default for Calibration {
             bins: 512,
             range: (0.0, 4096.0),
             active: false,
-            original_column: "energy".to_string(),
         }
     }
 }
 
 impl Calibration {
-    pub fn new(original_column: &str) -> Self {
-        Self {
-            a: 0.0,
-            b: 1.0,
-            c: 0.0,
-            bins: 512,
-            range: (0.0, 4096.0),
-            active: false,
-            original_column: original_column.to_string(),
-        }
-    }
-
     pub fn ui(&mut self, ui: &mut egui::Ui, bins: bool) {
         ui.horizontal(|ui| {
             if self.active {
@@ -59,18 +45,9 @@ impl Calibration {
                                 .prefix("Range: (")
                                 .suffix(", "),
                         );
-                        ui.add(
-                            egui::DragValue::new(&mut self.range.1)
-                                .speed(1)
-                                .suffix(") [keV]"),
-                        );
+                        ui.add(egui::DragValue::new(&mut self.range.1).speed(1).suffix(")"));
                     });
                 }
-
-                // ui.label(format!(
-                //     "keV/bin: {:.2}",
-                //     (self.range.1 - self.range.0) / self.bins as f64
-                // ));
             }
             ui.checkbox(&mut self.active, "Active");
         });

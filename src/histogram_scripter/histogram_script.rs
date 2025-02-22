@@ -75,7 +75,11 @@ impl HistogramScript {
 
             ui.separator();
 
-            self.custom_scripts.ui(ui);
+            egui::CollapsingHeader::new("Custom")
+                .default_open(false)
+                .show(ui, |ui| {
+                    self.custom_scripts.ui(ui);
+                });
         });
     }
 
