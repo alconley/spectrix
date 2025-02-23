@@ -262,7 +262,7 @@ def get_2d_histograms(file_name):
         // Get all the checked parquet files
         let parquet_files: Vec<PathBuf> = checked_files
             .iter()
-            .filter(|file| file.extension().map_or(false, |ext| ext == "parquet"))
+            .filter(|file| file.extension().is_some_and(|ext| ext == "parquet"))
             .cloned()
             .collect();
 
@@ -335,7 +335,7 @@ def get_2d_histograms(file_name):
         // Check if any of the selected files are Parquet files
         if checked_files
             .iter()
-            .any(|file| file.extension().map_or(false, |ext| ext == "parquet"))
+            .any(|file| file.extension().is_some_and(|ext| ext == "parquet"))
         {
             self.create_lazyframe(&checked_files);
             self.perform_histogrammer_from_lazyframe();
@@ -343,7 +343,7 @@ def get_2d_histograms(file_name):
         // Check if any of the selected files are ROOT files
         else if checked_files
             .iter()
-            .any(|file| file.extension().map_or(false, |ext| ext == "root"))
+            .any(|file| file.extension().is_some_and(|ext| ext == "parquet"))
         {
             self.get_histograms_from_root_files(&checked_files)
                 .unwrap_or_else(|e| {
