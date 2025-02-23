@@ -162,7 +162,7 @@ def get_2d_histograms(file_name):
 
             let root_files: Vec<_> = checked_files
                 .iter()
-                .filter(|file| file.extension().map_or(false, |ext| ext == "root"))
+                .filter(|file| file.extension().is_some_and(|ext| ext == "root"))
                 .collect();
 
             for file in root_files.iter() {
