@@ -32,7 +32,7 @@ impl Default for PIPS {
             },
             active: false,
             range: (0.0, 4096.0),
-            bins: 512,
+            bins: 2048,
         }
     }
 }
@@ -42,10 +42,17 @@ impl PIPS {
         Self {
             name: name.to_string(),
             sps_timecut: TimeCut::default(),
-            energy_calibration: Calibration::default(),
+            energy_calibration: Calibration {
+                a: 0.0,
+                b: 1.0,
+                c: 0.0,
+                active: false,
+                range: (0.0, 2000.0),
+                bins: 2000,
+            },
             active: false,
             range: (0.0, 4096.0),
-            bins: 512,
+            bins: 2048,
         }
     }
 

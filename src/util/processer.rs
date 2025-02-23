@@ -444,19 +444,20 @@ def get_2d_histograms(file_name):
 
                 ui.separator();
 
-                ui.label("Selected files:");
-                ui.horizontal(|ui| {
-                    if ui.button("De/Select All").clicked() {
-                        let all_selected = self.selected_files.iter().all(|(_, checked)| *checked);
-                        for (_, checked) in self.selected_files.iter_mut() {
-                            *checked = !all_selected;
+                if !self.selected_files.is_empty() {
+                    ui.label("Selected files:");
+                    ui.horizontal(|ui| {
+                        if ui.button("De/Select All").clicked() {
+                            let all_selected = self.selected_files.iter().all(|(_, checked)| *checked);
+                            for (_, checked) in self.selected_files.iter_mut() {
+                                *checked = !all_selected;
+                            }
                         }
-                    }
-                    if ui.button("Clear").clicked() {
-                        self.selected_files.clear();
-                    }
-                });
-
+                        if ui.button("Clear").clicked() {
+                            self.selected_files.clear();
+                        }
+                    });
+                }
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if !self.selected_files.is_empty() {
                         // Clone the paths beforehand to avoid borrowing conflicts
