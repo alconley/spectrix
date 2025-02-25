@@ -310,6 +310,23 @@ impl Cut2D {
         self.polygon.menu_button(ui);
     }
 
+    pub fn single_ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("2D Cut");
+            if ui.button("Load").clicked() {
+                if let Err(e) = self.load_cut_from_json() {
+                    log::error!("Error loading cut: {:?}", e);
+                }
+            }
+
+            ui.add(
+                egui::TextEdit::singleline(&mut self.polygon.name)
+                    .hint_text("Cut Name")
+                    .clip_text(false),
+            );
+        });
+    }
+
     pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>) {
         row.col(|ui| {
             ui.add(
@@ -442,6 +459,20 @@ impl Cut2D {
 
     pub fn required_columns(&self) -> Vec<String> {
         vec![self.x_column.clone(), self.y_column.clone()]
+    }
+
+    pub fn filter_df_and_save(
+        &self,
+        df: &DataFrame,
+        file_path: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mask = self.create_mask(df)?;
+        let mut filtered_df = df.filter(&mask)?; // Make filtered_df mutable
+
+        let file = std::fs::File::create(file_path)?;
+        ParquetWriter::new(file).finish(&mut filtered_df)?; // Pass as mutable reference
+
+        Ok(())
     }
 }
 

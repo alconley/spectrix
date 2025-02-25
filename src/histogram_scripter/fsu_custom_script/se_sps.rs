@@ -128,6 +128,9 @@ impl SPSConfig {
             configs.hist1d(&format!("{base_path}/Focal Plane/X1"), "X1", fp_range, fp_bins, &main_cuts);
             configs.hist1d(&format!("{base_path}/Focal Plane/X2"), "X2", fp_range, fp_bins, &main_cuts);
             configs.hist1d(&format!("{base_path}/Focal Plane/Xavg"), "Xavg", fp_range, fp_bins, &main_cuts);
+
+            configs.hist2d(&format!("{base_path}/Focal Plane/Both Planes- AnodeBack v ScintLeft"), "ScintLeftEnergy", "AnodeBackEnergy", range, range, (bins,bins), &cut_bothplanes);
+
             if self.xavg.active {
                 configs.hist1d(&format!("{base_path}/Focal Plane/Xavg Energy Calibrated"), "XavgEnergyCalibrated", self.xavg.range, self.xavg.bins, &main_cuts);
             }
