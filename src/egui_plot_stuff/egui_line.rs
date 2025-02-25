@@ -37,17 +37,17 @@ impl Default for EguiLine {
             log_x: false,
             name: "Line".to_string(),
             highlighted: false,
-            stroke: Stroke::new(1.0, Color32::from_rgb(120, 47, 64)),
+            stroke: Stroke::new(1.0, Color32::LIGHT_BLUE),
             width: 2.0,
-            color: Color32::from_rgb(120, 47, 64),
+            color: Color32::LIGHT_BLUE,
             reference_fill: false,
             fill: 0.0,
             fill_alpha: 0.3,
             style: Some(LineStyle::Solid),
             style_length: 15.0,
             points: vec![],
-            color_rgb: Rgb::from_color32(Color32::from_rgb(120, 47, 64)),
-            stroke_rgb: Rgb::from_color32(Color32::from_rgb(120, 47, 64)),
+            color_rgb: Rgb::from_color32(Color32::LIGHT_BLUE),
+            stroke_rgb: Rgb::from_color32(Color32::LIGHT_BLUE),
         }
     }
 }
@@ -130,7 +130,7 @@ impl EguiLine {
                     .on_hover_text("Show in legend");
                 ui.checkbox(&mut self.highlighted, "Highlighted");
 
-                self.color_selection_buttons(ui);
+                // self.color_selection_buttons(ui);
                 // ui.color_edit_button_srgba(&mut self.color); // add this when the bug is fixed
                 ui.add(Slider::new(&mut self.width, 0.0..=10.0).text("Line Width"));
 
@@ -216,6 +216,13 @@ impl EguiLine {
                 });
             });
         });
+    }
+
+    pub fn set_color(&mut self, color: Color32) {
+        self.color = color;
+        self.color_rgb = Rgb::from_color32(color);
+        self.stroke.color = color;
+        self.stroke_rgb = Rgb::from_color32(color);
     }
 
     pub fn color_selection_buttons(&mut self, ui: &mut Ui) {

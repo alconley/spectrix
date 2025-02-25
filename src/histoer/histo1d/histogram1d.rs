@@ -393,6 +393,13 @@ impl Histogram {
     }
 
     pub fn render(&mut self, ui: &mut egui::Ui) {
+        // if light mode, se the color to black
+        if ui.visuals().dark_mode {
+            self.line.set_color(egui::Color32::LIGHT_BLUE);
+        } else {
+            self.line.set_color(egui::Color32::BLACK);
+        }
+
         // Display progress bar while hist is being filled
         // disabled since the row calculation is done in chucks
         // self.plot_settings.progress_ui(ui);
