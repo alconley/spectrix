@@ -26,9 +26,21 @@ impl Calibration {
         ui.horizontal(|ui| {
             if self.active {
                 ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut self.a).speed(0.01).prefix("a: "));
-                    ui.add(egui::DragValue::new(&mut self.b).speed(0.01).prefix("b: "));
-                    ui.add(egui::DragValue::new(&mut self.c).speed(0.01).prefix("c: "));
+                    ui.add(
+                        egui::DragValue::new(&mut self.a)
+                            .speed(0.0001)
+                            .prefix("a: "),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.b)
+                            .speed(0.0001)
+                            .prefix("b: "),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.c)
+                            .speed(0.0001)
+                            .prefix("c: "),
+                    );
                 });
 
                 if bins {

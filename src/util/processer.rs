@@ -406,7 +406,7 @@ def get_2d_histograms(file_name):
         // Check if any of the selected files are ROOT files
         else if checked_files
             .iter()
-            .any(|file| file.extension().is_some_and(|ext| ext == "parquet"))
+            .any(|file| file.extension().is_some_and(|ext| ext == "root"))
         {
             self.get_histograms_from_root_files(&checked_files)
                 .unwrap_or_else(|e| {
