@@ -535,7 +535,27 @@ def get_2d_histograms(file_name):
                         // Show common directory label if applicable
                         if let Some(ref common_dir) = common_path {
                             ui.separator();
-                            ui.label(format!("Directory: {}", common_dir.to_string_lossy())); // Show common directory
+                            ui.horizontal(|ui| {
+                                ui.label(format!("Directory: {}", common_dir.to_string_lossy())); // Show common directory
+
+                                // add a refresh button to update the files in the directory
+                                if ui.button("⟳").clicked() {
+                                    self.selected_files.clear();
+                                    if let Ok(entries) = std::fs::read_dir(common_dir) {
+                                        for entry in entries.flatten() {
+                                            let file_path = entry.path();
+                                            if let Some(ext) = file_path.extension() {
+                                                if (ext == "parquet" || ext == "root") && !self.selected_files.iter().any(|(f, _)| f == &file_path) {
+                                                    self.selected_files.push((file_path, false)); // Default to selected
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // sort the selected files by name
+                                    self.selected_files.sort_by(|a, b| a.0.cmp(&b.0));
+                                }
+                            });
+
                         }
                         // Track indices of files to remove
                         let mut to_remove = Vec::new();
