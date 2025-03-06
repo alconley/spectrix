@@ -10,6 +10,9 @@ use polars::prelude::*;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
+use std::sync::Arc;
+use std::thread;
+
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct ProcessorSettings {
     pub left_panel_open: bool,
@@ -297,7 +300,64 @@ def get_2d_histograms(file_name):
         }
     }
 
-    pub fn filter_selected_files_and_save(&mut self) {
+    // pub fn filter_selected_files_and_save(&mut self) {
+    //     let checked_files: Vec<PathBuf> = self
+    //         .selected_files
+    //         .iter()
+    //         .filter(|(_, checked)| *checked)
+    //         .map(|(file, _)| file.clone())
+    //         .collect();
+
+    //     if checked_files.is_empty() {
+    //         log::error!("No files selected for filtering.");
+    //         return;
+    //     }
+
+    //     let parquet_files: Vec<PathBuf> = checked_files
+    //         .into_iter()
+    //         .filter(|file| file.extension().map_or(false, |ext| ext == "parquet"))
+    //         .collect();
+
+    //     if parquet_files.is_empty() {
+    //         log::warn!("No selected Parquet files to process.");
+    //         return;
+    //     }
+
+    //     for file in parquet_files {
+    //         eprintln!("Processing file: {:?}", file);
+    //         let file_stem = file.file_stem().unwrap().to_string_lossy();
+    //         let new_file_name = format!("{}_{}", file_stem, self.settings.saved_cut_suffix);
+    //         let new_file_path = file.with_file_name(format!("{}.parquet", new_file_name));
+
+    //         log::info!("Processing file: {:?}", file);
+    //         log::info!("Saving filtered file as: {:?}", new_file_path);
+
+    //         // Load and collect one file at a time
+    //         match LazyFrame::scan_parquet(file.to_str().unwrap(), Default::default()) {
+    //             Ok(lf) => {
+    //                 if let Ok(df) = lf.collect() {
+    //                     if let Err(e) = self
+    //                         .settings
+    //                         .cut
+    //                         .filter_df_and_save(&df, new_file_path.to_str().unwrap())
+    //                     {
+    //                         log::error!("Failed to save filtered DataFrame for {:?}: {}", file, e);
+    //                     } else {
+    //                         log::info!(
+    //                             "Successfully saved filtered DataFrame: {:?}",
+    //                             new_file_path
+    //                         );
+    //                     }
+    //                 } else {
+    //                     log::error!("Failed to collect DataFrame from LazyFrame: {:?}", file);
+    //                 }
+    //             }
+    //             Err(e) => log::error!("Failed to read Parquet file {:?}: {}", file, e),
+    //         }
+    //     }
+    //
+
+    pub fn filter_selected_files_and_save(&self) {
         let checked_files: Vec<PathBuf> = self
             .selected_files
             .iter()
@@ -320,38 +380,47 @@ def get_2d_histograms(file_name):
             return;
         }
 
-        for file in parquet_files {
-            eprintln!("Processing file: {:?}", file);
-            let file_stem = file.file_stem().unwrap().to_string_lossy();
-            let new_file_name = format!("{}_{}", file_stem, self.settings.saved_cut_suffix);
-            let new_file_path = file.with_file_name(format!("{}.parquet", new_file_name));
+        // Clone necessary data for the thread
+        let cut = self.settings.cut.clone();
+        let saved_cut_suffix = self.settings.saved_cut_suffix.clone();
 
-            log::info!("Processing file: {:?}", file);
-            log::info!("Saving filtered file as: {:?}", new_file_path);
+        // Spawn the filtering task on a new thread
+        thread::spawn(move || {
+            for file in parquet_files {
+                eprintln!("Processing file: {:?}", file);
+                let file_stem = file.file_stem().unwrap().to_string_lossy();
+                let new_file_name = format!("{}_{}", file_stem, saved_cut_suffix);
+                let new_file_path = file.with_file_name(format!("{}.parquet", new_file_name));
 
-            // Load and collect one file at a time
-            match LazyFrame::scan_parquet(file.to_str().unwrap(), Default::default()) {
-                Ok(lf) => {
-                    if let Ok(df) = lf.collect() {
-                        if let Err(e) = self
-                            .settings
-                            .cut
-                            .filter_df_and_save(&df, new_file_path.to_str().unwrap())
-                        {
-                            log::error!("Failed to save filtered DataFrame for {:?}: {}", file, e);
+                log::info!("Processing file: {:?}", file);
+                log::info!("Saving filtered file as: {:?}", new_file_path);
+
+                // Load and collect one file at a time
+                match LazyFrame::scan_parquet(file.to_str().unwrap(), Default::default()) {
+                    Ok(lf) => {
+                        if let Ok(df) = lf.collect() {
+                            if let Err(e) =
+                                cut.filter_df_and_save(&df, new_file_path.to_str().unwrap())
+                            {
+                                log::error!(
+                                    "Failed to save filtered DataFrame for {:?}: {}",
+                                    file,
+                                    e
+                                );
+                            } else {
+                                log::info!(
+                                    "Successfully saved filtered DataFrame: {:?}",
+                                    new_file_path
+                                );
+                            }
                         } else {
-                            log::info!(
-                                "Successfully saved filtered DataFrame: {:?}",
-                                new_file_path
-                            );
+                            log::error!("Failed to collect DataFrame from LazyFrame: {:?}", file);
                         }
-                    } else {
-                        log::error!("Failed to collect DataFrame from LazyFrame: {:?}", file);
                     }
+                    Err(e) => log::error!("Failed to read Parquet file {:?}: {}", file, e),
                 }
-                Err(e) => log::error!("Failed to read Parquet file {:?}: {}", file, e),
             }
-        }
+        });
     }
 
     fn get_column_names_from_lazyframe(lazyframe: &LazyFrame) -> Vec<String> {
@@ -587,21 +656,21 @@ def get_2d_histograms(file_name):
                     }
 
                     ui.separator();
-                    ui.label("Save Filtered Files:");
-                    self.settings.cut.single_ui(ui);
-                    if !self.settings.cut.active {
-                        self.settings.cut.active = true;
-                    }
 
-                    ui.horizontal(|ui| {
-                        ui.label("Suffix:");
-                        ui.text_edit_singleline(&mut self.settings.saved_cut_suffix);
+                    ui.collapsing("Filter Files", |ui| {
+                        ui.label("Save Filtered Files:");
+                        self.settings.cut.single_ui(ui);
+                        if !self.settings.cut.active {
+                            self.settings.cut.active = true;
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label("Suffix:");
+                            ui.text_edit_singleline(&mut self.settings.saved_cut_suffix);
+                        });
+                        if ui.button("Save Filtered Files").clicked() {
+                            self.filter_selected_files_and_save();
+                        }
                     });
-
-                    if ui.button("Save Filtered Files").clicked() {
-                        self.filter_selected_files_and_save();
-                    }
-
                 });
 
             },

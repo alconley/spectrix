@@ -28,17 +28,17 @@ impl Calibration {
                 ui.horizontal(|ui| {
                     ui.add(
                         egui::DragValue::new(&mut self.a)
-                            .speed(0.0001)
+                            .speed(0.0000000001)
                             .prefix("a: "),
                     );
                     ui.add(
                         egui::DragValue::new(&mut self.b)
-                            .speed(0.0001)
+                            .speed(0.0000000001)
                             .prefix("b: "),
                     );
                     ui.add(
                         egui::DragValue::new(&mut self.c)
-                            .speed(0.0001)
+                            .speed(0.0000000001)
                             .prefix("c: "),
                     );
                 });

@@ -37,7 +37,7 @@ impl Default for EguiPlotSettings {
             allow_drag: true,
             allow_scroll: false,
             clamp_grid: false,
-            show_grid: true,
+            show_grid: false,
             sharp_grid_lines: true,
             show_background: true,
             allow_double_click_reset: true,
