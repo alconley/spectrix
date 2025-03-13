@@ -274,6 +274,20 @@ impl Cuts {
         cut_names.sort(); // Ensure consistent ordering
         cut_names.join(",") // Create a comma-separated key
     }
+
+    pub fn filter_df_and_save(
+        &self,
+        df: &DataFrame,
+        file_path: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mask = self.create_combined_mask(df, &self.cuts.iter().collect::<Vec<_>>())?;
+        let mut filtered_df = df.filter(&mask)?; // Make filtered_df mutable
+
+        let file = std::fs::File::create(file_path)?;
+        ParquetWriter::new(file).finish(&mut filtered_df)?; // Pass as mutable reference
+
+        Ok(())
+    }
 }
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct Cut2D {

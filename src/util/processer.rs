@@ -1,4 +1,4 @@
-use crate::histoer::cuts::Cut2D;
+use crate::histoer::cuts::Cuts;
 use crate::histoer::histogrammer::Histogrammer;
 
 use crate::histogram_scripter::histogram_script::HistogramScript;
@@ -19,7 +19,7 @@ pub struct ProcessorSettings {
     pub histogram_script_open: bool,
     pub column_names: Vec<String>,
     pub estimated_memory: f64,
-    pub cut: Cut2D,
+    pub cuts: Cuts,
     pub saved_cut_suffix: String,
 }
 
@@ -30,7 +30,7 @@ impl Default for ProcessorSettings {
             histogram_script_open: true,
             column_names: Vec::new(),
             estimated_memory: 4.0,
-            cut: Cut2D::default(),
+            cuts: Cuts::default(),
             saved_cut_suffix: String::new(),
         }
     }
@@ -381,7 +381,7 @@ def get_2d_histograms(file_name):
         }
 
         // Clone necessary data for the thread
-        let cut = self.settings.cut.clone();
+        let cut = self.settings.cuts.clone();
         let saved_cut_suffix = self.settings.saved_cut_suffix.clone();
 
         // Spawn the filtering task on a new thread
@@ -421,6 +421,83 @@ def get_2d_histograms(file_name):
                 }
             }
         });
+    }
+
+    pub fn combine_and_save_selected_files(&self) {
+        let checked_files: Vec<PathBuf> = self
+            .selected_files
+            .iter()
+            .filter(|(_, checked)| *checked)
+            .map(|(file, _)| file.clone())
+            .collect();
+
+        if checked_files.is_empty() {
+            log::error!("No files selected for combination.");
+            return;
+        }
+
+        let parquet_files: Vec<PathBuf> = checked_files
+            .into_iter()
+            .filter(|file| file.extension().map_or(false, |ext| ext == "parquet"))
+            .collect();
+
+        if parquet_files.is_empty() {
+            log::warn!("No selected Parquet files to combine.");
+            return;
+        }
+
+        // Ask the user to select a file name and path
+        if let Some(output_file) = rfd::FileDialog::new()
+            .set_title("Save Combined Parquet File")
+            .add_filter("Parquet Files", &["parquet"])
+            .save_file()
+        {
+            let output_file_clone = output_file.clone();
+
+            // Spawn a new thread for processing
+            thread::spawn(move || {
+                let mut lazyframes = Vec::new();
+
+                for file in &parquet_files {
+                    log::info!("Reading file: {:?}", file);
+                    match LazyFrame::scan_parquet(file.to_str().unwrap(), Default::default()) {
+                        Ok(lf) => lazyframes.push(lf),
+                        Err(e) => log::error!("Failed to read Parquet file {:?}: {}", file, e),
+                    }
+                }
+
+                if lazyframes.is_empty() {
+                    log::error!("No valid Parquet files loaded.");
+                    return;
+                }
+
+                let combined_lazyframe = concat(lazyframes, UnionArgs::default())
+                    .expect("Failed to concatenate LazyFrames");
+                match combined_lazyframe.collect() {
+                    Ok(mut df) => {
+                        if let Err(e) = ParquetWriter::new(
+                            &mut std::fs::File::create(&output_file_clone).unwrap(),
+                        )
+                        .finish(&mut df)
+                        {
+                            log::error!(
+                                "Failed to save combined DataFrame to {:?}: {}",
+                                output_file_clone,
+                                e
+                            );
+                        } else {
+                            log::info!(
+                                "Successfully saved combined Parquet file: {:?}",
+                                output_file_clone
+                            );
+                        }
+                    }
+                    Err(e) => log::error!("Failed to collect combined LazyFrame: {}", e),
+                }
+            });
+        } else {
+            log::warn!("User canceled the save operation.");
+        }
     }
 
     fn get_column_names_from_lazyframe(lazyframe: &LazyFrame) -> Vec<String> {
@@ -657,18 +734,25 @@ def get_2d_histograms(file_name):
 
                     ui.separator();
 
-                    ui.collapsing("Filter Files", |ui| {
+                    ui.collapsing("Selected File Settings", |ui| {
                         ui.label("Save Filtered Files:");
-                        self.settings.cut.single_ui(ui);
-                        if !self.settings.cut.active {
-                            self.settings.cut.active = true;
-                        }
+                        self.settings.cuts.ui(ui);
+
                         ui.horizontal(|ui| {
                             ui.label("Suffix:");
                             ui.text_edit_singleline(&mut self.settings.saved_cut_suffix);
                         });
+
+                        ui.separator();
+
                         if ui.button("Save Filtered Files").clicked() {
                             self.filter_selected_files_and_save();
+                        }
+
+                        ui.add_space(10.0);
+
+                        if ui.button("Combine Selected Files").clicked() {
+                            self.combine_and_save_selected_files();
                         }
                     });
                 });
