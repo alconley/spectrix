@@ -4,7 +4,9 @@ Spectrix is a comprehensive software designed for nucelar spectrum analysis. It 
 
 ### Running
 
-Currently have tested this on Apple M3 Macbook Pro (Memory: 18 GB) running macOS Sonoma Version 14.6.1 and Ubuntu 22.04.5 LTS. Both use python 3.13.
+Currently have tested this on Apple M3 Macbook Pro (Memory: 18 GB) running macOS Sonoma Version 14.6.1, Ubuntu 22.04.5 LTS and Windows 10. Both use python 3.13.
+
+If you are using this on Windows, make sure your python is downloaded from [python.org](https://www.python.org/downloads/).
 
 Make sure you are using the latest version of stable rust by running `rustup update`. Rust is very easy to install on any computer. First, you'll need to install the Rust toolchain (compiler, cargo, etc). Go to the [Rust website](https://www.rust-lang.org/tools/install) and follow the instructions there.
 
@@ -41,11 +43,8 @@ export PYTHONPATH=$(pwd)/.venv/lib/python3.*/site-packages
 cargo run --release
 
 ```
-If you get these errors use 
-
-`concurrent_queue::{ConcurrentQueue, ForcePushError, PopError, PushError}; no 'ForcePushError' in the root` or
-`match self.channel.queue.force_push(msg) method not found in 'ConcurrentQueue<T>'` you need to update cargo. This can be done by
-
+Tips if the program doesn't run:
+`rustup update`
 `cargo clean`
 `cargo update`
 
@@ -78,7 +77,7 @@ The goal was to create a very user-friendly UI that makes fitting peaks fun and 
 
 ### Fitting
  
-I opted to use python's [lmfit](https://lmfit.github.io/lmfit-py/builtin_models.html) to data in spectrix. Previously I used an awesome crate [varpro](https://github.com/geo-ant/varpro), however, I felt like I was reinventing the wheel for a lot. Therefore, I call python functions through the [pyo0](https://docs.rs/pyo3/latest/pyo3/). This adds extra dependencies and overhead but I think it is worth it to use the awesome fitting libray that lmfit has created while also making it easier for me to maintain/add new fitting functionalities to spectrix in the future.
+I opted to use python's [lmfit](https://lmfit.github.io/lmfit-py/builtin_models.html) to data in spectrix. Previously I used an awesome crate [varpro](https://github.com/geo-ant/varpro), however, I felt like I was reinventing the wheel for a lot. Therefore, I call python functions through the [pyo3](https://docs.rs/pyo3/latest/pyo3/). This adds extra dependencies and overhead but I think it is worth it to use the awesome fitting libray that lmfit has created while also making it easier for me to maintain/add new fitting functionalities to spectrix in the future.
 
 Keybinds (cursor must be in the plot):
 

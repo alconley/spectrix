@@ -372,7 +372,7 @@ def get_2d_histograms(file_name):
 
         let parquet_files: Vec<PathBuf> = checked_files
             .into_iter()
-            .filter(|file| file.extension().map_or(false, |ext| ext == "parquet"))
+            .filter(|file| file.extension().is_some_and(|ext| ext == "parquet"))
             .collect();
 
         if parquet_files.is_empty() {
@@ -438,7 +438,7 @@ def get_2d_histograms(file_name):
 
         let parquet_files: Vec<PathBuf> = checked_files
             .into_iter()
-            .filter(|file| file.extension().map_or(false, |ext| ext == "parquet"))
+            .filter(|file| file.extension().is_some_and(|ext| ext == "parquet"))
             .collect();
 
         if parquet_files.is_empty() {
