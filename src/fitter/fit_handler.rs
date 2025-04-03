@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 
 use super::fit_settings::FitSettings;
-use super::main_fitter::Fitter;
+use super::main_fitter::{FitResult, Fitter};
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Fits {
@@ -125,6 +125,39 @@ impl Fits {
         }
     }
 
+    pub fn export_all_lmfit_results(&self) {
+        use std::collections::HashMap;
+        use std::fs::File;
+        use std::io::Write;
+
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("JSON", &["json"])
+            .set_file_name("all_lmfit_results.json")
+            .save_file()
+        {
+            let mut result_map: HashMap<String, String> = HashMap::new();
+
+            for fit in self.stored_fits.iter() {
+                if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result {
+                    if let Some(text) = &gauss.lmfit_result {
+                        result_map.insert(fit.name.clone(), text.clone());
+                    }
+                }
+            }
+
+            match File::create(&path) {
+                Ok(mut file) => {
+                    if let Ok(json) = serde_json::to_string_pretty(&result_map) {
+                        if let Err(e) = file.write_all(json.as_bytes()) {
+                            log::error!("Failed to write file: {:?}", e);
+                        }
+                    }
+                }
+                Err(e) => log::error!("Error creating file: {:?}", e),
+            }
+        }
+    }
+
     pub fn save_and_load_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if ui.button("Save Fits").clicked() {
@@ -135,6 +168,12 @@ impl Fits {
 
             if ui.button("Load Fits").clicked() {
                 self.load_from_file();
+            }
+
+            ui.separator();
+
+            if ui.button("Export All lmfit Results").clicked() {
+                self.export_all_lmfit_results();
             }
         });
     }

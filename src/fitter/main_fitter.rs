@@ -8,7 +8,7 @@ use crate::egui_plot_stuff::egui_line::EguiLine;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
 pub enum FitModel {
-    Gaussian(Vec<f64>, bool, bool, f64), // initial peak locations, free sigma, free position, bin width
+    Gaussian(Vec<f64>, Vec<f64>, Vec<(f64, f64)>, bool, bool), // region markers, initial peak locations, free sigma, free position
     None,
 }
 
@@ -62,6 +62,26 @@ pub struct Fitter {
     pub decomposition_lines: Vec<EguiLine>,
 }
 
+impl Default for Fitter {
+    fn default() -> Self {
+        Fitter {
+            name: "Fit".to_string(),
+
+            data: Data::default(),
+
+            background_model: BackgroundModel::None,
+            background_result: None,
+
+            fit_model: FitModel::None,
+            fit_result: None,
+
+            background_line: EguiLine::new(egui::Color32::GREEN),
+            composition_line: EguiLine::new(egui::Color32::BLUE),
+            decomposition_lines: Vec::new(),
+        }
+    }
+}
+
 impl Fitter {
     // Constructor to create a new Fitter with empty data and specified model
     pub fn new(data: Data) -> Self {
@@ -84,15 +104,22 @@ impl Fitter {
 
     pub fn fit(&mut self) {
         match &self.fit_model {
-            FitModel::Gaussian(peak_markers, equal_stdev, free_position, bin_width) => {
+            FitModel::Gaussian(
+                region_markers,
+                peak_markers,
+                background_markrs,
+                equal_stdev,
+                free_position,
+            ) => {
                 let mut fit = GaussianFitter::new(
                     self.data.clone(),
+                    region_markers.clone(),
                     peak_markers.clone(),
+                    background_markrs.clone(),
                     self.background_model.clone(),
                     self.background_result.clone(),
                     *equal_stdev,
                     *free_position,
-                    *bin_width,
                 );
 
                 match fit.lmfit() {
@@ -202,40 +229,10 @@ impl Fitter {
         log::info!("Finished fitting background");
     }
 
-    pub fn subtract_background(&mut self, x_data: Vec<f64>, y_data: Vec<f64>) -> Option<Vec<f64>> {
-        // Ensure background fitting has been performed
-        if self.background_result.is_none() {
-            self.fit_background(); // Fit background if not done already
-        }
-
-        // Check if background fitting was successful
-        let background_fit = self.background_result.as_ref()?;
-
-        // Generate background values for each x_data point
-        let background_values: Vec<f64> = x_data
-            .iter()
-            .map(|&x| match background_fit {
-                BackgroundResult::Linear(fit) => fit.evaluate(x),
-                BackgroundResult::Quadratic(fit) => fit.evaluate(x),
-                BackgroundResult::PowerLaw(fit) => fit.evaluate(x),
-                BackgroundResult::Exponential(fit) => fit.evaluate(x),
-            })
-            .collect();
-
-        // Subtract the background values from the actual y_data
-        let corrected_y_data: Vec<f64> = y_data
-            .iter()
-            .zip(background_values.iter())
-            .map(|(&y, &bg)| y - bg)
-            .collect();
-
-        Some(corrected_y_data)
-    }
-
     pub fn get_peak_markers(&self) -> Vec<f64> {
         if self.fit_result.is_none() {
             match &self.fit_model {
-                FitModel::Gaussian(peak_markers, _, _, _) => peak_markers.clone(),
+                FitModel::Gaussian(_, peak_markers, _, _, _) => peak_markers.clone(),
                 FitModel::None => Vec::new(),
             }
         } else {
@@ -350,7 +347,6 @@ impl Fitter {
         }
     }
 
-    // Draw the background, decomposition, and composition lines
     pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         for line in &self.decomposition_lines {
             line.draw(plot_ui);
@@ -361,7 +357,6 @@ impl Fitter {
         self.background_line.draw(plot_ui);
     }
 
-    // Set the log_y flag for all lines
     pub fn set_log(&mut self, log_y: bool, log_x: bool) {
         for line in &mut self.decomposition_lines {
             line.log_y = log_y;

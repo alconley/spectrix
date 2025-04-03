@@ -283,21 +283,23 @@ impl Configs {
 
     pub fn check_and_add_panes(&self, h: &mut Histogrammer) {
         // reset all existings panes
-        h.reset_histograms();
+        // h.reset_histograms();
 
         // add panes that do not already exist in the histogrammer
         for config in &self.configs {
             match config {
                 Config::Hist1D(hist1d) => {
-                    if let Some(_id) = h.find_existing_histogram(&hist1d.name) {
+                    if let Some(id) = h.find_existing_histogram(&hist1d.name) {
                         log::info!("Histogram {} already exists", hist1d.name);
+                        h.reset_histogram(id);
                     } else {
                         h.add_hist1d(&hist1d.name, hist1d.bins, (hist1d.range.0, hist1d.range.1));
                     }
                 }
                 Config::Hist2D(hist2d) => {
-                    if let Some(_id) = h.find_existing_histogram(&hist2d.name) {
+                    if let Some(id) = h.find_existing_histogram(&hist2d.name) {
                         log::info!("Histogram {} already exists", hist2d.name);
+                        h.reset_histogram(id);
                     } else {
                         h.add_hist2d(
                             &hist2d.name,
@@ -600,6 +602,19 @@ impl Configs {
         ui.separator();
 
         self.config_ui(ui);
+    }
+
+    pub fn set_prefix(&mut self, prefix: String) {
+        for config in &mut self.configs {
+            match config {
+                Config::Hist1D(hist1d) => {
+                    hist1d.name = format!("{}/{}", prefix, hist1d.name);
+                }
+                Config::Hist2D(hist2d) => {
+                    hist2d.name = format!("{}/{}", prefix, hist2d.name);
+                }
+            }
+        }
     }
 }
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]

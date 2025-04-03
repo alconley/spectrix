@@ -83,12 +83,22 @@ impl HistogramScript {
         });
     }
 
-    pub fn add_histograms(&mut self, h: &mut Histogrammer, lf: LazyFrame, estimated_memory: f64) {
+    pub fn add_histograms(
+        &mut self,
+        h: &mut Histogrammer,
+        lf: LazyFrame,
+        estimated_memory: f64,
+        prefix: Option<String>,
+    ) {
         let active_custom_configs = self.custom_scripts.merge_active_configs();
 
         let mut cloned_configs = self.configs.clone();
         cloned_configs.merge(active_custom_configs);
-        let merged_configs = cloned_configs;
+        let mut merged_configs = cloned_configs;
+
+        if let Some(prefix) = prefix {
+            merged_configs.set_prefix(prefix);
+        }
 
         h.fill_histograms(merged_configs.clone(), &lf, estimated_memory);
     }

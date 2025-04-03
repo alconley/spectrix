@@ -34,4 +34,5 @@ echo "PYTHONPATH set to $(pwd)/.venv/lib/python${PYTHON_VERSION}/site-packages"
 
 # Run the Rust project in release mode
 echo "Running Rust project in release mode..."
+# RUST_LOG=info cargo run --release
 cargo run --release

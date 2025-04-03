@@ -21,6 +21,7 @@ pub struct ProcessorSettings {
     pub estimated_memory: f64,
     pub cuts: Cuts,
     pub saved_cut_suffix: String,
+    pub calculate_histograms_seperately: bool,
 }
 
 impl Default for ProcessorSettings {
@@ -32,6 +33,7 @@ impl Default for ProcessorSettings {
             estimated_memory: 4.0,
             cuts: Cuts::default(),
             saved_cut_suffix: String::new(),
+            calculate_histograms_seperately: false,
         }
     }
 }
@@ -300,63 +302,6 @@ def get_2d_histograms(file_name):
         }
     }
 
-    // pub fn filter_selected_files_and_save(&mut self) {
-    //     let checked_files: Vec<PathBuf> = self
-    //         .selected_files
-    //         .iter()
-    //         .filter(|(_, checked)| *checked)
-    //         .map(|(file, _)| file.clone())
-    //         .collect();
-
-    //     if checked_files.is_empty() {
-    //         log::error!("No files selected for filtering.");
-    //         return;
-    //     }
-
-    //     let parquet_files: Vec<PathBuf> = checked_files
-    //         .into_iter()
-    //         .filter(|file| file.extension().map_or(false, |ext| ext == "parquet"))
-    //         .collect();
-
-    //     if parquet_files.is_empty() {
-    //         log::warn!("No selected Parquet files to process.");
-    //         return;
-    //     }
-
-    //     for file in parquet_files {
-    //         eprintln!("Processing file: {:?}", file);
-    //         let file_stem = file.file_stem().unwrap().to_string_lossy();
-    //         let new_file_name = format!("{}_{}", file_stem, self.settings.saved_cut_suffix);
-    //         let new_file_path = file.with_file_name(format!("{}.parquet", new_file_name));
-
-    //         log::info!("Processing file: {:?}", file);
-    //         log::info!("Saving filtered file as: {:?}", new_file_path);
-
-    //         // Load and collect one file at a time
-    //         match LazyFrame::scan_parquet(file.to_str().unwrap(), Default::default()) {
-    //             Ok(lf) => {
-    //                 if let Ok(df) = lf.collect() {
-    //                     if let Err(e) = self
-    //                         .settings
-    //                         .cut
-    //                         .filter_df_and_save(&df, new_file_path.to_str().unwrap())
-    //                     {
-    //                         log::error!("Failed to save filtered DataFrame for {:?}: {}", file, e);
-    //                     } else {
-    //                         log::info!(
-    //                             "Successfully saved filtered DataFrame: {:?}",
-    //                             new_file_path
-    //                         );
-    //                     }
-    //                 } else {
-    //                     log::error!("Failed to collect DataFrame from LazyFrame: {:?}", file);
-    //                 }
-    //             }
-    //             Err(e) => log::error!("Failed to read Parquet file {:?}: {}", file, e),
-    //         }
-    //     }
-    //
-
     pub fn filter_selected_files_and_save(&self) {
         let checked_files: Vec<PathBuf> = self
             .selected_files
@@ -516,12 +461,13 @@ def get_2d_histograms(file_name):
         }
     }
 
-    fn perform_histogrammer_from_lazyframe(&mut self) {
+    fn perform_histogrammer_from_lazyframe(&mut self, prefix: Option<String>) {
         if let Some(lf) = &self.lazyframe {
             self.histogram_script.add_histograms(
                 &mut self.histogrammer,
                 lf.clone(),
                 self.settings.estimated_memory,
+                prefix,
             );
         } else {
             log::error!("Failed to preform histogrammer: LazyFrame is None.");
@@ -541,16 +487,24 @@ def get_2d_histograms(file_name):
             return;
         }
 
-        // Check if any of the selected files are Parquet files
-        if checked_files
+        if self.settings.calculate_histograms_seperately {
+            for file in &checked_files {
+                let prefix = file
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().to_string());
+
+                if file.extension().is_some_and(|ext| ext == "parquet") {
+                    self.create_lazyframe(&[file.clone()]);
+                    self.perform_histogrammer_from_lazyframe(prefix);
+                }
+            }
+        } else if checked_files
             .iter()
             .any(|file| file.extension().is_some_and(|ext| ext == "parquet"))
         {
             self.create_lazyframe(&checked_files);
-            self.perform_histogrammer_from_lazyframe();
-        }
-        // Check if any of the selected files are ROOT files
-        else if checked_files
+            self.perform_histogrammer_from_lazyframe(None);
+        } else if checked_files
             .iter()
             .any(|file| file.extension().is_some_and(|ext| ext == "root"))
         {
@@ -558,10 +512,6 @@ def get_2d_histograms(file_name):
                 .unwrap_or_else(|e| {
                     log::error!("Error processing ROOT files: {:?}", e);
                 });
-        }
-        // No valid files selected
-        else {
-            log::error!("No Parquet files or ROOT files selected.");
         }
     }
 
@@ -637,6 +587,13 @@ def get_2d_histograms(file_name):
                                 .suffix(" GB"),
                         ).on_hover_text("Estimated memory in GB. This is an approximation based off the rows and columns in a lazyframe, so set it lower that the actual memory to avoid crashes.");
 
+                        ui.add(
+                            egui::Checkbox::new(
+                                &mut self.settings.calculate_histograms_seperately,
+                                "Calculate histograms separately",
+                            )
+                        );
+
                         if self.histogrammer.calculating.load(Ordering::Relaxed) {
                             // Show spinner while `calculating` is true
                             ui.horizontal(|ui| {
@@ -681,7 +638,7 @@ def get_2d_histograms(file_name):
                         // Show common directory label if applicable
                         if let Some(ref common_dir) = common_path {
                             ui.separator();
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label(format!("Directory: {}", common_dir.to_string_lossy())); // Show common directory
 
                                 // add a refresh button to update the files in the directory

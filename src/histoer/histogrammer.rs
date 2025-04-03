@@ -100,7 +100,7 @@ impl Histogrammer {
         }
     }
 
-    fn reset_histogram(&mut self, pane_id: TileId) {
+    pub fn reset_histogram(&mut self, pane_id: TileId) {
         if let Some((_id, tile)) = self.tree.tiles.iter_mut().find(|(id, _)| **id == pane_id) {
             match tile {
                 egui_tiles::Tile::Pane(Pane::Histogram(hist)) => {
@@ -518,6 +518,10 @@ impl Histogrammer {
                         self.reorganize();
                     }
 
+                    if ui.button("Single Grid").clicked() {
+                        self.reorganize_to_single_grid();
+                    }
+
                     ui.separator();
 
                     if ui.button("Reset").clicked() {
@@ -830,6 +834,42 @@ impl Histogrammer {
         }
 
         log::info!("Reorganization complete.");
+    }
+
+    pub fn reorganize_to_single_grid(&mut self) {
+        let root_id = self.ensure_root();
+        let grid_id = self.add_histograms_grid(root_id);
+
+        // Remove existing children from the grid
+        if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Grid(grid))) =
+            self.tree.tiles.get_mut(grid_id)
+        {
+            let old_children = grid.children().copied().collect::<Vec<_>>();
+            for child in old_children {
+                self.tree.tiles.remove(child);
+            }
+        }
+
+        // Move all histogram panes into this grid
+        for tile_id in self
+            .tree
+            .tiles
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>()
+        {
+            if let Some(tile) = self.tree.tiles.get(tile_id) {
+                if matches!(
+                    tile,
+                    egui_tiles::Tile::Pane(Pane::Histogram(_))
+                        | egui_tiles::Tile::Pane(Pane::Histogram2D(_))
+                ) {
+                    self.tree.move_tile_to_container(tile_id, grid_id, 0, true);
+                }
+            }
+        }
+
+        log::info!("All histograms moved to a single grid container.");
     }
 
     pub fn retrieve_active_2d_cuts(&self) {
