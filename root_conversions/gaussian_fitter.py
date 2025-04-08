@@ -124,7 +124,7 @@ def GaussianFit(counts: list, centers: list,
     # Fit the background model to the data of the background markers before fitting the peaks
     if len(background_markers) == 0:
         # put marker at the start and end of the region
-        background_markers = [(region_markers[0], region_markers[1])]
+        background_markers = [(region_markers[0]-bin_width, region_markers[0]), (region_markers[1], region_markers[1]+bin_width)]
 
     bg_x = []
     bg_y = []
