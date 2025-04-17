@@ -61,7 +61,7 @@ impl Histogram {
 
             for entry in stats_entries.iter() {
                 plot_ui.text(
-                    egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
+                    egui_plot::Text::new("", egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
                         .highlight(false)
                         .color(self.line.color)
                         .name(entry),

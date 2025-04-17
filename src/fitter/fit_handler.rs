@@ -2,9 +2,14 @@ use rfd::FileDialog;
 
 use std::fs::File;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 
 use super::fit_settings::FitSettings;
 use super::main_fitter::{FitResult, Fitter};
+
+use super::models::gaussian::GaussianFitter;
+
+use crate::egui_plot_stuff::egui_line::EguiLine;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Fits {
@@ -35,7 +40,11 @@ impl Fits {
             temp_fit.set_composition_color(egui::Color32::DARK_BLUE);
             temp_fit.set_decomposition_color(egui::Color32::from_rgb(150, 0, 255));
 
-            temp_fit.set_name(format!("Fit {}", self.stored_fits.len()));
+            // remove Temp Fit from name
+            let name = temp_fit.name.clone();
+            let name = name.replace("Temp Fit", &format!("fit {}", self.stored_fits.len()));
+
+            temp_fit.set_name(name);
 
             self.stored_fits.push(temp_fit.clone());
         }
@@ -125,35 +134,62 @@ impl Fits {
         }
     }
 
-    pub fn export_all_lmfit_results(&self) {
-        use std::collections::HashMap;
-        use std::fs::File;
-        use std::io::Write;
-
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("JSON", &["json"])
-            .set_file_name("all_lmfit_results.json")
-            .save_file()
-        {
-            let mut result_map: HashMap<String, String> = HashMap::new();
-
-            for fit in self.stored_fits.iter() {
+    pub fn export_all_lmfit_individual_files(&self) {
+        if let Some(folder_path) = rfd::FileDialog::new().pick_folder() {
+            for (i, fit) in self.stored_fits.iter().enumerate() {
                 if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result {
                     if let Some(text) = &gauss.lmfit_result {
-                        result_map.insert(fit.name.clone(), text.clone());
-                    }
-                }
-            }
+                        let mut filename = format!("{}_fit_{}.sav", fit.name, i);
+                        filename =
+                            filename.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_"); // Sanitize filename
+                        let mut full_path = PathBuf::from(&folder_path);
+                        full_path.push(filename);
 
-            match File::create(&path) {
-                Ok(mut file) => {
-                    if let Ok(json) = serde_json::to_string_pretty(&result_map) {
-                        if let Err(e) = file.write_all(json.as_bytes()) {
-                            log::error!("Failed to write file: {:?}", e);
+                        match File::create(&full_path) {
+                            Ok(mut file) => {
+                                if let Err(e) = file.write_all(text.as_bytes()) {
+                                    log::error!(
+                                        "Failed to write file {}: {:?}",
+                                        full_path.display(),
+                                        e
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("Error creating file {}: {:?}", full_path.display(), e)
+                            }
                         }
                     }
                 }
-                Err(e) => log::error!("Error creating file: {:?}", e),
+            }
+        }
+    }
+
+    pub fn export_lmfit(&self, dir: PathBuf) {
+        for (i, fit) in self.stored_fits.iter().enumerate() {
+            if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result {
+                if let Some(text) = &gauss.lmfit_result {
+                    let mut filename = format!("{}_fit_{}.sav", fit.name, i);
+                    filename =
+                        filename.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_"); // Sanitize filename
+                    let mut full_path = PathBuf::from(&dir);
+                    full_path.push(filename);
+
+                    match File::create(&full_path) {
+                        Ok(mut file) => {
+                            if let Err(e) = file.write_all(text.as_bytes()) {
+                                log::error!(
+                                    "Failed to write file {}: {:?}",
+                                    full_path.display(),
+                                    e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Error creating file {}: {:?}", full_path.display(), e)
+                        }
+                    }
+                }
             }
         }
     }
@@ -173,7 +209,46 @@ impl Fits {
             ui.separator();
 
             if ui.button("Export All lmfit Results").clicked() {
-                self.export_all_lmfit_results();
+                self.export_all_lmfit_individual_files();
+            }
+
+            if ui.button("Load lmfit .sav").clicked() {
+                if let Some(paths) = FileDialog::new().add_filter("SAV", &["sav"]).pick_files() {
+                    for path in paths {
+                        let mut gaussian_fitter = GaussianFitter::default();
+
+                        match gaussian_fitter.lmfit(Some(path.clone())) {
+                            Ok(_) => {
+                                let mut new_fitter = Fitter::default();
+                                new_fitter.set_name(
+                                    path.file_stem()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or("lmfit_result")
+                                        .to_string(),
+                                );
+                                new_fitter.composition_line.points =
+                                    gaussian_fitter.fit_points.clone();
+
+                                for (i, fit) in gaussian_fitter.fit_result.iter().enumerate() {
+                                    let mut line =
+                                        EguiLine::new(egui::Color32::from_rgb(150, 0, 255));
+                                    line.points = fit.fit_points.clone();
+                                    line.name = format!("{} Decomposition {}", new_fitter.name, i);
+                                    new_fitter.decomposition_lines.push(line);
+                                }
+
+                                new_fitter.fit_result =
+                                    Some(FitResult::Gaussian(gaussian_fitter.clone()));
+
+                                self.stored_fits.push(new_fitter);
+                                log::info!("Loaded lmfit result from {:?}", path);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to load lmfit result: {:?}", e);
+                            }
+                        }
+                    }
+                }
             }
         });
     }
@@ -191,6 +266,11 @@ impl Fits {
 
         for fit in &mut self.stored_fits.iter() {
             fit.draw(plot_ui);
+
+            // put the uuid above each peak if it is not 0
+            if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result {
+                gauss.draw_uuid(plot_ui);
+            }
         }
     }
 
@@ -212,6 +292,7 @@ impl Fits {
                 ui.label("Area");
                 ui.label("Amplitude");
                 ui.label("Sigma");
+                ui.label("UUID");
 
                 ui.end_row();
 

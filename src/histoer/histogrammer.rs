@@ -560,6 +560,23 @@ impl Histogrammer {
                         println!("File save dialog canceled.");
                     }
                 }
+
+                if ui.button("Export All lmfit Fits").clicked() {
+                    if let Some(dir_path) = rfd::FileDialog::new().pick_folder() {
+                        let dir_path = dir_path.to_path_buf();
+
+                        for (_id, tile) in self.tree.tiles.iter() {
+                            if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+                                let hist = hist.lock().unwrap();
+                                let fits = &hist.fits;
+
+                                fits.export_lmfit(dir_path.clone());
+                            }
+
+                            log::info!("All lmfit results exported.");
+                        }
+                    }
+                }
             }
         });
     }

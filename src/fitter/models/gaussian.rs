@@ -9,6 +9,11 @@ use pyo3::{
     prelude::*,
     types::{PyDict, PyModule},
 };
+
+use std::fs::File;
+use std::io::Write;
+use std::path::PathBuf;
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct GaussianParameters {
     pub amplitude: Parameter,
@@ -16,6 +21,7 @@ pub struct GaussianParameters {
     pub sigma: Parameter,
     pub fwhm: Parameter,
     pub area: Parameter,
+    pub uuid: usize,
     pub fit_points: Vec<[f64; 2]>, // Vector of (x, y) points representing the Gaussian curve
 }
 
@@ -42,6 +48,7 @@ impl Default for GaussianParameters {
                 name: "area".to_string(),
                 ..Default::default()
             },
+            uuid: 0,
             fit_points: Vec::new(),
         }
     }
@@ -86,6 +93,7 @@ impl GaussianParameters {
                 uncertainty: Some(area.1),
                 ..Default::default()
             },
+            uuid: 0,
             fit_points: Vec::new(),
         }
     }
@@ -109,7 +117,7 @@ impl GaussianParameters {
         }
     }
 
-    pub fn params_ui(&self, ui: &mut egui::Ui) {
+    pub fn params_ui(&mut self, ui: &mut egui::Ui) {
         ui.label(format!(
             "{:.2} ± {:.2}",
             self.mean.value.unwrap_or(0.0),
@@ -142,13 +150,13 @@ impl GaussianParameters {
     }
 }
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Default, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct GaussianFitSettings {
     pub equal_stdev: bool,
     pub free_position: bool,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct GaussianFitter {
     pub data: Data,
     pub region_markers: Vec<f64>,
@@ -193,7 +201,7 @@ impl GaussianFitter {
         }
     }
 
-    pub fn lmfit(&mut self) -> PyResult<()> {
+    pub fn lmfit(&mut self, load_result_path: Option<PathBuf>) -> PyResult<()> {
         Python::with_gil(|py| {
             // let sys = py.import_bound("sys")?;
             // let version: String = sys.getattr("version")?.extract()?;
@@ -504,6 +512,72 @@ def GaussianFit(counts: list, centers: list,
 
     return gaussian_params, background_params, x_data_line, y_data_line, fit_report
 
+def load_result(filename: str):
+    """
+    Load a saved lmfit model result from a file.
+    """
+    result = load_modelresult(filename)
+
+    params = result.params
+
+    peak_markers = []
+    for key in params:
+        if 'g' in key and '_center' in key:
+            peak_markers.append(params[key].value)
+
+    x_min = result.userkws['x'].min()
+    x_max = result.userkws['x'].max()
+    x_data = np.linspace(x_min, x_max, 1000)
+
+    # Print initial parameter guesses
+    print("\nInitial Parameter Guesses:")
+    params.pretty_print()
+
+    # Print fit report
+    print("\nFit Report:")
+
+    fit_report = result.fit_report()
+    print(fit_report)
+
+    # Extract Gaussian and background parameters
+    gaussian_params = []
+    for i in range(len(peak_markers)):
+        amplitude = float(result.params[f'g{i}_amplitude'].value)
+        amplitude_uncertainty = result.params[f'g{i}_amplitude'].stderr or 0.0
+        mean = float(result.params[f'g{i}_center'].value)
+        mean_uncertainty = result.params[f'g{i}_center'].stderr or 0.0
+        sigma = float(result.params[f'g{i}_sigma'].value)
+        sigma_uncertainty = result.params[f'g{i}_sigma'].stderr or 0.0
+        fwhm = float(result.params[f'g{i}_fwhm'].value)
+        fwhm_uncertainty = result.params[f'g{i}_fwhm'].stderr or 0.0
+        area = float(result.params[f'g{i}_area'].value)
+        area_uncertainty = result.params[f'g{i}_area'].stderr or 0.0
+
+        uuid = result.params.get(f'g{i}_uuid', 0)
+
+        gaussian_params.append((
+            amplitude, amplitude_uncertainty, mean, mean_uncertainty,
+            sigma, sigma_uncertainty, fwhm, fwhm_uncertainty, area, area_uncertainty, uuid
+        ))
+
+        # Extract background parameters
+        background_params = []
+        # if bg_type != 'None':
+        for key in result.params:
+            if 'bg_' in key:
+                value = float(result.params[key].value)
+                uncertainty = result.params[key].stderr or 0.0
+                background_params.append((key, value, uncertainty))
+
+        # Create smooth fit line
+        x_data_line = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
+        y_data_line = result.eval(x=x_data_line)
+
+    # save the fit result to a temp file
+    save_modelresult(result, 'temp_fit.sav')
+
+    return gaussian_params, background_params, x_data_line, y_data_line, fit_report
+
 "#;
 
             // Compile the Python code into a module
@@ -776,21 +850,27 @@ def GaussianFit(counts: list, centers: list,
 
             log::info!("Fitting Gaussian model");
 
-            let result = module.getattr("GaussianFit")?.call1((
-                y_data,
-                x_data.clone(),
-                region_markers,
-                peak_markers,
-                background_markers,
-                equal_sigma,
-                free_position,
-                background_params,
-            ))?;
+            let result = if let Some(path) = load_result_path {
+                // Load the lmfit result from the file
+                module.getattr("load_result")?.call1((path,))?
+            } else {
+                // Call the GaussianFit function
+                module.getattr("GaussianFit")?.call1((
+                    y_data,
+                    x_data.clone(),
+                    region_markers,
+                    peak_markers,
+                    background_markers,
+                    equal_sigma,
+                    free_position,
+                    background_params,
+                ))?
+            };
 
             let gaussian_params =
                 result
                     .get_item(0)?
-                    .extract::<Vec<(f64, f64, f64, f64, f64, f64, f64, f64, f64, f64)>>()?;
+                    .extract::<Vec<(f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64)>>()?;
             let background_params = result.get_item(1)?.extract::<Vec<(String, f64, f64)>>()?;
             let x_composition = result.get_item(2)?.extract::<Vec<f64>>()?;
             let y_composition = result.get_item(3)?.extract::<Vec<f64>>()?;
@@ -809,8 +889,19 @@ def GaussianFit(counts: list, centers: list,
 
             self.peak_markers.clear();
 
-            for (amp, amp_err, mean, mean_err, sigma, sigma_err, fwhm, fwhm_err, area, area_err) in
-                gaussian_params
+            for (
+                amp,
+                amp_err,
+                mean,
+                mean_err,
+                sigma,
+                sigma_err,
+                fwhm,
+                fwhm_err,
+                area,
+                area_err,
+                uuid,
+            ) in gaussian_params
             {
                 log::info!("Amplitude: {:.3} ± {:.3}, Mean: {:.3} ± {:.3}, Sigma: {:.3} ± {:.3}, FWHM: {:.3} ± {:.3}, Area: {:.3} ± {:.3}", 
                             amp, amp_err, mean, mean_err, sigma, sigma_err, fwhm, fwhm_err, area, area_err);
@@ -825,6 +916,8 @@ def GaussianFit(counts: list, centers: list,
                     (fwhm, fwhm_err),
                     (area, area_err),
                 );
+
+                gaussian_param.uuid = uuid as usize;
 
                 // Generate the fit points for this Gaussian, using 100 points (or as many as needed)
                 gaussian_param.generate_fit_points(100);
@@ -934,13 +1027,101 @@ def GaussianFit(counts: list, centers: list,
         })
     }
 
-    pub fn fit_params_ui(&self, ui: &mut egui::Ui, skip_one: bool) {
-        for (i, params) in self.fit_result.iter().enumerate() {
+    pub fn update_uuid_for_peak(&mut self, peak_index: usize, new_uuid: usize) -> PyResult<()> {
+        // Step 1: Write current lmfit_result to a temp file
+        let temp_path = PathBuf::from("temp_fit_uuid_update.sav");
+        if let Some(ref lmfit) = self.lmfit_result {
+            let mut file = File::create(&temp_path)?;
+            file.write_all(lmfit.as_bytes())?;
+        } else {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "No lmfit_result to update.",
+            ));
+        }
+
+        // Step 2: Python call to update UUID
+        Python::with_gil(|py| {
+            let module = PyModule::from_code_bound(
+                py,
+                r#"
+from lmfit.model import load_modelresult, save_modelresult
+
+def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
+    result = load_modelresult(file_path)
+
+    # print fit report
+    print("\nPre Fit Report:")
+    fit_report = result.fit_report()
+    print(fit_report)
+
+    if f"g{peak_number}_uuid" not in result.params:
+        result.params.add(f"g{peak_number}_uuid", value=uuid, vary=False)
+    else:
+        result.params[f"g{peak_number}_uuid"].set(value=uuid, vary=False)
+    save_modelresult(result, file_path)
+
+    print("\nPost Fit Report:")
+    fit_report = result.fit_report()
+    print(fit_report)
+
+    return result.fit_report()
+"#,
+                "uuid_patch.py",
+                "uuid_patch",
+            )?;
+
+            let fit_report: String = module
+                .getattr("Add_UUID_to_Result")?
+                .call1((temp_path.to_str().unwrap(), peak_index, new_uuid))?
+                .extract()?;
+
+            // Step 3: Reload updated file into lmfit_result
+            let updated_lmfit = std::fs::read_to_string(&temp_path)
+                .unwrap_or_else(|_| "Failed to read updated fit.".to_string());
+
+            std::fs::remove_file(&temp_path).unwrap_or_else(|err| {
+                eprintln!("Warning: failed to remove temp fit file: {}", err);
+            });
+
+            self.fit_result[peak_index].uuid = new_uuid;
+            self.lmfit_result = Some(updated_lmfit);
+            self.fit_report = fit_report;
+
+            Ok(())
+        })
+    }
+
+    pub fn draw_uuid(&self, plot_ui: &mut egui_plot::PlotUi<'_>) {
+        use egui::Align2;
+        use egui_plot::Text;
+
+        for params in &self.fit_result {
+            if params.uuid == 0 {
+                continue; // Skip if UUID is not set
+            }
+            if let Some(mean) = params.mean.value {
+                let label = Text::new("", [mean, 0.0].into(), params.uuid.to_string())
+                    .anchor(Align2::CENTER_BOTTOM);
+
+                plot_ui.text(label);
+            }
+        }
+    }
+
+    pub fn fit_params_ui(&mut self, ui: &mut egui::Ui, skip_one: bool) {
+        let mut uuid_updates = Vec::new();
+
+        for (i, params) in self.fit_result.iter_mut().enumerate() {
             if skip_one && i != 0 {
                 ui.label("");
             }
             ui.label(format!("{}", i));
             params.params_ui(ui);
+
+            let mut uuid = params.uuid;
+            if ui.add(egui::DragValue::new(&mut uuid).speed(1)).changed() {
+                uuid_updates.push((i, uuid)); // defer the update
+            }
 
             if i == 0 {
                 if let Some(ref text) = self.lmfit_result {
@@ -968,6 +1149,12 @@ def GaussianFit(counts: list, centers: list,
             }
 
             ui.end_row();
+        }
+
+        for (index, new_uuid) in uuid_updates {
+            if let Err(e) = self.update_uuid_for_peak(index, new_uuid) {
+                eprintln!("UUID update failed: {e}");
+            }
         }
     }
 }

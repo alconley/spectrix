@@ -17,12 +17,13 @@ pub enum FitResult {
     Gaussian(GaussianFitter),
 }
 
-#[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Default, PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum BackgroundModel {
     Linear(LinearParameters),
     Quadratic(QuadraticParameters),
     PowerLaw(PowerLawParameters),
     Exponential(ExponentialParameters),
+    #[default]
     None,
 }
 
@@ -122,7 +123,7 @@ impl Fitter {
                     *free_position,
                 );
 
-                match fit.lmfit() {
+                match fit.lmfit(None) {
                     Ok(_) => {
                         self.composition_line.points = fit.fit_points.clone();
                         for fit in &fit.fit_result {
@@ -327,18 +328,18 @@ impl Fitter {
                                 self.fitter_stats(ui, false);
                             });
 
-                        for line in &mut self.decomposition_lines {
-                            line.menu_button(ui);
-                        }
+                        // for line in &mut self.decomposition_lines {
+                        //     line.menu_button(ui);
+                        // }
 
-                        self.composition_line.menu_button(ui);
+                        // self.composition_line.menu_button(ui);
                     }
                 });
         });
     }
 
     pub fn fitter_stats(&mut self, ui: &mut egui::Ui, skip_one: bool) {
-        if let Some(fit_result) = &self.fit_result {
+        if let Some(fit_result) = &mut self.fit_result {
             match fit_result {
                 FitResult::Gaussian(fit) => {
                     fit.fit_params_ui(ui, skip_one);

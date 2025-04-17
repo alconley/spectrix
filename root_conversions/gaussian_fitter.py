@@ -293,7 +293,96 @@ def GaussianFit(counts: list, centers: list,
 
     return gaussian_params, background_params, x_data_line, y_data_line, fit_report
 
+def load_result(filename: str):
+    """
+    Load a saved lmfit model result from a file.
+    """
+    result = load_modelresult(filename)
 
+    params = result.params
+
+    peak_markers = []
+    for key in params:
+        if 'g' in key and '_center' in key:
+            peak_markers.append(params[key].value)
+
+    x_min = result.userkws['x'].min()
+    x_max = result.userkws['x'].max()
+    x_data = np.linspace(x_min, x_max, 1000)
+
+    # Print initial parameter guesses
+    print("\nInitial Parameter Guesses:")
+    params.pretty_print()
+
+    # Print fit report
+    print("\nFit Report:")
+
+    fit_report = result.fit_report()
+    print(fit_report)
+
+    # Extract Gaussian and background parameters
+    gaussian_params = []
+    for i in range(len(peak_markers)):
+        amplitude = float(result.params[f'g{i}_amplitude'].value)
+        amplitude_uncertainty = result.params[f'g{i}_amplitude'].stderr or 0.0
+        mean = float(result.params[f'g{i}_center'].value)
+        mean_uncertainty = result.params[f'g{i}_center'].stderr or 0.0
+        sigma = float(result.params[f'g{i}_sigma'].value)
+        sigma_uncertainty = result.params[f'g{i}_sigma'].stderr or 0.0
+        fwhm = float(result.params[f'g{i}_fwhm'].value)
+        fwhm_uncertainty = result.params[f'g{i}_fwhm'].stderr or 0.0
+        area = float(result.params[f'g{i}_area'].value)
+        area_uncertainty = result.params[f'g{i}_area'].stderr or 0.0
+        uuid = result.params.get(f'g{i}_uuid', None)
+
+        gaussian_params.append((
+            amplitude, amplitude_uncertainty, mean, mean_uncertainty,
+            sigma, sigma_uncertainty, fwhm, fwhm_uncertainty, area, area_uncertainty, uuid
+        ))
+
+        # Extract background parameters
+        background_params = []
+        # if bg_type != 'None':
+        for key in result.params:
+            if 'bg_' in key:
+                value = float(result.params[key].value)
+                uncertainty = result.params[key].stderr or 0.0
+                background_params.append((key, value, uncertainty))
+
+        # Create smooth fit line
+        x_data_line = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
+        y_data_line = result.eval(x=x_data_line)
+
+    # save the fit result to a temp file
+    save_modelresult(result, 'temp_fit.sav')
+
+    return gaussian_params, background_params, x_data_line, y_data_line, fit_report
+
+def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
+    # load the result
+    result = load_modelresult(file_path)
+
+    # print fit report
+    print("\nPre Fit Report:")
+    fit_report = result.fit_report()
+    print(fit_report)
+
+    # Add the UUID to the result
+    if f"g{peak_number}_uuid" not in result.params:
+        result.params.add(f"g{peak_number}_uuid", value=uuid, vary=False)
+    else:
+        # update the uuid
+        result.params[f"g{peak_number}_uuid"].set(value=uuid, vary=False)
+
+    # print fit report
+    print("\nPost Fit Report:")
+    fit_report = result.fit_report()
+    print(fit_report)
+
+    # save the fit result to a temp file
+    save_modelresult(result, 'temp_fit.sav')
+
+    return fit_report
 
 import polars as pl
 import matplotlib.pyplot as plt

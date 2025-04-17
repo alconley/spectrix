@@ -64,7 +64,7 @@ impl EguiHorizontalLine {
 
     pub fn draw(&self, plot_ui: &mut PlotUi<'_>) {
         if self.draw {
-            let mut line = HLine::new(self.y_value)
+            let mut line = HLine::new(self.name.clone(), self.y_value)
                 .highlight(self.highlighted)
                 .stroke(self.stroke)
                 .width(self.width)
@@ -88,11 +88,12 @@ impl EguiHorizontalLine {
                     self.y_value,
                 ]];
 
-                let mid_point = egui_plot::Points::new(mid_point_pos)
-                    .color(self.color)
-                    .highlight(self.highlighted)
-                    .radius(self.mid_point_radius)
-                    .id(Id::new(self.name.clone()));
+                let mid_point =
+                    egui_plot::Points::new(format!("{} mid point", self.name), mid_point_pos)
+                        .color(self.color)
+                        .highlight(self.highlighted)
+                        .radius(self.mid_point_radius)
+                        .id(Id::new(self.name.clone()));
 
                 plot_ui.points(mid_point);
             }

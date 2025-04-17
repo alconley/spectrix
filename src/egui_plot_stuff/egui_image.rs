@@ -94,6 +94,7 @@ impl EguiImage {
     pub fn get_plot_image_from_texture(&mut self) -> Option<egui_plot::PlotImage> {
         if let Some(texture) = &self.texture {
             Some(PlotImage::new(
+                self.name.clone(),
                 texture,
                 self.get_image_center(),
                 self.get_image_size(),

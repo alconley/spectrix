@@ -112,7 +112,7 @@ impl Histogram2D {
 
         for entry in stats_entries.iter() {
             plot_ui.text(
-                egui_plot::Text::new(egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
+                egui_plot::Text::new("", egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
                     .highlight(false)
                     .name(entry),
             );

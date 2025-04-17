@@ -97,7 +97,7 @@ impl EguiLine {
                 })
                 .collect();
 
-            let mut line = Line::new(PlotPoints::Owned(plot_points))
+            let mut line = Line::new(self.name.clone(), PlotPoints::Owned(plot_points))
                 .highlight(self.highlighted)
                 .stroke(self.stroke)
                 .width(self.width)
