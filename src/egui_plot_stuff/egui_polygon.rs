@@ -157,15 +157,14 @@ impl EguiPolygon {
         if self.draw {
             // draw the temp vertex
             if let Some(temp_vertex) = &self.temp_vertex {
-                let temp_vertex_points =
-                    egui_plot::Points::new(self.name.clone(), temp_vertex.clone())
-                        .radius(5.0)
-                        .color(self.stroke.color);
+                let temp_vertex_points = egui_plot::Points::new("", temp_vertex.clone())
+                    .radius(5.0)
+                    .color(self.stroke.color);
 
                 plot_ui.points(temp_vertex_points);
             }
 
-            let mut polygon = Polygon::new(self.name.clone(), self.vertices.clone())
+            let mut polygon = Polygon::new("", self.vertices.clone())
                 .highlight(self.highlighted)
                 .stroke(self.stroke)
                 .width(self.width)
@@ -184,12 +183,11 @@ impl EguiPolygon {
 
             // if the user can drag the vertices, draw the vertices
             if self.interactive_dragging {
-                let vertices_points =
-                    egui_plot::Points::new(self.name.clone(), self.vertices.clone())
-                        .radius(5.0)
-                        .color(self.stroke.color)
-                        .id(Id::new(self.name.clone()))
-                        .highlight(self.highlighted);
+                let vertices_points = egui_plot::Points::new("", self.vertices.clone())
+                    .radius(5.0)
+                    .color(self.stroke.color)
+                    .id(Id::new(self.name.clone()))
+                    .highlight(self.highlighted);
 
                 plot_ui.points(vertices_points);
             }

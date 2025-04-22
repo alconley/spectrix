@@ -64,7 +64,7 @@ impl EguiVerticalLine {
 
     pub fn draw(&self, plot_ui: &mut PlotUi<'_>) {
         if self.draw {
-            let mut line = VLine::new(self.name.clone(), self.x_value)
+            let mut line = VLine::new("", self.x_value)
                 .highlight(self.highlighted)
                 .stroke(self.stroke)
                 .width(self.width)
@@ -88,14 +88,11 @@ impl EguiVerticalLine {
                     (plot_ui.plot_bounds().min()[1] + plot_ui.plot_bounds().max()[1]) / 2.0,
                 ]];
 
-                let mid_point = egui_plot::Points::new(
-                    format!("{} mid point", self.name.clone()),
-                    mid_point_pos,
-                )
-                .color(self.color)
-                .highlight(self.highlighted)
-                .radius(self.mid_point_radius)
-                .id(Id::new(self.name.clone()));
+                let mid_point = egui_plot::Points::new("", mid_point_pos)
+                    .color(self.color)
+                    .highlight(self.highlighted)
+                    .radius(self.mid_point_radius)
+                    .id(Id::new(self.name.clone()));
 
                 plot_ui.points(mid_point);
             }

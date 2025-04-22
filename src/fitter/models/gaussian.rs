@@ -489,9 +489,12 @@ def GaussianFit(counts: list, centers: list,
         area = float(result.params[f'g{i}_area'].value)
         area_uncertainty = result.params[f'g{i}_area'].stderr or 0.0
 
+        # default
+        uuid = 0
+
         gaussian_params.append((
             amplitude, amplitude_uncertainty, mean, mean_uncertainty,
-            sigma, sigma_uncertainty, fwhm, fwhm_uncertainty, area, area_uncertainty
+            sigma, sigma_uncertainty, fwhm, fwhm_uncertainty, area, area_uncertainty, uuid
         ))
 
         # Extract background parameters
