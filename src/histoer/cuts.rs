@@ -288,6 +288,34 @@ impl Cuts {
 
         Ok(())
     }
+
+    pub fn filter_lazyframe_in_batches(
+        &self,
+        lf: &LazyFrame,
+        batch_size: usize,
+    ) -> Result<LazyFrame, PolarsError> {
+        let mut offset = 0;
+        let mut filtered_batches = vec![];
+
+        loop {
+            let batch = lf.clone().slice(offset as i64, batch_size as u32);
+            let df = batch.collect()?;
+            if df.height() == 0 {
+                break;
+            }
+
+            let mask = self.create_combined_mask(&df, &self.cuts.iter().collect::<Vec<_>>())?;
+            let filtered = df.filter(&mask)?;
+
+            filtered_batches.push(filtered);
+            offset += batch_size;
+        }
+
+        let lazy_batches: Vec<LazyFrame> =
+            filtered_batches.into_iter().map(DataFrame::lazy).collect();
+        let concatenated = concat(lazy_batches, UnionArgs::default())?;
+        Ok(concatenated)
+    }
 }
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct Cut2D {

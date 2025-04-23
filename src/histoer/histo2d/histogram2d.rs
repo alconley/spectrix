@@ -5,13 +5,15 @@ use crate::egui_plot_stuff::egui_image::EguiImage;
 
 use super::plot_settings::PlotSettings;
 
+use polars::prelude::*;
+
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Histogram2D {
     pub name: String,
     pub bins: Bins,
     pub range: Range,
-    pub overflow: (u64, u64),
-    pub underflow: (u64, u64),
+    pub overflow: u64,
+    pub underflow: u64,
     pub plot_settings: PlotSettings,
     pub image: EguiImage,
     pub backup_bins: Option<Bins>,
@@ -41,8 +43,8 @@ impl Histogram2D {
                     max: range.1 .1,
                 },
             },
-            overflow: (0, 0),
-            underflow: (0, 0),
+            overflow: 0,
+            underflow: 0,
             plot_settings: PlotSettings::default(),
             image: EguiImage::heatmap(
                 name.to_string(),
@@ -62,13 +64,13 @@ impl Histogram2D {
 
     pub fn fill(&mut self, x_value: f64, y_value: f64) {
         if x_value < self.range.x.min {
-            self.underflow.0 += 1; // Increment x-axis underflow
+            self.underflow += 1; // Increment x-axis underflow
         } else if x_value >= self.range.x.max {
-            self.overflow.0 += 1; // Increment x-axis overflow
+            self.overflow += 1; // Increment x-axis overflow
         } else if y_value < self.range.y.min {
-            self.underflow.1 += 1; // Increment y-axis underflow
+            self.underflow += 1; // Increment y-axis underflow
         } else if y_value >= self.range.y.max {
-            self.overflow.1 += 1; // Increment y-axis overflow
+            self.overflow += 1; // Increment y-axis overflow
         } else {
             // Value is within range; proceed to calculate indices and update counts
             let x_index = ((x_value - self.range.x.min) / self.bins.x_width) as usize;
@@ -80,6 +82,71 @@ impl Histogram2D {
             self.bins.min_count = self.bins.min_count.min(*count);
             self.bins.max_count = self.bins.max_count.max(*count);
         }
+    }
+
+    pub fn fill_from_lazyframe(
+        &mut self,
+        lf: LazyFrame,
+        x_column: &str,
+        y_column: &str,
+        invalid_value: f64,
+    ) -> PolarsResult<()> {
+        let (x_min, x_max) = (self.range.x.min, self.range.x.max);
+        let (y_min, y_max) = (self.range.y.min, self.range.y.max);
+        let (x_width, y_width) = (self.bins.x_width, self.bins.y_width);
+
+        let raw_x = ((col(x_column) - lit(x_min)) / lit(x_width)).cast(DataType::Int32);
+        let raw_y = ((col(y_column) - lit(y_min)) / lit(y_width)).cast(DataType::Int32);
+
+        let x_bin = when(col(x_column).lt(lit(x_min)))
+            .then(lit(-2))
+            .when(col(x_column).gt_eq(lit(x_max)))
+            .then(lit(-1))
+            .otherwise(raw_x)
+            .alias("x_bin");
+
+        let y_bin = when(col(y_column).lt(lit(y_min)))
+            .then(lit(-2))
+            .when(col(y_column).gt_eq(lit(y_max)))
+            .then(lit(-1))
+            .otherwise(raw_y)
+            .alias("y_bin");
+
+        let df = lf
+            .filter(
+                col(x_column)
+                    .neq(lit(invalid_value))
+                    .and(col(y_column).neq(lit(invalid_value))),
+            )
+            .with_columns([x_bin, y_bin])
+            .group_by([col("x_bin"), col("y_bin")])
+            .agg([col("x_bin").count().alias("count")])
+            .sort(["x_bin", "y_bin"], Default::default())
+            .collect()?;
+
+        let x_bins = df.column("x_bin")?.i32()?;
+        let y_bins = df.column("y_bin")?.i32()?;
+        let counts = df.column("count")?.u32()?;
+
+        for ((x_opt, y_opt), count_opt) in x_bins.into_iter().zip(y_bins).zip(counts) {
+            if let ((Some(x), Some(y)), Some(count)) = ((x_opt, y_opt), count_opt) {
+                match (x, y) {
+                    (-2, _) | (_, -2) => self.underflow += count as u64,
+                    (-1, _) | (_, -1) => self.overflow += count as u64,
+                    (x_bin, y_bin) if x_bin >= 0 && y_bin >= 0 => {
+                        let (xi, yi) = (x_bin as usize, y_bin as usize);
+                        let bin = self.bins.counts.entry((xi, yi)).or_insert(0);
+                        *bin += count as u64;
+                        self.bins.min_count = self.bins.min_count.min(*bin);
+                        self.bins.max_count = self.bins.max_count.max(*bin);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        self.plot_settings.recalculate_image = true;
+        Ok(())
     }
 
     // get the bin index for a given x value

@@ -21,6 +21,11 @@ use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
 use super::tree::TreeBehavior;
 
+use super::cuts::Cuts;
+
+use crate::histoer::configs::Hist1DConfig;
+use crate::histoer::configs::Hist2DConfig;
+
 #[derive(serde::Deserialize, serde::Serialize, PartialEq, Debug)]
 pub enum ContainerType {
     Grid,
@@ -50,6 +55,9 @@ pub struct Histogrammer {
     #[serde(skip)]
     pub progress: Arc<Mutex<f32>>,
     pub histogram_map: HashMap<String, ContainerInfo>, // Map full path to TabInfo
+
+    #[serde(skip)]
+    pub fill_column_wise: bool,
 }
 
 impl Default for Histogrammer {
@@ -62,6 +70,7 @@ impl Default for Histogrammer {
             abort_flag: Arc::new(AtomicBool::new(false)),
             progress: Arc::new(Mutex::new(0.0)),
             histogram_map: HashMap::new(),
+            fill_column_wise: true,
         }
     }
 }
@@ -190,7 +199,7 @@ impl Histogrammer {
         }
     }
 
-    pub fn fill_histograms(
+    pub fn fill_histograms_row_wise(
         &mut self,
         mut configs: Configs,
         lf: &LazyFrame,
@@ -414,6 +423,241 @@ impl Histogrammer {
                 calculating.store(false, Ordering::SeqCst);
             }
         });
+    }
+
+    pub fn fill_histograms_column_wise(
+        &mut self,
+        mut configs: Configs,
+        lf: &LazyFrame,
+        estimated_memory: f64,
+    ) {
+        let calculating = Arc::clone(&self.calculating);
+        let abort_flag = Arc::clone(&self.abort_flag);
+        let progress = Arc::clone(&self.progress);
+
+        // Set calculating to true at the start
+        calculating.store(true, Ordering::SeqCst);
+        abort_flag.store(false, Ordering::SeqCst);
+
+        let mut lf = lf.clone();
+
+        // Validate configurations and prepare histograms
+        let valid_configs = configs.valid_configs(&mut lf);
+        valid_configs.check_and_add_panes(self);
+
+        // if valid configs is empty, return early
+        if valid_configs.is_empty() {
+            calculating.store(false, Ordering::SeqCst);
+            log::error!("No valid configurations found for histograms.");
+            return;
+        }
+
+        // Select required columns from the LazyFrame
+        let used_columns = valid_configs.get_used_columns();
+
+        let columns = used_columns.len() as u64;
+
+        // Select required columns from the LazyFrame
+        let used_columns = valid_configs.get_used_columns();
+        let selected_columns: Vec<_> = used_columns.iter().map(col).collect();
+
+        // Estimate rows per chunk
+        let bytes_per_row = columns as f64 * 8.0; // Each f64 is 8 bytes
+        let chunk_size_bytes = estimated_memory * 1_073_741_824.0;
+        let rows_per_chunk = (chunk_size_bytes / bytes_per_row).floor() as usize;
+
+        // Apply the selection to the LazyFrame
+        let lf = Arc::new(lf.clone().select(selected_columns.clone()));
+
+        // Initialize histogram maps
+        let hist1d_map: Vec<_> = valid_configs
+            .configs
+            .iter()
+            .filter_map(|config| {
+                if let Config::Hist1D(hist1d) = config {
+                    self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
+                        egui_tiles::Tile::Pane(Pane::Histogram(hist))
+                            if hist.lock().unwrap().name == hist1d.name =>
+                        {
+                            Some((Arc::clone(hist), hist1d.clone()))
+                        }
+                        _ => None,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let hist2d_map: Vec<_> = valid_configs
+            .configs
+            .iter()
+            .filter_map(|config| {
+                if let Config::Hist2D(hist2d) = config {
+                    self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
+                        egui_tiles::Tile::Pane(Pane::Histogram2D(hist))
+                            if hist.lock().unwrap().name == hist2d.name =>
+                        {
+                            Some((Arc::clone(hist), hist2d.clone()))
+                        }
+                        _ => None,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        #[allow(clippy::type_complexity)]
+        let mut cut_groups_1d: HashMap<
+            String,
+            (Cuts, Vec<(Arc<Mutex<Box<Histogram>>>, Hist1DConfig)>),
+        > = HashMap::new();
+        
+        #[allow(clippy::type_complexity)]
+        let mut cut_groups_2d: HashMap<
+            String,
+            (Cuts, Vec<(Arc<Mutex<Box<Histogram2D>>>, Hist2DConfig)>),
+        > = HashMap::new();
+
+        for config in &valid_configs.configs {
+            match config {
+                Config::Hist1D(hist1d) => {
+                    if let Some(hist) = self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
+                        egui_tiles::Tile::Pane(Pane::Histogram(hist))
+                            if hist.lock().unwrap().name == hist1d.name =>
+                        {
+                            Some(Arc::clone(hist))
+                        }
+                        _ => None,
+                    }) {
+                        let key = hist1d.cuts.generate_key();
+                        cut_groups_1d
+                            .entry(key.clone())
+                            .or_insert_with(|| (hist1d.cuts.clone(), vec![]))
+                            .1
+                            .push((hist, hist1d.clone()));
+                    }
+                }
+                Config::Hist2D(hist2d) => {
+                    if let Some(hist) = self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
+                        egui_tiles::Tile::Pane(Pane::Histogram2D(hist))
+                            if hist.lock().unwrap().name == hist2d.name =>
+                        {
+                            Some(Arc::clone(hist))
+                        }
+                        _ => None,
+                    }) {
+                        let key = hist2d.cuts.generate_key();
+                        cut_groups_2d
+                            .entry(key.clone())
+                            .or_insert_with(|| (hist2d.cuts.clone(), vec![]))
+                            .1
+                            .push((hist, hist2d.clone()));
+                    }
+                }
+            }
+        }
+        std::thread::spawn({
+            let calculating = Arc::clone(&calculating);
+            let progress = Arc::clone(&progress);
+            let lf = Arc::clone(&lf);
+            let total_histos = (hist1d_map.len() + hist2d_map.len()) as u64;
+
+            let progress_bar = ProgressBar::new(total_histos);
+            progress_bar.set_style(
+                ProgressStyle::default_bar()
+                    .template("[{elapsed_precise}] {bar:40.cyan/blue} {percent}% ({pos}/{len})")
+                    .expect("progress bar template")
+                    .progress_chars("#>-"),
+            );
+
+            move || {
+                let mut completed = 0.0;
+                let total = (cut_groups_1d
+                    .values()
+                    .map(|(_, list)| list.len())
+                    .sum::<usize>()
+                    + cut_groups_2d
+                        .values()
+                        .map(|(_, list)| list.len())
+                        .sum::<usize>()) as f32;
+
+                for (cuts, grouped) in cut_groups_1d.values() {
+                    let filtered_lf = if cuts.is_empty() {
+                        Ok((*lf).clone())
+                    } else {
+                        cuts.filter_lazyframe_in_batches(&(*lf).clone(), rows_per_chunk)
+                    };
+
+                    if let Ok(filtered_lf) = filtered_lf {
+                        for (hist, config) in grouped {
+                            let mut guard = hist.lock().unwrap();
+                            if let Err(e) = guard.fill_from_lazyframe(
+                                filtered_lf.clone(),
+                                &config.column_name,
+                                -1e6,
+                            ) {
+                                log::error!("Failed to fill hist1d '{}': {:?}", config.name, e);
+                            }
+                            completed += 1.0;
+                            *progress.lock().unwrap() = completed / total;
+                            progress_bar.inc(1);
+                            if abort_flag.load(Ordering::SeqCst) {
+                                println!("Processing aborted by user.");
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                for (cuts, grouped) in cut_groups_2d.values() {
+                    let filtered_lf = if cuts.is_empty() {
+                        Ok((*lf).clone())
+                    } else {
+                        cuts.filter_lazyframe_in_batches(&(*lf).clone(), rows_per_chunk)
+                    };
+
+                    if let Ok(filtered_lf) = filtered_lf {
+                        for (hist, config) in grouped {
+                            let mut guard = hist.lock().unwrap();
+                            if let Err(e) = guard.fill_from_lazyframe(
+                                filtered_lf.clone(),
+                                &config.x_column_name,
+                                &config.y_column_name,
+                                -1e6,
+                            ) {
+                                log::error!("Failed to fill hist2d '{}': {:?}", config.name, e);
+                            }
+                            completed += 1.0;
+                            *progress.lock().unwrap() = completed / total;
+                            progress_bar.inc(1);
+                            if abort_flag.load(Ordering::SeqCst) {
+                                println!("Processing aborted by user.");
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                progress_bar.finish_with_message("Column-wise histogram fill complete.");
+                *progress.lock().unwrap() = 1.0;
+                calculating.store(false, Ordering::SeqCst);
+            }
+        });
+    }
+
+    pub fn fill_histograms(
+        &mut self,
+        configs: Configs,
+        lf: &LazyFrame,
+        estimated_memory: f64, // chunk size in GB
+    ) {
+        if self.fill_column_wise {
+            self.fill_histograms_column_wise(configs, lf, estimated_memory);
+        } else {
+            self.fill_histograms_row_wise(configs, lf, estimated_memory);
+        }
     }
 
     pub fn add_hist1d_with_bin_values(

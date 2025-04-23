@@ -1,14 +1,17 @@
 use crate::util::processer::Processor;
+
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct Spectrix {
-    processor: Processor,
+    sessions: Vec<Processor>,
+    current_session: usize,
 }
 
 impl Default for Spectrix {
     fn default() -> Self {
         Self {
-            processor: Processor::new(),
+            sessions: vec![Processor::new()],
+            current_session: 0,
         }
     }
 }
@@ -27,7 +30,6 @@ impl Spectrix {
 }
 
 impl eframe::App for Spectrix {
-    /// Called by the frame work to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
     }
@@ -36,21 +38,48 @@ impl eframe::App for Spectrix {
         egui::TopBottomPanel::top("spectrix_top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 egui::global_theme_preference_switch(ui);
-
                 ui.heading("Spectrix");
-
                 ui.separator();
 
-                self.processor.histogrammer.menu_ui(ui);
+                // Session tab switcher
+                for (i, _) in self.sessions.iter().enumerate() {
+                    if ui
+                        .selectable_label(self.current_session == i, format!("Session {}", i + 1))
+                        .clicked()
+                    {
+                        self.current_session = i;
+                    }
+                }
 
-                ui.add_space(ui.available_width() - 50.0);
+                // Add new session button
+                if ui.button("➕ New Session").clicked() {
+                    self.sessions.push(Processor::new());
+                    self.current_session = self.sessions.len() - 1;
+                }
 
-                if ui.button("Reset").clicked() {
+                ui.add_space(ui.available_width() - 100.0);
+
+                // if there are more than 1 sessions say "Remove Current Session" else say "Reset to Default"
+                if self.sessions.len() > 1 {
+                    if ui.button("Remove Session").clicked() {
+                        self.sessions.remove(self.current_session);
+                        if self.current_session >= self.sessions.len() {
+                            self.current_session = self.sessions.len() - 1;
+                        }
+                    }
+                } else if ui.button("Reset Session").clicked() {
                     self.reset_to_default();
                 }
             });
         });
 
-        self.processor.ui(ctx);
+        // Draw the UI for the current session
+        if let Some(current) = self.sessions.get_mut(self.current_session) {
+            egui::TopBottomPanel::top("spectrix_top_menu_panel").show(ctx, |ui| {
+                current.histogrammer.menu_ui(ui);
+            });
+
+            current.ui(ctx);
+        }
     }
 }
