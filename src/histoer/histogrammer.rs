@@ -513,7 +513,7 @@ impl Histogrammer {
             String,
             (Cuts, Vec<(Arc<Mutex<Box<Histogram>>>, Hist1DConfig)>),
         > = HashMap::new();
-        
+
         #[allow(clippy::type_complexity)]
         let mut cut_groups_2d: HashMap<
             String,
