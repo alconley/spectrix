@@ -928,91 +928,216 @@ def load_result(filename: str):
                 self.fit_result.push(gaussian_param);
             }
 
-            if self.background_result.is_none() {
-                // get the min x data in the x_composition
-                let min_x = x_composition.iter().cloned().fold(f64::INFINITY, f64::min);
+            // if self.background_result.is_none() {
+            //     // get the min x data in the x_composition
+            //     let min_x = x_composition.iter().cloned().fold(f64::INFINITY, f64::min);
 
-                // get the max x data in the x_composition
+            //     // get the max x data in the x_composition
+            //     let max_x = x_composition
+            //         .iter()
+            //         .cloned()
+            //         .fold(f64::NEG_INFINITY, f64::max);
+
+            //     match self.background_model {
+            //         // Handle the Linear case
+            //         BackgroundModel::Linear(_) => {
+            //             let slope = background_params[0].1;
+            //             let slope_err = background_params[0].2;
+            //             let intercept = background_params[1].1;
+            //             let intercept_err = background_params[1].2;
+
+            //             let linear_fitter = LinearFitter::new_from_parameters(
+            //                 (slope, slope_err),
+            //                 (intercept, intercept_err),
+            //                 min_x,
+            //                 max_x,
+            //             );
+
+            //             self.background_result = Some(BackgroundResult::Linear(linear_fitter));
+            //         }
+
+            //         // Handle the Exponential case
+            //         BackgroundModel::Exponential(_) => {
+            //             let amplitude = background_params[0].1;
+            //             let amplitude_err = background_params[0].2;
+            //             let decay = background_params[1].1;
+            //             let decay_err = background_params[1].2;
+
+            //             let exponential_fitter = ExponentialFitter::new_from_parameters(
+            //                 (amplitude, amplitude_err),
+            //                 (decay, decay_err),
+            //                 min_x,
+            //                 max_x,
+            //             );
+
+            //             self.background_result =
+            //                 Some(BackgroundResult::Exponential(exponential_fitter));
+            //         }
+
+            //         // Handle the Quadratic case (to be implemented similarly)
+            //         BackgroundModel::Quadratic(_) => {
+            //             let a = background_params[0].1;
+            //             let a_err = background_params[0].2;
+            //             let b = background_params[1].1;
+            //             let b_err = background_params[1].2;
+            //             let c = background_params[2].1;
+            //             let c_err = background_params[2].2;
+
+            //             let quadratic_fitter = QuadraticFitter::new_from_parameters(
+            //                 (a, a_err),
+            //                 (b, b_err),
+            //                 (c, c_err),
+            //                 min_x,
+            //                 max_x,
+            //             );
+
+            //             self.background_result =
+            //                 Some(BackgroundResult::Quadratic(quadratic_fitter));
+            //         }
+
+            //         // Handle the PowerLaw case (to be implemented similarly)
+            //         BackgroundModel::PowerLaw(_) => {
+            //             let amplitude = background_params[0].1;
+            //             let amplitude_err = background_params[0].2;
+            //             let exponent = background_params[1].1;
+            //             let exponent_err = background_params[1].2;
+
+            //             let powerlaw_fitter = PowerLawFitter::new_from_parameters(
+            //                 (amplitude, amplitude_err),
+            //                 (exponent, exponent_err),
+            //                 min_x,
+            //                 max_x,
+            //             );
+
+            //             self.background_result = Some(BackgroundResult::PowerLaw(powerlaw_fitter));
+            //         }
+
+            //         BackgroundModel::None => {}
+            //     }
+            // }
+
+            if self.background_result.is_none() && !background_params.is_empty() {
+                let bg_type = background_params[0].0.as_str();
+
+                let min_x = x_composition.iter().cloned().fold(f64::INFINITY, f64::min);
                 let max_x = x_composition
                     .iter()
                     .cloned()
                     .fold(f64::NEG_INFINITY, f64::max);
 
-                match self.background_model {
-                    // Handle the Linear case
-                    BackgroundModel::Linear(_) => {
-                        let slope = background_params[0].1;
-                        let slope_err = background_params[0].2;
-                        let intercept = background_params[1].1;
-                        let intercept_err = background_params[1].2;
+                match bg_type {
+                    "bg_slope" | "bg_intercept" => {
+                        // assume Linear
+                        self.background_model = BackgroundModel::Linear(Default::default());
 
-                        let linear_fitter = LinearFitter::new_from_parameters(
-                            (slope, slope_err),
-                            (intercept, intercept_err),
+                        let slope = background_params
+                            .iter()
+                            .find(|(name, _, _)| name == "bg_slope")
+                            .map(|(_, val, _)| *val)
+                            .unwrap_or(0.0);
+
+                        let intercept = background_params
+                            .iter()
+                            .find(|(name, _, _)| name == "bg_intercept")
+                            .map(|(_, val, _)| *val)
+                            .unwrap_or(0.0);
+
+                        let linear = LinearFitter::new_from_parameters(
+                            (slope, 0.0),
+                            (intercept, 0.0),
                             min_x,
                             max_x,
                         );
-
-                        self.background_result = Some(BackgroundResult::Linear(linear_fitter));
+                        self.background_result = Some(BackgroundResult::Linear(linear));
                     }
 
-                    // Handle the Exponential case
-                    BackgroundModel::Exponential(_) => {
-                        let amplitude = background_params[0].1;
-                        let amplitude_err = background_params[0].2;
-                        let decay = background_params[1].1;
-                        let decay_err = background_params[1].2;
+                    "bg_a" | "bg_b" | "bg_c" => {
+                        self.background_model = BackgroundModel::Quadratic(Default::default());
 
-                        let exponential_fitter = ExponentialFitter::new_from_parameters(
-                            (amplitude, amplitude_err),
-                            (decay, decay_err),
+                        let a = background_params
+                            .iter()
+                            .find(|(name, _, _)| name == "bg_a")
+                            .map(|(_, val, _)| *val)
+                            .unwrap_or(0.0);
+                        let b = background_params
+                            .iter()
+                            .find(|(name, _, _)| name == "bg_b")
+                            .map(|(_, val, _)| *val)
+                            .unwrap_or(0.0);
+                        let c = background_params
+                            .iter()
+                            .find(|(name, _, _)| name == "bg_c")
+                            .map(|(_, val, _)| *val)
+                            .unwrap_or(0.0);
+
+                        let quad = QuadraticFitter::new_from_parameters(
+                            (a, 0.0),
+                            (b, 0.0),
+                            (c, 0.0),
                             min_x,
                             max_x,
                         );
-
-                        self.background_result =
-                            Some(BackgroundResult::Exponential(exponential_fitter));
+                        self.background_result = Some(BackgroundResult::Quadratic(quad));
                     }
 
-                    // Handle the Quadratic case (to be implemented similarly)
-                    BackgroundModel::Quadratic(_) => {
-                        let a = background_params[0].1;
-                        let a_err = background_params[0].2;
-                        let b = background_params[1].1;
-                        let b_err = background_params[1].2;
-                        let c = background_params[2].1;
-                        let c_err = background_params[2].2;
+                    "bg_amplitude"
+                        if background_params
+                            .iter()
+                            .any(|(k, _, _)| k.contains("decay")) =>
+                    {
+                        self.background_model = BackgroundModel::Exponential(Default::default());
 
-                        let quadratic_fitter = QuadraticFitter::new_from_parameters(
-                            (a, a_err),
-                            (b, b_err),
-                            (c, c_err),
+                        let amplitude = background_params
+                            .iter()
+                            .find(|(name, _, _)| name == "bg_amplitude")
+                            .map(|(_, val, _)| *val)
+                            .unwrap_or(0.0);
+                        let decay = background_params
+                            .iter()
+                            .find(|(name, _, _)| name == "bg_decay")
+                            .map(|(_, val, _)| *val)
+                            .unwrap_or(0.0);
+
+                        let expo = ExponentialFitter::new_from_parameters(
+                            (amplitude, 0.0),
+                            (decay, 0.0),
                             min_x,
                             max_x,
                         );
-
-                        self.background_result =
-                            Some(BackgroundResult::Quadratic(quadratic_fitter));
+                        self.background_result = Some(BackgroundResult::Exponential(expo));
                     }
 
-                    // Handle the PowerLaw case (to be implemented similarly)
-                    BackgroundModel::PowerLaw(_) => {
-                        let amplitude = background_params[0].1;
-                        let amplitude_err = background_params[0].2;
-                        let exponent = background_params[1].1;
-                        let exponent_err = background_params[1].2;
+                    "bg_amplitude"
+                        if background_params
+                            .iter()
+                            .any(|(k, _, _)| k.contains("exponent")) =>
+                    {
+                        self.background_model = BackgroundModel::PowerLaw(Default::default());
 
-                        let powerlaw_fitter = PowerLawFitter::new_from_parameters(
-                            (amplitude, amplitude_err),
-                            (exponent, exponent_err),
+                        let amplitude = background_params
+                            .iter()
+                            .find(|(name, _, _)| name == "bg_amplitude")
+                            .map(|(_, val, _)| *val)
+                            .unwrap_or(0.0);
+                        let exponent = background_params
+                            .iter()
+                            .find(|(name, _, _)| name == "bg_exponent")
+                            .map(|(_, val, _)| *val)
+                            .unwrap_or(0.0);
+
+                        let powerlaw = PowerLawFitter::new_from_parameters(
+                            (amplitude, 0.0),
+                            (exponent, 0.0),
                             min_x,
                             max_x,
                         );
-
-                        self.background_result = Some(BackgroundResult::PowerLaw(powerlaw_fitter));
+                        self.background_result = Some(BackgroundResult::PowerLaw(powerlaw));
                     }
 
-                    BackgroundModel::None => {}
+                    _ => {
+                        self.background_model = BackgroundModel::None;
+                        self.background_result = None;
+                    }
                 }
             }
 

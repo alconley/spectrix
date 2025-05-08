@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::thread;
 
 #[derive(serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct ProcessorSettings {
     pub left_panel_open: bool,
     pub histogram_script_open: bool,
@@ -39,6 +40,7 @@ impl Default for ProcessorSettings {
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct Processor {
     #[serde(skip)]
     pub file_dialog: FileDialog,
@@ -701,29 +703,28 @@ def get_2d_histograms(file_name):
                         }
                     }
 
-                    ui.separator();
-
-                    ui.collapsing("Selected File Settings", |ui| {
-                        ui.label("Save Filtered Files:");
-                        self.settings.cuts.ui(ui);
-
-                        ui.horizontal(|ui| {
-                            ui.label("Suffix:");
-                            ui.text_edit_singleline(&mut self.settings.saved_cut_suffix);
-                        });
-
+                    // if there are no selected files, show a message
+                    if !self.selected_files.is_empty() {
                         ui.separator();
 
-                        if ui.button("Save Filtered Files").clicked() {
-                            self.filter_selected_files_and_save();
-                        }
+                        ui.collapsing("Selected File Settings", |ui| {
+                            ui.label("Save Filtered Files:");
+                            self.settings.cuts.ui(ui);
+                            ui.horizontal(|ui| {
+                                ui.label("Suffix:");
+                                ui.text_edit_singleline(&mut self.settings.saved_cut_suffix);
+                            });
+                            ui.separator();
+                            if ui.button("Save Filtered Files").clicked() {
+                                self.filter_selected_files_and_save();
+                            }
+                            ui.add_space(10.0);
+                            if ui.button("Combine Selected Files").clicked() {
+                                self.combine_and_save_selected_files();
+                            }
+                        });
+                    }
 
-                        ui.add_space(10.0);
-
-                        if ui.button("Combine Selected Files").clicked() {
-                            self.combine_and_save_selected_files();
-                        }
-                    });
                 });
 
             },

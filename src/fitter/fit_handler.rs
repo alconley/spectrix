@@ -237,8 +237,17 @@ impl Fits {
                                     new_fitter.decomposition_lines.push(line);
                                 }
 
+                                if let Some(background_result) = &gaussian_fitter.background_result
+                                {
+                                    new_fitter.background_result = Some(background_result.clone());
+                                    new_fitter.background_line.points =
+                                        background_result.get_fit_points();
+                                }
                                 new_fitter.fit_result =
                                     Some(FitResult::Gaussian(gaussian_fitter.clone()));
+
+                                // new_fitter.fit_result =
+                                //     Some(FitResult::Gaussian(gaussian_fitter.clone()));
 
                                 self.stored_fits.push(new_fitter);
                                 log::info!("Loaded lmfit result from {:?}", path);
@@ -331,11 +340,11 @@ impl Fits {
         if self.settings.show_fit_stats {
             ui.separator();
 
-            egui::ScrollArea::vertical()
-                .max_height(self.settings.fit_stats_height)
-                .show(ui, |ui| {
-                    self.fit_stats_grid_ui(ui);
-                });
+            // egui::ScrollArea::vertical()
+            // .max_height(self.settings.fit_stats_height)
+            // .show(ui, |ui| {
+            self.fit_stats_grid_ui(ui);
+            // });
         }
     }
 
@@ -354,15 +363,15 @@ impl Fits {
                     self.fit_stats_grid_ui(ui);
                 });
 
-            ui.separator();
+            // ui.separator();
 
-            if let Some(temp_fit) = &mut self.temp_fit {
-                temp_fit.fit_result_ui(ui);
-            }
+            // if let Some(temp_fit) = &mut self.temp_fit {
+            //     temp_fit.fit_result_ui(ui);
+            // }
 
-            for fit in &mut self.stored_fits {
-                fit.fit_result_ui(ui);
-            }
+            // for fit in &mut self.stored_fits {
+            //     fit.fit_result_ui(ui);
+            // }
         });
     }
 }
