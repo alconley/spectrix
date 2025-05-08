@@ -446,23 +446,30 @@ impl Histogram {
             self.line.set_color(egui::Color32::BLACK);
         }
 
-        // Display progress bar while hist is being filled
-        // disabled since the row calculation is done in chucks
-        // self.plot_settings.progress_ui(ui);
-
         self.update_line_points(); // Ensure line points are updated for projections
         self.keybinds(ui); // Handle interactive elements
 
         let ui_height = ui.available_height();
 
         ui.horizontal(|ui| {
-            self.fits.settings.fit_stats_height = ui_height;
-            self.fits.fit_stats_ui(ui);
-
             let ui_width = ui.available_width();
 
+            self.fits.settings.fit_stats_height = ui_height;
+            self.fits.ui(
+                ui,
+                ui_width * 0.25,
+                ui_height,
+                self.fits.settings.show_fit_stats,
+            );
+
+            let plot_width = if self.fits.settings.show_fit_stats {
+                ui_width * 0.75
+            } else {
+                ui_width
+            };
+
             let mut plot = egui_plot::Plot::new(self.name.clone())
-                .width(ui_width)
+                .width(plot_width)
                 .height(ui_height);
             plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 

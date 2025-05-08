@@ -40,21 +40,12 @@ impl Default for FitSettings {
 }
 
 impl FitSettings {
-    pub fn menu_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Fit Stats: ");
-            ui.checkbox(&mut self.show_fit_stats, "Show")
-                .on_hover_text("Show the fit statistics above the histogram");
-
-            ui.add(
-                egui::DragValue::new(&mut self.fit_stats_height)
-                    .speed(1.0)
-                    .range(0.0..=f32::INFINITY)
-                    .prefix("Height: ")
-                    .suffix(" px"),
-            )
-            .on_hover_text("Set the height of the fit statistics grid to see more fits at once");
-        });
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        // ui.horizontal(|ui| {
+        //     ui.label("Fit Panel: ");
+        //     ui.checkbox(&mut self.show_fit_stats, "Show")
+        //         .on_hover_text("Show the fit statistics above the histogram");
+        // });
 
         ui.separator();
 

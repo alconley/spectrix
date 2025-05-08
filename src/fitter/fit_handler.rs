@@ -212,6 +212,8 @@ impl Fits {
                 self.export_all_lmfit_individual_files();
             }
 
+            ui.separator();
+
             if ui.button("Load lmfit .sav").clicked() {
                 if let Some(paths) = FileDialog::new().add_filter("SAV", &["sav"]).pick_files() {
                     for path in paths {
@@ -340,38 +342,46 @@ impl Fits {
         if self.settings.show_fit_stats {
             ui.separator();
 
-            // egui::ScrollArea::vertical()
-            // .max_height(self.settings.fit_stats_height)
-            // .show(ui, |ui| {
             self.fit_stats_grid_ui(ui);
-            // });
+        }
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui, width: f32, height: f32, show: bool) {
+        if show {
+            ui.add_space(10.0);
+
+            egui::ScrollArea::both()
+                .max_width(width)
+                .min_scrolled_height(height)
+                .id_salt("Context menu fit stats grid")
+                .show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        ui.heading("Fit Panel");
+                        self.save_and_load_ui(ui);
+
+                        ui.separator();
+
+                        self.settings.ui(ui);
+
+                        self.fit_stats_grid_ui(ui);
+
+                        ui.add_space(10.0);
+                    });
+                });
         }
     }
 
     pub fn fit_context_menu_ui(&mut self, ui: &mut egui::Ui) {
+        let width = ui.available_width();
+        let height = ui.available_height();
         ui.menu_button("Fits", |ui| {
-            self.save_and_load_ui(ui);
+            ui.horizontal(|ui| {
+                ui.label("Fit Panel: ");
+                ui.checkbox(&mut self.settings.show_fit_stats, "Show")
+                    .on_hover_text("Show the fit statistics above the histogram");
+            });
 
-            ui.separator();
-
-            self.settings.menu_ui(ui);
-
-            egui::ScrollArea::vertical()
-                .max_height(300.0)
-                .id_salt("Context menu fit stats grid")
-                .show(ui, |ui| {
-                    self.fit_stats_grid_ui(ui);
-                });
-
-            // ui.separator();
-
-            // if let Some(temp_fit) = &mut self.temp_fit {
-            //     temp_fit.fit_result_ui(ui);
-            // }
-
-            // for fit in &mut self.stored_fits {
-            //     fit.fit_result_ui(ui);
-            // }
+            self.ui(ui, width, height, true);
         });
     }
 }
