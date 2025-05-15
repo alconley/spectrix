@@ -1,6 +1,62 @@
 use crate::egui_plot_stuff::{egui_line::EguiLine, egui_vertical_line::EguiVerticalLine};
 use egui_plot::{PlotPoint, PlotUi};
 
+use super::histogram1d::Histogram;
+
+impl Histogram {
+    pub fn update_background_pair_lines(&mut self) {
+        // Extract bin edges and counts **before** modifying anything
+        let bin_edges = self.get_bin_edges();
+        let bin_counts = self.bins.clone();
+
+        // Extract immutable background marker positions first
+        let marker_positions: Vec<(f64, f64)> = self
+            .plot_settings
+            .markers
+            .background_markers
+            .iter()
+            .map(|bg_pair| (bg_pair.start.x_value, bg_pair.end.x_value))
+            .collect();
+
+        // Compute bin indices based on marker positions **before** modifying anything
+        let bin_indices: Vec<(usize, usize)> = marker_positions
+            .iter()
+            .map(|&(start_x, end_x)| {
+                let start_bin = self.get_bin_index(start_x).unwrap_or(0);
+                let end_bin = self
+                    .get_bin_index(end_x)
+                    .unwrap_or(self.bins.len().saturating_sub(1));
+                (start_bin, end_bin)
+            })
+            .collect();
+
+        // Now, modify `background_markers` without conflicting borrows
+        for (bg_pair, &(start_bin, end_bin)) in self
+            .plot_settings
+            .markers
+            .background_markers
+            .iter_mut()
+            .zip(bin_indices.iter())
+        {
+            bg_pair.histogram_line.points.clear(); // Clear previous points
+
+            // Collect the **actual bin edges** and counts in the correct range
+            for i in start_bin..=end_bin {
+                if i < bin_edges.len() - 1 {
+                    // Ensure no out-of-bounds access
+                    let x_start = bin_edges[i]; // Start of the bin
+                    let x_end = bin_edges[i + 1]; // End of the bin
+                    let y = bin_counts[i] as f64; // Bin count
+
+                    // Add both edges of the bin to the histogram line
+                    bg_pair.histogram_line.points.push([x_start, y]);
+                    bg_pair.histogram_line.points.push([x_end, y]);
+                }
+            }
+        }
+    }
+}
+
 #[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FitMarkers {
     pub region_markers: Vec<EguiVerticalLine>,
