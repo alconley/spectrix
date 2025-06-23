@@ -146,6 +146,9 @@ impl Histogram2D {
         }
 
         self.plot_settings.recalculate_image = true;
+        self.plot_settings.x_column = x_column.to_string();
+        self.plot_settings.y_column = y_column.to_string();
+
         Ok(())
     }
 

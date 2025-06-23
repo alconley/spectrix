@@ -5,3 +5,4 @@
 .venv
 *.root
 *.VSCodeCounter
+.DS_Store

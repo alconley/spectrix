@@ -37,8 +37,10 @@ impl Histogram {
     }
 
     pub fn reset(&mut self) {
-        self.bins = vec![0; self.bins.len()];
+        self.bins = vec![0; self.original_bins.len()];
         self.original_bins = vec![0; self.original_bins.len()];
+        self.plot_settings.rebin_factor = 1;
+        self.bin_width = (self.range.1 - self.range.0) / self.bins.len() as f64;
         self.overflow = 0;
         self.underflow = 0;
     }
