@@ -599,13 +599,13 @@ def get_2d_histograms(file_name):
                             )
                         );
 
-                        // check box for fill_column_wise
-                        ui.add(
-                            egui::Checkbox::new(
-                                &mut self.histogrammer.fill_column_wise,
-                                "Fill column-wise",
-                            )
-                        ).on_hover_text("Fill histograms column-wise instead of row-wise. Sometimes can be faster.");
+                        // // check box for fill_column_wise
+                        // ui.add(
+                        //     egui::Checkbox::new(
+                        //         &mut self.histogrammer.fill_column_wise,
+                        //         "Fill column-wise",
+                        //     )
+                        // ).on_hover_text("Fill histograms column-wise instead of row-wise. Sometimes can be faster.");
 
 
                         if self.histogrammer.calculating.load(Ordering::Relaxed) {
