@@ -23,7 +23,7 @@ impl Default for Calibration {
 
 impl Calibration {
     pub fn ui(&mut self, ui: &mut egui::Ui, bins: bool) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if self.active {
                 ui.horizontal(|ui| {
                     ui.add(

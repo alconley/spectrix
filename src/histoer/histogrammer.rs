@@ -600,6 +600,8 @@ impl Histogrammer {
                             ) {
                                 log::error!("Failed to fill hist1d '{}': {:?}", config.name, e);
                             }
+                            guard.plot_settings.egui_settings.reset_axis = true;
+
                             completed += 1.0;
                             *progress.lock().unwrap() = completed / total;
                             progress_bar.inc(1);
@@ -629,6 +631,8 @@ impl Histogrammer {
                             ) {
                                 log::error!("Failed to fill hist2d '{}': {:?}", config.name, e);
                             }
+
+                            // reset
                             completed += 1.0;
                             *progress.lock().unwrap() = completed / total;
                             progress_bar.inc(1);
