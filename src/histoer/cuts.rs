@@ -603,29 +603,83 @@ impl Cut1D {
             })
     }
 
-    // Parse and cache conditions
+    // // Parse and cache conditions
+    // pub fn parse_conditions(&mut self) {
+    //     self.parsed_conditions = None; // Reset parsed conditions
+
+    //     let condition_re = Regex::new(
+    //         r"(?P<column>\w+)\s*(?P<op>>=|<=|!=|==|>|<)\s*(?P<value>-?\d+(\.\d+)?(e-?\d+)?|nan|inf)"
+    //     ).unwrap();
+
+    //     let mut conditions = Vec::new();
+    //     for caps in condition_re.captures_iter(&self.expression) {
+    //         let column_name = caps["column"].to_string();
+    //         let operator = caps["op"].to_string();
+    //         let literal_value: f64 = caps["value"].parse().unwrap();
+
+    //         conditions.push(ParsedCondition {
+    //             column_name,
+    //             operator,
+    //             literal_value,
+    //         });
+    //     }
+    //     self.parsed_conditions = Some(conditions);
+
+    //     log::info!("Parsed conditions: {:?}", self.parsed_conditions);
+    // }
+
     pub fn parse_conditions(&mut self) {
-        self.parsed_conditions = None; // Reset parsed conditions
+        // self.parsed_conditions = None; // Reset
+        if self.expression.trim().is_empty() {
+            log::error!("Empty expression for cut '{}'", self.name);
+            self.parsed_conditions = None;
+            return;
+        }
 
         let condition_re = Regex::new(
-            r"(?P<column>\w+)\s*(?P<op>>=|<=|!=|==|>|<)\s*(?P<value>-?\d+(\.\d+)?(e-?\d+)?|nan|inf)"
+            r"(?P<column>\w+)\s*(?P<op>>=|<=|!=|==|>|<)\s*(?P<value>-?\d+(?:\.\d+)?(?:e-?\d+)?|nan|inf)"
         ).unwrap();
 
         let mut conditions = Vec::new();
-        for caps in condition_re.captures_iter(&self.expression) {
-            let column_name = caps["column"].to_string();
-            let operator = caps["op"].to_string();
-            let literal_value: f64 = caps["value"].parse().unwrap();
 
-            conditions.push(ParsedCondition {
-                column_name,
-                operator,
-                literal_value,
-            });
+        // Split on '&' to allow multiple conditions in one expression
+        for expr in self.expression.split('&') {
+            let expr = expr.trim();
+            if let Some(caps) = condition_re.captures(expr) {
+                let column_name = caps["column"].to_string();
+                let operator = caps["op"].to_string();
+                let literal_value: f64 = match caps["value"].parse() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        log::error!(
+                            "Invalid numeric literal in cut '{}': {} ({})",
+                            self.name,
+                            expr,
+                            e
+                        );
+                        continue;
+                    }
+                };
+
+                conditions.push(ParsedCondition {
+                    column_name,
+                    operator,
+                    literal_value,
+                });
+            } else {
+                log::error!(
+                    "Failed to parse expression '{}' in cut '{}'",
+                    expr,
+                    self.name
+                );
+            }
         }
-        self.parsed_conditions = Some(conditions);
 
-        log::info!("Parsed conditions: {:?}", self.parsed_conditions);
+        if conditions.is_empty() {
+            log::error!("No valid conditions parsed in cut '{}'", self.name);
+        }
+
+        self.parsed_conditions = Some(conditions);
     }
 
     // Validate a row using cached conditions

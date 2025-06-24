@@ -77,10 +77,10 @@ impl SPSConfig {
             configs.columns.push(self.xavg.new_column("Xavg", "XavgEnergyCalibrated"));
         }
 
-        let bothplanes_cut = Cut::new_1d("Both Planes", "X2 != -1e6 && X1 != -1e6");
-        let only_x1_plane_cut = Cut::new_1d("Only X1 Plane", "X1 != -1e6 && X2 == -1e6");
-        let only_x2_plane_cut = Cut::new_1d("Only X2 Plane", "X2 != -1e6 && X1 == -1e6");
-        let valid_sps_timing = Cut::new_1d("Valid SPS Timing", "AnodeBackTime != -1e6 && ScintLeftTime != -1e6");
+        let bothplanes_cut = Cut::new_1d("Both Planes", "X2 != -1e6 & X1 != -1e6");
+        let only_x1_plane_cut = Cut::new_1d("Only X1 Plane", "X1 != -1e6 & X2 == -1e6");
+        let only_x2_plane_cut = Cut::new_1d("Only X2 Plane", "X2 != -1e6 & X1 == -1e6");
+        let valid_sps_timing = Cut::new_1d("Valid SPS Timing", "AnodeBackTime != -1e6 & ScintLeftTime != -1e6");
 
         configs.cuts.add_cut(bothplanes_cut.clone());
         configs.cuts.add_cut(only_x1_plane_cut.clone());
