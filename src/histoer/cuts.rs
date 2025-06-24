@@ -304,7 +304,17 @@ impl Cuts {
                 break;
             }
 
-            let mask = self.create_combined_mask(&df, &self.cuts.iter().collect::<Vec<_>>())?;
+            // get valid cuts
+            let valid_cuts: Vec<&Cut> = self
+                .cuts
+                .iter()
+                .filter(|cut| match cut {
+                    Cut::Cut1D(cut1d) => cut1d.active,
+                    Cut::Cut2D(cut2d) => cut2d.active,
+                })
+                .collect();
+
+            let mask = self.create_combined_mask(&df, &valid_cuts)?;
             let filtered = df.filter(&mask)?;
 
             filtered_batches.push(filtered);
@@ -413,6 +423,9 @@ impl Cut2D {
     }
 
     pub fn valid(&self, df: &DataFrame, row_idx: usize) -> bool {
+        if !self.active {
+            return false; // If the cut is not active, it is not valid
+        }
         // Attempt to retrieve the x and y column values for the specified row
         if let (Ok(cut_x_values), Ok(cut_y_values)) = (
             df.column(&self.x_column).and_then(|c| c.f64()),
@@ -617,6 +630,9 @@ impl Cut1D {
 
     // Validate a row using cached conditions
     pub fn valid(&self, df: &DataFrame, row_idx: usize) -> bool {
+        if !self.active {
+            return false; // If the cut is not active, it is not valid
+        }
         if let Some(conditions) = &self.parsed_conditions {
             // Iterate through all parsed conditions
             for condition in conditions {

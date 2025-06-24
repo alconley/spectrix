@@ -195,7 +195,7 @@ impl Fits {
     }
 
     pub fn save_and_load_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("Save Fits").clicked() {
                 self.save_to_file();
             }
@@ -346,20 +346,14 @@ impl Fits {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, width: f32, height: f32, show: bool) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, show: bool) {
         if show {
-            ui.add_space(10.0);
-
             egui::ScrollArea::both()
-                .max_width(width)
-                .min_scrolled_height(height)
                 .id_salt("Context menu fit stats grid")
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.heading("Fit Panel");
                         self.save_and_load_ui(ui);
-
-                        ui.separator();
 
                         self.settings.ui(ui);
 
@@ -372,8 +366,6 @@ impl Fits {
     }
 
     pub fn fit_context_menu_ui(&mut self, ui: &mut egui::Ui) {
-        let width = ui.available_width();
-        let height = ui.available_height();
         ui.menu_button("Fits", |ui| {
             ui.horizontal(|ui| {
                 ui.label("Fit Panel: ");
@@ -381,7 +373,7 @@ impl Fits {
                     .on_hover_text("Show the fit statistics above the histogram");
             });
 
-            self.ui(ui, width, height, true);
+            self.ui(ui, true);
         });
     }
 }

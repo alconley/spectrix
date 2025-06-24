@@ -1,6 +1,7 @@
 use super::plot_settings::PlotSettings;
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::fit_handler::Fits;
+use egui_extras::{Column, TableBuilder};
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Histogram {
@@ -112,87 +113,169 @@ impl Histogram {
     }
 
     pub fn render(&mut self, ui: &mut egui::Ui) {
-        // if light mode, se the color to black
         if ui.visuals().dark_mode {
             self.line.set_color(egui::Color32::LIGHT_BLUE);
         } else {
             self.line.set_color(egui::Color32::BLACK);
         }
 
-        self.update_line_points(); // Ensure line points are updated for projections
-        self.keybinds(ui); // Handle interactive elements
+        self.update_line_points();
+        self.keybinds(ui);
 
-        let ui_height = ui.available_height();
+        let height = ui.available_height();
+        let mut width = ui.available_width();
 
-        ui.horizontal(|ui| {
-            let ui_width = ui.available_width();
+        let show_stats = self.fits.settings.show_fit_stats;
 
-            self.fits.settings.fit_stats_height = ui_height;
-            self.fits.ui(
-                ui,
-                ui_width * 0.25,
-                ui_height,
-                self.fits.settings.show_fit_stats,
-            );
+        // Dynamically build table with 1 or 2 columns
+        let mut table = TableBuilder::new(ui);
 
-            let plot_width = if self.fits.settings.show_fit_stats {
-                ui_width * 0.75
-            } else {
-                ui_width
-            };
+        if show_stats {
+            table = table.column(Column::auto().resizable(true));
+        }
 
-            let mut plot = egui_plot::Plot::new(self.name.clone())
-                .width(plot_width)
-                .height(ui_height);
-            plot = self.plot_settings.egui_settings.apply_to_plot(plot);
+        table = table.column(Column::remainder()).vscroll(false);
 
-            let (scroll, _pointer_down, _modifiers) = ui.input(|i| {
-                let scroll = i.events.iter().find_map(|e| match e {
-                    egui::Event::MouseWheel {
-                        unit: _,
-                        delta,
-                        modifiers: _,
-                    } => Some(*delta),
-                    _ => None,
-                });
-                (scroll, i.pointer.primary_down(), i.modifiers)
-            });
-
-            let plot_response = plot.show(ui, |plot_ui| {
-                self.draw(plot_ui);
-
-                if self.plot_settings.progress.is_some() {
-                    let y_max = self.bins.iter().max().cloned().unwrap_or(0) as f64;
-                    let mut plot_bounds = plot_ui.plot_bounds();
-                    plot_bounds.extend_with_y(y_max * 1.1);
-                    plot_ui.set_plot_bounds(plot_bounds);
+        table.body(|mut body| {
+            body.row(height, |mut row| {
+                if show_stats {
+                    row.col(|ui| {
+                        self.fits.ui(ui, true);
+                        width -= ui.available_width(); // assign the difference back to `width`
+                    });
                 }
 
-                if self.plot_settings.egui_settings.reset_axis {
-                    plot_ui.auto_bounds();
-                    self.plot_settings.egui_settings.reset_axis = false;
-                }
+                row.col(|ui| {
+                    let mut plot = egui_plot::Plot::new(self.name.clone()).width(width);
+                    plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
-                if self.plot_settings.cursor_position.is_some() {
-                    if let Some(delta_pos) = scroll {
-                        if delta_pos.y > 0.0 {
-                            plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.0));
-                        } else if delta_pos.y < 0.0 {
-                            plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 1.0));
-                        } else if delta_pos.x > 0.0 {
-                            plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.0));
-                        } else if delta_pos.x < 0.0 {
-                            plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 1.0));
+                    let (scroll, _pointer_down, _modifiers) = ui.input(|i| {
+                        let scroll = i.events.iter().find_map(|e| match e {
+                            egui::Event::MouseWheel { delta, .. } => Some(*delta),
+                            _ => None,
+                        });
+                        (scroll, i.pointer.primary_down(), i.modifiers)
+                    });
+
+                    let plot_response = plot.show(ui, |plot_ui| {
+                        self.draw(plot_ui);
+
+                        if self.plot_settings.progress.is_some() {
+                            let y_max = self.bins.iter().max().cloned().unwrap_or(0) as f64;
+                            let mut plot_bounds = plot_ui.plot_bounds();
+                            plot_bounds.extend_with_y(y_max * 1.1);
+                            plot_ui.set_plot_bounds(plot_bounds);
                         }
-                    }
-                }
-            });
 
-            plot_response.response.context_menu(|ui| {
-                self.context_menu(ui);
-            });
+                        if self.plot_settings.egui_settings.reset_axis {
+                            plot_ui.auto_bounds();
+                            self.plot_settings.egui_settings.reset_axis = false;
+                        }
 
-            self.plot_settings.interactive_response(&plot_response);
+                        if self.plot_settings.cursor_position.is_some() {
+                            if let Some(delta_pos) = scroll {
+                                let zoom_factor = if delta_pos.y > 0.0 || delta_pos.x > 0.0 {
+                                    1.1
+                                } else {
+                                    0.9
+                                };
+                                plot_ui
+                                    .zoom_bounds_around_hovered(egui::Vec2::new(zoom_factor, 1.0));
+                            }
+                        }
+                    });
+
+                    plot_response.response.context_menu(|ui| {
+                        self.context_menu(ui);
+                    });
+
+                    self.plot_settings.interactive_response(&plot_response);
+                });
+            });
         });
     }
+
+    // pub fn render(&mut self, ui: &mut egui::Ui) {
+    //     // if light mode, se the color to black
+    //     if ui.visuals().dark_mode {
+    //         self.line.set_color(egui::Color32::LIGHT_BLUE);
+    //     } else {
+    //         self.line.set_color(egui::Color32::BLACK);
+    //     }
+
+    //     self.update_line_points(); // Ensure line points are updated for projections
+    //     self.keybinds(ui); // Handle interactive elements
+
+    //     let height = ui.available_height();
+
+    //     // egui_extras column
+    //     TableBuilder::new(ui)
+    //         .column(Column::auto().resizable(true))
+    //         .column(Column::remainder())
+    //         .body(|mut body| {
+    //             body.row(height, |mut row| {
+    //                 // Left column: fits/settings
+
+    //                 row.col(|ui| {
+    //                     self.fits.ui(ui, self.fits.settings.show_fit_stats);
+    //                 });
+
+    //                 // Right column: plot
+    //                 row.col(|ui| {
+    //                     let mut plot = egui_plot::Plot::new(self.name.clone());
+
+    //                     plot = self.plot_settings.egui_settings.apply_to_plot(plot);
+
+    //                     let (scroll, _pointer_down, _modifiers) = ui.input(|i| {
+    //                         let scroll = i.events.iter().find_map(|e| match e {
+    //                             egui::Event::MouseWheel {
+    //                                 unit: _,
+    //                                 delta,
+    //                                 modifiers: _,
+    //                             } => Some(*delta),
+    //                             _ => None,
+    //                         });
+    //                         (scroll, i.pointer.primary_down(), i.modifiers)
+    //                     });
+
+    //                     let plot_response = plot.show(ui, |plot_ui| {
+    //                         self.draw(plot_ui);
+
+    //                         if self.plot_settings.progress.is_some() {
+    //                             let y_max = self.bins.iter().max().cloned().unwrap_or(0) as f64;
+    //                             let mut plot_bounds = plot_ui.plot_bounds();
+    //                             plot_bounds.extend_with_y(y_max * 1.1);
+    //                             plot_ui.set_plot_bounds(plot_bounds);
+    //                         }
+
+    //                         if self.plot_settings.egui_settings.reset_axis {
+    //                             plot_ui.auto_bounds();
+    //                             self.plot_settings.egui_settings.reset_axis = false;
+    //                         }
+
+    //                         if self.plot_settings.cursor_position.is_some() {
+    //                             if let Some(delta_pos) = scroll {
+    //                                 if delta_pos.y > 0.0 {
+    //                                     plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.0));
+    //                                 } else if delta_pos.y < 0.0 {
+    //                                     plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 1.0));
+    //                                 } else if delta_pos.x > 0.0 {
+    //                                     plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.0));
+    //                                 } else if delta_pos.x < 0.0 {
+    //                                     plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 1.0));
+    //                                 }
+    //                             }
+    //                         }
+    //                     });
+
+    //                     plot_response.response.context_menu(|ui| {
+    //                         self.context_menu(ui);
+    //                     });
+
+    //                     self.plot_settings.interactive_response(&plot_response);
+
+    //                 });
+    //             })
+    //         });
+    // }
 }

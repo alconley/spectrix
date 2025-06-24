@@ -71,6 +71,10 @@ impl CustomConfigs {
                     "Calculate No Cut Histograms",
                 );
             });
+        } else {
+            // make sure to disable the options if no cuts are defined and reset them
+            self.options.calculate_cut_histograms = false;
+            self.options.calculate_no_cut_histograms = true;
         }
 
         if self.sps.active {

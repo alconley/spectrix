@@ -178,18 +178,24 @@ impl Configs {
                                 .iter()
                                 .filter(|cut| {
                                     let required_columns = cut.required_columns();
-                                    for column in required_columns {
-                                        if !column_names.contains(&column) {
-                                            log::error!(
-                                                "Invalid cut '{}' for 1D histogram '{}': Missing column '{}'",
-                                                cut.name(),
-                                                hist1d.name,
-                                                column
-                                            );
-                                            return false;
+                                    let has_columns = required_columns.iter().all(|col| column_names.contains(col));
+                                    let is_active = match cut {
+                                        Cut::Cut1D(cut1d) => cut1d.active,
+                                        Cut::Cut2D(cut2d) => cut2d.active,
+                                    };
+                                    if !has_columns {
+                                        for column in required_columns {
+                                            if !column_names.contains(&column) {
+                                                log::error!(
+                                                    "Invalid cut '{}' for 1D histogram '{}': Missing column '{}'",
+                                                    cut.name(),
+                                                    hist1d.name,
+                                                    column
+                                                );
+                                            }
                                         }
                                     }
-                                    true
+                                    has_columns && is_active
                                 })
                                 .cloned()
                                 .collect();
@@ -219,18 +225,24 @@ impl Configs {
                                 .iter()
                                 .filter(|cut| {
                                     let required_columns = cut.required_columns();
-                                    for column in required_columns {
-                                        if !column_names.contains(&column) {
-                                            log::error!(
-                                                "Invalid cut '{}' for 2D histogram '{}': Missing column '{}'",
-                                                cut.name(),
-                                                hist2d.name,
-                                                column
-                                            );
-                                            return false;
+                                    let has_columns = required_columns.iter().all(|col| column_names.contains(col));
+                                    let is_active = match cut {
+                                        Cut::Cut1D(cut1d) => cut1d.active,
+                                        Cut::Cut2D(cut2d) => cut2d.active,
+                                    };
+                                    if !has_columns {
+                                        for column in required_columns {
+                                            if !column_names.contains(&column) {
+                                                log::error!(
+                                                    "Invalid cut '{}' for 2D histogram '{}': Missing column '{}'",
+                                                    cut.name(),
+                                                    hist2d.name,
+                                                    column
+                                                );
+                                            }
                                         }
                                     }
-                                    true
+                                    has_columns && is_active
                                 })
                                 .cloned()
                                 .collect();

@@ -49,7 +49,7 @@ impl FitSettings {
 
         ui.separator();
 
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Background Models");
 
             ui.radio_value(
@@ -97,7 +97,7 @@ impl FitSettings {
 
         ui.separator();
 
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Gaussian Fit Settings");
             ui.checkbox(&mut self.equal_stddev, "Equal Standard Deviation")
                 .on_hover_text("Allow the standard deviation of the Gaussian to be free");
@@ -107,7 +107,7 @@ impl FitSettings {
 
         ui.separator();
 
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Show Fit Lines: ");
             ui.checkbox(&mut self.show_decomposition, "Decomposition")
                 .on_hover_text("Show the decomposition peaks");
