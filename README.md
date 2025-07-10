@@ -109,13 +109,6 @@ Keybinds (cursor must be in the plot):
     - Display the mean, counts, and sigma on the histogram.
 - L: Toggle Log Y
 
-#### Future Goals with Fitting
-
-- Allow the user to plot different relationships (like FWHM vs Position, energy calibration, etc.)
-- Pop out the fit panel into a new window
-- More fit stats
-- Open to any feedback
-
 ## 2D Histogram
 
 ### Features

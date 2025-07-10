@@ -1,7 +1,10 @@
 use egui::{Color32, DragValue, Slider, Stroke, Ui};
 use egui_plot::{Line, LineStyle, PlotPoint, PlotPoints, PlotUi};
 
-use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
+use crate::{
+    egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS},
+    fitter::common::Calibration,
+};
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct EguiLine {
@@ -77,22 +80,30 @@ impl EguiLine {
         self.points.push([x, y]);
     }
 
-    pub fn draw(&self, plot_ui: &mut PlotUi<'_>) {
+    pub fn draw(&self, plot_ui: &mut PlotUi<'_>, calibration: Option<&Calibration>) {
         if self.draw {
             let plot_points: Vec<PlotPoint> = self
                 .points
                 .iter()
                 .map(|&[x, y]| {
-                    let x = if self.log_x && x > 0.0 {
-                        x.log10().max(0.0001)
+                    let calibrated_x = if let Some(cal) = calibration {
+                        cal.calibrate(x)
                     } else {
                         x
                     };
+
+                    let x = if self.log_x && calibrated_x > 0.0 {
+                        calibrated_x.log10().max(0.0001)
+                    } else {
+                        calibrated_x
+                    };
+
                     let y = if self.log_y && y > 0.0 {
                         y.log10().max(0.0001)
                     } else {
                         y
                     };
+
                     PlotPoint::new(x, y)
                 })
                 .collect();

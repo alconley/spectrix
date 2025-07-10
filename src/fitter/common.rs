@@ -5,6 +5,101 @@ pub struct Data {
 }
 
 #[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct Value {
+    pub value: f64,
+    pub uncertainty: f64,
+}
+
+impl Value {
+    pub fn ui(&mut self, ui: &mut egui::Ui, name: Option<&str>) {
+        ui.horizontal(|ui| {
+            if let Some(name) = name {
+                ui.label(name);
+            }
+            ui.add(egui::DragValue::new(&mut self.value).speed(0.1))
+                .on_hover_text("Value of the parameter");
+
+            ui.label("±");
+
+            ui.add(egui::DragValue::new(&mut self.uncertainty).speed(0.1))
+                .on_hover_text("Uncertainty of the parameter");
+        });
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct Calibration {
+    pub a: Value,
+    pub b: Value,
+    pub c: Value,
+}
+
+impl Default for Calibration {
+    fn default() -> Self {
+        Calibration {
+            a: Value {
+                value: 0.0,
+                uncertainty: 0.0,
+            },
+            b: Value {
+                value: 1.0,
+                uncertainty: 0.0,
+            },
+            c: Value {
+                value: 0.0,
+                uncertainty: 0.0,
+            },
+        }
+    }
+}
+
+impl Calibration {
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            self.a.ui(ui, Some("a:"));
+            ui.separator();
+            self.b.ui(ui, Some("b:"));
+            ui.separator();
+            self.c.ui(ui, Some("c:"));
+        });
+    }
+
+    pub fn calibrate(&self, x: f64) -> f64 {
+        self.a.value * x * x + self.b.value * x + self.c.value
+    }
+
+    pub fn invert(&self, energy: f64) -> Option<f64> {
+        let a = self.a.value;
+        let b = self.b.value;
+        let c = self.c.value;
+
+        if a.abs() < 1e-12 {
+            // Linear case: E = bx + c ⇒ x = (E - c)/b
+            if b.abs() < 1e-12 {
+                return None; // Not invertible
+            }
+            return Some((energy - c) / b);
+        }
+
+        // Quadratic case: E = ax² + bx + c ⇒ solve ax² + bx + (c - E) = 0
+        let discriminant = b * b - 4.0 * a * (c - energy);
+
+        if discriminant < 0.0 {
+            return None; // No real roots
+        }
+
+        let sqrt_disc = discriminant.sqrt();
+
+        // Return the root closer to 0 (can adjust this if needed)
+        let x1 = (-b + sqrt_disc) / (2.0 * a);
+        let x2 = (-b - sqrt_disc) / (2.0 * a);
+
+        // Choose the root that's in a reasonable range
+        Some(if x1.abs() < x2.abs() { x1 } else { x2 })
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Parameter {
     pub name: String,
     pub min: f64,
@@ -13,6 +108,8 @@ pub struct Parameter {
     pub vary: bool,
     pub value: Option<f64>,
     pub uncertainty: Option<f64>,
+    pub calibrated_value: Option<f64>,
+    pub calibrated_uncertainty: Option<f64>,
 }
 
 impl Default for Parameter {
@@ -25,11 +122,87 @@ impl Default for Parameter {
             vary: true,
             value: None,
             uncertainty: None,
+            calibrated_value: None,
+            calibrated_uncertainty: None,
         }
     }
 }
 
 impl Parameter {
+    pub fn calibrate_energy(&mut self, calibration: &Calibration) {
+        if let Some(x) = self.value {
+            let dx = self.uncertainty.unwrap_or(0.0);
+
+            let a = calibration.a.value;
+            let b = calibration.b.value;
+            let c = calibration.c.value;
+
+            let da = calibration.a.uncertainty;
+            let db = calibration.b.uncertainty;
+            let dc = calibration.c.uncertainty;
+
+            let energy = a * x * x + b * x + c;
+
+            let de = ((x * x * da).powi(2)
+                + (x * db).powi(2)
+                + dc.powi(2)
+                + ((2.0 * a * x + b) * dx).powi(2))
+            .sqrt();
+
+            self.calibrated_value = Some(energy);
+            self.calibrated_uncertainty = Some(de);
+        } else {
+            self.calibrated_value = None;
+            self.calibrated_uncertainty = None;
+        }
+    }
+
+    pub fn calibrate_sigma(&mut self, calibration: &Calibration, x: f64) {
+        if let Some(sigma_x) = self.value {
+            let a = calibration.a.value;
+            let b = calibration.b.value;
+
+            let da = calibration.a.uncertainty;
+            let db = calibration.b.uncertainty;
+
+            let dedx = 2.0 * a * x + b;
+            let dedx_unc = ((2.0 * x * da).powi(2) + db.powi(2)).sqrt();
+
+            let sigma_e = dedx.abs() * sigma_x;
+            let dsigma_e = (dedx * self.uncertainty.unwrap_or(0.0)).hypot(sigma_x * dedx_unc);
+
+            self.calibrated_value = Some(sigma_e);
+            self.calibrated_uncertainty = Some(dsigma_e);
+        } else {
+            self.calibrated_value = None;
+            self.calibrated_uncertainty = None;
+        }
+    }
+
+    pub fn calibrate_fwhm(&mut self, calibration: &Calibration, x: f64) {
+        if let Some(fwhm_x) = self.value {
+            let sigma_x = fwhm_x / 2.355;
+            let a = calibration.a.value;
+            let b = calibration.b.value;
+
+            let da = calibration.a.uncertainty;
+            let db = calibration.b.uncertainty;
+
+            let dedx = 2.0 * a * x + b;
+            let dedx_unc = ((2.0 * x * da).powi(2) + db.powi(2)).sqrt();
+
+            let fwhm_e = dedx.abs() * sigma_x * 2.355;
+            let dfwhm_e =
+                (dedx * self.uncertainty.unwrap_or(0.0)).hypot(sigma_x * 2.355 * dedx_unc);
+
+            self.calibrated_value = Some(fwhm_e);
+            self.calibrated_uncertainty = Some(dfwhm_e);
+        } else {
+            self.calibrated_value = None;
+            self.calibrated_uncertainty = None;
+        }
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.label(&self.name);
         ui.add(

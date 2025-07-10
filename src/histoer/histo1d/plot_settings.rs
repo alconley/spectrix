@@ -1,6 +1,7 @@
 use super::markers::FitMarkers;
 use super::peak_finder::PeakFindingSettings;
 use crate::egui_plot_stuff::egui_plot_settings::EguiPlotSettings;
+use crate::fitter::common::Calibration;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlotSettings {
@@ -35,8 +36,12 @@ impl PlotSettings {
         self.markers.menu_button(ui);
     }
 
-    pub fn interactive_response(&mut self, response: &egui_plot::PlotResponse<()>) {
-        self.markers.interactive_dragging(response);
+    pub fn interactive_response(
+        &mut self,
+        response: &egui_plot::PlotResponse<()>,
+        calibration: Option<&Calibration>,
+    ) {
+        self.markers.interactive_dragging(response, calibration);
     }
 
     // pub fn progress_ui(&mut self, ui: &mut egui::Ui) {

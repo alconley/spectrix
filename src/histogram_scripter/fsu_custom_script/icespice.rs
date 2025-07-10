@@ -98,7 +98,7 @@ impl PIPS {
                     // create the time difference column
                     configs.columns.push((format!("{cebr3_time_column} - {pips_time_column}"), pips_rel_time_to_cebra_column.clone()));
 
-                    let valid_cebra_time_cut = Cut::new_1d(&format!("Valid PIPS{} Cebra{} Time Cut", self.name, cebr3.number), &format!("PIPS{}Energy > 0.0 && Cebra{}Energy > 0.0", self.name, cebr3.number));
+                    let valid_cebra_time_cut = Cut::new_1d(&format!("Valid PIPS{} Cebra{} Time Cut", self.name, cebr3.number), &format!("PIPS{}Energy > 0.0 & Cebra{}Energy > 0.0", self.name, cebr3.number));
                     configs.cuts.add_cut(valid_cebra_time_cut.clone());
 
                     let cebra_tcut: Option<Cuts> = if let Some(mut main_cuts) = main_cuts.clone() {
@@ -190,7 +190,7 @@ impl PIPS {
                 configs.columns.push((format!("{pips_rel_time_to_sps_column} - {sps_tcut_mean}"), pips_rel_time_to_sps_column_shifted.clone()));
 
                 // add the time cut
-                let pips_sps_tcut = Cut::new_1d(&format!("PIPS{} Time Cut", self.name), &format!("{pips_rel_time_to_sps_column} >= {sps_tcut_min} && {pips_rel_time_to_sps_column} <= {sps_tcut_max}"));
+                let pips_sps_tcut = Cut::new_1d(&format!("PIPS{} Time Cut", self.name), &format!("{pips_rel_time_to_sps_column} >= {sps_tcut_min} & {pips_rel_time_to_sps_column} <= {sps_tcut_max}"));
                 configs.cuts.add_cut(pips_sps_tcut.clone());
 
                 let sps_tcut: Option<Cuts> = if let Some(mut main_cuts) = main_cuts.clone() {
@@ -202,6 +202,9 @@ impl PIPS {
 
                 // configs.hist1d(&format!("{base_path}/PIPS{det}/SPS/Time Cut/{pips_rel_time_to_sps_column_shifted}"), &pips_rel_time_to_sps_column_shifted, sps_tcut_time_range, sps_tcut_time_bins, &sps_tcut);
                 configs.hist1d(&format!("{base_path}/PIPS{det}/SPS/Time Cut/{pips_energy_column}"), &pips_energy_column, pips_range, pips_bins, &sps_tcut);
+                if self.energy_calibration.active {
+                    configs.hist1d(&format!("{base_path}/PIPS{det}/SPS/Time Cut/{pips_energy_calibrated_column}"), &pips_energy_calibrated_column, self.energy_calibration.range, self.energy_calibration.bins, &sps_tcut);
+                }
                 configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/Time Cut/{pips_energy_column} v Xavg"), &format!("Xavg"), &pips_energy_column, (-300.0, 300.0), pips_range, (600, pips_bins), &sps_tcut);
                 configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/Time Cut/{pips_rel_time_to_sps_column_shifted} v Xavg"), &format!("Xavg"), &pips_rel_time_to_sps_column_shifted, (-300.0, 300.0), sps_tcut_time_range, (600, sps_tcut_time_bins), &sps_tcut);
             }

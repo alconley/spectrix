@@ -5,6 +5,8 @@ use crate::fitter::models::linear::LinearFitter;
 use crate::fitter::models::powerlaw::PowerLawFitter;
 use crate::fitter::models::quadratic::QuadraticFitter;
 
+use crate::fitter::common::Calibration;
+
 use pyo3::{
     prelude::*,
     types::{PyDict, PyModule},
@@ -22,6 +24,7 @@ pub struct GaussianParameters {
     pub fwhm: Parameter,
     pub area: Parameter,
     pub uuid: usize,
+    pub energy: Parameter,
     pub fit_points: Vec<[f64; 2]>, // Vector of (x, y) points representing the Gaussian curve
 }
 
@@ -49,6 +52,11 @@ impl Default for GaussianParameters {
                 ..Default::default()
             },
             uuid: 0,
+            energy: Parameter {
+                name: "energy".to_string(),
+                vary: false,
+                ..Default::default()
+            },
             fit_points: Vec::new(),
         }
     }
@@ -94,6 +102,12 @@ impl GaussianParameters {
                 ..Default::default()
             },
             uuid: 0,
+            energy: Parameter {
+                name: "energy".to_string(),
+                value: None,
+                uncertainty: None,
+                ..Default::default()
+            },
             fit_points: Vec::new(),
         }
     }
@@ -117,36 +131,64 @@ impl GaussianParameters {
         }
     }
 
-    pub fn params_ui(&mut self, ui: &mut egui::Ui) {
-        ui.label(format!(
-            "{:.2} ± {:.2}",
-            self.mean.value.unwrap_or(0.0),
-            self.mean.uncertainty.unwrap_or(0.0)
-        ));
+    pub fn params_ui(&mut self, ui: &mut egui::Ui, calibrate: bool) {
+        if calibrate {
+            ui.label(format!(
+                "{:.2} ± {:.2}",
+                self.mean.calibrated_value.unwrap_or(0.0),
+                self.mean.calibrated_uncertainty.unwrap_or(0.0)
+            ));
+            ui.label(format!(
+                "{:.2} ± {:.2}",
+                self.fwhm.calibrated_value.unwrap_or(0.0),
+                self.fwhm.calibrated_uncertainty.unwrap_or(0.0)
+            ));
+            ui.label(format!(
+                "{:.2} ± {:.2}",
+                self.area.calibrated_value.unwrap_or(0.0),
+                self.area.calibrated_uncertainty.unwrap_or(0.0)
+            ));
+            ui.label(format!(
+                "{:.2} ± {:.2}",
+                self.amplitude.calibrated_value.unwrap_or(0.0),
+                self.amplitude.calibrated_uncertainty.unwrap_or(0.0)
+            ));
+            ui.label(format!(
+                "{:.2} ± {:.2}",
+                self.sigma.calibrated_value.unwrap_or(0.0),
+                self.sigma.calibrated_uncertainty.unwrap_or(0.0)
+            ));
+        } else {
+            ui.label(format!(
+                "{:.2} ± {:.2}",
+                self.mean.value.unwrap_or(0.0),
+                self.mean.uncertainty.unwrap_or(0.0)
+            ));
 
-        ui.label(format!(
-            "{:.2} ± {:.2}",
-            self.fwhm.value.unwrap_or(0.0),
-            self.fwhm.uncertainty.unwrap_or(0.0)
-        ));
+            ui.label(format!(
+                "{:.2} ± {:.2}",
+                self.fwhm.value.unwrap_or(0.0),
+                self.fwhm.uncertainty.unwrap_or(0.0)
+            ));
 
-        ui.label(format!(
-            "{:.2} ± {:.2}",
-            self.area.value.unwrap_or(0.0),
-            self.area.uncertainty.unwrap_or(0.0)
-        ));
+            ui.label(format!(
+                "{:.2} ± {:.2}",
+                self.area.value.unwrap_or(0.0),
+                self.area.uncertainty.unwrap_or(0.0)
+            ));
 
-        ui.label(format!(
-            "{:.2} ± {:.2}",
-            self.amplitude.value.unwrap_or(0.0),
-            self.amplitude.uncertainty.unwrap_or(0.0)
-        ));
+            ui.label(format!(
+                "{:.2} ± {:.2}",
+                self.amplitude.value.unwrap_or(0.0),
+                self.amplitude.uncertainty.unwrap_or(0.0)
+            ));
 
-        ui.label(format!(
-            "{:.2} ± {:.2}",
-            self.sigma.value.unwrap_or(0.0),
-            self.sigma.uncertainty.unwrap_or(0.0)
-        ));
+            ui.label(format!(
+                "{:.2} ± {:.2}",
+                self.sigma.value.unwrap_or(0.0),
+                self.sigma.uncertainty.unwrap_or(0.0)
+            ));
+        }
     }
 }
 
@@ -198,6 +240,51 @@ impl GaussianFitter {
             fit_points: Vec::new(),
             fit_report: String::new(),
             lmfit_result: None,
+        }
+    }
+
+    pub fn get_calibration_data(&self) -> Vec<(f64, f64, f64, f64)> {
+        let mut calibration_data = Vec::new();
+
+        for params in &self.fit_result {
+            if let (Some(energy), Some(energy_unc), Some(mean), Some(mean_unc)) = (
+                params.energy.value,
+                params.energy.uncertainty,
+                params.mean.value,
+                params.mean.uncertainty,
+            ) {
+                if energy != -1.0 {
+                    calibration_data.push((mean, mean_unc, energy, energy_unc));
+                }
+            }
+        }
+
+        calibration_data
+    }
+
+    pub fn calibrate(&mut self, calibration: &Calibration) {
+        log::info!("Calibrating");
+        // Calibration logic goes here
+
+        // calibrate the parameters
+        for param in &mut self.fit_result {
+            // param.amplitude.calibrate(calibration);
+            param.mean.calibrate_energy(calibration);
+            param
+                .sigma
+                .calibrate_sigma(calibration, param.mean.value.unwrap_or(0.0));
+            param
+                .fwhm
+                .calibrate_fwhm(calibration, param.mean.value.unwrap_or(0.0));
+
+            param.energy.calibrated_value = param.energy.value;
+            param.energy.calibrated_uncertainty = param.energy.uncertainty;
+
+            param.amplitude.calibrated_value = param.amplitude.value;
+            param.amplitude.calibrated_uncertainty = param.amplitude.uncertainty;
+
+            param.area.calibrated_value = param.area.value;
+            param.area.calibrated_uncertainty = param.area.uncertainty;
         }
     }
 
@@ -477,6 +564,7 @@ def GaussianFit(counts: list, centers: list,
 
     # Extract Gaussian and background parameters
     gaussian_params = []
+    additional_params = []
     for i in range(len(peak_markers)):
         amplitude = float(result.params[f'g{i}_amplitude'].value)
         amplitude_uncertainty = result.params[f'g{i}_amplitude'].stderr or 0.0
@@ -491,10 +579,16 @@ def GaussianFit(counts: list, centers: list,
 
         # default
         uuid = 0
+        energy = -1.0
+        energy_uncertainty = 0.0
 
         gaussian_params.append((
             amplitude, amplitude_uncertainty, mean, mean_uncertainty,
             sigma, sigma_uncertainty, fwhm, fwhm_uncertainty, area, area_uncertainty, uuid
+        ))
+
+        additional_params.append((
+            energy, energy_uncertainty,
         ))
 
         # Extract background parameters
@@ -513,7 +607,7 @@ def GaussianFit(counts: list, centers: list,
     # save the fit result to a temp file
     save_modelresult(result, 'temp_fit.sav')
 
-    return gaussian_params, background_params, x_data_line, y_data_line, fit_report
+    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params
 
 def load_result(filename: str):
     """
@@ -544,6 +638,7 @@ def load_result(filename: str):
 
     # Extract Gaussian and background parameters
     gaussian_params = []
+    additional_params = []
     for i in range(len(peak_markers)):
         amplitude = float(result.params[f'g{i}_amplitude'].value)
         amplitude_uncertainty = result.params[f'g{i}_amplitude'].stderr or 0.0
@@ -558,9 +653,25 @@ def load_result(filename: str):
 
         uuid = result.params.get(f'g{i}_uuid', 0)
 
+        # check if energy parameter exists
+        if f'g{i}_energy' in result.params:
+            energy = float(result.params[f'g{i}_energy'].value)
+        else:
+            energy = -1.0  # Default value if not present
+
+        # check if energy uncertainty parameter exists
+        if f'g{i}_energy_uncertainty' in result.params:
+            energy_uncertainty = result.params[f'g{i}_energy_uncertainty'].value
+        else:
+            energy_uncertainty = 0.0  # Default value if not present
+
         gaussian_params.append((
             amplitude, amplitude_uncertainty, mean, mean_uncertainty,
             sigma, sigma_uncertainty, fwhm, fwhm_uncertainty, area, area_uncertainty, uuid
+        ))
+
+        additional_params.append((
+            energy, energy_uncertainty,
         ))
 
         # Extract background parameters
@@ -579,7 +690,7 @@ def load_result(filename: str):
     # save the fit result to a temp file
     save_modelresult(result, 'temp_fit.sav')
 
-    return gaussian_params, background_params, x_data_line, y_data_line, fit_report
+    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params
 
 "#;
 
@@ -878,6 +989,7 @@ def load_result(filename: str):
             let x_composition = result.get_item(2)?.extract::<Vec<f64>>()?;
             let y_composition = result.get_item(3)?.extract::<Vec<f64>>()?;
             let fit_report = result.get_item(4)?.extract::<String>()?;
+            let additional_params = result.get_item(5)?.extract::<Vec<(f64, f64)>>()?;
 
             // get the temp fit result, store the text in the struct
             let fit_text = std::fs::read_to_string("temp_fit.sav")
@@ -893,34 +1005,40 @@ def load_result(filename: str):
             self.peak_markers.clear();
 
             for (
-                amp,
-                amp_err,
-                mean,
-                mean_err,
-                sigma,
-                sigma_err,
-                fwhm,
-                fwhm_err,
-                area,
-                area_err,
-                uuid,
-            ) in gaussian_params
+                (
+                    amp,
+                    amp_err,
+                    mean,
+                    mean_err,
+                    sigma,
+                    sigma_err,
+                    fwhm,
+                    fwhm_err,
+                    area,
+                    area_err,
+                    uuid,
+                ),
+                (energy, energy_err),
+            ) in gaussian_params.iter().zip(additional_params.iter())
             {
-                log::info!("Amplitude: {:.3} ± {:.3}, Mean: {:.3} ± {:.3}, Sigma: {:.3} ± {:.3}, FWHM: {:.3} ± {:.3}, Area: {:.3} ± {:.3}", 
+                log::info!("Amplitude: {:.3} ± {:.3}, Mean: {:.3} ± {:.3}, Sigma: {:.3} ± {:.3}, FWHM: {:.3} ± {:.3}, Area: {:.3} ± {:.3}",
                             amp, amp_err, mean, mean_err, sigma, sigma_err, fwhm, fwhm_err, area, area_err);
 
-                self.peak_markers.push(mean);
+                self.peak_markers.push(*mean);
 
                 // Create the GaussianParameters for each set of values
                 let mut gaussian_param = GaussianParameters::new(
-                    (amp, amp_err),
-                    (mean, mean_err),
-                    (sigma, sigma_err),
-                    (fwhm, fwhm_err),
-                    (area, area_err),
+                    (*amp, *amp_err),
+                    (*mean, *mean_err),
+                    (*sigma, *sigma_err),
+                    (*fwhm, *fwhm_err),
+                    (*area, *area_err),
                 );
 
-                gaussian_param.uuid = uuid as usize;
+                gaussian_param.uuid = *uuid as usize;
+
+                gaussian_param.energy.value = Some(*energy);
+                gaussian_param.energy.uncertainty = Some(*energy_err);
 
                 // Generate the fit points for this Gaussian, using 100 points (or as many as needed)
                 gaussian_param.generate_fit_points(100);
@@ -1219,7 +1337,88 @@ def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
         })
     }
 
-    pub fn draw_uuid(&self, plot_ui: &mut egui_plot::PlotUi<'_>) {
+    pub fn update_energy_for_peak(
+        &mut self,
+        peak_index: usize,
+        new_energy: f64,
+        new_uncertainty: f64,
+    ) -> PyResult<()> {
+        // Step 1: Write current lmfit_result to a temp file
+        let temp_path = PathBuf::from("temp_fit_energy_update.sav");
+        if let Some(ref lmfit) = self.lmfit_result {
+            let mut file = File::create(&temp_path)?;
+            file.write_all(lmfit.as_bytes())?;
+        } else {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "No lmfit_result to update.",
+            ));
+        }
+
+        // Step 2: Python call to update energy
+        Python::with_gil(|py| {
+            let module = PyModule::from_code_bound(
+                py,
+                r#"
+from lmfit.model import load_modelresult, save_modelresult
+
+def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: float):
+    result = load_modelresult(file_path)
+
+    # print fit report
+    print("\nPre Fit Report:")
+    fit_report = result.fit_report()
+    print(fit_report)
+                
+    if f"g{peak_number}_energy" not in result.params:
+        result.params.add(f"g{peak_number}_energy", value=energy, vary=False)
+    else:
+        result.params[f"g{peak_number}_energy"].set(value=energy, vary=False)
+
+    if f"g{peak_number}_energy_uncertainty" not in result.params:
+        result.params.add(f"g{peak_number}_energy_uncertainty", value=uncertainty, vary=False)
+    else:
+        result.params[f"g{peak_number}_energy_uncertainty"].set(value=uncertainty, vary=False)
+
+    save_modelresult(result, file_path)
+
+    print("\nPost Fit Report:")
+    fit_report = result.fit_report()
+    print(fit_report)
+
+    return result.fit_report()
+"#,
+                "energy_patch.py",
+                "energy_patch",
+            )?;
+
+            let fit_report: String = module
+                .getattr("Update_Energy")?
+                .call1((
+                    temp_path.to_str().unwrap(),
+                    peak_index,
+                    new_energy,
+                    new_uncertainty,
+                ))?
+                .extract()?;
+
+            // Step 3: Reload updated file into lmfit_result
+            let updated_lmfit = std::fs::read_to_string(&temp_path)
+                .unwrap_or_else(|_| "Failed to read updated fit.".to_string());
+
+            std::fs::remove_file(&temp_path).unwrap_or_else(|err| {
+                eprintln!("Warning: failed to remove temp fit file: {}", err);
+            });
+
+            self.fit_result[peak_index].energy.value = Some(new_energy);
+            self.fit_result[peak_index].energy.uncertainty = Some(new_uncertainty);
+            self.lmfit_result = Some(updated_lmfit);
+            self.fit_report = fit_report;
+
+            Ok(())
+        })
+    }
+
+    pub fn draw_uuid(&self, plot_ui: &mut egui_plot::PlotUi<'_>, calibrate: bool) {
         use egui::Align2;
         use egui_plot::Text;
 
@@ -1228,7 +1427,16 @@ def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
                 continue; // Skip if UUID is not set
             }
             if let Some(mean) = params.mean.value {
-                let label = Text::new("", [mean, 0.0].into(), params.uuid.to_string())
+                let position = if calibrate {
+                    if let Some(calibrated_mean) = params.mean.calibrated_value {
+                        calibrated_mean
+                    } else {
+                        mean
+                    }
+                } else {
+                    mean
+                };
+                let label = Text::new("", [position, 0.0].into(), params.uuid.to_string())
                     .anchor(Align2::CENTER_BOTTOM);
 
                 plot_ui.text(label);
@@ -1236,24 +1444,43 @@ def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
         }
     }
 
-    pub fn fit_params_ui(&mut self, ui: &mut egui::Ui, skip_one: bool) {
+    pub fn fit_params_ui(&mut self, ui: &mut egui::Ui, skip_one: bool, calibrate: bool) {
         let mut uuid_updates = Vec::new();
+        let mut energy_updates = Vec::new();
 
         for (i, params) in self.fit_result.iter_mut().enumerate() {
             if skip_one && i != 0 {
                 ui.label("");
             }
             ui.label(format!("{}", i));
-            params.params_ui(ui);
+            params.params_ui(ui, calibrate);
 
             let mut uuid = params.uuid;
             if ui.add(egui::DragValue::new(&mut uuid).speed(1)).changed() {
                 uuid_updates.push((i, uuid)); // defer the update
             }
 
+            let mut energy = params.energy.value.unwrap_or(-1.0);
+            let mut uncertainty = params.energy.uncertainty.unwrap_or(0.0);
+
+            ui.horizontal(|ui| {
+                let mut changed = false;
+                changed |= ui
+                    .add(egui::DragValue::new(&mut energy).speed(0.1))
+                    .changed();
+                ui.label("±");
+                changed |= ui
+                    .add(egui::DragValue::new(&mut uncertainty).speed(0.1))
+                    .changed();
+
+                if changed {
+                    energy_updates.push((i, energy, uncertainty));
+                }
+            });
+
             if i == 0 {
                 if let Some(ref text) = self.lmfit_result {
-                    if ui.button("Export lmfit Result").clicked() {
+                    if ui.button("Export").clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .set_file_name("fit_result.txt")
                             .save_file()
@@ -1280,8 +1507,19 @@ def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
         }
 
         for (index, new_uuid) in uuid_updates {
+            println!("Updating UUID for peak {}: {}", index, new_uuid);
             if let Err(e) = self.update_uuid_for_peak(index, new_uuid) {
                 eprintln!("UUID update failed: {e}");
+            }
+        }
+
+        for (index, new_energy, new_uncertainty) in energy_updates {
+            println!(
+                "Updating energy for peak {}: {}, uncertainty: {}",
+                index, new_energy, new_uncertainty
+            );
+            if let Err(e) = self.update_energy_for_peak(index, new_energy, new_uncertainty) {
+                eprintln!("Energy update failed: {e}");
             }
         }
     }

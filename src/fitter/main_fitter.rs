@@ -5,6 +5,7 @@ use super::models::linear::{LinearFitter, LinearParameters};
 use super::models::powerlaw::{PowerLawFitter, PowerLawParameters};
 use super::models::quadratic::{QuadraticFitter, QuadraticParameters};
 use crate::egui_plot_stuff::egui_line::EguiLine;
+use crate::fitter::common::Calibration;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
 pub enum FitModel {
@@ -15,6 +16,14 @@ pub enum FitModel {
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum FitResult {
     Gaussian(GaussianFitter),
+}
+
+impl FitResult {
+    pub fn get_calibration_data(&self) -> Vec<(f64, f64, f64, f64)> {
+        match self {
+            FitResult::Gaussian(fit) => fit.get_calibration_data(),
+        }
+    }
 }
 
 #[derive(Default, PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -152,6 +161,20 @@ impl Fitter {
         }
     }
 
+    pub fn calibrate(&mut self, calibration: &Calibration) {
+        log::info!("Calibrating");
+        // Calibration logic goes here
+
+        // update gaussian fit parameters
+        if let Some(fit_result) = &mut self.fit_result {
+            match fit_result {
+                FitResult::Gaussian(fit) => {
+                    fit.calibrate(calibration);
+                }
+            }
+        }
+    }
+
     pub fn fit_background(&mut self) {
         log::info!("Fitting background");
         match &self.background_model {
@@ -283,7 +306,7 @@ impl Fitter {
         self.name = name;
     }
 
-    pub fn fit_result_ui(&mut self, ui: &mut egui::Ui) {
+    pub fn fit_result_ui(&mut self, ui: &mut egui::Ui, calibrate: bool) {
         ui.collapsing(self.name.clone(), |ui| {
             egui::ScrollArea::vertical()
                 .min_scrolled_height(300.0)
@@ -322,10 +345,11 @@ impl Fitter {
                                 ui.label("Area");
                                 ui.label("Amplitude");
                                 ui.label("Sigma");
+                                ui.label("Energy");
 
                                 ui.end_row();
 
-                                self.fitter_stats(ui, false);
+                                self.fitter_stats(ui, false, calibrate);
                             });
 
                         // for line in &mut self.decomposition_lines {
@@ -338,24 +362,24 @@ impl Fitter {
         });
     }
 
-    pub fn fitter_stats(&mut self, ui: &mut egui::Ui, skip_one: bool) {
+    pub fn fitter_stats(&mut self, ui: &mut egui::Ui, skip_one: bool, calibrate: bool) {
         if let Some(fit_result) = &mut self.fit_result {
             match fit_result {
                 FitResult::Gaussian(fit) => {
-                    fit.fit_params_ui(ui, skip_one);
+                    fit.fit_params_ui(ui, skip_one, calibrate);
                 }
             }
         }
     }
 
-    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi<'_>) {
+    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi<'_>, calibration: Option<&Calibration>) {
         for line in &self.decomposition_lines {
-            line.draw(plot_ui);
+            line.draw(plot_ui, calibration);
         }
 
-        self.composition_line.draw(plot_ui);
+        self.composition_line.draw(plot_ui, calibration);
 
-        self.background_line.draw(plot_ui);
+        self.background_line.draw(plot_ui, calibration);
     }
 
     pub fn set_log(&mut self, log_y: bool, log_x: bool) {

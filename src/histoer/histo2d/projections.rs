@@ -335,15 +335,15 @@ impl Projections {
 
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         if self.add_y_projection {
-            self.y_projection_line_1.draw(plot_ui);
-            self.y_projection_line_2.draw(plot_ui);
-            self.fill_y_line.draw(plot_ui);
+            self.y_projection_line_1.draw(plot_ui, None);
+            self.y_projection_line_2.draw(plot_ui, None);
+            self.fill_y_line.draw(plot_ui, None);
         }
 
         if self.add_x_projection {
             self.x_projection_line_1.draw(plot_ui);
             self.x_projection_line_2.draw(plot_ui);
-            self.fill_x_line.draw(plot_ui);
+            self.fill_x_line.draw(plot_ui, None);
         }
 
         self.is_dragging();
@@ -351,8 +351,10 @@ impl Projections {
 
     pub fn interactive_dragging(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
         if self.add_y_projection {
-            self.y_projection_line_1.interactive_dragging(plot_response);
-            self.y_projection_line_2.interactive_dragging(plot_response);
+            self.y_projection_line_1
+                .interactive_dragging(plot_response, None);
+            self.y_projection_line_2
+                .interactive_dragging(plot_response, None);
         }
 
         if self.add_x_projection {

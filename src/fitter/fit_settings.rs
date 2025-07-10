@@ -18,6 +18,7 @@ pub struct FitSettings {
     pub quadratic_params: QuadraticParameters,
     pub power_law_params: PowerLawParameters,
     pub exponential_params: ExponentialParameters,
+    pub calibrated: bool,
 }
 
 impl Default for FitSettings {
@@ -35,6 +36,7 @@ impl Default for FitSettings {
             quadratic_params: QuadraticParameters::default(),
             power_law_params: PowerLawParameters::default(),
             exponential_params: ExponentialParameters::default(),
+            calibrated: false,
         }
     }
 }

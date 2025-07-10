@@ -1,4 +1,5 @@
 use crate::egui_plot_stuff::{egui_line::EguiLine, egui_vertical_line::EguiVerticalLine};
+use crate::fitter::common::Calibration;
 use egui_plot::{PlotPoint, PlotUi};
 
 use super::histogram1d::Histogram;
@@ -104,15 +105,19 @@ impl BackgroundPair {
         (self.start.x_value + self.end.x_value) / 2.0
     }
 
-    pub fn draw(&mut self, plot_ui: &mut PlotUi<'_>) {
-        self.start.draw(plot_ui);
-        self.end.draw(plot_ui);
-        self.histogram_line.draw(plot_ui);
+    pub fn draw(&mut self, plot_ui: &mut PlotUi<'_>, calibration: Option<&Calibration>) {
+        self.start.draw(plot_ui, calibration);
+        self.end.draw(plot_ui, calibration);
+        self.histogram_line.draw(plot_ui, calibration);
     }
 
-    pub fn interactive_dragging(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
-        self.start.interactive_dragging(plot_response);
-        self.end.interactive_dragging(plot_response);
+    pub fn interactive_dragging(
+        &mut self,
+        plot_response: &egui_plot::PlotResponse<()>,
+        calibration: Option<&Calibration>,
+    ) {
+        self.start.interactive_dragging(plot_response, calibration);
+        self.end.interactive_dragging(plot_response, calibration);
     }
 
     /// Updates the `histogram_line` to match the histogram bins within this background pair
@@ -217,41 +222,71 @@ impl FitMarkers {
         }
     }
 
-    pub fn delete_closest_marker(&mut self) {
-        if let Some(cursor_pos) = self.cursor_position {
-            let mut all_markers: Vec<(f64, &str)> = vec![];
+    // pub fn delete_closest_marker(&mut self, cursor_position: Some(PlotPoint)) {
+    //     if let Some(cursor_pos) = self.cursor_position {
+    //         let mut all_markers: Vec<(f64, &str)> = vec![];
 
-            all_markers.extend(self.region_markers.iter().map(|x| (x.x_value, "region")));
-            all_markers.extend(self.peak_markers.iter().map(|x| (x.x_value, "peak")));
-            // all_markers.extend(
-            //     self.background_markers
-            //         .iter()
-            //         .map(|x| (x.x_value, "background")),
-            // );
+    //         all_markers.extend(self.region_markers.iter().map(|x| (x.x_value, "region")));
+    //         all_markers.extend(self.peak_markers.iter().map(|x| (x.x_value, "peak")));
+    //         // all_markers.extend(
+    //         //     self.background_markers
+    //         //         .iter()
+    //         //         .map(|x| (x.x_value, "background")),
+    //         // );
 
-            all_markers.extend(
-                self.background_markers
-                    .iter()
-                    .map(|x| (x.average_x(), "background")),
-            );
+    //         all_markers.extend(
+    //             self.background_markers
+    //                 .iter()
+    //                 .map(|x| (x.average_x(), "background")),
+    //         );
 
-            if let Some(&(closest_marker, marker_type)) =
-                all_markers.iter().min_by(|(x1, _), (x2, _)| {
-                    let dist1 = (cursor_pos.x - x1).abs();
-                    let dist2 = (cursor_pos.x - x2).abs();
-                    dist1.partial_cmp(&dist2).unwrap()
-                })
-            {
-                match marker_type {
-                    "region" => Self::delete_marker(&mut self.region_markers, closest_marker),
-                    "peak" => Self::delete_marker(&mut self.peak_markers, closest_marker),
-                    "background" => {
-                        // Self::delete_marker(&mut self.background_markers, closest_marker)
-                        self.background_markers
-                            .retain(|x| x.average_x() != closest_marker);
-                    }
-                    _ => {}
+    //         if let Some(&(closest_marker, marker_type)) =
+    //             all_markers.iter().min_by(|(x1, _), (x2, _)| {
+    //                 let dist1 = (cursor_pos.x - x1).abs();
+    //                 let dist2 = (cursor_pos.x - x2).abs();
+    //                 dist1.partial_cmp(&dist2).unwrap()
+    //             })
+    //         {
+    //             match marker_type {
+    //                 "region" => Self::delete_marker(&mut self.region_markers, closest_marker),
+    //                 "peak" => Self::delete_marker(&mut self.peak_markers, closest_marker),
+    //                 "background" => {
+    //                     // Self::delete_marker(&mut self.background_markers, closest_marker)
+    //                     self.background_markers
+    //                         .retain(|x| x.average_x() != closest_marker);
+    //                 }
+    //                 _ => {}
+    //             }
+    //         }
+    //     }
+    // }
+
+    pub fn delete_closest_marker(&mut self, cursor_x: f64) {
+        let mut all_markers: Vec<(f64, &str)> = vec![];
+
+        all_markers.extend(self.region_markers.iter().map(|x| (x.x_value, "region")));
+        all_markers.extend(self.peak_markers.iter().map(|x| (x.x_value, "peak")));
+        all_markers.extend(
+            self.background_markers
+                .iter()
+                .map(|x| (x.average_x(), "background")),
+        );
+
+        if let Some(&(closest_marker, marker_type)) =
+            all_markers.iter().min_by(|(x1, _), (x2, _)| {
+                let dist1 = (cursor_x - x1).abs();
+                let dist2 = (cursor_x - x2).abs();
+                dist1.partial_cmp(&dist2).unwrap()
+            })
+        {
+            match marker_type {
+                "region" => Self::delete_marker(&mut self.region_markers, closest_marker),
+                "peak" => Self::delete_marker(&mut self.peak_markers, closest_marker),
+                "background" => {
+                    self.background_markers
+                        .retain(|x| x.average_x() != closest_marker);
                 }
+                _ => {}
             }
         }
     }
@@ -288,31 +323,39 @@ impl FitMarkers {
         });
     }
 
-    pub fn draw_all_markers(&mut self, plot_ui: &mut PlotUi<'_>) {
+    pub fn draw_all_markers(
+        &mut self,
+        plot_ui: &mut PlotUi<'_>,
+        calibration: Option<&Calibration>,
+    ) {
         for marker in &mut self.background_markers {
-            marker.draw(plot_ui);
+            marker.draw(plot_ui, calibration);
         }
 
         for marker in &mut self.region_markers {
-            marker.draw(plot_ui);
+            marker.draw(plot_ui, calibration);
         }
 
         for marker in &mut self.peak_markers {
-            marker.draw(plot_ui);
+            marker.draw(plot_ui, calibration);
         }
     }
 
-    pub fn interactive_dragging(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
+    pub fn interactive_dragging(
+        &mut self,
+        plot_response: &egui_plot::PlotResponse<()>,
+        calibration: Option<&Calibration>,
+    ) {
         for marker in &mut self.background_markers {
-            marker.interactive_dragging(plot_response);
+            marker.interactive_dragging(plot_response, calibration);
         }
 
         for marker in &mut self.region_markers {
-            marker.interactive_dragging(plot_response);
+            marker.interactive_dragging(plot_response, calibration);
         }
 
         for marker in &mut self.peak_markers {
-            marker.interactive_dragging(plot_response);
+            marker.interactive_dragging(plot_response, calibration);
         }
     }
 

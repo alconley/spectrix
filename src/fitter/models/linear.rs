@@ -85,6 +85,8 @@ impl LinearFitter {
                 vary: true,
                 value: Some(slope.0),
                 uncertainty: Some(slope.1),
+                calibrated_value: None,
+                calibrated_uncertainty: None,
             },
             intercept: Parameter {
                 name: "intercept".to_string(),
@@ -94,6 +96,8 @@ impl LinearFitter {
                 vary: true,
                 value: Some(intercept.0),
                 uncertainty: Some(intercept.1),
+                calibrated_value: None,
+                calibrated_uncertainty: None,
             },
         };
         LinearFitter {

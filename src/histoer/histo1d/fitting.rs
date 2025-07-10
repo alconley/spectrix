@@ -92,5 +92,12 @@ impl Histogram {
 
         fitter.set_name(self.name.clone());
         self.fits.temp_fit = Some(fitter);
+
+        // calibrate temp fit if calibration is enabled
+        if self.fits.settings.calibrated {
+            if let Some(temp_fit) = &mut self.fits.temp_fit {
+                temp_fit.calibrate(&self.fits.calibration);
+            }
+        }
     }
 }

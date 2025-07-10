@@ -2,6 +2,7 @@ use egui::{Color32, DragValue, Id, Slider, Stroke, Ui};
 use egui_plot::{LineStyle, PlotResponse, PlotUi, VLine};
 
 use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
+use crate::fitter::common::Calibration;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct EguiVerticalLine {
@@ -62,9 +63,14 @@ impl EguiVerticalLine {
         }
     }
 
-    pub fn draw(&self, plot_ui: &mut PlotUi<'_>) {
+    pub fn draw(&self, plot_ui: &mut PlotUi<'_>, calibration: Option<&Calibration>) {
         if self.draw {
-            let mut line = VLine::new("", self.x_value)
+            let x_value = if let Some(calibration) = calibration {
+                calibration.calibrate(self.x_value)
+            } else {
+                self.x_value
+            };
+            let mut line = VLine::new("", x_value)
                 .highlight(self.highlighted)
                 .stroke(self.stroke)
                 .width(self.width)
@@ -84,7 +90,7 @@ impl EguiVerticalLine {
 
             if self.interactive_dragging {
                 let mid_point_pos: Vec<[f64; 2]> = vec![[
-                    self.x_value,
+                    x_value,
                     (plot_ui.plot_bounds().min()[1] + plot_ui.plot_bounds().max()[1]) / 2.0,
                 ]];
 
@@ -99,8 +105,40 @@ impl EguiVerticalLine {
         }
     }
 
-    pub fn interactive_dragging(&mut self, plot_response: &PlotResponse<()>) {
+    // pub fn interactive_dragging(&mut self, plot_response: &PlotResponse<()>) {
+    //     let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
+    //     if let Some(pointer_pos) = pointer_state.hover_pos() {
+    //         if let Some(hovered_id) = plot_response.hovered_plot_item {
+    //             if hovered_id == Id::new(self.name.clone()) {
+    //                 self.highlighted = true;
+    //                 if pointer_state.button_pressed(egui::PointerButton::Primary) {
+    //                     self.is_dragging = true;
+    //                 }
+    //             } else {
+    //                 self.highlighted = false;
+    //             }
+    //         } else {
+    //             self.highlighted = false;
+    //         }
+
+    //         if self.is_dragging {
+    //             self.x_value = plot_response.transform.value_from_position(pointer_pos).x;
+    //             if pointer_state.button_released(egui::PointerButton::Primary) {
+    //                 self.is_dragging = false;
+    //             }
+    //         }
+    //     } else if pointer_state.button_released(egui::PointerButton::Primary) {
+    //         self.is_dragging = false;
+    //     }
+    // }
+
+    pub fn interactive_dragging(
+        &mut self,
+        plot_response: &PlotResponse<()>,
+        calibration: Option<&Calibration>,
+    ) {
         let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
+
         if let Some(pointer_pos) = pointer_state.hover_pos() {
             if let Some(hovered_id) = plot_response.hovered_plot_item {
                 if hovered_id == Id::new(self.name.clone()) {
@@ -116,7 +154,13 @@ impl EguiVerticalLine {
             }
 
             if self.is_dragging {
-                self.x_value = plot_response.transform.value_from_position(pointer_pos).x;
+                let calibrated_x = plot_response.transform.value_from_position(pointer_pos).x;
+                self.x_value = if let Some(cal) = calibration {
+                    cal.invert(calibrated_x).unwrap_or(calibrated_x)
+                } else {
+                    calibrated_x
+                };
+
                 if pointer_state.button_released(egui::PointerButton::Primary) {
                     self.is_dragging = false;
                 }

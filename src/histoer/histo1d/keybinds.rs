@@ -1,37 +1,111 @@
 use super::histogram1d::Histogram;
 
+// impl Histogram {
+//     // Handles the interactive elements of the histogram
+//     pub fn keybinds(&mut self, ui: &mut egui::Ui) {
+//         self.plot_settings.markers.cursor_position = self.plot_settings.cursor_position;
+
+//         if let Some(cursor_position) = self.plot_settings.cursor_position {
+//             if ui.input(|i| i.key_pressed(egui::Key::P)) {
+//                 self.plot_settings
+//                     .markers
+//                     .add_peak_marker(cursor_position.x);
+//             }
+
+//             if ui.input(|i| i.key_pressed(egui::Key::B)) {
+//                 // self.plot_settings
+//                 //     .markers
+//                 //     .add_background_marker(cursor_position.x);
+//                 self.plot_settings
+//                     .markers
+//                     .add_background_pair(cursor_position.x, self.bin_width);
+//             }
+
+//             if ui.input(|i| i.key_pressed(egui::Key::R)) {
+//                 if self.plot_settings.markers.region_markers.len() >= 2 {
+//                     self.plot_settings.markers.clear_region_markers();
+//                 }
+//                 self.plot_settings
+//                     .markers
+//                     .add_region_marker(cursor_position.x);
+//             }
+
+//             if ui.input(|i| i.key_pressed(egui::Key::Minus)) {
+//                 self.plot_settings.markers.delete_closest_marker();
+//             }
+
+//             if ui.input(|i| i.key_pressed(egui::Key::Delete)) {
+//                 self.plot_settings.markers.clear_background_markers();
+//                 self.plot_settings.markers.clear_peak_markers();
+//                 self.plot_settings.markers.clear_region_markers();
+//             }
+
+//             if ui.input(|i| i.key_pressed(egui::Key::Minus) || i.key_pressed(egui::Key::Delete)) {
+//                 self.fits.remove_temp_fits();
+//             }
+
+//             if ui.input(|i| i.key_pressed(egui::Key::G)) {
+//                 self.fit_background();
+//             }
+
+//             if ui.input(|i| i.key_pressed(egui::Key::F)) {
+//                 self.fit_gaussians();
+//             }
+
+//             if ui.input(|i| i.key_pressed(egui::Key::S)) {
+//                 self.fits.store_temp_fit();
+//             }
+
+//             if ui.input(|i| i.key_pressed(egui::Key::I)) {
+//                 self.plot_settings.stats_info = !self.plot_settings.stats_info;
+//             }
+
+//             if ui.input(|i| i.key_pressed(egui::Key::L)) {
+//                 self.plot_settings.egui_settings.log_y = !self.plot_settings.egui_settings.log_y;
+//                 self.plot_settings.egui_settings.reset_axis = true;
+//             }
+
+//             if ui.input(|i| i.key_pressed(egui::Key::O)) {
+//                 self.find_peaks();
+//             }
+//         }
+//     }
 impl Histogram {
     // Handles the interactive elements of the histogram
     pub fn keybinds(&mut self, ui: &mut egui::Ui) {
         self.plot_settings.markers.cursor_position = self.plot_settings.cursor_position;
 
         if let Some(cursor_position) = self.plot_settings.cursor_position {
+            let cursor_x_raw = if self.fits.settings.calibrated {
+                self.fits
+                    .calibration
+                    .invert(cursor_position.x)
+                    .unwrap_or(cursor_position.x)
+            } else {
+                cursor_position.x
+            };
+
             if ui.input(|i| i.key_pressed(egui::Key::P)) {
-                self.plot_settings
-                    .markers
-                    .add_peak_marker(cursor_position.x);
+                self.plot_settings.markers.add_peak_marker(cursor_x_raw);
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::B)) {
-                // self.plot_settings
-                //     .markers
-                //     .add_background_marker(cursor_position.x);
                 self.plot_settings
                     .markers
-                    .add_background_pair(cursor_position.x, self.bin_width);
+                    .add_background_pair(cursor_x_raw, self.bin_width);
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::R)) {
                 if self.plot_settings.markers.region_markers.len() >= 2 {
                     self.plot_settings.markers.clear_region_markers();
                 }
-                self.plot_settings
-                    .markers
-                    .add_region_marker(cursor_position.x);
+                self.plot_settings.markers.add_region_marker(cursor_x_raw);
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::Minus)) {
-                self.plot_settings.markers.delete_closest_marker();
+                self.plot_settings
+                    .markers
+                    .delete_closest_marker(cursor_x_raw);
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::Delete)) {

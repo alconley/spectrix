@@ -9,13 +9,19 @@ use super::main_fitter::{FitResult, Fitter};
 
 use super::models::gaussian::GaussianFitter;
 
+use super::common::Calibration;
+
 use crate::egui_plot_stuff::egui_line::EguiLine;
+use crate::fitter::common::Data;
+use crate::fitter::models::linear::LinearFitter;
+use crate::fitter::models::quadratic;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Fits {
     pub temp_fit: Option<Fitter>,
     pub stored_fits: Vec<Fitter>,
     pub settings: FitSettings,
+    pub calibration: Calibration,
 }
 
 impl Default for Fits {
@@ -31,6 +37,7 @@ impl Fits {
             // temp_background_fit: None,
             stored_fits: Vec::new(),
             settings: FitSettings::default(),
+            calibration: Calibration::default(),
         }
     }
 
@@ -194,6 +201,104 @@ impl Fits {
         }
     }
 
+    pub fn calibrate_stored_fits(&mut self, linear: bool, quadratic: bool) {
+        let mut mean = Vec::new();
+        let mut mean_uncertainty = Vec::new();
+        let mut energy = Vec::new();
+        let mut energy_uncertainty = Vec::new();
+
+        for fit in &mut self.stored_fits {
+            // get the energy valye from the
+            let fit_result = fit.fit_result.clone();
+
+            if let Some(FitResult::Gaussian(gauss)) = fit_result {
+                let cal_data = gauss.get_calibration_data();
+                for (fit_mean, fit_mean_unc, fit_energy, fit_energy_unc) in cal_data {
+                    mean.push(fit_mean);
+                    mean_uncertainty.push(fit_mean_unc);
+                    energy.push(fit_energy);
+                    energy_uncertainty.push(fit_energy_unc);
+                }
+            }
+        }
+
+        if linear {
+            // make sure there are at least 2 points to fit a linear
+            if mean.len() < 2 || energy.len() < 2 {
+                log::error!("Not enough points to fit a linear. Need at least 2 points.");
+                return;
+            }
+
+            // Fit a linear model
+            let mut fitter = LinearFitter::new(Data {
+                x: mean.clone(),
+                y: energy.clone(),
+            });
+
+            match fitter.lmfit() {
+                Ok(_) => {
+                    self.calibration.a = crate::fitter::common::Value {
+                        value: 0.0,
+                        uncertainty: 0.0,
+                    };
+                    self.calibration.b = crate::fitter::common::Value {
+                        value: fitter.paramaters.slope.value.unwrap_or(1.0),
+                        uncertainty: fitter.paramaters.slope.uncertainty.unwrap_or(0.0),
+                    };
+                    self.calibration.c = crate::fitter::common::Value {
+                        value: fitter.paramaters.intercept.value.unwrap_or(0.0),
+                        uncertainty: fitter.paramaters.intercept.uncertainty.unwrap_or(0.0),
+                    };
+                }
+                Err(e) => {
+                    log::error!("Calibration fit failed: {:?}", e);
+                }
+            }
+        }
+
+        if quadratic {
+            // make sure there are at least 3 points to fit a quadratic
+            if mean.len() < 3 || energy.len() < 3 {
+                log::error!("Not enough points to fit a quadratic. Need at least 3 points.");
+                return;
+            }
+
+            let mut fitter = quadratic::QuadraticFitter::new(Data {
+                x: mean.clone(),
+                y: energy.clone(),
+            });
+
+            match fitter.lmfit() {
+                Ok(_) => {
+                    self.calibration.a = crate::fitter::common::Value {
+                        value: fitter.paramaters.a.value.unwrap_or(0.0),
+                        uncertainty: fitter.paramaters.a.uncertainty.unwrap_or(0.0),
+                    };
+                    self.calibration.b = crate::fitter::common::Value {
+                        value: fitter.paramaters.b.value.unwrap_or(1.0),
+                        uncertainty: fitter.paramaters.b.uncertainty.unwrap_or(0.0),
+                    };
+                    self.calibration.c = crate::fitter::common::Value {
+                        value: fitter.paramaters.c.value.unwrap_or(0.0),
+                        uncertainty: fitter.paramaters.c.uncertainty.unwrap_or(0.0),
+                    };
+                }
+                Err(e) => {
+                    log::error!("Calibration fit failed: {:?}", e);
+                }
+            }
+        }
+
+        // Apply the calibration to all stored fits and temp fit
+        for fit in &mut self.stored_fits {
+            fit.calibrate(&self.calibration);
+        }
+
+        if let Some(temp_fit) = &mut self.temp_fit {
+            temp_fit.calibrate(&self.calibration);
+        }
+    }
+
     pub fn save_and_load_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             if ui.button("Save Fits").clicked() {
@@ -271,16 +376,23 @@ impl Fits {
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         self.apply_visibility_settings();
 
+        let calibration = if self.settings.calibrated {
+            Some(&self.calibration)
+        } else {
+            None
+        };
+
         if let Some(temp_fit) = &self.temp_fit {
-            temp_fit.draw(plot_ui);
+            temp_fit.draw(plot_ui, calibration);
         }
 
+        let calibrated = self.settings.calibrated;
         for fit in &mut self.stored_fits.iter() {
-            fit.draw(plot_ui);
+            fit.draw(plot_ui, calibration);
 
             // put the uuid above each peak if it is not 0
             if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result {
-                gauss.draw_uuid(plot_ui);
+                gauss.draw_uuid(plot_ui, calibrated);
             }
         }
     }
@@ -304,6 +416,8 @@ impl Fits {
                 ui.label("Amplitude");
                 ui.label("Sigma");
                 ui.label("UUID");
+                ui.label("Energy");
+                ui.label("lmfit");
 
                 ui.end_row();
 
@@ -311,7 +425,7 @@ impl Fits {
                     ui.label("Temp");
 
                     if let Some(temp_fit) = &mut self.temp_fit {
-                        temp_fit.fitter_stats(ui, true);
+                        temp_fit.fitter_stats(ui, true, self.settings.calibrated);
                     }
                 }
 
@@ -328,7 +442,7 @@ impl Fits {
 
                             ui.separator();
                         });
-                        fit.fitter_stats(ui, true);
+                        fit.fitter_stats(ui, true, self.settings.calibrated);
                     }
                 }
             });
@@ -346,6 +460,31 @@ impl Fits {
         }
     }
 
+    pub fn calubration_ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.settings.calibrated, "Calibration");
+
+            if self.settings.calibrated {
+                self.calibration.ui(ui);
+
+                ui.separator();
+
+                if ui.button("Calibrate").clicked() {
+                    self.calibrate_stored_fits(false, false);
+                }
+
+                if ui.button("Linear").clicked() {
+                    self.calibrate_stored_fits(true, false);
+                }
+
+                if ui.button("Quadratic").clicked() {
+                    self.calibrate_stored_fits(false, true);
+                }
+            }
+        });
+
+        ui.separator();
+    }
     pub fn ui(&mut self, ui: &mut egui::Ui, show: bool) {
         if show {
             egui::ScrollArea::both()
@@ -356,6 +495,8 @@ impl Fits {
                         self.save_and_load_ui(ui);
 
                         self.settings.ui(ui);
+
+                        self.calubration_ui(ui);
 
                         self.fit_stats_grid_ui(ui);
 

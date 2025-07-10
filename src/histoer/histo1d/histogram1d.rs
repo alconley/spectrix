@@ -67,14 +67,23 @@ impl Histogram {
 
         self.line.log_y = log_y;
         self.line.log_x = log_x;
-        self.line.draw(plot_ui);
+        // Extract calibration before any mutable borrow of `self.fits`
+        let calibration = {
+            if self.fits.settings.calibrated {
+                Some(&self.fits.calibration)
+            } else {
+                None
+            }
+        };
+        self.line.draw(plot_ui, calibration);
+        self.plot_settings
+            .markers
+            .draw_all_markers(plot_ui, calibration);
 
         self.fits.set_log(log_y, log_x);
         self.fits.draw(plot_ui);
-
         self.show_stats(plot_ui);
 
-        self.plot_settings.markers.draw_all_markers(plot_ui);
         self.update_background_pair_lines();
         for bg_pair in &mut self.plot_settings.markers.background_markers {
             bg_pair.histogram_line.log_x = log_x;
@@ -189,7 +198,16 @@ impl Histogram {
                         self.context_menu(ui);
                     });
 
-                    self.plot_settings.interactive_response(&plot_response);
+                    let calibration = {
+                        if self.fits.settings.calibrated {
+                            Some(&self.fits.calibration)
+                        } else {
+                            None
+                        }
+                    };
+
+                    self.plot_settings
+                        .interactive_response(&plot_response, calibration);
                 });
             });
         });
