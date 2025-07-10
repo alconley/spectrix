@@ -286,6 +286,11 @@ impl GaussianFitter {
             param.area.calibrated_value = param.area.value;
             param.area.calibrated_uncertainty = param.area.uncertainty;
         }
+
+        // add calibration to result file
+        if let Err(e) = self.add_calibration_to_result(calibration) {
+            log::error!("Failed to add calibration to lmfit result: {:?}", e);
+        }
     }
 
     pub fn lmfit(&mut self, load_result_path: Option<PathBuf>) -> PyResult<()> {
@@ -1330,6 +1335,152 @@ def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
             });
 
             self.fit_result[peak_index].uuid = new_uuid;
+            self.lmfit_result = Some(updated_lmfit);
+            self.fit_report = fit_report;
+
+            Ok(())
+        })
+    }
+
+    pub fn add_calibration_to_result(&mut self, calibration: &Calibration) -> PyResult<()> {
+        // Step 1: Write current lmfit_result to a temp file
+        let temp_path = PathBuf::from("temp_fit_energy_calibration_update.sav");
+        if let Some(ref lmfit) = self.lmfit_result {
+            let mut file = File::create(&temp_path)?;
+            file.write_all(lmfit.as_bytes())?;
+        } else {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "No lmfit_result to update.",
+            ));
+        }
+
+        // Step 2: Python call to update energy
+        Python::with_gil(|py| {
+            let module = PyModule::from_code_bound(
+                py,
+                r#"
+from lmfit.model import load_modelresult, save_modelresult
+import numpy as np
+
+def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: float, b_uncertainty: float, c: float, c_uncertainty: float):
+    result = load_modelresult(file_path)
+
+    def set_param(name, value, uncertainty):
+        if name not in result.params:
+            result.params.add(name, value=value, vary=False)
+        else:
+            result.params[name].set(value=value, vary=False)
+
+        unc_name = f"{name}_uncertainty"
+        if unc_name not in result.params:
+            result.params.add(unc_name, value=uncertainty, vary=False)
+        else:
+            result.params[unc_name].set(value=uncertainty, vary=False)
+
+    # Store calibration values as constants
+    set_param("calibration_a", a, a_uncertainty)
+    set_param("calibration_b", b, b_uncertainty)
+    set_param("calibration_c", c, c_uncertainty)
+
+    i = 0
+    while f"g{i}_center" in result.params:
+        # Add expression-based parameters
+        result.params.add(
+            f"g{i}_center_calibrated",
+            expr=f"calibration_a * g{i}_center**2 + calibration_b * g{i}_center + calibration_c",
+            vary=False,
+        )
+        result.params.add(
+            f"g{i}_sigma_calibrated",
+            expr=f"abs((2 * calibration_a * g{i}_center + calibration_b) * g{i}_sigma)",
+            vary=False,
+        )
+        result.params.add(
+            f"g{i}_fwhm_calibrated",
+            expr=f"2.3548200 * g{i}_sigma_calibrated",
+            vary=False,
+        )
+
+        # Direct copies of uncalibrated
+        for param in ["area", "amplitude", "height"]:
+            name = f"g{i}_{param}_calibrated"
+            if name not in result.params:
+                result.params.add(name, expr=f"g{i}_{param}", vary=False)
+            else:
+                result.params[name].set(expr=f"g{i}_{param}", vary=False)
+
+        # Evaluate expressions and set stderr manually
+        center = result.params[f"g{i}_center"].value
+        center_unc = result.params[f"g{i}_center"].stderr or 0.0
+        sigma = result.params[f"g{i}_sigma"].value
+        sigma_unc = result.params[f"g{i}_sigma"].stderr or 0.0
+
+        dx_dE = 2 * a * center + b
+
+        # Propagated uncertainty for calibrated center
+        d_center_cal = np.sqrt(
+            (center ** 2 * a_uncertainty) ** 2 +
+            (center * b_uncertainty) ** 2 +
+            c_uncertainty ** 2 +
+            ((2 * a * center + b) * center_unc) ** 2
+        )
+
+        # Calibrated sigma
+        d_sigma_cal = np.sqrt(
+            (2 * center * a_uncertainty * sigma) ** 2 +
+            (b_uncertainty * sigma) ** 2 +
+            (dx_dE * sigma_unc) ** 2
+        )
+
+        # FWHM
+        d_fwhm_cal = 2.3548200 * d_sigma_cal
+
+        result.params[f"g{i}_center_calibrated"].stderr = d_center_cal
+        result.params[f"g{i}_sigma_calibrated"].stderr = d_sigma_cal
+        result.params[f"g{i}_fwhm_calibrated"].stderr = d_fwhm_cal
+
+        i += 1
+
+    save_modelresult(result, file_path)
+
+    print("\nPost Fit Report:")
+    fit_report = result.fit_report()
+    print(fit_report)
+
+    return result.fit_report()
+"#,
+                "energy_patch.py",
+                "energy_patch",
+            )?;
+
+            let a = calibration.a.value;
+            let a_uncertainty = calibration.a.uncertainty;
+            let b = calibration.b.value;
+            let b_uncertainty = calibration.b.uncertainty;
+            let c = calibration.c.value;
+            let c_uncertainty = calibration.c.uncertainty;
+
+            let fit_report: String = module
+                .getattr("Update_EnergyCalibration")?
+                .call1((
+                    temp_path.to_str().unwrap(),
+                    a,
+                    a_uncertainty,
+                    b,
+                    b_uncertainty,
+                    c,
+                    c_uncertainty,
+                ))?
+                .extract()?;
+
+            // Step 3: Reload updated file into lmfit_result
+            let updated_lmfit = std::fs::read_to_string(&temp_path)
+                .unwrap_or_else(|_| "Failed to read updated fit.".to_string());
+
+            std::fs::remove_file(&temp_path).unwrap_or_else(|err| {
+                eprintln!("Warning: failed to remove temp fit file: {}", err);
+            });
+
             self.lmfit_result = Some(updated_lmfit);
             self.fit_report = fit_report;
 
