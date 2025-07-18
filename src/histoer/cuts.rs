@@ -750,7 +750,7 @@ impl Cut1D {
                     _ => {
                         return Err(PolarsError::ComputeError(
                             format!("Unknown operator: {}", condition.operator).into(),
-                        ))
+                        ));
                     }
                 };
                 masks.push(mask);

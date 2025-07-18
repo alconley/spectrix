@@ -306,7 +306,9 @@ impl GaussianFitter {
             if py.import("lmfit").is_ok() {
                 // println!("Successfully imported `lmfit` module.");
             } else {
-                eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
+                eprintln!(
+                    "Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed."
+                );
                 return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
                     "`lmfit` module not available",
                 ));
@@ -990,7 +992,9 @@ def load_result(filename: str):
                 (energy, energy_err),
             ) in gaussian_params.iter().zip(additional_params.iter())
             {
-                log::info!("Amplitude: {amp:.3} ± {amp_err:.3}, Mean: {mean:.3} ± {mean_err:.3}, Sigma: {sigma:.3} ± {sigma_err:.3}, FWHM: {fwhm:.3} ± {fwhm_err:.3}, Area: {area:.3} ± {area_err:.3}");
+                log::info!(
+                    "Amplitude: {amp:.3} ± {amp_err:.3}, Mean: {mean:.3} ± {mean_err:.3}, Sigma: {sigma:.3} ± {sigma_err:.3}, FWHM: {fwhm:.3} ± {fwhm_err:.3}, Area: {area:.3} ± {area_err:.3}"
+                );
 
                 self.peak_markers.push(*mean);
 

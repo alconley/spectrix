@@ -2,7 +2,7 @@ use egui::{Color32, DragValue, Slider, Stroke, Ui};
 use egui_plot::{Line, LineStyle, PlotPoint, PlotPoints, PlotUi};
 
 use crate::{
-    egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS},
+    egui_plot_stuff::colors::{COLOR_OPTIONS, Rgb},
     fitter::common::Calibration,
 };
 

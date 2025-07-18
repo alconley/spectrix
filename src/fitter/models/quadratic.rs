@@ -123,7 +123,9 @@ impl QuadraticFitter {
             if py.import("lmfit").is_ok() {
                 // println!("Successfully imported `lmfit` module.");
             } else {
-                eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
+                eprintln!(
+                    "Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed."
+                );
                 return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
                     "`lmfit` module not available",
                 ));
@@ -132,7 +134,9 @@ impl QuadraticFitter {
             if py.import("numpy").is_ok() {
                 // println!("Successfully imported `numpy` module.");
             } else {
-                eprintln!("Error: `numpy` module could not be found. Make sure you are using the correct Python environment with `numpy` installed.");
+                eprintln!(
+                    "Error: `numpy` module could not be found. Make sure you are using the correct Python environment with `numpy` installed."
+                );
                 return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
                     "`numpy` module not available",
                 ));

@@ -11,8 +11,8 @@ use pyo3::{prelude::*, types::PyModule};
 use std::collections::HashMap;
 // use std::convert::TryInto;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 
 // Project modules
@@ -1251,7 +1251,9 @@ impl Histogrammer {
             if py.import("uproot").is_ok() {
                 println!("Successfully imported `uproot` module.");
             } else {
-                eprintln!("Error: `uproot` module could not be found. Make sure you are using the correct Python environment with `uproot` installed.");
+                eprintln!(
+                    "Error: `uproot` module could not be found. Make sure you are using the correct Python environment with `uproot` installed."
+                );
                 return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
                     "`uproot` module not available",
                 ));

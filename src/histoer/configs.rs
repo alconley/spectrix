@@ -1015,7 +1015,9 @@ impl Hist2DConfig {
                 } else {
                     log::error!(
                         "Warning: Unsupported pattern for 2D histogram with name '{}', x_column '{}', y_column '{}'",
-                        self.name, self.x_column_name, self.y_column_name
+                        self.name,
+                        self.x_column_name,
+                        self.y_column_name
                     );
                 }
             } else {

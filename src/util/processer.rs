@@ -111,7 +111,9 @@ impl Processor {
 
             // Check if the `uproot` module can be imported
             if let Err(e) = py.import("uproot") {
-                eprintln!("Error: `uproot` module could not be found. Ensure you have the correct Python environment with `uproot` installed.");
+                eprintln!(
+                    "Error: `uproot` module could not be found. Ensure you have the correct Python environment with `uproot` installed."
+                );
                 return Err(e);
             }
 
