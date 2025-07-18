@@ -626,7 +626,7 @@ def get_2d_histograms(file_name):
 
                 if !self.selected_files.is_empty() {
                     ui.label("Selected files:");
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui.button("De/Select All").clicked() {
                             let all_selected = self.selected_files.iter().all(|(_, checked)| *checked);
                             for (_, checked) in self.selected_files.iter_mut() {
@@ -678,7 +678,7 @@ def get_2d_histograms(file_name):
                         let mut to_remove = Vec::new();
                         // Iterate over files and track index
                         for (index, (file, checked)) in self.selected_files.iter_mut().enumerate() {
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 let display_text = if let Some(ref common_dir) = common_path {
                                     if file.parent() == Some(common_dir.as_path()) {
                                         file.file_name().unwrap_or_default().to_string_lossy() // Show only filename
@@ -691,11 +691,13 @@ def get_2d_histograms(file_name):
                                 if ui.selectable_label(*checked, display_text).clicked() {
                                     *checked = !*checked; // Toggle selection
                                 }
+
                                 // "❌" button to mark for removal
                                 if ui.button("❌").clicked() {
                                     to_remove.push(index);
                                 }
                             });
+
                         }
                         // Remove files after iteration (to avoid borrowing issues)
                         for &index in to_remove.iter().rev() {

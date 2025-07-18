@@ -120,44 +120,50 @@ impl PIPS {
                         configs.hist2d(&format!("{cebra_base_path}/Energy Calibrated/{pips_energy_calibrated_column} v {cebr3_energy_calibrated_column}"), &cebr3_energy_calibrated_column, &pips_energy_calibrated_column, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), &main_cuts);
                     }
                     // if cebr3.energy_calibration.active {
-                        // configs.hist2d(&format!("{}/Energy Calibrated/PIPS{}TimeRelToCebra{}Time v Cebra{}EnergyCalibrated", base_path, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}Time", self.name, cebr3.number), &cebr3_energy_calibrated, cebr3.pips_timecuts.pips1000.no_cut_range, cebr3.energy_calibration.range, (cebr3.pips_timecuts.pips1000.no_cut_bins, cebr3.energy_calibration.bins), None);
+                    //     configs.hist2d(&format!("{}/Energy Calibrated/PIPS{}TimeRelToCebra{}Time v Cebra{}EnergyCalibrated", base_path, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}Time", self.name, cebr3.number), &cebr3_energy_calibrated, cebr3.pips_timecuts.pips1000.no_cut_range, cebr3.energy_calibration.range, (cebr3.pips_timecuts.pips1000.no_cut_bins, cebr3.energy_calibration.bins), None);
                     // }
 
                     // check time cuts for the correct detector
                     // ONLY PIPS1000 is used for now for testing purposes
-                    // if cebr3.pips_timecuts.pips1000.active {
-                    //     let cebra_min = cebr3.pips_timecuts.pips1000.low;
-                    //     let cebra_max = cebr3.pips_timecuts.pips1000.high;
-                    //     let cebra_mean = cebr3.pips_timecuts.pips1000.mean;
-                    //     let cebra_time_range = cebr3.pips_timecuts.pips1000.range;
-                    //     let cebra_time_bins = cebr3.pips_timecuts.pips1000.bins;
+                    if cebr3.pips_timecuts.pips1000.active {
+                        let cebra_min = cebr3.pips_timecuts.pips1000.low;
+                        let cebra_max = cebr3.pips_timecuts.pips1000.high;
+                        let cebra_mean = cebr3.pips_timecuts.pips1000.mean;
+                        let cebra_time_range = cebr3.pips_timecuts.pips1000.range;
+                        let cebra_time_bins = cebr3.pips_timecuts.pips1000.bins;
 
-                    //     // add column for the time cut to shift the time
-                    //     configs.columns.push((format!("{cebr3_time_column} - {pips_time_column} - {cebra_mean}"), format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number)));
+                        // add column for the time cut to shift the time
+                        configs.columns.push((format!("{cebr3_time_column} - {pips_time_column} - {cebra_mean}"), format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number)));
 
-                    //     // add the time cut
+                        // add the time cut
+                        let pips_cebra_tcut = Cut::new_1d(&format!("PIPS{}+Cebra{} Time Cut", self.name, cebr3.number), &format!("PIPS{}TimeRelToCebra{}Time >= {} & PIPS{}TimeRelToCebra{}Time <= {}", self.name, cebr3.number, cebra_min, self.name, cebr3.number, cebra_max));
+                        configs.cuts.add_cut(pips_cebra_tcut.clone());
+                        // let tcut = Some(Cuts::new(vec![pips_cebra_tcut.clone(), valid_time_cut.clone()]));
 
-                    //     let pips_cebra_tcut = Cut::new_1d(&format!("PIPS{}+Cebra{} Time Cut", self.name, cebr3.number), &format!("PIPS{}TimeRelToCebra{}Time >= {} && PIPS{}TimeRelToCebra{}Time <= {}", self.name, cebr3.number, min, self.name, cebr3.number, max));
-                    //     configs.cuts.add_cut(pips_cebra_tcut.clone());
-                    //     let tcut = Some(Cuts::new(vec![pips_cebra_tcut.clone(), valid_time_cut.clone()]));
+                        let cebra_tcut_valid: Option<Cuts> = if let Some(mut main_cuts) = main_cuts.clone() {
+                            main_cuts.add_cut(pips_cebra_tcut);
+                            Some(main_cuts)
+                        } else {
+                            Some(Cuts::new(vec![pips_cebra_tcut.clone()]))
+                        };
 
-                    //     configs.hist1d(&format!("{}/Time Cut/PIPS{}TimeRelToCebra{}TimeShifted", base_path, self.name, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), time_range, time_bins, tcut.clone());
-                    //     configs.hist1d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut - PIPS{}TimeRelToCeBrA", self.name, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), time_range, time_bins, tcut.clone());
+                        configs.hist1d(&format!("{}/Time Cut/PIPS{}TimeRelToCebra{}TimeShifted", base_path, self.name, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), cebra_time_range, cebra_time_bins, &cebra_tcut_valid);
+                        configs.hist1d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut - PIPS{}TimeRelToCeBrA", self.name, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), cebra_time_range, cebra_time_bins, &cebra_tcut_valid);
 
-                    //     configs.hist2d(&format!("{}/Time Cut/PIPS{}Energy v Cebra{}Energy", base_path, self.name, cebr3.number), &cebr3_energy, &energy, cebr3_range, pips_range, (cebr3_bins, pips_bins), tcut.clone());
-                    //     configs.hist2d(&format!("{}/Time Cut/PIPS{}RelToCebra{}Shifted v Cebra{}Energy", base_path, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy, time_range, cebr3_range, (time_bins, cebr3_bins), tcut.clone());
-                    //     // energy calibrated histograms
-                    //     if self.energy_calibration.active & !cebr3.energy_calibration.active {
-                    //         configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}Energy", base_path, self.name, cebr3.number), &cebr3_energy, &energy_calibrated, cebr3_range, self.energy_calibration.range, (cebr3_bins, self.energy_calibration.bins), tcut.clone());
-                    //     } else if cebr3.energy_calibration.active & self.energy_calibration.active {
-                    //         configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}EnergyCalibrated", base_path, self.name, cebr3.number), &cebr3_energy_calibrated, &energy_calibrated, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), tcut.clone());
-                    //         configs.hist2d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut- PIPS{}EnergyCalibrated v CeBrA", self.name, self.name), &cebr3_energy_calibrated, &energy_calibrated, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), tcut.clone());
-                    //     }
-                    //     if cebr3.energy_calibration.active {
-                    //         configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}TimeRelToCebra{}TimeShifted v Cebra{}EnergyCalibrated", base_path, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated, time_range, cebr3.energy_calibration.range, (time_bins, cebr3.energy_calibration.bins), tcut.clone());
-                    //         configs.hist2d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut - PIPS{}TimeRelToCeBrA v CeBrA", self.name, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated, time_range, cebr3.energy_calibration.range, (time_bins, cebr3.energy_calibration.bins), tcut.clone());
-                    //     }
-                    // }
+                        configs.hist2d(&format!("{}/Time Cut/PIPS{}Energy v Cebra{}Energy", base_path, self.name, cebr3.number), &cebr3_energy_column, &pips_energy_column, cebr3_range, pips_range, (cebr3_bins, pips_bins), &cebra_tcut_valid);
+                        configs.hist2d(&format!("{}/Time Cut/PIPS{}RelToCebra{}Shifted v Cebra{}Energy", base_path, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_column, cebra_time_range, cebr3_range, (cebra_time_bins, cebr3_bins), &cebra_tcut_valid);
+                        // energy calibrated histograms
+                        if self.energy_calibration.active & !cebr3.energy_calibration.active {
+                            configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}Energy", base_path, self.name, cebr3.number), &cebr3_energy_column, &pips_energy_calibrated_column, cebr3_range, self.energy_calibration.range, (cebr3_bins, self.energy_calibration.bins), &cebra_tcut_valid);
+                        } else if cebr3.energy_calibration.active & self.energy_calibration.active {
+                            configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}EnergyCalibrated", base_path, self.name, cebr3.number), &cebr3_energy_calibrated_column, &pips_energy_calibrated_column, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), &cebra_tcut_valid);
+                            configs.hist2d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut- PIPS{}EnergyCalibrated v CeBrA", self.name, self.name), &cebr3_energy_calibrated_column, &pips_energy_calibrated_column, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), &cebra_tcut_valid);
+                        }
+                        if cebr3.energy_calibration.active {
+                            configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}TimeRelToCebra{}TimeShifted v Cebra{}EnergyCalibrated", base_path, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated_column, cebra_time_range, cebr3.energy_calibration.range, (cebra_time_bins, cebr3.energy_calibration.bins), &cebra_tcut_valid);
+                            configs.hist2d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut - PIPS{}TimeRelToCeBrA v CeBrA", self.name, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated_column, cebra_time_range, cebr3.energy_calibration.range, (cebra_time_bins, cebr3.energy_calibration.bins), &cebra_tcut_valid);
+                        }
+                    }
                 }
             }
 
