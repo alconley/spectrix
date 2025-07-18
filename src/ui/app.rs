@@ -36,7 +36,7 @@ impl eframe::App for Spectrix {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("spectrix_top_panel").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 egui::global_theme_preference_switch(ui);
                 ui.heading("Spectrix");
                 ui.separator();

@@ -198,10 +198,7 @@ impl Histogram2D {
             );
         });
 
-        egui::ColorImage {
-            size: [width, height],
-            pixels,
-        }
+        egui::ColorImage::new([width, height], pixels)
     }
 
     // Recalculate the image and replace the existing texture

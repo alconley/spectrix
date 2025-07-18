@@ -715,7 +715,7 @@ def load_result(filename: str):
 
             match self.background_model {
                 BackgroundModel::Linear(ref params) => {
-                    if let Some(BackgroundResult::Linear(ref fitter)) = &self.background_result {
+                    if let Some(BackgroundResult::Linear(fitter)) = &self.background_result {
                         // Use fitted values for slope and intercept and set `vary` to false
                         let fitted_slope = fitter
                             .paramaters
@@ -775,7 +775,7 @@ def load_result(filename: str):
                     }
                 }
                 BackgroundModel::Quadratic(ref params) => {
-                    if let Some(BackgroundResult::Quadratic(ref fitter)) = &self.background_result {
+                    if let Some(BackgroundResult::Quadratic(fitter)) = &self.background_result {
                         // Use fitted values for a, b, and c, set `vary` to false
                         let fitted_a = fitter
                             .paramaters
@@ -842,7 +842,7 @@ def load_result(filename: str):
                     }
                 }
                 BackgroundModel::Exponential(ref params) => {
-                    if let Some(BackgroundResult::Exponential(ref fitter)) = &self.background_result
+                    if let Some(BackgroundResult::Exponential(fitter)) = &self.background_result
                     {
                         // Use fitted values for amplitude and decay, set `vary` to false
                         let fitted_amplitude = fitter
@@ -903,7 +903,7 @@ def load_result(filename: str):
                     }
                 }
                 BackgroundModel::PowerLaw(ref params) => {
-                    if let Some(BackgroundResult::PowerLaw(ref fitter)) = &self.background_result {
+                    if let Some(BackgroundResult::PowerLaw(fitter)) = &self.background_result {
                         // Use fitted values for amplitude and exponent, set `vary` to false
                         let fitted_amplitude = fitter
                             .paramaters

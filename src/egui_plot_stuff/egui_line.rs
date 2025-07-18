@@ -41,7 +41,7 @@ impl Default for EguiLine {
             name: "Line".to_string(),
             highlighted: false,
             stroke: Stroke::new(1.0, Color32::LIGHT_BLUE),
-            width: 2.0,
+            width: 1.0,
             color: Color32::LIGHT_BLUE,
             reference_fill: false,
             fill: 0.0,
