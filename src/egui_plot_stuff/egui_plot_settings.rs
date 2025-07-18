@@ -142,14 +142,12 @@ impl EguiPlotSettings {
             plot
         };
 
-        let plot = if log_y {
+        if log_y {
             plot.y_grid_spacer(log_axis_spacer)
                 .y_axis_formatter(move |gm, bounds| log_axis_formatter(gm, bounds, max_size))
         } else {
             plot
-        };
-
-        plot
+        }
     }
 
     pub fn reset_axis_lims(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
