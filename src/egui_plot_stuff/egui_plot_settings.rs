@@ -24,7 +24,7 @@ pub struct EguiPlotSettings {
 
 impl Default for EguiPlotSettings {
     fn default() -> Self {
-        EguiPlotSettings {
+        Self {
             legend: true,
             log_x: false,
             log_y: false,
@@ -83,7 +83,7 @@ impl EguiPlotSettings {
                 ui.separator();
 
                 if ui.button("Reset").clicked() {
-                    *self = EguiPlotSettings::default();
+                    *self = Self::default();
                 }
             });
         });
@@ -160,7 +160,7 @@ impl EguiPlotSettings {
     }
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 fn log_axis_spacer(input: egui_plot::GridInput) -> Vec<egui_plot::GridMark> {
     let (min, max) = input.bounds;
     let mut marks = vec![];

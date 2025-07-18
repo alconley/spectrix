@@ -52,14 +52,14 @@ impl Histogram {
 
             let (integral, mean, stdev) = self.get_statistics(plot_min_x, plot_max_x);
             let stats_entries = [
-                format!("Integral: {}", integral),
-                format!("Mean: {:.2}", mean),
-                format!("Stdev: {:.2}", stdev),
+                format!("Integral: {integral}"),
+                format!("Mean: {mean:.2}"),
+                format!("Stdev: {stdev:.2}"),
                 format!("Overflow: {:}", self.overflow),
                 format!("Underflow: {:}", self.underflow),
             ];
 
-            for entry in stats_entries.iter() {
+            for entry in &stats_entries {
                 plot_ui.text(
                     egui_plot::Text::new("", egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
                         .highlight(false)

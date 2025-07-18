@@ -26,10 +26,10 @@ pub struct EguiImage {
 
 impl Default for EguiImage {
     fn default() -> Self {
-        EguiImage {
+        Self {
             draw: true,
             name_in_legend: false,
-            name: "Image".to_string(),
+            name: "Image".to_owned(),
             highlighted: false,
             uv: Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
             add_background: false,
@@ -55,9 +55,9 @@ impl Default for EguiImage {
 
 impl EguiImage {
     pub fn heatmap(name: String, range_x: [f64; 2], range_y: [f64; 2]) -> Self {
-        let image = EguiImage::default();
+        let image = Self::default();
 
-        EguiImage {
+        Self {
             name,
             image_width: (range_x[1] as f32 - range_x[0] as f32),
             image_height: (range_y[1] as f32 - range_y[0] as f32),
@@ -70,11 +70,11 @@ impl EguiImage {
     }
 
     // Convert ColorImage to ImageData (Byte array)
-    fn to_image_data(&self, color_image: ColorImage) -> ImageData {
+    fn to_image_data(color_image: &ColorImage) -> ImageData {
         let width = color_image.size[0];
         let height = color_image.size[1];
         let mut rgba_data = Vec::with_capacity(width * height * 4);
-        for pixel in color_image.pixels.iter() {
+        for pixel in &color_image.pixels {
             rgba_data.extend_from_slice(&pixel.to_array());
         }
 
@@ -105,9 +105,9 @@ impl EguiImage {
         }
     }
 
-    pub fn get_texture(&mut self, ui: &mut egui::Ui, color_image: ColorImage) {
+    pub fn get_texture(&mut self, ui: &mut egui::Ui, color_image: &ColorImage) {
         if self.texture.is_none() {
-            let image_data = self.to_image_data(color_image);
+            let image_data = Self::to_image_data(color_image);
             self.texture = Some(ui.ctx().load_texture(
                 self.name.clone(),
                 image_data,
@@ -137,7 +137,7 @@ impl EguiImage {
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
         ui.menu_button(format!("{} Image", self.name), |ui| {
-            ui.label(self.name.to_string());
+            ui.label(self.name.clone());
 
             ui.vertical(|ui| {
                 ui.checkbox(&mut self.draw, "Draw");

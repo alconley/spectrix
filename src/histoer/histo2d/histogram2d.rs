@@ -22,8 +22,8 @@ pub struct Histogram2D {
 impl Histogram2D {
     // Create a new 2D Histogram with specified ranges and number of bins for each axis
     pub fn new(name: &str, bins: (usize, usize), range: ((f64, f64), (f64, f64))) -> Self {
-        Histogram2D {
-            name: name.to_string(),
+        Self {
+            name: name.to_owned(),
             bins: Bins {
                 x: bins.0,
                 x_width: (range.0 .1 - range.0 .0) / bins.0 as f64,
@@ -47,7 +47,7 @@ impl Histogram2D {
             underflow: 0,
             plot_settings: PlotSettings::default(),
             image: EguiImage::heatmap(
-                name.to_string(),
+                name.to_owned(),
                 [range.0 .0, range.0 .1],
                 [range.1 .0, range.1 .1],
             ),
@@ -146,8 +146,8 @@ impl Histogram2D {
         }
 
         self.plot_settings.recalculate_image = true;
-        self.plot_settings.x_column = x_column.to_string();
-        self.plot_settings.y_column = y_column.to_string();
+        self.plot_settings.x_column = x_column.to_owned();
+        self.plot_settings.y_column = y_column.to_owned();
 
         Ok(())
     }
@@ -189,7 +189,7 @@ impl Histogram2D {
             // (x, y) where we reverse the y coordinate so that y=0 is at the bottom.
             let x = i % width;
             let y = height - 1 - (i / width);
-            let count = self.bins.counts.get(&(x, y)).cloned().unwrap_or(0);
+            let count = self.bins.counts.get(&(x, y)).copied().unwrap_or(0);
             *pixel = self.plot_settings.colormap.color(
                 count,
                 self.bins.min_count,
@@ -205,10 +205,10 @@ impl Histogram2D {
     fn calculate_image(&mut self, ui: &mut egui::Ui) {
         self.image.texture = None;
         let color_image = self.data_2_image();
-        self.image.get_texture(ui, color_image);
+        self.image.get_texture(ui, &color_image);
     }
 
-    fn limit_scrolling(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
+    fn limit_scrolling(&self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         let plot_bounds = plot_ui.plot_bounds();
 
         let current_x_min = plot_bounds.min()[0];

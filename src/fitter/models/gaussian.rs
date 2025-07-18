@@ -8,12 +8,13 @@ use crate::fitter::models::quadratic::QuadraticFitter;
 use crate::fitter::common::Calibration;
 
 use pyo3::{
+    ffi::c_str,
     prelude::*,
     types::{PyDict, PyModule},
 };
 
 use std::fs::File;
-use std::io::Write;
+use std::io::Write as _;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -30,30 +31,30 @@ pub struct GaussianParameters {
 
 impl Default for GaussianParameters {
     fn default() -> Self {
-        GaussianParameters {
+        Self {
             amplitude: Parameter {
-                name: "amplitude".to_string(),
+                name: "amplitude".to_owned(),
                 ..Default::default()
             },
             mean: Parameter {
-                name: "mean".to_string(),
+                name: "mean".to_owned(),
                 ..Default::default()
             },
             sigma: Parameter {
-                name: "sigma".to_string(),
+                name: "sigma".to_owned(),
                 ..Default::default()
             },
             fwhm: Parameter {
-                name: "fwhm".to_string(),
+                name: "fwhm".to_owned(),
                 ..Default::default()
             },
             area: Parameter {
-                name: "area".to_string(),
+                name: "area".to_owned(),
                 ..Default::default()
             },
             uuid: 0,
             energy: Parameter {
-                name: "energy".to_string(),
+                name: "energy".to_owned(),
                 vary: false,
                 ..Default::default()
             },
@@ -70,40 +71,40 @@ impl GaussianParameters {
         fwhm: (f64, f64),
         area: (f64, f64),
     ) -> Self {
-        GaussianParameters {
+        Self {
             amplitude: Parameter {
-                name: "amplitude".to_string(),
+                name: "amplitude".to_owned(),
                 value: Some(amp.0),
                 uncertainty: Some(amp.1),
                 ..Default::default()
             },
             mean: Parameter {
-                name: "mean".to_string(),
+                name: "mean".to_owned(),
                 value: Some(mean.0),
                 uncertainty: Some(mean.1),
                 ..Default::default()
             },
             sigma: Parameter {
-                name: "sigma".to_string(),
+                name: "sigma".to_owned(),
                 value: Some(sigma.0),
                 uncertainty: Some(sigma.1),
                 ..Default::default()
             },
             fwhm: Parameter {
-                name: "fwhm".to_string(),
+                name: "fwhm".to_owned(),
                 value: Some(fwhm.0),
                 uncertainty: Some(fwhm.1),
                 ..Default::default()
             },
             area: Parameter {
-                name: "area".to_string(),
+                name: "area".to_owned(),
                 value: Some(area.0),
                 uncertainty: Some(area.1),
                 ..Default::default()
             },
             uuid: 0,
             energy: Parameter {
-                name: "energy".to_string(),
+                name: "energy".to_owned(),
                 value: None,
                 uncertainty: None,
                 ..Default::default()
@@ -214,7 +215,7 @@ pub struct GaussianFitter {
 }
 
 impl GaussianFitter {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         data: Data,
         region_markers: Vec<f64>,
@@ -289,33 +290,30 @@ impl GaussianFitter {
 
         // add calibration to result file
         if let Err(e) = self.add_calibration_to_result(calibration) {
-            log::error!("Failed to add calibration to lmfit result: {:?}", e);
+            log::error!("Failed to add calibration to lmfit result: {e:?}");
         }
     }
 
     pub fn lmfit(&mut self, load_result_path: Option<PathBuf>) -> PyResult<()> {
         Python::with_gil(|py| {
-            // let sys = py.import_bound("sys")?;
+            // let sys = py.import("sys")?;
             // let version: String = sys.getattr("version")?.extract()?;
             // let executable: String = sys.getattr("executable")?.extract()?;
             // println!("Using Python version: {}", version);
             // println!("Python executable: {}", executable);
 
             // Check if the `uproot` module can be imported
-            match py.import_bound("lmfit") {
-                Ok(_) => {
-                    // println!("Successfully imported `lmfit` module.");
-                }
-                Err(_) => {
-                    eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
-                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                        "`lmfit` module not available",
-                    ));
-                }
+            if py.import("lmfit").is_ok() {
+                // println!("Successfully imported `lmfit` module.");
+            } else {
+                eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
+                return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                    "`lmfit` module not available",
+                ));
             }
 
             // Define the Python code as a module
-            let code = r#"
+            let code = c_str!("
 import numpy as np
 import lmfit
 from lmfit.model import load_modelresult, save_modelresult
@@ -333,40 +331,10 @@ def GaussianFit(counts: list, centers: list,
                                             'decay': (0, -np.inf, np.inf, 1.0, True),
                                             'exponent': (0, -np.inf, np.inf, 1.0, True)
                                             }):
-    """
-    Performs a multi-Gaussian fit with an optional background model on a 1D histogram.
-
-    This function fits one or more Gaussian peaks to a specified region of a 1D histogram,
-    optionally using background subtraction and energy assignments. It supports constraints
-    such as fixing peak positions, enforcing equal widths (σ), and calculating physical quantities 
-    such as integrated area and cross sections.
-
-    Parameters:
-    ----------
-    region_markers : tuple of float
-        Two values defining the fitting region boundaries (in channel or calibrated units).
-    peak_markers : list of float, optional
-        Initial guesses for peak positions. If empty, the function guesses based on the maximum bin.
-    background_markers : list of tuple, optional
-        List of (start, end) ranges used to fit the background model. If empty, uses the full region.
-    background_params : dict
-        Dictionary specifying the background model type and its initial parameters.
-        Supported types: 'linear', 'quadratic', 'exponential', 'powerlaw', or None.
-    equal_sigma : bool, default=True
-        If True, all Gaussians share the same sigma (FWHM). If False, each peak can vary independently.
-    free_position : bool, default=True
-        If True, allows peak positions to vary during fitting. If False, positions are fixed at initial guesses.
-    print_info : bool, default=True
-        If True, prints background and final fit reports to stdout.
-
-    Notes:
-    ------
-    - The fit includes background + sum of Gaussian peaks.
-    """
 
     # ensure the edges is the same length as counts + 1
     if len(centers) != len(counts):
-        raise ValueError("The length of edges must be one more than the length of counts.")
+        raise ValueError('The length of edges must be one more than the length of counts.')
     
     centers = np.array(centers)
     counts = np.array(counts)
@@ -375,14 +343,14 @@ def GaussianFit(counts: list, centers: list,
     
     # Ensure there are 2 region markers
     if len(region_markers) != 2:
-        raise ValueError("Region markers must have exactly 2 values.")
+        raise ValueError('Region markers must have exactly 2 values.')
     
     # sort the region markers
     region_markers = sorted(region_markers)
 
-    # enrsure there are only 2 region markers
+    # ensure there are only 2 region markers
     if len(region_markers) != 2:
-        raise ValueError("Region markers must have exactly 2 values.")
+        raise ValueError('Region markers must have exactly 2 values.')
     
     # Extract fitting region
     region_mask = (centers >= region_markers[0]) & (centers <= region_markers[1])
@@ -425,12 +393,12 @@ def GaussianFit(counts: list, centers: list,
         params = bg_model.make_params(amplitude=background_params['amplitude'][3], exponent=background_params['exponent'][3])
         params['bg_amplitude'].set(vary=background_params['amplitude'][4])
         params['bg_exponent'].set(vary=background_params['exponent'][4])
-    elif bg_type == "None":
+    elif bg_type == 'None':
         bg_model = lmfit.models.ConstantModel(prefix='bg_')
         params = bg_model.make_params(c=0)
         params['bg_c'].set(vary=False)
     else:
-        raise ValueError("Unsupported background model")
+        raise ValueError('Unsupported background model')
     
     # Fit the background model to the data of the background markers before fitting the peaks
     if len(background_markers) == 0:
@@ -453,11 +421,11 @@ def GaussianFit(counts: list, centers: list,
     bg_result = bg_model.fit(bg_y, params, x=bg_x)
 
     # print intial parameter guesses
-    print("\nInitial Background Parameter Guesses:")
+    print('Initial Background Parameter Guesses:')
     params.pretty_print()
 
     # print fit report
-    print("\nBackground Fit Report:")
+    print('Background Fit Report:')
     print(bg_result.fit_report())
 
     # **Adjust background parameters based on their errors**
@@ -526,7 +494,7 @@ def GaussianFit(counts: list, centers: list,
             params[f'g{i}_sigma'].set(min=0)
 
         params.add(f'g{i}_area', expr=f'g{i}_amplitude / {bin_width}')
-        params[f"g{i}_area"].set(min=0)  # Use estimated area
+        params[f'g{i}_area'].set(min=0)  # Use estimated area
 
         if not free_position:
             params[f'g{i}_center'].set(vary=False)
@@ -558,11 +526,11 @@ def GaussianFit(counts: list, centers: list,
     result = model.fit(y_data, params, x=x_data)
 
     # Print initial parameter guesses
-    print("\nInitial Parameter Guesses:")
+    print('Initial Parameter Guesses:')
     params.pretty_print()
 
     # Print fit report
-    print("\nFit Report:")
+    print('Fit Report:')
 
     fit_report = result.fit_report()
     print(fit_report)
@@ -615,9 +583,6 @@ def GaussianFit(counts: list, centers: list,
     return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params
 
 def load_result(filename: str):
-    """
-    Load a saved lmfit model result from a file.
-    """
     result = load_modelresult(filename)
 
     params = result.params
@@ -632,11 +597,11 @@ def load_result(filename: str):
     x_data = np.linspace(x_min, x_max, 1000)
 
     # Print initial parameter guesses
-    print("\nInitial Parameter Guesses:")
+    print('Initial Parameter Guesses:')
     params.pretty_print()
 
     # Print fit report
-    print("\nFit Report:")
+    print('Fit Report:')
 
     fit_report = result.fit_report()
     print(fit_report)
@@ -697,10 +662,10 @@ def load_result(filename: str):
 
     return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params
 
-"#;
+");
 
             // Compile the Python code into a module
-            let module = PyModule::from_code_bound(py, code, "gaussian.py", "gaussian")?;
+            let module = PyModule::from_code(py, code, c_str!("gaussian.py"), c_str!("gaussian"))?;
 
             let y_data = self.data.y.clone();
             let x_data = self.data.x.clone();
@@ -711,7 +676,7 @@ def load_result(filename: str):
             let free_position = self.fit_settings.free_position;
 
             // Form the `background_params` dictionary
-            let background_params = PyDict::new_bound(py);
+            let background_params = PyDict::new(py);
 
             match self.background_model {
                 BackgroundModel::Linear(ref params) => {
@@ -732,7 +697,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "slope",
                             (
-                                "slope".to_string(),
+                                "slope".to_owned(),
                                 params.slope.min,
                                 params.slope.max,
                                 fitted_slope,
@@ -742,7 +707,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "intercept",
                             (
-                                "intercept".to_string(),
+                                "intercept".to_owned(),
                                 params.intercept.min,
                                 params.intercept.max,
                                 fitted_intercept,
@@ -755,7 +720,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "slope",
                             (
-                                "slope".to_string(),
+                                "slope".to_owned(),
                                 params.slope.min,
                                 params.slope.max,
                                 params.slope.initial_guess,
@@ -765,7 +730,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "intercept",
                             (
-                                "intercept".to_string(),
+                                "intercept".to_owned(),
                                 params.intercept.min,
                                 params.intercept.max,
                                 params.intercept.initial_guess,
@@ -796,15 +761,15 @@ def load_result(filename: str):
                         background_params.set_item("bg_type", "quadratic")?;
                         background_params.set_item(
                             "a",
-                            ("a".to_string(), params.a.min, params.a.max, fitted_a, false),
+                            ("a".to_owned(), params.a.min, params.a.max, fitted_a, false),
                         )?;
                         background_params.set_item(
                             "b",
-                            ("b".to_string(), params.b.min, params.b.max, fitted_b, false),
+                            ("b".to_owned(), params.b.min, params.b.max, fitted_b, false),
                         )?;
                         background_params.set_item(
                             "c",
-                            ("c".to_string(), params.c.min, params.c.max, fitted_c, false),
+                            ("c".to_owned(), params.c.min, params.c.max, fitted_c, false),
                         )?;
                     } else {
                         // Use the initial guesses and allow them to vary
@@ -812,7 +777,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "a",
                             (
-                                "a".to_string(),
+                                "a".to_owned(),
                                 params.a.min,
                                 params.a.max,
                                 params.a.initial_guess,
@@ -822,7 +787,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "b",
                             (
-                                "b".to_string(),
+                                "b".to_owned(),
                                 params.b.min,
                                 params.b.max,
                                 params.b.initial_guess,
@@ -832,7 +797,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "c",
                             (
-                                "c".to_string(),
+                                "c".to_owned(),
                                 params.c.min,
                                 params.c.max,
                                 params.c.initial_guess,
@@ -842,8 +807,7 @@ def load_result(filename: str):
                     }
                 }
                 BackgroundModel::Exponential(ref params) => {
-                    if let Some(BackgroundResult::Exponential(fitter)) = &self.background_result
-                    {
+                    if let Some(BackgroundResult::Exponential(fitter)) = &self.background_result {
                         // Use fitted values for amplitude and decay, set `vary` to false
                         let fitted_amplitude = fitter
                             .paramaters
@@ -860,7 +824,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "amplitude",
                             (
-                                "amplitude".to_string(),
+                                "amplitude".to_owned(),
                                 params.amplitude.min,
                                 params.amplitude.max,
                                 fitted_amplitude,
@@ -870,7 +834,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "decay",
                             (
-                                "decay".to_string(),
+                                "decay".to_owned(),
                                 params.decay.min,
                                 params.decay.max,
                                 fitted_decay,
@@ -883,7 +847,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "amplitude",
                             (
-                                "amplitude".to_string(),
+                                "amplitude".to_owned(),
                                 params.amplitude.min,
                                 params.amplitude.max,
                                 params.amplitude.initial_guess,
@@ -893,7 +857,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "decay",
                             (
-                                "decay".to_string(),
+                                "decay".to_owned(),
                                 params.decay.min,
                                 params.decay.max,
                                 params.decay.initial_guess,
@@ -920,7 +884,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "amplitude",
                             (
-                                "amplitude".to_string(),
+                                "amplitude".to_owned(),
                                 params.amplitude.min,
                                 params.amplitude.max,
                                 fitted_amplitude,
@@ -930,7 +894,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "exponent",
                             (
-                                "exponent".to_string(),
+                                "exponent".to_owned(),
                                 params.exponent.min,
                                 params.exponent.max,
                                 fitted_exponent,
@@ -943,7 +907,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "amplitude",
                             (
-                                "amplitude".to_string(),
+                                "amplitude".to_owned(),
                                 params.amplitude.min,
                                 params.amplitude.max,
                                 params.amplitude.initial_guess,
@@ -953,7 +917,7 @@ def load_result(filename: str):
                         background_params.set_item(
                             "exponent",
                             (
-                                "exponent".to_string(),
+                                "exponent".to_owned(),
                                 params.exponent.min,
                                 params.exponent.max,
                                 params.exponent.initial_guess,
@@ -998,7 +962,7 @@ def load_result(filename: str):
 
             // get the temp fit result, store the text in the struct
             let fit_text = std::fs::read_to_string("temp_fit.sav")
-                .unwrap_or_else(|_| "Failed to read fit result file.".to_string());
+                .unwrap_or_else(|_| "Failed to read fit result file.".to_owned());
 
             self.lmfit_result = Some(fit_text);
 
@@ -1026,8 +990,7 @@ def load_result(filename: str):
                 (energy, energy_err),
             ) in gaussian_params.iter().zip(additional_params.iter())
             {
-                log::info!("Amplitude: {:.3} ± {:.3}, Mean: {:.3} ± {:.3}, Sigma: {:.3} ± {:.3}, FWHM: {:.3} ± {:.3}, Area: {:.3} ± {:.3}",
-                            amp, amp_err, mean, mean_err, sigma, sigma_err, fwhm, fwhm_err, area, area_err);
+                log::info!("Amplitude: {amp:.3} ± {amp_err:.3}, Mean: {mean:.3} ± {mean_err:.3}, Sigma: {sigma:.3} ± {sigma_err:.3}, FWHM: {fwhm:.3} ± {fwhm_err:.3}, Area: {area:.3} ± {area_err:.3}");
 
                 self.peak_markers.push(*mean);
 
@@ -1051,101 +1014,13 @@ def load_result(filename: str):
                 self.fit_result.push(gaussian_param);
             }
 
-            // if self.background_result.is_none() {
-            //     // get the min x data in the x_composition
-            //     let min_x = x_composition.iter().cloned().fold(f64::INFINITY, f64::min);
-
-            //     // get the max x data in the x_composition
-            //     let max_x = x_composition
-            //         .iter()
-            //         .cloned()
-            //         .fold(f64::NEG_INFINITY, f64::max);
-
-            //     match self.background_model {
-            //         // Handle the Linear case
-            //         BackgroundModel::Linear(_) => {
-            //             let slope = background_params[0].1;
-            //             let slope_err = background_params[0].2;
-            //             let intercept = background_params[1].1;
-            //             let intercept_err = background_params[1].2;
-
-            //             let linear_fitter = LinearFitter::new_from_parameters(
-            //                 (slope, slope_err),
-            //                 (intercept, intercept_err),
-            //                 min_x,
-            //                 max_x,
-            //             );
-
-            //             self.background_result = Some(BackgroundResult::Linear(linear_fitter));
-            //         }
-
-            //         // Handle the Exponential case
-            //         BackgroundModel::Exponential(_) => {
-            //             let amplitude = background_params[0].1;
-            //             let amplitude_err = background_params[0].2;
-            //             let decay = background_params[1].1;
-            //             let decay_err = background_params[1].2;
-
-            //             let exponential_fitter = ExponentialFitter::new_from_parameters(
-            //                 (amplitude, amplitude_err),
-            //                 (decay, decay_err),
-            //                 min_x,
-            //                 max_x,
-            //             );
-
-            //             self.background_result =
-            //                 Some(BackgroundResult::Exponential(exponential_fitter));
-            //         }
-
-            //         // Handle the Quadratic case (to be implemented similarly)
-            //         BackgroundModel::Quadratic(_) => {
-            //             let a = background_params[0].1;
-            //             let a_err = background_params[0].2;
-            //             let b = background_params[1].1;
-            //             let b_err = background_params[1].2;
-            //             let c = background_params[2].1;
-            //             let c_err = background_params[2].2;
-
-            //             let quadratic_fitter = QuadraticFitter::new_from_parameters(
-            //                 (a, a_err),
-            //                 (b, b_err),
-            //                 (c, c_err),
-            //                 min_x,
-            //                 max_x,
-            //             );
-
-            //             self.background_result =
-            //                 Some(BackgroundResult::Quadratic(quadratic_fitter));
-            //         }
-
-            //         // Handle the PowerLaw case (to be implemented similarly)
-            //         BackgroundModel::PowerLaw(_) => {
-            //             let amplitude = background_params[0].1;
-            //             let amplitude_err = background_params[0].2;
-            //             let exponent = background_params[1].1;
-            //             let exponent_err = background_params[1].2;
-
-            //             let powerlaw_fitter = PowerLawFitter::new_from_parameters(
-            //                 (amplitude, amplitude_err),
-            //                 (exponent, exponent_err),
-            //                 min_x,
-            //                 max_x,
-            //             );
-
-            //             self.background_result = Some(BackgroundResult::PowerLaw(powerlaw_fitter));
-            //         }
-
-            //         BackgroundModel::None => {}
-            //     }
-            // }
-
             if self.background_result.is_none() && !background_params.is_empty() {
                 let bg_type = background_params[0].0.as_str();
 
-                let min_x = x_composition.iter().cloned().fold(f64::INFINITY, f64::min);
+                let min_x = x_composition.iter().copied().fold(f64::INFINITY, f64::min);
                 let max_x = x_composition
                     .iter()
-                    .cloned()
+                    .copied()
                     .fold(f64::NEG_INFINITY, f64::max);
 
                 match bg_type {
@@ -1292,46 +1167,45 @@ def load_result(filename: str):
 
         // Step 2: Python call to update UUID
         Python::with_gil(|py| {
-            let module = PyModule::from_code_bound(
+            let module = PyModule::from_code(
                 py,
-                r#"
+                c_str!(
+                    "
 from lmfit.model import load_modelresult, save_modelresult
 
 def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
     result = load_modelresult(file_path)
 
-    # print fit report
-    print("\nPre Fit Report:")
-    fit_report = result.fit_report()
-    print(fit_report)
-
-    if f"g{peak_number}_uuid" not in result.params:
-        result.params.add(f"g{peak_number}_uuid", value=uuid, vary=False)
+    if f'g{peak_number}_uuid' not in result.params:
+        result.params.add(f'g{peak_number}_uuid', value=uuid, vary=False)
     else:
-        result.params[f"g{peak_number}_uuid"].set(value=uuid, vary=False)
+        result.params[f'g{peak_number}_uuid'].set(value=uuid, vary=False)
     save_modelresult(result, file_path)
 
-    print("\nPost Fit Report:")
     fit_report = result.fit_report()
-    print(fit_report)
 
     return result.fit_report()
-"#,
-                "uuid_patch.py",
-                "uuid_patch",
+"
+                ),
+                c_str!("uuid_patch.py"),
+                c_str!("uuid_patch"),
             )?;
 
             let fit_report: String = module
                 .getattr("Add_UUID_to_Result")?
-                .call1((temp_path.to_str().unwrap(), peak_index, new_uuid))?
+                .call1((
+                    temp_path.to_str().expect("Temp path should be valid"),
+                    peak_index,
+                    new_uuid,
+                ))?
                 .extract()?;
 
             // Step 3: Reload updated file into lmfit_result
             let updated_lmfit = std::fs::read_to_string(&temp_path)
-                .unwrap_or_else(|_| "Failed to read updated fit.".to_string());
+                .unwrap_or_else(|_| "Failed to read updated fit.".to_owned());
 
             std::fs::remove_file(&temp_path).unwrap_or_else(|err| {
-                eprintln!("Warning: failed to remove temp fit file: {}", err);
+                eprintln!("Warning: failed to remove temp fit file: {err}");
             });
 
             self.fit_result[peak_index].uuid = new_uuid;
@@ -1356,9 +1230,9 @@ def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
 
         // Step 2: Python call to update energy
         Python::with_gil(|py| {
-            let module = PyModule::from_code_bound(
+            let module = PyModule::from_code(
                 py,
-                r#"
+                c_str!("
 from lmfit.model import load_modelresult, save_modelresult
 import numpy as np
 
@@ -1371,49 +1245,49 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
         else:
             result.params[name].set(value=value, vary=False)
 
-        unc_name = f"{name}_uncertainty"
+        unc_name = f'{name}_uncertainty'
         if unc_name not in result.params:
             result.params.add(unc_name, value=uncertainty, vary=False)
         else:
             result.params[unc_name].set(value=uncertainty, vary=False)
 
     # Store calibration values as constants
-    set_param("calibration_a", a, a_uncertainty)
-    set_param("calibration_b", b, b_uncertainty)
-    set_param("calibration_c", c, c_uncertainty)
+    set_param('calibration_a', a, a_uncertainty)
+    set_param('calibration_b', b, b_uncertainty)
+    set_param('calibration_c', c, c_uncertainty)
 
     i = 0
-    while f"g{i}_center" in result.params:
+    while f'g{i}_center' in result.params:
         # Add expression-based parameters
         result.params.add(
-            f"g{i}_center_calibrated",
-            expr=f"calibration_a * g{i}_center**2 + calibration_b * g{i}_center + calibration_c",
+            f'g{i}_center_calibrated',
+            expr=f'calibration_a * g{i}_center**2 + calibration_b * g{i}_center + calibration_c',
             vary=False,
         )
         result.params.add(
-            f"g{i}_sigma_calibrated",
-            expr=f"abs((2 * calibration_a * g{i}_center + calibration_b) * g{i}_sigma)",
+            f'g{i}_sigma_calibrated',
+            expr=f'abs((2 * calibration_a * g{i}_center + calibration_b) * g{i}_sigma)',
             vary=False,
         )
         result.params.add(
-            f"g{i}_fwhm_calibrated",
-            expr=f"2.3548200 * g{i}_sigma_calibrated",
+            f'g{i}_fwhm_calibrated',
+            expr=f'2.3548200 * g{i}_sigma_calibrated',
             vary=False,
         )
 
         # Direct copies of uncalibrated
-        for param in ["area", "amplitude", "height"]:
-            name = f"g{i}_{param}_calibrated"
+        for param in ['area', 'amplitude', 'height']:
+            name = f'g{i}_{param}_calibrated'
             if name not in result.params:
-                result.params.add(name, expr=f"g{i}_{param}", vary=False)
+                result.params.add(name, expr=f'g{i}_{param}', vary=False)
             else:
-                result.params[name].set(expr=f"g{i}_{param}", vary=False)
+                result.params[name].set(expr=f'g{i}_{param}', vary=False)
 
         # Evaluate expressions and set stderr manually
-        center = result.params[f"g{i}_center"].value
-        center_unc = result.params[f"g{i}_center"].stderr or 0.0
-        sigma = result.params[f"g{i}_sigma"].value
-        sigma_unc = result.params[f"g{i}_sigma"].stderr or 0.0
+        center = result.params[f'g{i}_center'].value
+        center_unc = result.params[f'g{i}_center'].stderr or 0.0
+        sigma = result.params[f'g{i}_sigma'].value
+        sigma_unc = result.params[f'g{i}_sigma'].stderr or 0.0
 
         dx_dE = 2 * a * center + b
 
@@ -1435,22 +1309,22 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
         # FWHM
         d_fwhm_cal = 2.3548200 * d_sigma_cal
 
-        result.params[f"g{i}_center_calibrated"].stderr = d_center_cal
-        result.params[f"g{i}_sigma_calibrated"].stderr = d_sigma_cal
-        result.params[f"g{i}_fwhm_calibrated"].stderr = d_fwhm_cal
+        result.params[f'g{i}_center_calibrated'].stderr = d_center_cal
+        result.params[f'g{i}_sigma_calibrated'].stderr = d_sigma_cal
+        result.params[f'g{i}_fwhm_calibrated'].stderr = d_fwhm_cal
 
         i += 1
 
     save_modelresult(result, file_path)
 
-    print("\nPost Fit Report:")
+    print('Post Fit Report:')
     fit_report = result.fit_report()
     print(fit_report)
 
     return result.fit_report()
-"#,
-                "energy_patch.py",
-                "energy_patch",
+"),
+                c_str!("energy_patch.py"),
+                c_str!("energy_patch"),
             )?;
 
             let a = calibration.a.value;
@@ -1463,7 +1337,7 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
             let fit_report: String = module
                 .getattr("Update_EnergyCalibration")?
                 .call1((
-                    temp_path.to_str().unwrap(),
+                    temp_path.to_str().expect("Temp path should be valid"),
                     a,
                     a_uncertainty,
                     b,
@@ -1475,10 +1349,10 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
 
             // Step 3: Reload updated file into lmfit_result
             let updated_lmfit = std::fs::read_to_string(&temp_path)
-                .unwrap_or_else(|_| "Failed to read updated fit.".to_string());
+                .unwrap_or_else(|_| "Failed to read updated fit.".to_owned());
 
             std::fs::remove_file(&temp_path).unwrap_or_else(|err| {
-                eprintln!("Warning: failed to remove temp fit file: {}", err);
+                eprintln!("Warning: failed to remove temp fit file: {err}");
             });
 
             self.lmfit_result = Some(updated_lmfit);
@@ -1507,45 +1381,40 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
 
         // Step 2: Python call to update energy
         Python::with_gil(|py| {
-            let module = PyModule::from_code_bound(
+            let module = PyModule::from_code(
                 py,
-                r#"
+                c_str!(
+                    "
 from lmfit.model import load_modelresult, save_modelresult
 
 def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: float):
     result = load_modelresult(file_path)
 
-    # print fit report
-    print("\nPre Fit Report:")
-    fit_report = result.fit_report()
-    print(fit_report)
-                
-    if f"g{peak_number}_energy" not in result.params:
-        result.params.add(f"g{peak_number}_energy", value=energy, vary=False)
+    if f'g{peak_number}_energy' not in result.params:
+        result.params.add(f'g{peak_number}_energy', value=energy, vary=False)
     else:
-        result.params[f"g{peak_number}_energy"].set(value=energy, vary=False)
+        result.params[f'g{peak_number}_energy'].set(value=energy, vary=False)
 
-    if f"g{peak_number}_energy_uncertainty" not in result.params:
-        result.params.add(f"g{peak_number}_energy_uncertainty", value=uncertainty, vary=False)
+    if f'g{peak_number}_energy_uncertainty' not in result.params:
+        result.params.add(f'g{peak_number}_energy_uncertainty', value=uncertainty, vary=False)
     else:
-        result.params[f"g{peak_number}_energy_uncertainty"].set(value=uncertainty, vary=False)
+        result.params[f'g{peak_number}_energy_uncertainty'].set(value=uncertainty, vary=False)
 
     save_modelresult(result, file_path)
 
-    print("\nPost Fit Report:")
     fit_report = result.fit_report()
-    print(fit_report)
 
     return result.fit_report()
-"#,
-                "energy_patch.py",
-                "energy_patch",
+"
+                ),
+                c_str!("energy_patch.py"),
+                c_str!("energy_patch"),
             )?;
 
             let fit_report: String = module
                 .getattr("Update_Energy")?
                 .call1((
-                    temp_path.to_str().unwrap(),
+                    temp_path.to_str().expect("Temp path should be valid"),
                     peak_index,
                     new_energy,
                     new_uncertainty,
@@ -1554,10 +1423,10 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
 
             // Step 3: Reload updated file into lmfit_result
             let updated_lmfit = std::fs::read_to_string(&temp_path)
-                .unwrap_or_else(|_| "Failed to read updated fit.".to_string());
+                .unwrap_or_else(|_| "Failed to read updated fit.".to_owned());
 
             std::fs::remove_file(&temp_path).unwrap_or_else(|err| {
-                eprintln!("Warning: failed to remove temp fit file: {}", err);
+                eprintln!("Warning: failed to remove temp fit file: {err}");
             });
 
             self.fit_result[peak_index].energy.value = Some(new_energy);
@@ -1603,7 +1472,7 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
             if skip_one && i != 0 {
                 ui.label("");
             }
-            ui.label(format!("{}", i));
+            ui.label(format!("{i}"));
             params.params_ui(ui, calibrate);
 
             let mut uuid = params.uuid;
@@ -1637,9 +1506,9 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
                             .save_file()
                         {
                             if let Err(e) = std::fs::write(&path, text) {
-                                eprintln!("Failed to save lmfit result: {}", e);
+                                eprintln!("Failed to save lmfit result: {e}");
                             } else {
-                                log::info!("Saved lmfit result to {:?}", path);
+                                log::info!("Saved lmfit result to {path:?}");
                             }
                         }
                     }
@@ -1658,7 +1527,7 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
         }
 
         for (index, new_uuid) in uuid_updates {
-            println!("Updating UUID for peak {}: {}", index, new_uuid);
+            println!("Updating UUID for peak {index}: {new_uuid}");
             if let Err(e) = self.update_uuid_for_peak(index, new_uuid) {
                 eprintln!("UUID update failed: {e}");
             }
@@ -1666,8 +1535,7 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
 
         for (index, new_energy, new_uncertainty) in energy_updates {
             println!(
-                "Updating energy for peak {}: {}, uncertainty: {}",
-                index, new_energy, new_uncertainty
+                "Updating energy for peak {index}: {new_energy}, uncertainty: {new_uncertainty}"
             );
             if let Err(e) = self.update_energy_for_peak(index, new_energy, new_uncertainty) {
                 eprintln!("Energy update failed: {e}");

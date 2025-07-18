@@ -1,8 +1,8 @@
-use geo::Contains;
+use geo::Contains as _;
 use regex::Regex;
 use std::fs::File;
-use std::io::{BufReader, Write};
-use std::ops::BitAnd;
+use std::io::{BufReader, Write as _};
+use std::ops::BitAnd as _;
 
 use polars::prelude::*;
 
@@ -17,7 +17,7 @@ pub enum Cut {
 
 impl Default for Cut {
     fn default() -> Self {
-        Cut::Cut2D(Cut2D::default())
+        Self::Cut2D(Cut2D::default())
     }
 }
 
@@ -25,35 +25,35 @@ impl Cut {
     // Method to check if a cut is valid for a specific row in the DataFrame
     pub fn valid(&self, df: &DataFrame, row_idx: usize) -> bool {
         match self {
-            Cut::Cut1D(cut1d) => cut1d.valid(df, row_idx),
-            Cut::Cut2D(cut2d) => cut2d.valid(df, row_idx),
+            Self::Cut1D(cut1d) => cut1d.valid(df, row_idx),
+            Self::Cut2D(cut2d) => cut2d.valid(df, row_idx),
         }
     }
 
     pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>) {
         match self {
-            Cut::Cut1D(cut1d) => cut1d.table_row(row),
-            Cut::Cut2D(cut2d) => cut2d.table_row(row),
+            Self::Cut1D(cut1d) => cut1d.table_row(row),
+            Self::Cut2D(cut2d) => cut2d.table_row(row),
         }
     }
 
     pub fn name(&self) -> &str {
         match self {
-            Cut::Cut1D(cut1d) => &cut1d.name,
-            Cut::Cut2D(cut2d) => &cut2d.polygon.name,
+            Self::Cut1D(cut1d) => &cut1d.name,
+            Self::Cut2D(cut2d) => &cut2d.polygon.name,
         }
     }
 
     /// Returns the column(s) required by the cut
     pub fn required_columns(&self) -> Vec<String> {
         match self {
-            Cut::Cut1D(cut1d) => cut1d.required_columns(),
-            Cut::Cut2D(cut2d) => cut2d.required_columns(),
+            Self::Cut1D(cut1d) => cut1d.required_columns(),
+            Self::Cut2D(cut2d) => cut2d.required_columns(),
         }
     }
 
     pub fn new_1d(name: &str, expression: &str) -> Self {
-        Cut::Cut1D(Cut1D::new(name, expression))
+        Self::Cut1D(Cut1D::new(name, expression))
     }
 }
 
@@ -67,7 +67,7 @@ impl Cuts {
         Self { cuts }
     }
 
-    pub fn get_active_cuts(&self) -> Cuts {
+    pub fn get_active_cuts(&self) -> Self {
         let active_cuts = self
             .cuts
             .iter()
@@ -77,7 +77,7 @@ impl Cuts {
             })
             .cloned()
             .collect();
-        Cuts::new(active_cuts)
+        Self::new(active_cuts)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -98,7 +98,7 @@ impl Cuts {
         if let Some(pos) = self.cuts.iter().position(|cut| cut.name() == name) {
             self.cuts.remove(pos);
         } else {
-            log::error!("No cut with name '{}' found.", name);
+            log::error!("No cut with name '{name}' found.");
         }
     }
 
@@ -270,7 +270,7 @@ impl Cuts {
 
     pub fn generate_key(&self) -> String {
         let mut cut_names: Vec<String> =
-            self.cuts.iter().map(|cut| cut.name().to_string()).collect();
+            self.cuts.iter().map(|cut| cut.name().to_owned()).collect();
         cut_names.sort(); // Ensure consistent ordering
         cut_names.join(",") // Create a comma-separated key
     }
@@ -337,10 +337,10 @@ pub struct Cut2D {
 
 impl Default for Cut2D {
     fn default() -> Self {
-        Cut2D {
+        Self {
             polygon: EguiPolygon::default(),
-            x_column: "".to_string(),
-            y_column: "".to_string(),
+            x_column: String::new(),
+            y_column: String::new(),
             active: true,
         }
     }
@@ -350,13 +350,13 @@ impl Cut2D {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         if ui.button("Load").clicked() {
             if let Err(e) = self.load_cut_from_json() {
-                log::error!("Error loading cut: {:?}", e);
+                log::error!("Error loading cut: {e:?}");
             }
         }
 
         if ui.button("Save").clicked() {
             if let Err(e) = self.save_cut_to_json() {
-                log::error!("Error saving cut: {:?}", e);
+                log::error!("Error saving cut: {e:?}");
             }
         }
         self.polygon.menu_button(ui);
@@ -367,7 +367,7 @@ impl Cut2D {
             ui.label("2D Cut");
             if ui.button("Load").clicked() {
                 if let Err(e) = self.load_cut_from_json() {
-                    log::error!("Error loading cut: {:?}", e);
+                    log::error!("Error loading cut: {e:?}");
                 }
             }
 
@@ -409,13 +409,13 @@ impl Cut2D {
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
         if ui.button("Load").clicked() {
             if let Err(e) = self.load_cut_from_json() {
-                log::error!("Error loading cut: {:?}", e);
+                log::error!("Error loading cut: {e:?}");
             }
         }
 
         if ui.button("Save").clicked() {
             if let Err(e) = self.save_cut_to_json() {
-                log::error!("Error saving cut: {:?}", e);
+                log::error!("Error saving cut: {e:?}");
             }
         }
 
@@ -478,14 +478,19 @@ impl Cut2D {
         {
             let file = File::open(file_path)?;
             let reader = BufReader::new(file);
-            let cut: Cut2D = serde_json::from_reader(reader)?;
+            let cut: Self = serde_json::from_reader(reader)?;
             *self = cut;
         }
         Ok(())
     }
 
     fn to_geo_polygon(&self) -> geo::Polygon<f64> {
-        let exterior_coords: Vec<_> = self.polygon.vertices.iter().map(|&[x, y]| (x, y)).collect();
+        let exterior_coords: Vec<(f64, f64)> = self
+            .polygon
+            .vertices
+            .iter()
+            .map(|&arr| arr.into())
+            .collect();
         let exterior_line_string = geo::LineString::from(exterior_coords);
         geo::Polygon::new(exterior_line_string, vec![])
     }
@@ -551,8 +556,8 @@ pub struct Cut1D {
 impl Cut1D {
     pub fn new(name: &str, expression: &str) -> Self {
         Self {
-            name: name.to_string(),
-            expression: expression.to_string(),
+            name: name.to_owned(),
+            expression: expression.to_owned(),
             active: true,
             parsed_conditions: None,
         }
@@ -603,31 +608,6 @@ impl Cut1D {
             })
     }
 
-    // // Parse and cache conditions
-    // pub fn parse_conditions(&mut self) {
-    //     self.parsed_conditions = None; // Reset parsed conditions
-
-    //     let condition_re = Regex::new(
-    //         r"(?P<column>\w+)\s*(?P<op>>=|<=|!=|==|>|<)\s*(?P<value>-?\d+(\.\d+)?(e-?\d+)?|nan|inf)"
-    //     ).unwrap();
-
-    //     let mut conditions = Vec::new();
-    //     for caps in condition_re.captures_iter(&self.expression) {
-    //         let column_name = caps["column"].to_string();
-    //         let operator = caps["op"].to_string();
-    //         let literal_value: f64 = caps["value"].parse().unwrap();
-
-    //         conditions.push(ParsedCondition {
-    //             column_name,
-    //             operator,
-    //             literal_value,
-    //         });
-    //     }
-    //     self.parsed_conditions = Some(conditions);
-
-    //     log::info!("Parsed conditions: {:?}", self.parsed_conditions);
-    // }
-
     pub fn parse_conditions(&mut self) {
         // self.parsed_conditions = None; // Reset
         if self.expression.trim().is_empty() {
@@ -638,7 +618,7 @@ impl Cut1D {
 
         let condition_re = Regex::new(
             r"(?P<column>\w+)\s*(?P<op>>=|<=|!=|==|>|<)\s*(?P<value>-?\d+(?:\.\d+)?(?:e-?\d+)?|nan|inf)"
-        ).unwrap();
+        ).expect("Failed to create regex");
 
         let mut conditions = Vec::new();
 

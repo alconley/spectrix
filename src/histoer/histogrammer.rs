@@ -3,6 +3,7 @@ use egui_tiles::TileId;
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use polars::prelude::*;
+use pyo3::ffi::c_str;
 use pyo3::{prelude::*, types::PyModule};
 // use rayon::prelude::*;
 
@@ -26,7 +27,7 @@ use super::cuts::Cuts;
 use crate::histoer::configs::Hist1DConfig;
 use crate::histoer::configs::Hist2DConfig;
 
-#[derive(serde::Deserialize, serde::Serialize, PartialEq, Debug)]
+#[derive(serde::Deserialize, serde::Serialize, PartialEq, Eq, Debug)]
 pub enum ContainerType {
     Grid,
     Tabs,
@@ -42,7 +43,6 @@ pub struct ContainerInfo {
     display_name: String,
     tab_id: TileId,
 }
-
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct Histogrammer {
     pub name: String,
@@ -63,7 +63,7 @@ pub struct Histogrammer {
 impl Default for Histogrammer {
     fn default() -> Self {
         Self {
-            name: "Histogrammer".to_string(),
+            name: "Histogrammer".to_owned(),
             tree: egui_tiles::Tree::empty("Empty tree"),
             behavior: Default::default(),
             calculating: Arc::new(AtomicBool::new(false)),
@@ -80,12 +80,12 @@ impl Histogrammer {
         self.tree.tiles.iter().find_map(|(id, tile)| {
             match tile {
                 egui_tiles::Tile::Pane(Pane::Histogram(hist)) => {
-                    if hist.lock().unwrap().name == name {
+                    if hist.lock().expect("Failed to lock histogram").name == name {
                         return Some(*id);
                     }
                 }
                 egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) => {
-                    if hist.lock().unwrap().name == name {
+                    if hist.lock().expect("Failed to lock 2D histogram").name == name {
                         return Some(*id);
                     }
                 }
@@ -99,10 +99,10 @@ impl Histogrammer {
         for (_id, tile) in self.tree.tiles.iter_mut() {
             match tile {
                 egui_tiles::Tile::Pane(Pane::Histogram(hist)) => {
-                    hist.lock().unwrap().reset();
+                    hist.lock().expect("Failed to lock histogram").reset();
                 }
                 egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) => {
-                    hist.lock().unwrap().reset();
+                    hist.lock().expect("Failed to lock 2D histogram").reset();
                 }
                 _ => {}
             }
@@ -113,10 +113,10 @@ impl Histogrammer {
         if let Some((_id, tile)) = self.tree.tiles.iter_mut().find(|(id, _)| **id == pane_id) {
             match tile {
                 egui_tiles::Tile::Pane(Pane::Histogram(hist)) => {
-                    hist.lock().unwrap().reset();
+                    hist.lock().expect("Failed to lock histogram").reset();
                 }
                 egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) => {
-                    hist.lock().unwrap().reset();
+                    hist.lock().expect("Failed to lock 2D histogram").reset();
                 }
                 _ => {}
             }
@@ -148,33 +148,30 @@ impl Histogrammer {
 
     fn format_pane_in_containers(&mut self, name: &str, pane_id: TileId) {
         // Parse the name to determine its hierarchical structure (e.g., "Tab1/Tab2/Histogram")
-        let grid_id = self.create_tabs(name.to_string());
+        let grid_id = self.create_tabs(name);
 
         if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Grid(grid))) =
             self.tree.tiles.get_mut(grid_id)
         {
-            log::debug!("Adding pane '{}' to grid container ID {:?}", name, grid_id);
+            log::debug!("Adding pane '{name}' to grid container ID {grid_id:?}");
             grid.add_child(pane_id);
 
             self.histogram_map
-                .entry(name.to_string())
+                .entry(name.to_owned())
                 .and_modify(|container_info| container_info.children.push(pane_id));
         } else {
-            log::error!("Failed to retrieve grid container for '{}'", name);
+            log::error!("Failed to retrieve grid container for '{name}'");
         }
     }
 
     pub fn add_hist1d(&mut self, name: &str, bins: usize, range: (f64, f64)) {
-        log::debug!("Creating or updating 1D histogram '{}'", name);
+        log::debug!("Creating or updating 1D histogram '{name}'");
 
         if let Some(pane_id) = self.find_existing_histogram(name) {
-            log::debug!("Resetting existing 1D histogram '{}'", name);
+            log::debug!("Resetting existing 1D histogram '{name}'");
             self.reset_histogram(pane_id);
         } else {
-            log::debug!(
-                "No existing histogram found; creating new 1D histogram '{}'",
-                name
-            );
+            log::debug!("No existing histogram found; creating new 1D histogram '{name}'");
             self.create_1d_pane(name, bins, range);
         }
     }
@@ -185,16 +182,13 @@ impl Histogrammer {
         bins: (usize, usize),
         range: ((f64, f64), (f64, f64)),
     ) {
-        log::debug!("Creating or updating 2D histogram '{}'", name);
+        log::debug!("Creating or updating 2D histogram '{name}'");
 
         if let Some(pane_id) = self.find_existing_histogram(name) {
-            log::debug!("Resetting existing 2D histogram '{}'", name);
+            log::debug!("Resetting existing 2D histogram '{name}'");
             self.reset_histogram(pane_id);
         } else {
-            log::debug!(
-                "No existing histogram found; creating new 2D histogram '{}'",
-                name
-            );
+            log::debug!("No existing histogram found; creating new 2D histogram '{name}'");
             self.create_2d_pane(name, bins, range);
         }
     }
@@ -477,7 +471,8 @@ impl Histogrammer {
                 if let Config::Hist1D(hist1d) = config {
                     self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
                         egui_tiles::Tile::Pane(Pane::Histogram(hist))
-                            if hist.lock().unwrap().name == hist1d.name =>
+                            if hist.lock().expect("Failed to lock histogram").name
+                                == hist1d.name =>
                         {
                             Some((Arc::clone(hist), hist1d.clone()))
                         }
@@ -496,7 +491,8 @@ impl Histogrammer {
                 if let Config::Hist2D(hist2d) = config {
                     self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
                         egui_tiles::Tile::Pane(Pane::Histogram2D(hist))
-                            if hist.lock().unwrap().name == hist2d.name =>
+                            if hist.lock().expect("Failed to lock 2D histogram").name
+                                == hist2d.name =>
                         {
                             Some((Arc::clone(hist), hist2d.clone()))
                         }
@@ -508,13 +504,13 @@ impl Histogrammer {
             })
             .collect();
 
-        #[allow(clippy::type_complexity)]
+        #[expect(clippy::type_complexity)]
         let mut cut_groups_1d: HashMap<
             String,
             (Cuts, Vec<(Arc<Mutex<Box<Histogram>>>, Hist1DConfig)>),
         > = HashMap::new();
 
-        #[allow(clippy::type_complexity)]
+        #[expect(clippy::type_complexity)]
         let mut cut_groups_2d: HashMap<
             String,
             (Cuts, Vec<(Arc<Mutex<Box<Histogram2D>>>, Hist2DConfig)>),
@@ -525,7 +521,8 @@ impl Histogrammer {
                 Config::Hist1D(hist1d) => {
                     if let Some(hist) = self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
                         egui_tiles::Tile::Pane(Pane::Histogram(hist))
-                            if hist.lock().unwrap().name == hist1d.name =>
+                            if hist.lock().expect("Failed to lock histogram").name
+                                == hist1d.name =>
                         {
                             Some(Arc::clone(hist))
                         }
@@ -542,7 +539,8 @@ impl Histogrammer {
                 Config::Hist2D(hist2d) => {
                     if let Some(hist) = self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
                         egui_tiles::Tile::Pane(Pane::Histogram2D(hist))
-                            if hist.lock().unwrap().name == hist2d.name =>
+                            if hist.lock().expect("Failed to lock 2D histogram").name
+                                == hist2d.name =>
                         {
                             Some(Arc::clone(hist))
                         }
@@ -583,7 +581,10 @@ impl Histogrammer {
                         .map(|(_, list)| list.len())
                         .sum::<usize>()) as f32;
 
-                for (cuts, grouped) in cut_groups_1d.values() {
+                let mut values: Vec<_> = cut_groups_1d.values().collect();
+                values.sort_by_key(|(cuts, _)| format!("{cuts:?}")); // Stable deterministic ordering
+
+                for (cuts, grouped) in values {
                     let filtered_lf = if cuts.is_empty() {
                         Ok((*lf).clone())
                     } else {
@@ -592,7 +593,7 @@ impl Histogrammer {
 
                     if let Ok(filtered_lf) = filtered_lf {
                         for (hist, config) in grouped {
-                            let mut guard = hist.lock().unwrap();
+                            let mut guard = hist.lock().expect("Failed to lock histogram");
                             if let Err(e) = guard.fill_from_lazyframe(
                                 filtered_lf.clone(),
                                 &config.column_name,
@@ -603,7 +604,7 @@ impl Histogrammer {
                             guard.plot_settings.egui_settings.reset_axis = true;
 
                             completed += 1.0;
-                            *progress.lock().unwrap() = completed / total;
+                            *progress.lock().expect("Failed to lock progress") = completed / total;
                             progress_bar.inc(1);
                             if abort_flag.load(Ordering::SeqCst) {
                                 println!("Processing aborted by user.");
@@ -613,7 +614,71 @@ impl Histogrammer {
                     }
                 }
 
-                for (cuts, grouped) in cut_groups_2d.values() {
+                // for (cuts, grouped) in cut_groups_1d.values() {
+                //     let filtered_lf = if cuts.is_empty() {
+                //         Ok((*lf).clone())
+                //     } else {
+                //         cuts.filter_lazyframe_in_batches(&(*lf).clone(), rows_per_chunk)
+                //     };
+
+                //     if let Ok(filtered_lf) = filtered_lf {
+                //         for (hist, config) in grouped {
+                //             let mut guard = hist.lock().expect("Failed to lock histogram");
+                //             if let Err(e) = guard.fill_from_lazyframe(
+                //                 filtered_lf.clone(),
+                //                 &config.column_name,
+                //                 -1e6,
+                //             ) {
+                //                 log::error!("Failed to fill hist1d '{}': {:?}", config.name, e);
+                //             }
+                //             guard.plot_settings.egui_settings.reset_axis = true;
+
+                //             completed += 1.0;
+                //             *progress.lock().expect("Failed to lock progress") = completed / total;
+                //             progress_bar.inc(1);
+                //             if abort_flag.load(Ordering::SeqCst) {
+                //                 println!("Processing aborted by user.");
+                //                 return;
+                //             }
+                //         }
+                //     }
+                // }
+
+                // for (cuts, grouped) in cut_groups_2d.values() {
+                //     let filtered_lf = if cuts.is_empty() {
+                //         Ok((*lf).clone())
+                //     } else {
+                //         cuts.filter_lazyframe_in_batches(&(*lf).clone(), rows_per_chunk)
+                //     };
+
+                //     if let Ok(filtered_lf) = filtered_lf {
+                //         for (hist, config) in grouped {
+                //             let mut guard = hist.lock().expect("Failed to lock 2D histogram");
+                //             if let Err(e) = guard.fill_from_lazyframe(
+                //                 filtered_lf.clone(),
+                //                 &config.x_column_name,
+                //                 &config.y_column_name,
+                //                 -1e6,
+                //             ) {
+                //                 log::error!("Failed to fill hist2d '{}': {:?}", config.name, e);
+                //             }
+
+                //             // reset
+                //             completed += 1.0;
+                //             *progress.lock().expect("Failed to lock progress") = completed / total;
+                //             progress_bar.inc(1);
+                //             if abort_flag.load(Ordering::SeqCst) {
+                //                 println!("Processing aborted by user.");
+                //                 return;
+                //             }
+                //         }
+                //     }
+                // }
+
+                let mut values: Vec<_> = cut_groups_2d.values().collect();
+                values.sort_by_key(|(cuts, _)| format!("{cuts:?}")); // sort by cuts debug string (stable)
+
+                for (cuts, grouped) in values {
                     let filtered_lf = if cuts.is_empty() {
                         Ok((*lf).clone())
                     } else {
@@ -622,7 +687,7 @@ impl Histogrammer {
 
                     if let Ok(filtered_lf) = filtered_lf {
                         for (hist, config) in grouped {
-                            let mut guard = hist.lock().unwrap();
+                            let mut guard = hist.lock().expect("Failed to lock 2D histogram");
                             if let Err(e) = guard.fill_from_lazyframe(
                                 filtered_lf.clone(),
                                 &config.x_column_name,
@@ -632,9 +697,8 @@ impl Histogrammer {
                                 log::error!("Failed to fill hist2d '{}': {:?}", config.name, e);
                             }
 
-                            // reset
                             completed += 1.0;
-                            *progress.lock().unwrap() = completed / total;
+                            *progress.lock().expect("Failed to lock progress") = completed / total;
                             progress_bar.inc(1);
                             if abort_flag.load(Ordering::SeqCst) {
                                 println!("Processing aborted by user.");
@@ -645,7 +709,7 @@ impl Histogrammer {
                 }
 
                 progress_bar.finish_with_message("Column-wise histogram fill complete.");
-                *progress.lock().unwrap() = 1.0;
+                *progress.lock().expect("Failed to lock progress") = 1.0;
                 calculating.store(false, Ordering::SeqCst);
             }
         });
@@ -678,23 +742,23 @@ impl Histogrammer {
         if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
             self.tree.tiles.iter_mut().find(|(_id, tile)| {
                 if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                    hist.lock().unwrap().name == name
+                    hist.lock().expect("Failed to lock histogram").name == name
                 } else {
                     false
                 }
             })
         {
-            hist.lock().unwrap().bins = bins.clone();
-            hist.lock().unwrap().original_bins = bins;
-            hist.lock().unwrap().underflow = underflow;
-            hist.lock().unwrap().overflow = overflow;
+            hist.lock().expect("Failed to lock histogram").bins = bins.clone();
+            hist.lock().expect("Failed to lock histogram").original_bins = bins;
+            hist.lock().expect("Failed to lock histogram").underflow = underflow;
+            hist.lock().expect("Failed to lock histogram").overflow = overflow;
         }
     }
 
     pub fn add_hist2d_with_bin_values(
         &mut self,
         name: &str,
-        bins: Vec<Vec<u64>>,
+        bins: &[Vec<u64>],
         range: ((f64, f64), (f64, f64)),
     ) {
         // First, add the 2D histogram (with the bin size and range)
@@ -730,13 +794,13 @@ impl Histogrammer {
         if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
             self.tree.tiles.iter_mut().find(|(_id, tile)| {
                 if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                    hist.lock().unwrap().name == name
+                    hist.lock().expect("Failed to lock 2D histogram").name == name
                 } else {
                     false
                 }
             })
         {
-            let mut hist = hist.lock().unwrap();
+            let mut hist = hist.lock().expect("Failed to lock 2D histogram");
             hist.bins.counts = bin_map;
             hist.bins.min_count = min_value;
             hist.bins.max_count = max_value;
@@ -744,7 +808,7 @@ impl Histogrammer {
             // Flag the image to be recalculated due to new bin values
             hist.plot_settings.recalculate_image = true;
         } else {
-            log::error!("2D histogram '{}' not found in the tree", name);
+            log::error!("2D histogram '{name}' not found in the tree");
         }
     }
 
@@ -798,8 +862,8 @@ impl Histogrammer {
                         // Convert path to a string and call the function
                         if let Some(output_file) = path.to_str() {
                             match self.histograms_to_root(output_file) {
-                                Ok(_) => println!("ROOT file created at: {}", output_file),
-                                Err(e) => eprintln!("Error creating ROOT file: {:?}", e),
+                                Ok(_) => println!("ROOT file created at: {output_file}"),
+                                Err(e) => eprintln!("Error creating ROOT file: {e:?}"),
                             }
                         } else {
                             eprintln!("Invalid file path selected.");
@@ -811,14 +875,14 @@ impl Histogrammer {
 
                 if ui.button("Export All lmfit Fits").clicked() {
                     if let Some(dir_path) = rfd::FileDialog::new().pick_folder() {
-                        let dir_path = dir_path.to_path_buf();
+                        let dir_path = dir_path.clone();
 
                         for (_id, tile) in self.tree.tiles.iter() {
                             if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                                let hist = hist.lock().unwrap();
+                                let hist = hist.lock().expect("Failed to lock histogram");
                                 let fits = &hist.fits;
 
-                                fits.export_lmfit(dir_path.clone());
+                                fits.export_lmfit(&dir_path);
                             }
 
                             log::info!("All lmfit results exported.");
@@ -855,7 +919,7 @@ impl Histogrammer {
         }
     }
 
-    fn create_tabs(&mut self, name: String) -> TileId {
+    fn create_tabs(&mut self, name: &str) -> TileId {
         // Ensure root container (main tab) exists
         let mut current_container_id = self.ensure_root();
         let path_components: Vec<&str> = name.split('/').collect();
@@ -882,7 +946,7 @@ impl Histogrammer {
                             container_type: ContainerType::Tabs,
                             parent_id: Some(current_container_id),
                             children: vec![],
-                            display_name: component.to_string(),
+                            display_name: (*component).to_owned(),
                             tab_id,
                         },
                     );
@@ -896,7 +960,7 @@ impl Histogrammer {
                             container_type: ContainerType::Grid,
                             parent_id: Some(current_container_id),
                             children: vec![],
-                            display_name: "Histograms".to_string(), // Set display name to "Histograms"
+                            display_name: "Histograms".to_owned(), // Set display name to "Histograms"
                             tab_id: grid_id,
                         },
                     );
@@ -915,7 +979,10 @@ impl Histogrammer {
                     }
                 } else {
                     // If no parent path (i.e., root level), add to main tab
-                    let main_tab = self.histogram_map.get_mut("Histogrammer").unwrap();
+                    let main_tab = self
+                        .histogram_map
+                        .get_mut("Histogrammer")
+                        .expect("Main tab not found");
                     if !main_tab.children.contains(&new_id) {
                         main_tab.children.push(new_id);
                     }
@@ -934,7 +1001,7 @@ impl Histogrammer {
         let new_tab = egui_tiles::Container::new_tabs(vec![]);
         let new_tab_id = self.tree.tiles.insert_new(new_tab.into());
         self.behavior
-            .set_tile_tab_mapping(new_tab_id, name.to_string());
+            .set_tile_tab_mapping(new_tab_id, name.to_owned());
 
         // Attach the new tab to its parent container
         if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(parent_tabs))) =
@@ -942,10 +1009,7 @@ impl Histogrammer {
         {
             parent_tabs.add_child(new_tab_id);
         } else {
-            log::error!(
-                "Parent container ID {:?} is not a Tabs container",
-                parent_id
-            );
+            log::error!("Parent container ID {parent_id:?} is not a Tabs container");
         }
 
         new_tab_id
@@ -953,7 +1017,7 @@ impl Histogrammer {
 
     fn add_histograms_grid(&mut self, parent_tab_id: TileId) -> TileId {
         // Construct the key for lookup in histogram_map
-        let histograms_key = format!("{:?}/Histograms", parent_tab_id);
+        let histograms_key = format!("{parent_tab_id:?}/Histograms");
 
         // Check if there's already a "Histograms" grid under the parent
         if let Some(container_info) = self.histogram_map.get(&histograms_key) {
@@ -970,7 +1034,7 @@ impl Histogrammer {
 
         // Set the display name for the grid as "Histograms"
         self.behavior
-            .set_tile_tab_mapping(grid_id, "Histograms".to_string());
+            .set_tile_tab_mapping(grid_id, "Histograms".to_owned());
 
         // Attach this grid to the specified parent tab container
         if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
@@ -978,10 +1042,7 @@ impl Histogrammer {
         {
             tabs.add_child(grid_id);
         } else {
-            log::error!(
-                "Parent container ID {:?} is not a Tabs container",
-                parent_tab_id
-            );
+            log::error!("Parent container ID {parent_tab_id:?} is not a Tabs container");
         }
 
         // Add the new grid to histogram_map with the correct name and ID
@@ -991,12 +1052,12 @@ impl Histogrammer {
                 container_type: ContainerType::Grid,
                 parent_id: Some(parent_tab_id),
                 children: vec![],
-                display_name: "Histograms".to_string(),
+                display_name: "Histograms".to_owned(),
                 tab_id: grid_id,
             },
         );
 
-        log::debug!("Created new Histograms grid with ID {:?}", grid_id);
+        log::debug!("Created new Histograms grid with ID {grid_id:?}");
 
         grid_id
     }
@@ -1006,7 +1067,7 @@ impl Histogrammer {
 
         // Step 1: Find the main tab using the root tile
         let main_tab_id = self.tree.root.expect("Main root tile (tab) not found");
-        log::info!("Main tab found with ID: {:?}", main_tab_id);
+        log::info!("Main tab found with ID: {main_tab_id:?}");
 
         // Step 2: Locate the main tab in histogram_map and prepare to reorganize its children
         if let Some(main_tab_info) = self
@@ -1053,11 +1114,22 @@ impl Histogrammer {
             }
         }
 
-        // Step 4: Identify and move orphan histogram panes (those not found as keys in `histogram_map`)
+        // for info in self.histogram_map.values() {
+        //     for &child_id in &info.children {
+        //         if !self.histogram_map.contains_key(&format!("{child_id:?}")) {
+        //             orphans_to_move.push((child_id, info.tab_id));
+        //         }
+        //     }
+        // }
+
         let mut orphans_to_move = Vec::new();
-        for info in self.histogram_map.values() {
+        // Step 4: Identify and move orphan histogram panes (those not found as keys in `histogram_map`)
+        let mut values: Vec<_> = self.histogram_map.values().collect();
+        values.sort_by_key(|info| format!("{:?}", info.tab_id));
+
+        for info in values {
             for &child_id in &info.children {
-                if !self.histogram_map.contains_key(&format!("{:?}", child_id)) {
+                if !self.histogram_map.contains_key(&format!("{child_id:?}")) {
                     orphans_to_move.push((child_id, info.tab_id));
                 }
             }
@@ -1065,17 +1137,30 @@ impl Histogrammer {
 
         for (orphan_id, destination_id) in orphans_to_move {
             log::info!(
-                "Moving orphan ID {:?} to destination container ID {:?}",
-                orphan_id,
-                destination_id
+                "Moving orphan ID {orphan_id:?} to destination container ID {destination_id:?}"
             );
             self.tree
                 .move_tile_to_container(orphan_id, destination_id, 0, true);
         }
 
         // Step 5: Identify and remove unreferenced (extraneous) containers
+        // let mut referenced_ids = std::collections::HashSet::new();
+        // for info in self.histogram_map.values() {
+        //     referenced_ids.insert(info.tab_id);
+        //     if let Some(parent_id) = info.parent_id {
+        //         referenced_ids.insert(parent_id);
+        //     }
+        //     for &child_id in &info.children {
+        //         referenced_ids.insert(child_id);
+        //     }
+        // }
+
         let mut referenced_ids = std::collections::HashSet::new();
-        for info in self.histogram_map.values() {
+
+        let mut values: Vec<_> = self.histogram_map.values().collect();
+        values.sort_by_key(|info| format!("{:?}", info.tab_id)); // stable ordering
+
+        for info in values {
             referenced_ids.insert(info.tab_id);
             if let Some(parent_id) = info.parent_id {
                 referenced_ids.insert(parent_id);
@@ -1094,7 +1179,7 @@ impl Histogrammer {
             .collect();
 
         for tile_id in unreferenced_ids {
-            log::info!("Removing extraneous container with ID {:?}", tile_id);
+            log::info!("Removing extraneous container with ID {tile_id:?}");
             self.tree.remove_recursively(tile_id);
         }
 
@@ -1126,8 +1211,7 @@ impl Histogrammer {
             if let Some(tile) = self.tree.tiles.get(tile_id) {
                 if matches!(
                     tile,
-                    egui_tiles::Tile::Pane(Pane::Histogram(_))
-                        | egui_tiles::Tile::Pane(Pane::Histogram2D(_))
+                    egui_tiles::Tile::Pane(Pane::Histogram(_) | Pane::Histogram2D(_))
                 ) {
                     self.tree.move_tile_to_container(tile_id, grid_id, 0, true);
                 }
@@ -1141,7 +1225,7 @@ impl Histogrammer {
         let mut active_cuts = Vec::new();
         for (_id, tile) in self.tree.tiles.iter() {
             if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                let hist = hist.lock().unwrap();
+                let hist = hist.lock().expect("Failed to lock 2D histogram");
                 for cut in &hist.plot_settings.cuts {
                     active_cuts.push(cut.clone());
                 }
@@ -1157,50 +1241,29 @@ impl Histogrammer {
         // cargo run --release
 
         Python::with_gil(|py| {
-            let sys = py.import_bound("sys")?;
+            let sys = py.import("sys")?;
             let version: String = sys.getattr("version")?.extract()?;
             let executable: String = sys.getattr("executable")?.extract()?;
-            println!("Using Python version: {}", version);
-            println!("Python executable: {}", executable);
+            println!("Using Python version: {version}");
+            println!("Python executable: {executable}");
 
             // Check if the `uproot` module can be imported
-            match py.import_bound("uproot") {
-                Ok(_) => {
-                    println!("Successfully imported `uproot` module.");
-                }
-                Err(_) => {
-                    eprintln!("Error: `uproot` module could not be found. Make sure you are using the correct Python environment with `uproot` installed.");
-                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                        "`uproot` module not available",
-                    ));
-                }
+            if py.import("uproot").is_ok() {
+                println!("Successfully imported `uproot` module.");
+            } else {
+                eprintln!("Error: `uproot` module could not be found. Make sure you are using the correct Python environment with `uproot` installed.");
+                return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                    "`uproot` module not available",
+                ));
             }
 
             // Define the Python code as a module
-            let code = r#"
+            let code = c_str!(
+                "
 import numpy as np
 import uproot
 
 def write_histograms(output_file, hist1d_data, hist2d_data):
-    """
-    Writes 1D and 2D histograms to a ROOT file.
-
-    Parameters:
-        output_file (str): Path to the output ROOT file.
-        hist1d_data (list): List of tuples for 1D histograms. Each tuple contains:
-            - name (str): Histogram name.
-            - title (str): Histogram title.
-            - bins (list of int): Bin counts.
-            - underflow (int): Underflow count.
-            - overflow (int): Overflow count.
-            - range (tuple): Range of the histogram as (min, max).
-        hist2d_data (list): List of tuples for 2D histograms. Each tuple contains:
-            - name (str): Histogram name.
-            - title (str): Histogram title.
-            - bins (list of list of int): Bin counts (2D array).
-            - range_x (tuple): Range of the X-axis as (min, max).
-            - range_y (tuple): Range of the Y-axis as (min, max).
-    """
     with uproot.recreate(output_file) as file:
         for name, title, bins, underflow, overflow, range in hist1d_data:
             # Create bin edges for the histogram
@@ -1212,8 +1275,8 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
 
             # Define fXaxis using to_TAxis with positional arguments
             fXaxis = uproot.writing.identify.to_TAxis(
-                fName="xaxis",         # Temporary name for the X-axis
-                fTitle="",       # Title of the X-axis
+                fName='xaxis',         # Temporary name for the X-axis
+                fTitle='',       # Title of the X-axis
                 fNbins=len(bins),      # Number of bins
                 fXmin=range[0],       # Minimum X-axis value
                 fXmax=range[1],       # Maximum X-axis value
@@ -1254,8 +1317,8 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
             y_bin_edges = np.linspace(range_y[0], range_y[1], bins.shape[0] + 1)
 
             fXaxis = uproot.writing.identify.to_TAxis(
-                fName="xaxis",
-                fTitle="",
+                fName='xaxis',
+                fTitle='',
                 fNbins=bins.shape[1],
                 fXmin=range_x[0],
                 fXmax=range_x[1],
@@ -1263,8 +1326,8 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
             )
 
             fYaxis = uproot.writing.identify.to_TAxis(
-                fName="yaxis",
-                fTitle="",
+                fName='yaxis',
+                fTitle='',
                 fNbins=bins.shape[0],
                 fXmin=range_y[0],
                 fXmax=range_y[1],
@@ -1299,22 +1362,28 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
                 fXaxis=fXaxis,
                 fYaxis=fYaxis
             )
-            
-    print(f"All histograms written to '{output_file}'.")
-"#;
+
+    print(f'All histograms written to {output_file}.')
+"
+            );
 
             // Compile the Python code into a module
-            let module =
-                PyModule::from_code_bound(py, code, "write_histograms.py", "write_histograms")?;
+            let module = PyModule::from_code(
+                py,
+                code,
+                c_str!("write_histograms.py"),
+                c_str!("write_histograms"),
+            )?;
 
             let mut hist1d_data = Vec::new();
             for (_id, tile) in self.tree.tiles.iter() {
                 if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                    let hist = hist.lock().unwrap();
+                    let hist = hist.lock().expect("Failed to lock histogram");
 
                     // strip the last part of the name for the title
                     let name_parts: Vec<&str> = hist.name.split('/').collect();
-                    let title = name_parts.last().unwrap().to_string();
+                    let title =
+                        (*name_parts.last().expect("Failed to get last name part")).to_owned();
 
                     hist1d_data.push((
                         hist.name.clone(),
@@ -1330,15 +1399,17 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
             let mut hist2d_data = Vec::new();
             for (_id, tile) in self.tree.tiles.iter() {
                 if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                    let hist = hist.lock().unwrap();
+                    let hist = hist.lock().expect("Failed to lock 2D histogram");
 
                     // Use backup bins if available
                     let bins = hist.backup_bins.as_ref().unwrap_or(&hist.bins);
 
                     let mut counts_2d = vec![vec![0; bins.x]; bins.y];
 
-                    // Populate the counts, setting empty bins to 0
-                    for ((x_idx, y_idx), &count) in &bins.counts {
+                    let mut entries: Vec<_> = bins.counts.iter().collect();
+                    entries.sort_by_key(|&(&(x, y), _)| (y, x)); // row-major order, adjust as needed
+
+                    for ((x_idx, y_idx), &count) in entries {
                         if *x_idx < bins.x && *y_idx < bins.y {
                             counts_2d[*y_idx][*x_idx] = count;
                         }
@@ -1350,7 +1421,7 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
 
                     // Create a human-readable title from the histogram name
                     let name_parts: Vec<&str> = hist.name.split('/').collect();
-                    let title = name_parts.last().unwrap_or(&"").to_string();
+                    let title = (*name_parts.last().unwrap_or(&"")).to_owned();
 
                     // Add to the data vector
                     hist2d_data.push((
@@ -1368,7 +1439,7 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
                 .call1((output_file, hist1d_data, hist2d_data))
             {
                 Ok(_) => println!("Histograms written successfully."),
-                Err(e) => eprintln!("Error in Python code: {:?}", e),
+                Err(e) => eprintln!("Error in Python code: {e:?}"),
             }
 
             Ok(())

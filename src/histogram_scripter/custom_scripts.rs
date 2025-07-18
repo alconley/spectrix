@@ -120,30 +120,30 @@ impl CustomConfigs {
         if self.sps.active {
             if self.options.calculate_cut_histograms && !self.cuts.is_empty() {
                 let cuts = self.cuts.clone();
-                let sps_configs = self.sps.sps_configs(Some(cuts));
+                let sps_configs = self.sps.sps_configs(&Some(cuts));
                 configs.merge(sps_configs.clone()); // Ensure `merge` handles in-place modifications
             }
 
             if self.options.calculate_no_cut_histograms {
-                let sps_configs = self.sps.sps_configs(None);
+                let sps_configs = self.sps.sps_configs(&None);
                 configs.merge(sps_configs.clone()); // Ensure `merge` handles in-place modifications
             }
         }
 
         if self.cebra.active {
-            for det in self.cebra.detectors.iter_mut() {
+            for det in &mut self.cebra.detectors {
                 if det.active {
                     let sps_config = self.sps.clone();
 
                     if self.options.calculate_cut_histograms && !self.cuts.is_empty() {
                         let cuts = self.cuts.clone();
                         let cebr3_configs =
-                            det.cebr3_configs(sps_config.clone(), Some(cuts.clone()));
+                            det.cebr3_configs(&sps_config.clone(), &Some(cuts.clone()));
                         configs.merge(cebr3_configs.clone()); // Ensure `merge` handles in-place modifications
                     }
 
                     if self.options.calculate_no_cut_histograms {
-                        let cebr3_configs = det.cebr3_configs(sps_config.clone(), None);
+                        let cebr3_configs = det.cebr3_configs(&sps_config.clone(), &None);
                         configs.merge(cebr3_configs.clone()); // Ensure `merge` handles in-place modifications
                     }
                 }
@@ -158,14 +158,14 @@ impl CustomConfigs {
                 let cuts = self.cuts.clone();
                 let icespice_configs =
                     self.icespice
-                        .icespice_configs(&cebr_config, &sps_config, Some(cuts));
+                        .icespice_configs(&cebr_config, &sps_config, &Some(cuts));
                 configs.merge(icespice_configs.clone()); // Ensure `merge` handles in-place modifications
             }
 
             if self.options.calculate_no_cut_histograms {
                 let icespice_configs =
                     self.icespice
-                        .icespice_configs(&cebr_config, &sps_config, None);
+                        .icespice_configs(&cebr_config, &sps_config, &None);
                 configs.merge(icespice_configs.clone()); // Ensure `merge` handles in-place modifications
             }
         }

@@ -80,8 +80,18 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
         match pane {
-            Pane::Histogram(hist) => hist.lock().unwrap().name.clone().into(),
-            Pane::Histogram2D(hist) => hist.lock().unwrap().name.clone().into(),
+            Pane::Histogram(hist) => hist
+                .lock()
+                .expect("Failed to lock histogram")
+                .name
+                .clone()
+                .into(),
+            Pane::Histogram2D(hist) => hist
+                .lock()
+                .expect("Failed to lock 2D histogram")
+                .name
+                .clone()
+                .into(),
         }
     }
 
@@ -160,8 +170,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
         } else {
             match tiles.get(tile_id) {
                 Some(Tile::Pane(pane)) => return self.tab_title_for_pane(pane),
-                Some(Tile::Container(_)) => "Container".to_string(),
-                _ => "Unknown".to_string(),
+                Some(Tile::Container(_)) => "Container".to_owned(),
+                _ => "Unknown".to_owned(),
             }
         };
 
@@ -169,7 +179,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
         if let Some(Tile::Container(container)) = tiles.get(tile_id) {
             let children: Vec<_> = container.children().collect(); // Collect into a vector
             if !children.is_empty() && title != "Histograms" {
-                title = format!("{} 📂", title); // Add folder icon if children are present
+                title = format!("{title} 📂"); // Add folder icon if children are present
             }
         }
 

@@ -72,7 +72,7 @@ impl EguiPoints {
             }
 
             if self.shape.is_some() {
-                points = points.shape(self.shape.unwrap());
+                points = points.shape(self.shape.expect("Shape should be set"));
             }
 
             plot_ui.points(points);

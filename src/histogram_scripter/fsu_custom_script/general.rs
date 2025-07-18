@@ -71,7 +71,7 @@ impl Calibration {
                 "({})*{}**2 + ({})*{} + ({})",
                 self.a, column, self.b, column, self.c
             ),
-            alias.to_string(),
+            alias.to_owned(),
         )
     }
 }

@@ -20,15 +20,15 @@ pub struct Histogram {
 impl Histogram {
     // Create a new Histogram with specified min, max, and number of bins
     pub fn new(name: &str, number_of_bins: usize, range: (f64, f64)) -> Self {
-        Histogram {
-            name: name.to_string(),
+        Self {
+            name: name.to_owned(),
             bins: vec![0; number_of_bins],
             range,
             overflow: 0,
             underflow: 0,
             bin_width: (range.1 - range.0) / number_of_bins as f64,
             line: EguiLine {
-                name: name.to_string(),
+                name: name.to_owned(),
                 ..Default::default()
             },
             plot_settings: PlotSettings::default(),
@@ -113,7 +113,7 @@ impl Histogram {
     pub fn draw_other_histograms(
         &mut self,
         plot_ui: &mut egui_plot::PlotUi<'_>,
-        histograms: &[Histogram],
+        histograms: &[Self],
     ) {
         for histogram in histograms {
             let mut hist = histogram.clone();
@@ -170,7 +170,7 @@ impl Histogram {
                         self.draw(plot_ui);
 
                         if self.plot_settings.progress.is_some() {
-                            let y_max = self.bins.iter().max().cloned().unwrap_or(0) as f64;
+                            let y_max = self.bins.iter().max().copied().unwrap_or(0) as f64;
                             let mut plot_bounds = plot_ui.plot_bounds();
                             plot_bounds.extend_with_y(y_max * 1.1);
                             plot_ui.set_plot_bounds(plot_bounds);

@@ -31,10 +31,10 @@ pub struct EguiHorizontalLine {
 
 impl Default for EguiHorizontalLine {
     fn default() -> Self {
-        EguiHorizontalLine {
+        Self {
             draw: true,
             name_in_legend: false,
-            name: "Horizontal Line".to_string(),
+            name: "Horizontal Line".to_owned(),
             highlighted: false,
             stroke: Stroke::new(1.0, Color32::BLUE),
             width: 2.0,
@@ -53,8 +53,8 @@ impl Default for EguiHorizontalLine {
 
 impl EguiHorizontalLine {
     pub fn new(y_value: f64, color: Color32) -> Self {
-        let line = EguiHorizontalLine::default();
-        EguiHorizontalLine {
+        let line = Self::default();
+        Self {
             y_value,
             color,
             color_rgb: Rgb::from_color32(color),
@@ -77,7 +77,7 @@ impl EguiHorizontalLine {
             }
 
             if self.style.is_some() {
-                line = line.style(self.style.unwrap());
+                line = line.style(self.style.expect("Style should be set"));
             }
 
             plot_ui.hline(line);
@@ -128,7 +128,7 @@ impl EguiHorizontalLine {
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
         ui.menu_button(format!("{} Line", self.name), |ui| {
-            ui.label(self.name.to_string());
+            ui.label(self.name.clone());
             ui.vertical(|ui| {
                 ui.checkbox(&mut self.draw, "Draw Line");
                 ui.add(
@@ -181,7 +181,7 @@ impl EguiHorizontalLine {
         ui.label("Line Color");
 
         ui.horizontal_wrapped(|ui| {
-            for &(color, name) in COLOR_OPTIONS.iter() {
+            for &(color, name) in COLOR_OPTIONS {
                 if ui
                     .add(egui::Button::new(" ").fill(color))
                     .on_hover_text(name)
@@ -217,7 +217,7 @@ impl EguiHorizontalLine {
     pub fn stroke_color_selection_buttons(&mut self, ui: &mut Ui) {
         ui.label("Stroke Color");
         ui.horizontal_wrapped(|ui| {
-            for &(color, _) in COLOR_OPTIONS.iter() {
+            for &(color, _) in COLOR_OPTIONS {
                 if ui.add(egui::Button::new(" ").fill(color)).clicked() {
                     self.stroke.color = color;
                     self.stroke_rgb = Rgb::from_color32(color);

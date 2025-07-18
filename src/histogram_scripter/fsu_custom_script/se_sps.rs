@@ -67,8 +67,8 @@ impl SPSConfig {
     }
 
     #[rustfmt::skip]
-    #[allow(clippy::all)]
-    pub fn sps_configs(&self, main_cuts: Option<Cuts>) -> Configs {
+    // #[expect(clippy::all)]
+    pub fn sps_configs(&self, main_cuts: &Option<Cuts>) -> Configs {
         let mut configs = Configs::default();
 
         let base_path = if main_cuts.is_none() { "No Cuts/SE-SPS" } else { "Cuts/SE-SPS" };
@@ -125,79 +125,79 @@ impl SPSConfig {
 
         // Focal plane histograms
         if self.options.focal_plane {
-            configs.hist1d(&format!("{base_path}/Focal Plane/X1"), "X1", fp_range, fp_bins, &main_cuts);
-            configs.hist1d(&format!("{base_path}/Focal Plane/X2"), "X2", fp_range, fp_bins, &main_cuts);
-            configs.hist1d(&format!("{base_path}/Focal Plane/Xavg"), "Xavg", fp_range, fp_bins, &main_cuts);
+            configs.hist1d(&format!("{base_path}/Focal Plane/X1"), "X1", fp_range, fp_bins, main_cuts);
+            configs.hist1d(&format!("{base_path}/Focal Plane/X2"), "X2", fp_range, fp_bins, main_cuts);
+            configs.hist1d(&format!("{base_path}/Focal Plane/Xavg"), "Xavg", fp_range, fp_bins, main_cuts);
 
             configs.hist2d(&format!("{base_path}/Focal Plane/Both Planes- AnodeBack v ScintLeft"), "ScintLeftEnergy", "AnodeBackEnergy", range, range, (bins,bins), &cut_bothplanes);
 
             if self.xavg.active {
-                configs.hist1d(&format!("{base_path}/Focal Plane/Xavg Energy Calibrated"), "XavgEnergyCalibrated", self.xavg.range, self.xavg.bins, &main_cuts);
+                configs.hist1d(&format!("{base_path}/Focal Plane/Xavg Energy Calibrated"), "XavgEnergyCalibrated", self.xavg.range, self.xavg.bins, main_cuts);
             }
-            configs.hist2d(&format!("{base_path}/Focal Plane/X2 v X1"), "X1", "X2", fp_range, fp_range, (fp_bins, fp_bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Focal Plane/Theta v Xavg"), "Xavg", "Theta", fp_range, (0.0, PI), (fp_bins, fp_bins), &main_cuts);
-            configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Xavg"), "Xavg", fp_range, fp_bins, &main_cuts);
-            configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Raw- X1"), "X1", fp_range, fp_bins, &main_cuts);
+            configs.hist2d(&format!("{base_path}/Focal Plane/X2 v X1"), "X1", "X2", fp_range, fp_range, (fp_bins, fp_bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Focal Plane/Theta v Xavg"), "Xavg", "Theta", fp_range, (0.0, PI), (fp_bins, fp_bins), main_cuts);
+            configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Xavg"), "Xavg", fp_range, fp_bins, main_cuts);
+            configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Raw- X1"), "X1", fp_range, fp_bins, main_cuts);
             configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Both Planes- X1"), "X1", fp_range, fp_bins, &cut_bothplanes);
             configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Only 1 Plane- X1"), "X1", fp_range, fp_bins, &cut_only_x1_plane);
-            configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Raw- X2"), "X2", fp_range, fp_bins, &main_cuts);
+            configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Raw- X2"), "X2", fp_range, fp_bins, main_cuts);
             configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Both Planes- X2"), "X2", fp_range, fp_bins, &cut_bothplanes);
             configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Only 1 Plane- X2"), "X2", fp_range, fp_bins, &cut_only_x2_plane);
         }
 
         // Particle Identification histograms
         if self.options.particle_identification {
-            configs.hist2d(&format!("{base_path}/Particle Identification/AnodeBack v ScintLeft"), "ScintLeftEnergy", "AnodeBackEnergy", range, range, (bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification/AnodeFront v ScintLeft"), "ScintLeftEnergy", "AnodeFrontEnergy", range, range, (bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification/Cathode v ScintLeft"), "ScintLeftEnergy", "CathodeEnergy", range, range, (bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification/AnodeBack v ScintRight"), "ScintRightEnergy", "AnodeBackEnergy", range, range, (bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification/AnodeFront v ScintRight"), "ScintRightEnergy", "AnodeFrontEnergy", range, range, (bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification/Cathode v ScintRight"), "ScintRightEnergy", "CathodeEnergy", range, range, (bins,bins), &main_cuts);    
+            configs.hist2d(&format!("{base_path}/Particle Identification/AnodeBack v ScintLeft"), "ScintLeftEnergy", "AnodeBackEnergy", range, range, (bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification/AnodeFront v ScintLeft"), "ScintLeftEnergy", "AnodeFrontEnergy", range, range, (bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification/Cathode v ScintLeft"), "ScintLeftEnergy", "CathodeEnergy", range, range, (bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification/AnodeBack v ScintRight"), "ScintRightEnergy", "AnodeBackEnergy", range, range, (bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification/AnodeFront v ScintRight"), "ScintRightEnergy", "AnodeFrontEnergy", range, range, (bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification/Cathode v ScintRight"), "ScintRightEnergy", "CathodeEnergy", range, range, (bins,bins), main_cuts);    
         }
 
         // Particle Identification vs Focal plane histograms
         if self.options.particle_identification_vs_focal_plane {
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/ScintLeft v X1"), "X1", "ScintLeftEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/ScintLeft v X2"), "X2", "ScintLeftEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/ScintLeft v Xavg"), "Xavg", "ScintLeftEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/ScintRight v X1"), "X1", "ScintRightEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/ScintRight v X2"), "X2", "ScintRightEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/ScintRight v Xavg"), "Xavg", "ScintRightEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/AnodeBack v X1"), "X1", "AnodeBackEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/AnodeBack v X2"), "X2", "AnodeBackEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/AnodeBack v Xavg"), "Xavg", "AnodeBackEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/AnodeFront v X1"), "X1", "AnodeFrontEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/AnodeFront v X2"), "X2", "AnodeFrontEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/AnodeFront v Xavg"), "Xavg", "AnodeFrontEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/Cathode v X1"), "X1", "CathodeEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/Cathode v X2"), "X2", "CathodeEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/Cathode v Xavg"), "Xavg", "CathodeEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/ScintLeft v X1"), "X1", "ScintLeftEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/ScintLeft v X2"), "X2", "ScintLeftEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/ScintLeft v Xavg"), "Xavg", "ScintLeftEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/ScintRight v X1"), "X1", "ScintRightEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/ScintRight v X2"), "X2", "ScintRightEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/ScintRight v Xavg"), "Xavg", "ScintRightEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/AnodeBack v X1"), "X1", "AnodeBackEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/AnodeBack v X2"), "X2", "AnodeBackEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/AnodeBack v Xavg"), "Xavg", "AnodeBackEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/AnodeFront v X1"), "X1", "AnodeFrontEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/AnodeFront v X2"), "X2", "AnodeFrontEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/AnodeFront v Xavg"), "Xavg", "AnodeFrontEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/Cathode v X1"), "X1", "CathodeEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/Cathode v X2"), "X2", "CathodeEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Particle Identification v Focal Plane/Cathode v Xavg"), "Xavg", "CathodeEnergy", fp_range, range, (fp_bins,bins), main_cuts);
         }
 
         // Delay lines vs Focal plane histograms
         if self.options.delay_lines_vs_focal_plane {
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayFrontRight v X1"), "X1", "DelayFrontRightEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayFrontLeft v X1"), "X1", "DelayFrontLeftEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayBackRight v X2"), "X2", "DelayBackRightEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayBackLeft v X2"), "X2", "DelayBackLeftEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayBackRight v Xavg"), "Xavg", "DelayBackRightEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayBackLeft v Xavg"), "Xavg", "DelayBackLeftEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayFrontRight v Xavg"), "Xavg", "DelayFrontRightEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayFrontLeft v Xavg"), "Xavg", "DelayFrontLeftEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayBackRight v X1"), "X1", "DelayBackRightEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayBackLeft v X1"), "X1", "DelayBackLeftEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayFrontRight v X2"), "X2", "DelayFrontRightEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayFrontLeft v X2"), "X2", "DelayFrontLeftEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayFrontRight v X1"), "X1", "DelayFrontRightEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayFrontLeft v X1"), "X1", "DelayFrontLeftEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayBackRight v X2"), "X2", "DelayBackRightEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayBackLeft v X2"), "X2", "DelayBackLeftEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayBackRight v Xavg"), "Xavg", "DelayBackRightEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayBackLeft v Xavg"), "Xavg", "DelayBackLeftEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayFrontRight v Xavg"), "Xavg", "DelayFrontRightEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayFrontLeft v Xavg"), "Xavg", "DelayFrontLeftEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayBackRight v X1"), "X1", "DelayBackRightEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayBackLeft v X1"), "X1", "DelayBackLeftEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayFrontRight v X2"), "X2", "DelayFrontRightEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/DelayFrontLeft v X2"), "X2", "DelayFrontLeftEnergy", fp_range, range, (fp_bins,bins), main_cuts);
 
             configs.columns.push(("( DelayFrontRightEnergy + DelayFrontLeftEnergy ) / 2.0".into(), "DelayFrontAverageEnergy".into()));
             configs.columns.push(("( DelayBackRightEnergy + DelayBackLeftEnergy ) / 2.0".into(), "DelayBackAverageEnergy".into()));
 
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/Averages/DelayFrontAverage v X1"), "X1", "DelayFrontAverageEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/Averages/DelayBackAverage v X1"), "X1", "DelayBackAverageEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/Averages/DelayFrontAverage v X2"), "X2", "DelayFrontAverageEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/Averages/DelayBackAverage v X2"), "X2", "DelayBackAverageEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/Averages/DelayFrontAverage v Xavg"), "Xavg", "DelayFrontAverageEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
-            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/Averages/DelayBackAverage v Xavg"), "Xavg", "DelayBackAverageEnergy", fp_range, range, (fp_bins,bins), &main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/Averages/DelayFrontAverage v X1"), "X1", "DelayFrontAverageEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/Averages/DelayBackAverage v X1"), "X1", "DelayBackAverageEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/Averages/DelayFrontAverage v X2"), "X2", "DelayFrontAverageEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/Averages/DelayBackAverage v X2"), "X2", "DelayBackAverageEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/Averages/DelayFrontAverage v Xavg"), "Xavg", "DelayFrontAverageEnergy", fp_range, range, (fp_bins,bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Delay Lines v Focal Plane/Averages/DelayBackAverage v Xavg"), "Xavg", "DelayBackAverageEnergy", fp_range, range, (fp_bins,bins), main_cuts);
         }
 
 

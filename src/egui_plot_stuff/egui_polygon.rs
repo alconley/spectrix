@@ -1,6 +1,6 @@
 use egui::{Color32, DragValue, Id, Slider, Stroke, Ui};
 use egui_plot::{LineStyle, PlotResponse, PlotUi, Polygon};
-use geo::Contains;
+use geo::Contains as _;
 
 use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
 
@@ -34,10 +34,10 @@ pub struct EguiPolygon {
 
 impl Default for EguiPolygon {
     fn default() -> Self {
-        EguiPolygon {
+        Self {
             draw: true,
             name_in_legend: false,
-            name: "Polygon".to_string(),
+            name: "Polygon".to_owned(),
             highlighted: false,
             stroke: Stroke::new(1.0, Color32::RED),
             width: 2.0,
@@ -59,15 +59,16 @@ impl Default for EguiPolygon {
 
 impl EguiPolygon {
     pub fn new(name: &str) -> Self {
-        EguiPolygon {
-            name: name.to_string(),
+        Self {
+            name: name.to_owned(),
             interactive_clicking: true,
             ..Default::default()
         }
     }
 
     fn to_geo_polygon(&self) -> geo::Polygon<f64> {
-        let exterior_coords: Vec<_> = self.vertices.iter().map(|&[x, y]| (x, y)).collect();
+        let exterior_coords: Vec<(f64, f64)> =
+            self.vertices.iter().map(|&arr| arr.into()).collect();
         let exterior_line_string = geo::LineString::from(exterior_coords);
         geo::Polygon::new(exterior_line_string, vec![])
     }
@@ -111,14 +112,14 @@ impl EguiPolygon {
                             .min_by(|(_, a), (_, b)| {
                                 let dist_a = (a[0] - x_value).powi(2) + (a[1] - y_value).powi(2);
                                 let dist_b = (b[0] - x_value).powi(2) + (b[1] - y_value).powi(2);
-                                dist_a.partial_cmp(&dist_b).unwrap()
+                                dist_a.partial_cmp(&dist_b).expect("Comparison failed")
                             })
                             .map(|(index, _)| index);
 
                         log::info!(
                             "Closest index: {:?}, (x,y)={:?}",
                             closest_index,
-                            self.vertices[closest_index.unwrap()]
+                            self.vertices[closest_index.expect("Closest index should be found")]
                         );
 
                         if pointer_state.button_pressed(egui::PointerButton::Primary) {
@@ -176,7 +177,7 @@ impl EguiPolygon {
             }
 
             if self.style.is_some() {
-                polygon = polygon.style(self.style.unwrap());
+                polygon = polygon.style(self.style.expect("Style should be set"));
             }
 
             plot_ui.polygon(polygon);
@@ -195,7 +196,7 @@ impl EguiPolygon {
     }
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
-        ui.menu_button(self.name.to_string(), |ui| {
+        ui.menu_button(self.name.clone(), |ui| {
             ui.vertical(|ui| {
                 ui.text_edit_singleline(&mut self.name);
                 ui.checkbox(&mut self.draw, "Draw Polygon");
@@ -249,13 +250,13 @@ impl EguiPolygon {
     }
 
     pub fn polygon_info_menu_button(&mut self, ui: &mut Ui) {
-        ui.menu_button(self.name.to_string(), |ui| {
+        ui.menu_button(self.name.clone(), |ui| {
             ui.text_edit_singleline(&mut self.name);
 
             ui.label("Vertices (X,Y)");
             for (index, vertex) in self.vertices.iter().enumerate() {
                 ui.horizontal(|ui| {
-                    ui.label(format!("Vertex {}", index));
+                    ui.label(format!("Vertex {index}"));
                     ui.label(format!("({:.2}, {:.2})", vertex[0], vertex[1]));
                 });
             }
@@ -265,7 +266,7 @@ impl EguiPolygon {
     pub fn stroke_color_selection_buttons(&mut self, ui: &mut Ui) {
         ui.label("Color");
         ui.horizontal_wrapped(|ui| {
-            for &(color, _) in COLOR_OPTIONS.iter() {
+            for &(color, _) in COLOR_OPTIONS {
                 if ui.add(egui::Button::new(" ").fill(color)).clicked() {
                     self.stroke.color = color;
                     self.stroke_rgb = Rgb::from_color32(color);

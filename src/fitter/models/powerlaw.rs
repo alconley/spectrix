@@ -1,5 +1,5 @@
 use crate::fitter::common::{Data, Parameter};
-use pyo3::{prelude::*, types::PyModule};
+use pyo3::{ffi::c_str, prelude::*, types::PyModule};
 
 #[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct PowerLawParameters {
@@ -9,13 +9,13 @@ pub struct PowerLawParameters {
 
 impl Default for PowerLawParameters {
     fn default() -> Self {
-        PowerLawParameters {
+        Self {
             amplitude: Parameter {
-                name: "amplitude".to_string(),
+                name: "amplitude".to_owned(),
                 ..Default::default()
             },
             exponent: Parameter {
-                name: "exponent".to_string(),
+                name: "exponent".to_owned(),
                 initial_guess: -1.0,
                 ..Default::default()
             },
@@ -28,7 +28,7 @@ impl PowerLawParameters {
         ui.horizontal(|ui| {
             ui.label("Fit Parameters");
             if ui.small_button("Reset").clicked() {
-                *self = PowerLawParameters::default();
+                *self = Self::default();
             }
         });
         // create a grid for the param
@@ -59,7 +59,7 @@ pub struct PowerLawFitter {
 
 impl PowerLawFitter {
     pub fn new(data: Data) -> Self {
-        PowerLawFitter {
+        Self {
             data,
             paramaters: PowerLawParameters::default(),
             fit_points: Vec::new(),
@@ -73,11 +73,11 @@ impl PowerLawFitter {
         min_x: f64,
         max_x: f64,
     ) -> Self {
-        let mut fitter = PowerLawFitter {
+        let mut fitter = Self {
             data: Data::default(),
             paramaters: PowerLawParameters::default(),
             fit_points: Vec::new(),
-            fit_report: "Fitted with other model".to_string(),
+            fit_report: "Fitted with other model".to_owned(),
         };
 
         // Set the parameter values and uncertainties
@@ -103,43 +103,37 @@ impl PowerLawFitter {
     pub fn lmfit(&mut self) -> PyResult<()> {
         log::info!("Fitting data with a PowerLaw line using `lmfit`.");
         Python::with_gil(|py| {
-            // let sys = py.import_bound("sys")?;
+            // let sys = py.import("sys")?;
             // let version: String = sys.getattr("version")?.extract()?;
             // let executable: String = sys.getattr("executable")?.extract()?;
             // println!("Using Python version: {}", version);
             // println!("Python executable: {}", executable);
 
             // Check if the `uproot` module can be imported
-            match py.import_bound("lmfit") {
-                Ok(_) => {
-                    // println!("Successfully imported `lmfit` module.");
-                }
-                Err(_) => {
-                    eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
-                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                        "`lmfit` module not available",
-                    ));
-                }
+            if py.import("lmfit").is_ok() {
+                // println!("Successfully imported `lmfit` module.");
+            } else {
+                eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
+                return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                    "`lmfit` module not available",
+                ));
             }
 
-            match py.import_bound("numpy") {
-                Ok(_) => {
-                    // println!("Successfully imported `lmfit` module.");
-                }
-                Err(_) => {
-                    eprintln!("Error: `numpy` module could not be found. Make sure you are using the correct Python environment with `numpy` installed.");
-                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                        "`numpy` module not available",
-                    ));
-                }
+            if py.import("numpy").is_ok() {
+                // println!("Successfully imported `lmfit` module.");
+            } else {
+                eprintln!("Error: `numpy` module could not be found. Make sure you are using the correct Python environment with `numpy` installed.");
+                return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                    "`numpy` module not available",
+                ));
             }
 
             // Define the Python code as a module
-            let code = r#"
+            let code = c_str!("
 import lmfit
 import numpy as np
 
-def PowerLawFit(x_data: list, y_data: list, amplitude: list = ("amplitude", -np.inf, np.inf, 0.0, True), exponent = ("exponent", -np.inf, np.inf, 0.0, True)):    
+def PowerLawFit(x_data: list, y_data: list, amplitude: list = ('amplitude', -np.inf, np.inf, 0.0, True), exponent = ('exponent', -np.inf, np.inf, 0.0, True)):    
     # params = [name, min, max, initial_guess, vary]
     
     model = lmfit.models.PowerLawModel()
@@ -176,10 +170,10 @@ def PowerLawFit(x_data: list, y_data: list, amplitude: list = ("amplitude", -np.
     fit_report = str(result.fit_report())
 
     return params, x, y, fit_report
-"#;
+");
 
             // Compile the Python code into a module
-            let module = PyModule::from_code_bound(py, code, "powerlaw.py", "powerlaw")?;
+            let module = PyModule::from_code(py, code, c_str!("powerlaw.py"), c_str!("powerlaw"))?;
 
             let x_data = self.data.x.clone();
             let y_data = self.data.y.clone();

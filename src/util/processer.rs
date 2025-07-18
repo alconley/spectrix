@@ -2,6 +2,7 @@ use crate::histoer::cuts::Cuts;
 use crate::histoer::histogrammer::Histogrammer;
 
 use crate::histogram_scripter::histogram_script::HistogramScript;
+use pyo3::ffi::c_str;
 use pyo3::{prelude::*, types::PyModule};
 
 use egui_file_dialog::FileDialog;
@@ -77,55 +78,48 @@ impl Processor {
     }
 
     pub fn get_histograms_from_root_files(&mut self, checked_files: &[PathBuf]) -> PyResult<()> {
-        // python3 -m venv .venv
-        // source .venv/bin/activate
-        // export PYO3_PYTHON=$(pwd)/.venv/bin/python
-        // export PYTHONPATH=$(pwd)/.venv/lib/python3.12/site-packages
-        // cargo run --release
-
         Python::with_gil(|py| {
             // Attempt to import Python modules and handle errors
-            let sys = py.import_bound("sys").map_err(|e| {
-                eprintln!("Error importing `sys` module: {:?}", e);
+            let sys = py.import("sys").map_err(|e| {
+                eprintln!("Error importing `sys` module: {e:?}");
                 e
             })?;
             let version: String = sys
                 .getattr("version")
                 .map_err(|e| {
-                    eprintln!("Error retrieving Python version: {:?}", e);
+                    eprintln!("Error retrieving Python version: {e:?}");
                     e
                 })?
                 .extract()
                 .map_err(|e| {
-                    eprintln!("Error extracting Python version as a string: {:?}", e);
+                    eprintln!("Error extracting Python version as a string: {e:?}");
                     e
                 })?;
             let executable: String = sys
                 .getattr("executable")
                 .map_err(|e| {
-                    eprintln!("Error retrieving Python executable: {:?}", e);
+                    eprintln!("Error retrieving Python executable: {e:?}");
                     e
                 })?
                 .extract()
                 .map_err(|e| {
-                    eprintln!("Error extracting Python executable as a string: {:?}", e);
+                    eprintln!("Error extracting Python executable as a string: {e:?}");
                     e
                 })?;
-            println!("Using Python version: {}", version);
-            println!("Python executable: {}", executable);
+            println!("Using Python version: {version}");
+            println!("Python executable: {executable}");
 
             // Check if the `uproot` module can be imported
-            if let Err(e) = py.import_bound("uproot") {
+            if let Err(e) = py.import("uproot") {
                 eprintln!("Error: `uproot` module could not be found. Ensure you have the correct Python environment with `uproot` installed.");
                 return Err(e);
             }
 
             // Define the Python code as a module
-            let code = r#"
+            let code = c_str!("
 import uproot
 
 def get_1d_histogram(file, name):
-    """Get a 1D histogram from the ROOT file."""
     hist = file[name]
     bin_edges = hist.axis().edges().tolist()
     counts = hist.counts(flow=True).tolist()
@@ -133,16 +127,14 @@ def get_1d_histogram(file, name):
     return name, counts, bin_edges
 
 def get_2d_histogram(file, name):
-    """Get a 2D histogram from the ROOT file."""
     hist = file[name]
-    bin_edges_x = hist.axis("x").edges().tolist()
-    bin_edges_y = hist.axis("y").edges().tolist()
+    bin_edges_x = hist.axis('x').edges().tolist()
+    bin_edges_y = hist.axis('y').edges().tolist()
     counts = hist.counts(flow=False).tolist()
 
     return name, counts, bin_edges_x, bin_edges_y
 
 def get_1d_histograms(file_name):
-    """Get all 1D histograms from the ROOT file."""
     with uproot.open(file_name) as file:
         hist1d_names = [key for key, value in file.classnames().items() if value in ['TH1D', 'TH1F', 'TH1I']]
         histograms = []
@@ -152,7 +144,6 @@ def get_1d_histograms(file_name):
         return histograms
 
 def get_2d_histograms(file_name):
-    """Get all 2D histograms from the ROOT file."""
     with uproot.open(file_name) as file:
         hist2d_names = [key for key, value in file.classnames().items() if value in ['TH2D', 'TH2F', 'TH2I']]
         histograms = []
@@ -160,59 +151,46 @@ def get_2d_histograms(file_name):
             name, counts, bin_edges_x, bin_edges_y = get_2d_histogram(file, name)
             histograms.append([name, counts, bin_edges_x, bin_edges_y])
         return histograms
-"#;
-
-            // Compile the Python code into a module
-            // let module =
-            //     PyModule::from_code_bound(py, code, "uproot_functions.py", "uproot_functions")?;
-
-            let module =
-                PyModule::from_code_bound(py, code, "uproot_functions.py", "uproot_functions")
-                    .map_err(|e| {
-                        eprintln!("Error compiling Python code into a module: {:?}", e);
-                        e
-                    })?;
+");
+            let module = PyModule::from_code(
+                py,
+                code,
+                c_str!("uproot_functions.py"),
+                c_str!("uproot_functions"),
+            )
+            .map_err(|e| {
+                eprintln!("Error compiling Python code into a module: {e:?}");
+                e
+            })?;
 
             let root_files: Vec<_> = checked_files
                 .iter()
                 .filter(|file| file.extension().is_some_and(|ext| ext == "root"))
                 .collect();
 
-            for file in root_files.iter() {
-                let file_name = file.to_str().unwrap();
-
-                // let result_1d = module.getattr("get_1d_histograms")?.call1((file_name,))?;
+            for file in &root_files {
+                let file_name = file.to_str().expect("Failed to convert path to str");
 
                 let result_1d = module
                     .getattr("get_1d_histograms")
                     .map_err(|e| {
-                        eprintln!("Error accessing `get_1d_histograms` function: {:?}", e);
+                        eprintln!("Error accessing `get_1d_histograms` function: {e:?}");
                         e
                     })?
                     .call1((file_name,))
                     .map_err(|e| {
-                        eprintln!(
-                            "Error calling `get_1d_histograms` with file {}: {:?}",
-                            file_name, e
-                        );
+                        eprintln!("Error calling `get_1d_histograms` with file {file_name}: {e:?}");
                         e
                     })?;
 
-                // log::info!("File: {}", file_name);
-                // log::info!("Result 1D: {:?}", result_1d);
-
                 let length_1d: usize = result_1d.len()?;
-                // log::info!("Number of histograms: {}", length_1d);
 
                 for i in 0..length_1d {
                     let item = result_1d.get_item(i)?;
-
-                    // Extract the full path of the histogram
                     let full_name: String = item.get_item(0)?.extract()?;
-                    // let grid_name = full_name.clone(); // Join the folder parts as the grid name
                     let mut counts: Vec<f64> = item.get_item(1)?.extract()?;
                     let underflow = counts.remove(0);
-                    let overflow = counts.pop().unwrap();
+                    let overflow = counts.pop().unwrap_or(0.0);
                     let bin_edges: Vec<f64> = item.get_item(2)?.extract()?;
                     let range = (bin_edges[0], bin_edges[bin_edges.len() - 1]);
 
@@ -231,15 +209,12 @@ def get_2d_histograms(file_name):
                 let result_2d = module
                     .getattr("get_2d_histograms")
                     .map_err(|e| {
-                        eprintln!("Error accessing `get_2d_histograms` function: {:?}", e);
+                        eprintln!("Error accessing `get_2d_histograms` function: {e:?}");
                         e
                     })?
                     .call1((file_name,))
                     .map_err(|e| {
-                        eprintln!(
-                            "Error calling `get_2d_histograms` with file {}: {:?}",
-                            file_name, e
-                        );
+                        eprintln!("Error calling `get_2d_histograms` with file {file_name}: {e:?}");
                         e
                     })?;
 
@@ -263,7 +238,7 @@ def get_2d_histograms(file_name):
                         .collect::<Vec<Vec<u64>>>();
 
                     self.histogrammer
-                        .add_hist2d_with_bin_values(&full_name, counts_u64, range);
+                        .add_hist2d_with_bin_values(&full_name, &counts_u64, range);
                 }
             }
 
@@ -287,7 +262,7 @@ def get_2d_histograms(file_name):
 
         let files_arc: Arc<[PathBuf]> = Arc::from(parquet_files);
         let args = ScanArgsParquet::default();
-        log::info!("Processing Parquet files: {:?}", files_arc);
+        log::info!("Processing Parquet files: {files_arc:?}");
 
         match LazyFrame::scan_parquet_files(files_arc, args) {
             Ok(lf) => {
@@ -299,7 +274,7 @@ def get_2d_histograms(file_name):
             }
             Err(e) => {
                 self.lazyframe = None; // Indicates that loading failed
-                log::error!("Failed to load selected Parquet files: {}", e);
+                log::error!("Failed to load selected Parquet files: {e}");
             }
         }
     }
@@ -334,37 +309,41 @@ def get_2d_histograms(file_name):
         // Spawn the filtering task on a new thread
         thread::spawn(move || {
             for file in parquet_files {
-                eprintln!("Processing file: {:?}", file);
-                let file_stem = file.file_stem().unwrap().to_string_lossy();
-                let new_file_name = format!("{}_{}", file_stem, saved_cut_suffix);
-                let new_file_path = file.with_file_name(format!("{}.parquet", new_file_name));
+                eprintln!("Processing file: {file:?}");
+                let file_stem = file
+                    .file_stem()
+                    .expect("Failed to get file stem")
+                    .to_string_lossy();
+                let new_file_name = format!("{file_stem}_{saved_cut_suffix}");
+                let new_file_path = file.with_file_name(format!("{new_file_name}.parquet"));
 
-                log::info!("Processing file: {:?}", file);
-                log::info!("Saving filtered file as: {:?}", new_file_path);
+                log::info!("Processing file: {file:?}");
+                log::info!("Saving filtered file as: {new_file_path:?}");
 
                 // Load and collect one file at a time
-                match LazyFrame::scan_parquet(file.to_str().unwrap(), Default::default()) {
+                match LazyFrame::scan_parquet(
+                    file.to_str().expect("Failed to convert path to str"),
+                    Default::default(),
+                ) {
                     Ok(lf) => {
                         if let Ok(df) = lf.collect() {
-                            if let Err(e) =
-                                cut.filter_df_and_save(&df, new_file_path.to_str().unwrap())
-                            {
-                                log::error!(
-                                    "Failed to save filtered DataFrame for {:?}: {}",
-                                    file,
-                                    e
-                                );
+                            if let Err(e) = cut.filter_df_and_save(
+                                &df,
+                                new_file_path
+                                    .to_str()
+                                    .expect("Failed to convert path to str"),
+                            ) {
+                                log::error!("Failed to save filtered DataFrame for {file:?}: {e}");
                             } else {
                                 log::info!(
-                                    "Successfully saved filtered DataFrame: {:?}",
-                                    new_file_path
+                                    "Successfully saved filtered DataFrame: {new_file_path:?}"
                                 );
                             }
                         } else {
-                            log::error!("Failed to collect DataFrame from LazyFrame: {:?}", file);
+                            log::error!("Failed to collect DataFrame from LazyFrame: {file:?}");
                         }
                     }
-                    Err(e) => log::error!("Failed to read Parquet file {:?}: {}", file, e),
+                    Err(e) => log::error!("Failed to read Parquet file {file:?}: {e}"),
                 }
             }
         });
@@ -406,10 +385,13 @@ def get_2d_histograms(file_name):
                 let mut lazyframes = Vec::new();
 
                 for file in &parquet_files {
-                    log::info!("Reading file: {:?}", file);
-                    match LazyFrame::scan_parquet(file.to_str().unwrap(), Default::default()) {
+                    log::info!("Reading file: {file:?}");
+                    match LazyFrame::scan_parquet(
+                        file.to_str().expect("Failed to convert path to str"),
+                        Default::default(),
+                    ) {
                         Ok(lf) => lazyframes.push(lf),
-                        Err(e) => log::error!("Failed to read Parquet file {:?}: {}", file, e),
+                        Err(e) => log::error!("Failed to read Parquet file {file:?}: {e}"),
                     }
                 }
 
@@ -423,23 +405,21 @@ def get_2d_histograms(file_name):
                 match combined_lazyframe.collect() {
                     Ok(mut df) => {
                         if let Err(e) = ParquetWriter::new(
-                            &mut std::fs::File::create(&output_file_clone).unwrap(),
+                            &mut std::fs::File::create(&output_file_clone)
+                                .expect("Failed to create output file"),
                         )
                         .finish(&mut df)
                         {
                             log::error!(
-                                "Failed to save combined DataFrame to {:?}: {}",
-                                output_file_clone,
-                                e
+                                "Failed to save combined DataFrame to {output_file_clone:?}: {e}"
                             );
                         } else {
                             log::info!(
-                                "Successfully saved combined Parquet file: {:?}",
-                                output_file_clone
+                                "Successfully saved combined Parquet file: {output_file_clone:?}"
                             );
                         }
                     }
-                    Err(e) => log::error!("Failed to collect combined LazyFrame: {}", e),
+                    Err(e) => log::error!("Failed to collect combined LazyFrame: {e}"),
                 }
             });
         } else {
@@ -448,7 +428,7 @@ def get_2d_histograms(file_name):
     }
 
     fn get_column_names_from_lazyframe(lazyframe: &LazyFrame) -> Vec<String> {
-        let lf: LazyFrame = lazyframe.clone().limit(1);
+        let lf = lazyframe.clone().limit(1);
 
         match lf.collect() {
             Ok(df) => df
@@ -457,7 +437,7 @@ def get_2d_histograms(file_name):
                 .map(|name| name.to_string())
                 .collect(),
             Err(e) => {
-                eprintln!("Error collecting DataFrame: {:?}", e);
+                eprintln!("Error collecting DataFrame: {e:?}");
                 Vec::new() // Return an empty vector on error
             }
         }
@@ -467,7 +447,7 @@ def get_2d_histograms(file_name):
         if let Some(lf) = &self.lazyframe {
             self.histogram_script.add_histograms(
                 &mut self.histogrammer,
-                lf.clone(),
+                &lf.clone(),
                 self.settings.estimated_memory,
                 prefix,
             );
@@ -512,7 +492,7 @@ def get_2d_histograms(file_name):
         {
             self.get_histograms_from_root_files(&checked_files)
                 .unwrap_or_else(|e| {
-                    log::error!("Error processing ROOT files: {:?}", e);
+                    log::error!("Error processing ROOT files: {e:?}");
                 });
         }
     }
@@ -523,12 +503,10 @@ def get_2d_histograms(file_name):
             self.settings.left_panel_open,
             |ui| {
                 ui.horizontal(|ui| {
-
                     ui.vertical(|ui| {
                         if ui.button("Get Files").clicked() {
                             self.file_dialog.pick_multiple();
                         }
-
                         if ui
                             .selectable_label(self.settings.histogram_script_open, "Histograms")
                             .clicked()
@@ -537,11 +515,10 @@ def get_2d_histograms(file_name):
                             }
                     });
 
-
                     if let Some(paths) = self.file_dialog.take_picked_multiple() {
                         for path in paths {
                             if path.is_dir() {
-                                self.file_dialog = FileDialog::new().initial_directory(path.to_path_buf());
+                                self.file_dialog = FileDialog::new().initial_directory(path.clone());
                                 if let Ok(entries) = std::fs::read_dir(&path) {
                                     for entry in entries.flatten() {
                                         let file_path = entry.path();
@@ -559,7 +536,6 @@ def get_2d_histograms(file_name):
                                 }
                             }
                         }
-
                         // Sort the selected files by name
                         self.selected_files.sort_by(|a, b| a.0.cmp(&b.0));
                     }
@@ -581,9 +557,6 @@ def get_2d_histograms(file_name):
                             self.calculate_histograms();
                         }
 
-
-                        // 
-
                         ui.add(
                             egui::DragValue::new(&mut self.settings.estimated_memory)
                                 .range(0.1..=f64::INFINITY)
@@ -598,15 +571,6 @@ def get_2d_histograms(file_name):
                                 "Calculate histograms separately",
                             )
                         );
-
-                        // // check box for fill_column_wise
-                        // ui.add(
-                        //     egui::Checkbox::new(
-                        //         &mut self.histogrammer.fill_column_wise,
-                        //         "Fill column-wise",
-                        //     )
-                        // ).on_hover_text("Fill histograms column-wise instead of row-wise. Sometimes can be faster.");
-
 
                         if self.histogrammer.calculating.load(Ordering::Relaxed) {
                             // Show spinner while `calculating` is true
@@ -624,111 +588,7 @@ def get_2d_histograms(file_name):
 
                 ui.separator();
 
-                if !self.selected_files.is_empty() {
-                    ui.label("Selected files:");
-                    ui.horizontal_wrapped(|ui| {
-                        if ui.button("De/Select All").clicked() {
-                            let all_selected = self.selected_files.iter().all(|(_, checked)| *checked);
-                            for (_, checked) in self.selected_files.iter_mut() {
-                                *checked = !all_selected;
-                            }
-                        }
-                        if ui.button("Clear").clicked() {
-                            self.selected_files.clear();
-                        }
-                    });
-                }
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    if !self.selected_files.is_empty() {
-                        // Clone the paths beforehand to avoid borrowing conflicts
-                        let file_parents: Vec<_> = self.selected_files.iter()
-                            .filter_map(|(file, _)| file.parent().map(|p| p.to_path_buf()))
-                            .collect();
-                        // Check if all parent directories are the same
-                        let common_path = file_parents
-                            .first()
-                            .filter(|&first_path| file_parents.iter().all(|p| p == first_path))
-                            .cloned();
-                        // Show common directory label if applicable
-                        if let Some(ref common_dir) = common_path {
-                            ui.separator();
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(format!("Directory: {}", common_dir.to_string_lossy())); // Show common directory
-
-                                // add a refresh button to update the files in the directory
-                                if ui.button("⟳").clicked() {
-                                    self.selected_files.clear();
-                                    if let Ok(entries) = std::fs::read_dir(common_dir) {
-                                        for entry in entries.flatten() {
-                                            let file_path = entry.path();
-                                            if let Some(ext) = file_path.extension() {
-                                                if (ext == "parquet" || ext == "root") && !self.selected_files.iter().any(|(f, _)| f == &file_path) {
-                                                    self.selected_files.push((file_path, false)); // Default to selected
-                                                }
-                                            }
-                                        }
-                                    }
-                                    // sort the selected files by name
-                                    self.selected_files.sort_by(|a, b| a.0.cmp(&b.0));
-                                }
-                            });
-
-                        }
-                        // Track indices of files to remove
-                        let mut to_remove = Vec::new();
-                        // Iterate over files and track index
-                        for (index, (file, checked)) in self.selected_files.iter_mut().enumerate() {
-                            ui.horizontal_wrapped(|ui| {
-                                let display_text = if let Some(ref common_dir) = common_path {
-                                    if file.parent() == Some(common_dir.as_path()) {
-                                        file.file_name().unwrap_or_default().to_string_lossy() // Show only filename
-                                    } else {
-                                        file.to_string_lossy() // Show full path for outliers
-                                    }
-                                } else {
-                                    file.to_string_lossy() // Show full path if no common directory
-                                };
-                                if ui.selectable_label(*checked, display_text).clicked() {
-                                    *checked = !*checked; // Toggle selection
-                                }
-
-                                // "❌" button to mark for removal
-                                if ui.button("❌").clicked() {
-                                    to_remove.push(index);
-                                }
-                            });
-
-                        }
-                        // Remove files after iteration (to avoid borrowing issues)
-                        for &index in to_remove.iter().rev() {
-                            self.selected_files.remove(index);
-                        }
-                    }
-
-                    // if there are no selected files, show a message
-                    if !self.selected_files.is_empty() {
-                        ui.separator();
-
-                        ui.collapsing("Selected File Settings", |ui| {
-                            ui.label("Save Filtered Files:");
-                            self.settings.cuts.ui(ui);
-                            ui.horizontal(|ui| {
-                                ui.label("Suffix:");
-                                ui.text_edit_singleline(&mut self.settings.saved_cut_suffix);
-                            });
-                            ui.separator();
-                            if ui.button("Save Filtered Files").clicked() {
-                                self.filter_selected_files_and_save();
-                            }
-                            ui.add_space(10.0);
-                            if ui.button("Combine Selected Files").clicked() {
-                                self.combine_and_save_selected_files();
-                            }
-                        });
-                    }
-
-                });
-
+                self.selected_files_ui(ui);
             },
         );
 
@@ -740,6 +600,10 @@ def get_2d_histograms(file_name):
             },
         );
 
+        self.panel_toggle_button(ctx);
+    }
+
+    pub fn panel_toggle_button(&mut self, ctx: &egui::Context) {
         // Secondary left panel for the toggle button
         egui::SidePanel::left("spectrix_toggle_left_panel")
             .resizable(false)
@@ -760,6 +624,119 @@ def get_2d_histograms(file_name):
                     }
                 });
             });
+    }
+
+    pub fn selected_files_ui(&mut self, ui: &mut egui::Ui) {
+        if !self.selected_files.is_empty() {
+            ui.label("Selected files:");
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("De/Select All").clicked() {
+                    let all_selected = self.selected_files.iter().all(|(_, checked)| *checked);
+                    for (_, checked) in &mut self.selected_files {
+                        *checked = !all_selected;
+                    }
+                }
+                if ui.button("Clear").clicked() {
+                    self.selected_files.clear();
+                }
+            });
+        }
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            if !self.selected_files.is_empty() {
+                // Clone the paths beforehand to avoid borrowing conflicts
+                let file_parents: Vec<_> = self
+                    .selected_files
+                    .iter()
+                    .filter_map(|(file, _)| file.parent().map(|p| p.to_path_buf()))
+                    .collect();
+                // Check if all parent directories are the same
+                let common_path = file_parents
+                    .first()
+                    .filter(|&first_path| file_parents.iter().all(|p| p == first_path))
+                    .cloned();
+                // Show common directory label if applicable
+                if let Some(ref common_dir) = common_path {
+                    ui.separator();
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(format!("Directory: {}", common_dir.to_string_lossy())); // Show common directory
+
+                        // add a refresh button to update the files in the directory
+                        if ui.button("⟳").clicked() {
+                            self.selected_files.clear();
+                            if let Ok(entries) = std::fs::read_dir(common_dir) {
+                                for entry in entries.flatten() {
+                                    let file_path = entry.path();
+                                    if let Some(ext) = file_path.extension() {
+                                        if (ext == "parquet" || ext == "root")
+                                            && !self
+                                                .selected_files
+                                                .iter()
+                                                .any(|(f, _)| f == &file_path)
+                                        {
+                                            self.selected_files.push((file_path, false));
+                                            // Default to selected
+                                        }
+                                    }
+                                }
+                            }
+                            // sort the selected files by name
+                            self.selected_files.sort_by(|a, b| a.0.cmp(&b.0));
+                        }
+                    });
+                }
+                // Track indices of files to remove
+                let mut to_remove = Vec::new();
+                // Iterate over files and track index
+                for (index, (file, checked)) in self.selected_files.iter_mut().enumerate() {
+                    ui.horizontal_wrapped(|ui| {
+                        let display_text = if let Some(ref common_dir) = common_path {
+                            if file.parent() == Some(common_dir.as_path()) {
+                                file.file_name().unwrap_or_default().to_string_lossy()
+                            // Show only filename
+                            } else {
+                                file.to_string_lossy() // Show full path for outliers
+                            }
+                        } else {
+                            file.to_string_lossy() // Show full path if no common directory
+                        };
+                        if ui.selectable_label(*checked, display_text).clicked() {
+                            *checked = !*checked; // Toggle selection
+                        }
+
+                        // "❌" button to mark for removal
+                        if ui.button("❌").clicked() {
+                            to_remove.push(index);
+                        }
+                    });
+                }
+                // Remove files after iteration (to avoid borrowing issues)
+                for &index in to_remove.iter().rev() {
+                    self.selected_files.remove(index);
+                }
+            }
+
+            // if there are no selected files, show a message
+            if !self.selected_files.is_empty() {
+                ui.separator();
+
+                ui.collapsing("Selected File Settings", |ui| {
+                    ui.label("Save Filtered Files:");
+                    self.settings.cuts.ui(ui);
+                    ui.horizontal(|ui| {
+                        ui.label("Suffix:");
+                        ui.text_edit_singleline(&mut self.settings.saved_cut_suffix);
+                    });
+                    ui.separator();
+                    if ui.button("Save Filtered Files").clicked() {
+                        self.filter_selected_files_and_save();
+                    }
+                    ui.add_space(10.0);
+                    if ui.button("Combine Selected Files").clicked() {
+                        self.combine_and_save_selected_files();
+                    }
+                });
+            }
+        });
     }
 
     pub fn bottom_panel(&mut self, ctx: &egui::Context) {

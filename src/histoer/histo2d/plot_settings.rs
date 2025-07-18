@@ -24,7 +24,7 @@ pub struct PlotSettings {
 }
 impl Default for PlotSettings {
     fn default() -> Self {
-        PlotSettings {
+        Self {
             cursor_position: None,
             egui_settings: EguiPlotSettings::default(),
             x_column: String::new(),

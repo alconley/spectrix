@@ -21,7 +21,7 @@ pub enum FitResult {
 impl FitResult {
     pub fn get_calibration_data(&self) -> Vec<(f64, f64, f64, f64)> {
         match self {
-            FitResult::Gaussian(fit) => fit.get_calibration_data(),
+            Self::Gaussian(fit) => fit.get_calibration_data(),
         }
     }
 }
@@ -47,10 +47,10 @@ pub enum BackgroundResult {
 impl BackgroundResult {
     pub fn get_fit_points(&self) -> Vec<[f64; 2]> {
         match self {
-            BackgroundResult::Linear(fit) => fit.fit_points.clone(),
-            BackgroundResult::Quadratic(fit) => fit.fit_points.clone(),
-            BackgroundResult::PowerLaw(fit) => fit.fit_points.clone(),
-            BackgroundResult::Exponential(fit) => fit.fit_points.clone(),
+            Self::Linear(fit) => fit.fit_points.clone(),
+            Self::Quadratic(fit) => fit.fit_points.clone(),
+            Self::PowerLaw(fit) => fit.fit_points.clone(),
+            Self::Exponential(fit) => fit.fit_points.clone(),
         }
     }
 }
@@ -74,8 +74,8 @@ pub struct Fitter {
 
 impl Default for Fitter {
     fn default() -> Self {
-        Fitter {
-            name: "Fit".to_string(),
+        Self {
+            name: "Fit".to_owned(),
 
             data: Data::default(),
 
@@ -95,8 +95,8 @@ impl Default for Fitter {
 impl Fitter {
     // Constructor to create a new Fitter with empty data and specified model
     pub fn new(data: Data) -> Self {
-        Fitter {
-            name: "Fit".to_string(),
+        Self {
+            name: "Fit".to_owned(),
 
             data,
 
@@ -151,7 +151,7 @@ impl Fitter {
                         self.fit_result = Some(FitResult::Gaussian(fit));
                     }
                     Err(e) => {
-                        eprintln!("Error: {}", e);
+                        eprintln!("Error: {e}");
                     }
                 }
             }
@@ -191,7 +191,7 @@ impl Fitter {
                         self.background_result = Some(BackgroundResult::Linear(fit));
                     }
                     Err(e) => {
-                        eprintln!("Error: {}", e);
+                        eprintln!("Error: {e}");
                     }
                 }
             }
@@ -208,7 +208,7 @@ impl Fitter {
                         self.background_result = Some(BackgroundResult::Quadratic(fit));
                     }
                     Err(e) => {
-                        eprintln!("Error: {}", e);
+                        eprintln!("Error: {e}");
                     }
                 }
             }
@@ -225,7 +225,7 @@ impl Fitter {
                         self.background_result = Some(BackgroundResult::PowerLaw(fit));
                     }
                     Err(e) => {
-                        eprintln!("Error: {}", e);
+                        eprintln!("Error: {e}");
                     }
                 }
             }
@@ -242,7 +242,7 @@ impl Fitter {
                         self.background_result = Some(BackgroundResult::Exponential(fit));
                     }
                     Err(e) => {
-                        eprintln!("Error: {}", e);
+                        eprintln!("Error: {e}");
                     }
                 }
             }
@@ -296,13 +296,13 @@ impl Fitter {
     }
 
     pub fn set_name(&mut self, name: String) {
-        self.composition_line.name = format!("{}-Composition", name);
+        self.composition_line.name = format!("{name}-Composition");
 
         for (i, line) in self.decomposition_lines.iter_mut().enumerate() {
-            line.name = format!("{}-Peak {}", name, i);
+            line.name = format!("{name}-Peak {i}");
         }
 
-        self.background_line.name = format!("{}-Background", name);
+        self.background_line.name = format!("{name}-Background");
         self.name = name;
     }
 

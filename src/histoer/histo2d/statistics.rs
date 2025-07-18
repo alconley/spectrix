@@ -32,7 +32,10 @@ impl Histogram2D {
         let mut sum_product_x = 0.0;
         let mut sum_product_y = 0.0;
 
-        for (&(x_index, y_index), &count) in self.bins.counts.iter() {
+        let mut entries: Vec<_> = self.bins.counts.iter().collect();
+        entries.sort_by_key(|&(&(x, y), _)| (y, x)); // row-major order
+
+        for (&(x_index, y_index), &count) in entries {
             if x_index >= start_x_index
                 && x_index <= end_x_index
                 && y_index >= start_y_index
@@ -46,12 +49,10 @@ impl Histogram2D {
                     + self.bins.y_width * 0.5;
 
                 total_count += count;
-
                 sum_product_x += count as f64 * bin_center_x;
                 sum_product_y += count as f64 * bin_center_y;
             }
         }
-
         if total_count == 0 {
             (0, 0.0, 0.0, 0.0, 0.0)
         } else {
@@ -61,7 +62,10 @@ impl Histogram2D {
             let mut sum_squared_diff_x = 0.0;
             let mut sum_squared_diff_y = 0.0;
 
-            for (&(x_index, y_index), &count) in self.bins.counts.iter() {
+            let mut entries: Vec<_> = self.bins.counts.iter().collect();
+            entries.sort_by_key(|&(&(x, y), _)| (y, x)); // row-major sort; adjust as needed
+
+            for (&(x_index, y_index), &count) in entries {
                 if x_index >= start_x_index
                     && x_index <= end_x_index
                     && y_index >= start_y_index
@@ -110,7 +114,7 @@ impl Histogram2D {
             format!("Underflow: {:}", self.underflow),
         ];
 
-        for entry in stats_entries.iter() {
+        for entry in &stats_entries {
             plot_ui.text(
                 egui_plot::Text::new("", egui_plot::PlotPoint::new(0, 0), " ") // Placeholder for positioning; adjust as needed
                     .highlight(false)

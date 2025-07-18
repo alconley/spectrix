@@ -12,7 +12,10 @@ impl Histogram2D {
         // Extract the y-projection data
         let mut y_bins = vec![0; self.bins.y];
 
-        for ((x_index, y_index), &count) in &self.bins.counts {
+        let mut entries: Vec<_> = self.bins.counts.iter().collect();
+        entries.sort_by_key(|&(&(x, y), _)| (y, x)); // row-major sort
+
+        for ((x_index, y_index), &count) in entries {
             let x_center = self.range.x.min + (*x_index as f64 + 0.5) * self.bins.x_width;
             if x_center >= x_min && x_center < x_max && *y_index < y_bins.len() {
                 y_bins[*y_index] += count;
@@ -26,7 +29,10 @@ impl Histogram2D {
         // Extract the x-projection data
         let mut x_bins = vec![0; self.bins.x];
 
-        for ((x_index, y_index), &count) in &self.bins.counts {
+        let mut entries: Vec<_> = self.bins.counts.iter().collect();
+        entries.sort_by_key(|&(&(x, y), _)| (y, x)); // row-major order
+
+        for ((x_index, y_index), &count) in entries {
             let y_center = self.range.y.min + (*y_index as f64 + 0.5) * self.bins.y_width;
             if y_center >= y_min && y_center < y_max && *x_index < x_bins.len() {
                 x_bins[*x_index] += count;
@@ -50,7 +56,7 @@ impl Histogram2D {
                         .projections
                         .y_projection
                         .as_mut()
-                        .unwrap()
+                        .expect("Y Projection should be set")
                         .plot_settings
                         .rebin_factor = 1;
 
@@ -58,28 +64,28 @@ impl Histogram2D {
                         .projections
                         .y_projection
                         .as_mut()
-                        .unwrap()
+                        .expect("Y Projection should be set")
                         .rebin();
 
                     self.plot_settings
                         .projections
                         .y_projection
                         .as_mut()
-                        .unwrap()
+                        .expect("Y Projection should be set")
                         .bins = bins.clone();
 
                     self.plot_settings
                         .projections
                         .y_projection
                         .as_mut()
-                        .unwrap()
+                        .expect("Y Projection should be set")
                         .original_bins = bins;
 
                     self.plot_settings
                         .projections
                         .y_projection
                         .as_mut()
-                        .unwrap()
+                        .expect("Y Projection should be set")
                         .plot_settings
                         .egui_settings
                         .reset_axis = true;
@@ -108,7 +114,7 @@ impl Histogram2D {
                     .projections
                     .y_projection
                     .as_mut()
-                    .unwrap()
+                    .expect("Y Projection should be set")
                     .plot_settings
                     .egui_settings
                     .reset_axis = true;
@@ -136,7 +142,7 @@ impl Histogram2D {
                         .projections
                         .x_projection
                         .as_mut()
-                        .unwrap()
+                        .expect("X Projection should be set")
                         .plot_settings
                         .rebin_factor = 1;
 
@@ -144,28 +150,28 @@ impl Histogram2D {
                         .projections
                         .x_projection
                         .as_mut()
-                        .unwrap()
+                        .expect("X Projection should be set")
                         .rebin();
 
                     self.plot_settings
                         .projections
                         .x_projection
                         .as_mut()
-                        .unwrap()
+                        .expect("X Projection should be set")
                         .bins = bins.clone();
 
                     self.plot_settings
                         .projections
                         .x_projection
                         .as_mut()
-                        .unwrap()
+                        .expect("X Projection should be set")
                         .original_bins = bins;
 
                     self.plot_settings
                         .projections
                         .x_projection
                         .as_mut()
-                        .unwrap()
+                        .expect("X Projection should be set")
                         .plot_settings
                         .egui_settings
                         .reset_axis = true;
@@ -193,7 +199,7 @@ impl Histogram2D {
                     .projections
                     .x_projection
                     .as_mut()
-                    .unwrap()
+                    .expect("X Projection should be set")
                     .plot_settings
                     .egui_settings
                     .reset_axis = true;
@@ -229,25 +235,25 @@ pub struct Projections {
 }
 impl Projections {
     pub fn new() -> Self {
-        Projections {
+        Self {
             add_y_projection: false,
             y_projection: None,
             y_projection_line_1: EguiVerticalLine {
-                name: "Y Projection Line 1".to_string(),
+                name: "Y Projection Line 1".to_owned(),
                 color: egui::Color32::from_rgb(255, 0, 0),
                 mid_point_radius: 5.0,
                 x_value: 0.0,
                 ..EguiVerticalLine::default()
             },
             y_projection_line_2: EguiVerticalLine {
-                name: "Y Projection Line 2".to_string(),
+                name: "Y Projection Line 2".to_owned(),
                 color: egui::Color32::from_rgb(255, 0, 0),
                 mid_point_radius: 5.0,
                 x_value: 4096.0,
                 ..EguiVerticalLine::default()
             },
             fill_y_line: EguiLine {
-                name: "Y Projection Fill".to_string(),
+                name: "Y Projection Fill".to_owned(),
                 draw: true,
                 color: egui::Color32::from_rgb(255, 0, 0),
                 stroke: egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 0, 0)),
@@ -258,21 +264,21 @@ impl Projections {
             add_x_projection: false,
             x_projection: None,
             x_projection_line_1: EguiHorizontalLine {
-                name: "X Projection Line 1".to_string(),
+                name: "X Projection Line 1".to_owned(),
                 color: egui::Color32::from_rgb(0, 0, 255),
                 mid_point_radius: 5.0,
                 y_value: 0.0,
                 ..EguiHorizontalLine::default()
             },
             x_projection_line_2: EguiHorizontalLine {
-                name: "X Projection Line 2".to_string(),
+                name: "X Projection Line 2".to_owned(),
                 color: egui::Color32::from_rgb(0, 0, 255),
                 mid_point_radius: 5.0,
                 y_value: 4096.0,
                 ..EguiHorizontalLine::default()
             },
             fill_x_line: EguiLine {
-                name: "X Projection Fill".to_string(),
+                name: "X Projection Fill".to_owned(),
                 draw: true,
                 color: egui::Color32::from_rgb(0, 0, 255),
                 stroke: egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 0, 255)),
@@ -283,13 +289,13 @@ impl Projections {
         }
     }
 
-    fn show_y_projection(&mut self, ui: &mut egui::Ui) {
+    fn show_y_projection(&mut self, ui: &egui::Ui) {
         if self.add_y_projection && self.y_projection.is_some() {
             let name = if let Some(histogram) = &self.y_projection {
                 let name = histogram.name.clone();
-                name.split(':').collect::<Vec<&str>>()[0].to_string()
+                name.split(':').collect::<Vec<&str>>()[0].to_owned()
             } else {
-                "Y-Projection".to_string()
+                "Y-Projection".to_owned()
             };
             let ctx = ui.ctx().clone();
             egui::Window::new(name).show(&ctx, |ui| {
@@ -302,13 +308,13 @@ impl Projections {
         }
     }
 
-    fn show_x_projection(&mut self, ui: &mut egui::Ui) {
+    fn show_x_projection(&mut self, ui: &egui::Ui) {
         if self.add_x_projection && self.x_projection.is_some() {
             let name = if let Some(histogram) = &self.x_projection {
                 let name = histogram.name.clone();
-                name.split(':').collect::<Vec<&str>>()[0].to_string()
+                name.split(':').collect::<Vec<&str>>()[0].to_owned()
             } else {
-                "X-Projection".to_string()
+                "X-Projection".to_owned()
             };
             let ctx = ui.ctx().clone();
             egui::Window::new(name).show(&ctx, |ui| {

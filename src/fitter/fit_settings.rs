@@ -23,7 +23,7 @@ pub struct FitSettings {
 
 impl Default for FitSettings {
     fn default() -> Self {
-        FitSettings {
+        Self {
             show_decomposition: true,
             show_composition: true,
             show_background: true,

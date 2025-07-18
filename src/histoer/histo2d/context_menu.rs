@@ -64,7 +64,7 @@ impl Histogram2D {
                 if ui
                     .selectable_label(
                         self.plot_settings.rebin_x_factor == factor,
-                        format!("{}", factor),
+                        format!("{factor}"),
                     )
                     .clicked()
                 {
@@ -80,7 +80,7 @@ impl Histogram2D {
                 if ui
                     .selectable_label(
                         self.plot_settings.rebin_y_factor == factor,
-                        format!("{}", factor),
+                        format!("{factor}"),
                     )
                     .clicked()
                 {

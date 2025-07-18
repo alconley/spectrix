@@ -5,7 +5,7 @@ use crate::histoer::histogrammer::Histogrammer;
 use polars::prelude::*;
 
 use std::fs::File;
-use std::io::{BufReader, Write};
+use std::io::{BufReader, Write as _};
 
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct HistogramScript {
@@ -29,7 +29,7 @@ impl HistogramScript {
         {
             if let Ok(serialized) = serde_json::to_string_pretty(&self) {
                 if let Ok(mut file) = File::create(path) {
-                    let _ = file.write_all(serialized.as_bytes());
+                    let _file = file.write_all(serialized.as_bytes());
                 }
             }
         }
@@ -86,7 +86,7 @@ impl HistogramScript {
     pub fn add_histograms(
         &mut self,
         h: &mut Histogrammer,
-        lf: LazyFrame,
+        lf: &LazyFrame,
         estimated_memory: f64,
         prefix: Option<String>,
     ) {
@@ -97,9 +97,9 @@ impl HistogramScript {
         let mut merged_configs = cloned_configs;
 
         if let Some(prefix) = prefix {
-            merged_configs.set_prefix(prefix);
+            merged_configs.set_prefix(&prefix);
         }
 
-        h.fill_histograms(merged_configs.clone(), &lf, estimated_memory);
+        h.fill_histograms(merged_configs.clone(), lf, estimated_memory);
     }
 }

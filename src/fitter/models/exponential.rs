@@ -1,5 +1,5 @@
 use crate::fitter::common::{Data, Parameter};
-use pyo3::{prelude::*, types::PyModule};
+use pyo3::{ffi::c_str, prelude::*, types::PyModule};
 
 #[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ExponentialParameters {
@@ -9,13 +9,13 @@ pub struct ExponentialParameters {
 
 impl Default for ExponentialParameters {
     fn default() -> Self {
-        ExponentialParameters {
+        Self {
             amplitude: Parameter {
-                name: "amplitude".to_string(),
+                name: "amplitude".to_owned(),
                 ..Default::default()
             },
             decay: Parameter {
-                name: "decay".to_string(),
+                name: "decay".to_owned(),
                 initial_guess: 500.0,
                 ..Default::default()
             },
@@ -28,7 +28,7 @@ impl ExponentialParameters {
         ui.horizontal(|ui| {
             ui.label("Fit Parameters");
             if ui.small_button("Reset").clicked() {
-                *self = ExponentialParameters::default();
+                *self = Self::default();
             }
         });
         // create a grid for the param
@@ -59,7 +59,7 @@ pub struct ExponentialFitter {
 
 impl ExponentialFitter {
     pub fn new(data: Data) -> Self {
-        ExponentialFitter {
+        Self {
             data,
             paramaters: ExponentialParameters::default(),
             fit_points: Vec::new(),
@@ -73,11 +73,11 @@ impl ExponentialFitter {
         min_x: f64,
         max_x: f64,
     ) -> Self {
-        let mut fitter = ExponentialFitter {
+        let mut fitter = Self {
             data: Data::default(),
             paramaters: ExponentialParameters::default(),
             fit_points: Vec::new(),
-            fit_report: "Fitter with other model".to_string(),
+            fit_report: "Fitter with other model".to_owned(),
         };
 
         // Set the parameter values and uncertainties
@@ -103,43 +103,38 @@ impl ExponentialFitter {
     pub fn lmfit(&mut self) -> PyResult<()> {
         log::info!("Fitting data with a Exponential line using `lmfit`.");
         Python::with_gil(|py| {
-            // let sys = py.import_bound("sys")?;
+            // let sys = py.import("sys")?;
             // let version: String = sys.getattr("version")?.extract()?;
             // let executable: String = sys.getattr("executable")?.extract()?;
             // println!("Using Python version: {}", version);
             // println!("Python executable: {}", executable);
 
             // Check if the `uproot` module can be imported
-            match py.import_bound("lmfit") {
-                Ok(_) => {
-                    // println!("Successfully imported `lmfit` module.");
-                }
-                Err(_) => {
-                    eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
-                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                        "`lmfit` module not available",
-                    ));
-                }
+            if py.import("lmfit").is_ok() {
+                // println!("Successfully imported `lmfit` module.");
+            } else {
+                eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
+                return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                    "`lmfit` module not available",
+                ));
             }
 
-            match py.import_bound("numpy") {
-                Ok(_) => {
-                    // println!("Successfully imported `lmfit` module.");
-                }
-                Err(_) => {
-                    eprintln!("Error: `numpy` module could not be found. Make sure you are using the correct Python environment with `numpy` installed.");
-                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                        "`numpy` module not available",
-                    ));
-                }
+            if py.import("numpy").is_ok() {
+                // println!("Successfully imported `lmfit` module.");
+            } else {
+                eprintln!("Error: `numpy` module could not be found. Make sure you are using the correct Python environment with `numpy` installed.");
+                return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                    "`numpy` module not available",
+                ));
             }
 
             // Define the Python code as a module
-            let code = r#"
+            let code = c_str!("
+
 import lmfit
 import numpy as np
 
-def ExponentialFit(x_data: list, y_data: list, amplitude: list = ("amplitude", -np.inf, np.inf, 0.0, True), decay = ("decay", -np.inf, np.inf, 0.0, True)):    
+def ExponentialFit(x_data: list, y_data: list, amplitude: list = ('amplitude', -np.inf, np.inf, 0.0, True), decay = ('decay', -np.inf, np.inf, 0.0, True)):    
     # params = [name, min, max, initial_guess, vary]
     
     model = lmfit.models.ExponentialModel()
@@ -176,10 +171,11 @@ def ExponentialFit(x_data: list, y_data: list, amplitude: list = ("amplitude", -
     fit_report = str(result.fit_report())
 
     return params, x, y, fit_report
-"#;
+");
 
             // Compile the Python code into a module
-            let module = PyModule::from_code_bound(py, code, "Exponential.py", "Exponential")?;
+            let module =
+                PyModule::from_code(py, code, c_str!("Exponential.py"), c_str!("Exponential"))?;
 
             let x_data = self.data.x.clone();
             let y_data = self.data.y.clone();

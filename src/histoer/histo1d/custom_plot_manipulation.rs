@@ -17,8 +17,8 @@ impl Histogram {
         let current_y_min = plot_bounds.min()[1];
         let current_y_max = plot_bounds.max()[1];
 
-        let y_max = self.bins.iter().max().cloned().unwrap_or(0) as f64;
-        let y_min = self.bins.iter().min().cloned().unwrap_or(0) as f64;
+        let y_max = self.bins.iter().max().copied().unwrap_or(0) as f64;
+        let y_min = self.bins.iter().min().copied().unwrap_or(0) as f64;
 
         // account for log y
         let y_min = if self.plot_settings.egui_settings.log_y {

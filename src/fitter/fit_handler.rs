@@ -1,7 +1,7 @@
 use rfd::FileDialog;
 
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write as _;
 use std::path::PathBuf;
 
 use super::fit_settings::FitSettings;
@@ -32,7 +32,7 @@ impl Default for Fits {
 
 impl Fits {
     pub fn new() -> Self {
-        Fits {
+        Self {
             temp_fit: None,
             // temp_background_fit: None,
             stored_fits: Vec::new(),
@@ -115,7 +115,7 @@ impl Fits {
                         .expect("Failed to write file");
                 }
                 Err(e) => {
-                    log::error!("Error creating file: {:?}", e);
+                    log::error!("Error creating file: {e:?}");
                 }
             }
         }
@@ -123,19 +123,15 @@ impl Fits {
 
     fn load_from_file(&mut self) {
         if let Some(path) = FileDialog::new().add_filter("JSON", &["json"]).pick_file() {
-            let file = File::open(path);
-            match file {
-                Ok(mut file) => {
-                    let mut contents = String::new();
-                    file.read_to_string(&mut contents)
-                        .expect("Failed to read file");
-                    let loaded_fits: Fits =
+            match std::fs::read_to_string(&path) {
+                Ok(contents) => {
+                    let loaded_fits: Self =
                         serde_json::from_str(&contents).expect("Failed to deserialize fits");
-                    self.stored_fits.extend(loaded_fits.stored_fits); // Append loaded fits to current stored fits
-                    self.temp_fit = loaded_fits.temp_fit; // override temp_fit
+                    self.stored_fits.extend(loaded_fits.stored_fits);
+                    self.temp_fit = loaded_fits.temp_fit;
                 }
                 Err(e) => {
-                    log::error!("Error opening file: {:?}", e);
+                    log::error!("Error reading file: {e:?}");
                 }
             }
         }
@@ -149,8 +145,7 @@ impl Fits {
                         let mut filename = format!("{}_fit_{}.sav", fit.name, i);
                         filename =
                             filename.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_"); // Sanitize filename
-                        let mut full_path = PathBuf::from(&folder_path);
-                        full_path.push(filename);
+                        let full_path = PathBuf::from(&folder_path).join(filename);
 
                         match File::create(&full_path) {
                             Ok(mut file) => {
@@ -163,7 +158,7 @@ impl Fits {
                                 }
                             }
                             Err(e) => {
-                                log::error!("Error creating file {}: {:?}", full_path.display(), e)
+                                log::error!("Error creating file {}: {:?}", full_path.display(), e);
                             }
                         }
                     }
@@ -172,15 +167,14 @@ impl Fits {
         }
     }
 
-    pub fn export_lmfit(&self, dir: PathBuf) {
+    pub fn export_lmfit(&self, dir: &PathBuf) {
         for (i, fit) in self.stored_fits.iter().enumerate() {
             if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result {
                 if let Some(text) = &gauss.lmfit_result {
                     let mut filename = format!("{}_fit_{}.sav", fit.name, i);
                     filename =
                         filename.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_"); // Sanitize filename
-                    let mut full_path = PathBuf::from(&dir);
-                    full_path.push(filename);
+                    let full_path = PathBuf::from(&dir).join(filename);
 
                     match File::create(&full_path) {
                         Ok(mut file) => {
@@ -193,7 +187,7 @@ impl Fits {
                             }
                         }
                         Err(e) => {
-                            log::error!("Error creating file {}: {:?}", full_path.display(), e)
+                            log::error!("Error creating file {}: {:?}", full_path.display(), e);
                         }
                     }
                 }
@@ -251,7 +245,7 @@ impl Fits {
                     };
                 }
                 Err(e) => {
-                    log::error!("Calibration fit failed: {:?}", e);
+                    log::error!("Calibration fit failed: {e:?}");
                 }
             }
         }
@@ -284,7 +278,7 @@ impl Fits {
                     };
                 }
                 Err(e) => {
-                    log::error!("Calibration fit failed: {:?}", e);
+                    log::error!("Calibration fit failed: {e:?}");
                 }
             }
         }
@@ -331,7 +325,7 @@ impl Fits {
                                     path.file_stem()
                                         .and_then(|s| s.to_str())
                                         .unwrap_or("lmfit_result")
-                                        .to_string(),
+                                        .to_owned(),
                                 );
                                 new_fitter.composition_line.points =
                                     gaussian_fitter.fit_points.clone();
@@ -357,10 +351,10 @@ impl Fits {
                                 //     Some(FitResult::Gaussian(gaussian_fitter.clone()));
 
                                 self.stored_fits.push(new_fitter);
-                                log::info!("Loaded lmfit result from {:?}", path);
+                                log::info!("Loaded lmfit result from {path:?}");
                             }
                             Err(e) => {
-                                log::error!("Failed to load lmfit result: {:?}", e);
+                                log::error!("Failed to load lmfit result: {e:?}");
                             }
                         }
                     }
@@ -432,7 +426,7 @@ impl Fits {
                 if !self.stored_fits.is_empty() {
                     for (i, fit) in self.stored_fits.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
-                            ui.label(format!("{}", i));
+                            ui.label(format!("{i}"));
 
                             ui.separator();
 

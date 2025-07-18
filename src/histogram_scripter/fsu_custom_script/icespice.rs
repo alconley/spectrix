@@ -20,7 +20,7 @@ pub struct PIPS {
 impl Default for PIPS {
     fn default() -> Self {
         Self {
-            name: "1000".to_string(),
+            name: "1000".to_owned(),
             sps_timecut: TimeCut::default(),
             energy_calibration: Calibration {
                 a: 0.0,
@@ -40,7 +40,7 @@ impl Default for PIPS {
 impl PIPS {
     pub fn new(name: &str) -> Self {
         Self {
-            name: name.to_string(),
+            name: name.to_owned(),
             sps_timecut: TimeCut::default(),
             energy_calibration: Calibration {
                 a: 0.0,
@@ -57,8 +57,8 @@ impl PIPS {
     }
 
     #[rustfmt::skip]
-    #[allow(clippy::all)]
-    pub fn configs(&self, cebra_config: CeBrAConfig, sps_config: SPSConfig, main_cuts: Option<Cuts>) -> Configs {
+    #[expect(clippy::all)]
+    pub fn configs(&self, cebra_config: &CeBrAConfig, sps_config: &SPSConfig, main_cuts: &Option<Cuts>) -> Configs {
         let mut configs = Configs::default();
         let base_path = if main_cuts.is_none() { "No Cuts/ICESPICE" } else { "Cuts/ICESPICE" };
 
@@ -80,7 +80,7 @@ impl PIPS {
         }
 
         if cebra_config.active {
-            for cebr3 in cebra_config.detectors.iter() {
+            for cebr3 in &cebra_config.detectors {
                 if cebr3.active {
 
                     let cebra_det_number = cebr3.number;
@@ -643,39 +643,39 @@ impl ICESPICEConfig {
         &self,
         cebra_config: &CeBrAConfig,
         sps_config: &SPSConfig,
-        main_cuts: Option<Cuts>,
+        main_cuts: &Option<Cuts>,
     ) -> Configs {
         let mut configs = Configs::default();
 
         if self.pips1000.active {
             configs.merge(self.pips1000.configs(
-                cebra_config.clone(),
-                sps_config.clone(),
-                main_cuts.clone(),
+                &cebra_config.clone(),
+                &sps_config.clone(),
+                &main_cuts.clone(),
             ));
         }
 
         if self.pips500.active {
             configs.merge(self.pips500.configs(
-                cebra_config.clone(),
-                sps_config.clone(),
-                main_cuts.clone(),
+                &cebra_config.clone(),
+                &sps_config.clone(),
+                &main_cuts.clone(),
             ));
         }
 
         if self.pips300.active {
             configs.merge(self.pips300.configs(
-                cebra_config.clone(),
-                sps_config.clone(),
-                main_cuts.clone(),
+                &cebra_config.clone(),
+                &sps_config.clone(),
+                &main_cuts.clone(),
             ));
         }
 
         if self.pips100.active {
             configs.merge(self.pips100.configs(
-                cebra_config.clone(),
-                sps_config.clone(),
-                main_cuts.clone(),
+                &cebra_config.clone(),
+                &sps_config.clone(),
+                &main_cuts.clone(),
             ));
         }
 

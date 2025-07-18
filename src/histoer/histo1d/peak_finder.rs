@@ -121,7 +121,7 @@ pub struct PeakFindingSettings {
 
 impl Default for PeakFindingSettings {
     fn default() -> Self {
-        PeakFindingSettings {
+        Self {
             min_height: 20.0,
             max_height: 0.0,
             min_prominence: 1.0,
@@ -153,7 +153,7 @@ impl PeakFindingSettings {
             ui.heading("Peak Finder Settings");
 
             if ui.button("Reset").clicked() {
-                *self = PeakFindingSettings::default();
+                *self = Self::default();
             }
 
             ui.separator();
@@ -272,8 +272,8 @@ impl PeakFindingSettings {
         });
     }
 
-    pub fn find_peaks(&self, y_data: Vec<f64>) -> Vec<Peak<f64>> {
-        let mut peak_finder = PeakFinder::new(&y_data);
+    pub fn find_peaks(&self, y_data: &[f64]) -> Vec<Peak<f64>> {
+        let mut peak_finder = PeakFinder::new(y_data);
 
         if self.enable_min_height {
             peak_finder.with_min_height(self.min_height);

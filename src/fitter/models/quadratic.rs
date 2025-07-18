@@ -1,5 +1,5 @@
 use crate::fitter::common::{Data, Parameter};
-use pyo3::{prelude::*, types::PyModule};
+use pyo3::{ffi::c_str, prelude::*, types::PyModule};
 
 #[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct QuadraticParameters {
@@ -10,17 +10,17 @@ pub struct QuadraticParameters {
 
 impl Default for QuadraticParameters {
     fn default() -> Self {
-        QuadraticParameters {
+        Self {
             a: Parameter {
-                name: "a".to_string(),
+                name: "a".to_owned(),
                 ..Default::default()
             },
             b: Parameter {
-                name: "b".to_string(),
+                name: "b".to_owned(),
                 ..Default::default()
             },
             c: Parameter {
-                name: "c".to_string(),
+                name: "c".to_owned(),
                 ..Default::default()
             },
         }
@@ -32,7 +32,7 @@ impl QuadraticParameters {
         ui.horizontal(|ui| {
             ui.label("Fit Parameters");
             if ui.small_button("Reset").clicked() {
-                *self = QuadraticParameters::default();
+                *self = Self::default();
             }
         });
         // create a grid for the param
@@ -65,7 +65,7 @@ pub struct QuadraticFitter {
 
 impl QuadraticFitter {
     pub fn new(data: Data) -> Self {
-        QuadraticFitter {
+        Self {
             data,
             paramaters: QuadraticParameters::default(),
             fit_points: Vec::new(),
@@ -80,11 +80,11 @@ impl QuadraticFitter {
         min_x: f64,
         max_x: f64,
     ) -> Self {
-        let mut fitter = QuadraticFitter {
+        let mut fitter = Self {
             data: Data::default(),
             paramaters: QuadraticParameters::default(),
             fit_points: Vec::new(),
-            fit_report: "Fitted with other model".to_string(),
+            fit_report: "Fitted with other model".to_owned(),
         };
 
         // Set the parameter values and uncertainties
@@ -113,43 +113,37 @@ impl QuadraticFitter {
     pub fn lmfit(&mut self) -> PyResult<()> {
         log::info!("Fitting data with a linear line using `lmfit`.");
         Python::with_gil(|py| {
-            // let sys = py.import_bound("sys")?;
+            // let sys = py.import("sys")?;
             // let version: String = sys.getattr("version")?.extract()?;
             // let executable: String = sys.getattr("executable")?.extract()?;
             // println!("Using Python version: {}", version);
             // println!("Python executable: {}", executable);
 
             // Check if the `uproot` module can be imported
-            match py.import_bound("lmfit") {
-                Ok(_) => {
-                    // println!("Successfully imported `lmfit` module.");
-                }
-                Err(_) => {
-                    eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
-                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                        "`lmfit` module not available",
-                    ));
-                }
+            if py.import("lmfit").is_ok() {
+                // println!("Successfully imported `lmfit` module.");
+            } else {
+                eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
+                return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                    "`lmfit` module not available",
+                ));
             }
 
-            match py.import_bound("numpy") {
-                Ok(_) => {
-                    // println!("Successfully imported `lmfit` module.");
-                }
-                Err(_) => {
-                    eprintln!("Error: `numpy` module could not be found. Make sure you are using the correct Python environment with `numpy` installed.");
-                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                        "`numpy` module not available",
-                    ));
-                }
+            if py.import("numpy").is_ok() {
+                // println!("Successfully imported `numpy` module.");
+            } else {
+                eprintln!("Error: `numpy` module could not be found. Make sure you are using the correct Python environment with `numpy` installed.");
+                return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                    "`numpy` module not available",
+                ));
             }
 
             // Define the Python code as a module
-            let code = r#"
+            let code = c_str!("
 import lmfit
 import numpy as np
 
-def QuadraticFit(x_data: list, y_data: list, a: list = ("a", -np.inf, np.inf, 0.0, True), b = ("b", -np.inf, np.inf, 0.0, True), c: list = ("a", -np.inf, np.inf, 0.0, True),):    
+def QuadraticFit(x_data: list, y_data: list, a: list = ('a', -np.inf, np.inf, 0.0, True), b = ('b', -np.inf, np.inf, 0.0, True), c: list = ('c', -np.inf, np.inf, 0.0, True),):    
     # params = [name, min, max, initial_guess, vary]
     
     model = lmfit.models.QuadraticModel()
@@ -196,10 +190,11 @@ def QuadraticFit(x_data: list, y_data: list, a: list = ("a", -np.inf, np.inf, 0.
     fit_report = str(result.fit_report())
 
     return params, x, y, fit_report
-"#;
+");
 
             // Compile the Python code into a module
-            let module = PyModule::from_code_bound(py, code, "quadratic.py", "quadratic")?;
+            let module =
+                PyModule::from_code(py, code, c_str!("quadratic.py"), c_str!("quadratic"))?;
 
             let x_data = self.data.x.clone();
             let y_data = self.data.y.clone();

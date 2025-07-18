@@ -21,13 +21,28 @@ impl Histogram2D {
             }
             factors
         } else {
-            while self.backup_bins.as_ref().unwrap().x % (factor * 2) == 0 {
+            while self
+                .backup_bins
+                .as_ref()
+                .expect("Backup bins should be set")
+                .x
+                % (factor * 2)
+                == 0
+            {
                 factor *= 2;
                 factors.push(factor);
             }
 
             // remove the last factor if it is the same as the number of bins
-            if factors.last() == Some(&self.backup_bins.as_ref().unwrap().x) {
+            if factors.last()
+                == Some(
+                    &self
+                        .backup_bins
+                        .as_ref()
+                        .expect("Backup bins should be set")
+                        .x,
+                )
+            {
                 factors.pop();
             }
             factors
@@ -52,13 +67,28 @@ impl Histogram2D {
             }
             factors
         } else {
-            while self.backup_bins.as_ref().unwrap().y % (factor * 2) == 0 {
+            while self
+                .backup_bins
+                .as_ref()
+                .expect("Backup bins should be set")
+                .y
+                % (factor * 2)
+                == 0
+            {
                 factor *= 2;
                 factors.push(factor);
             }
 
             // remove the last factor if it is the same as the number of bins
-            if factors.last() == Some(&self.backup_bins.as_ref().unwrap().y) {
+            if factors.last()
+                == Some(
+                    &self
+                        .backup_bins
+                        .as_ref()
+                        .expect("Backup bins should be set")
+                        .y,
+                )
+            {
                 factors.pop();
             }
             factors
@@ -89,8 +119,10 @@ impl Histogram2D {
                 max_count: u64::MIN,
             };
 
-            // Transfer counts to new bins
-            for ((old_x_index, old_y_index), &count) in &backup_bins.counts {
+            let mut entries: Vec<_> = backup_bins.counts.iter().collect();
+            entries.sort_by_key(|&(&(x, y), _)| (y, x)); // row-major ordering
+
+            for ((old_x_index, old_y_index), &count) in entries {
                 let old_x_value = self.range.x.min + *old_x_index as f64 * backup_bins.x_width;
                 let old_y_value = self.range.y.min + *old_y_index as f64 * backup_bins.y_width;
 

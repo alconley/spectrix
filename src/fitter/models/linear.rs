@@ -1,5 +1,5 @@
 use crate::fitter::common::{Data, Parameter};
-use pyo3::{prelude::*, types::PyModule};
+use pyo3::{ffi::c_str, prelude::*, types::PyModule};
 
 #[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct LinearParameters {
@@ -9,13 +9,13 @@ pub struct LinearParameters {
 
 impl Default for LinearParameters {
     fn default() -> Self {
-        LinearParameters {
+        Self {
             slope: Parameter {
-                name: "slope".to_string(),
+                name: "slope".to_owned(),
                 ..Default::default()
             },
             intercept: Parameter {
-                name: "intercept".to_string(),
+                name: "intercept".to_owned(),
                 ..Default::default()
             },
         }
@@ -27,7 +27,7 @@ impl LinearParameters {
         ui.horizontal(|ui| {
             ui.label("Fit Parameters");
             if ui.small_button("Reset").clicked() {
-                *self = LinearParameters::default();
+                *self = Self::default();
             }
         });
         // create a grid for the param
@@ -58,7 +58,7 @@ pub struct LinearFitter {
 
 impl LinearFitter {
     pub fn new(data: Data) -> Self {
-        LinearFitter {
+        Self {
             data,
             paramaters: LinearParameters::default(),
             fit_points: Vec::new(),
@@ -78,7 +78,7 @@ impl LinearFitter {
         ];
         let paramaters = LinearParameters {
             slope: Parameter {
-                name: "slope".to_string(),
+                name: "slope".to_owned(),
                 min: f64::NEG_INFINITY,
                 max: f64::INFINITY,
                 initial_guess: slope.0,
@@ -89,7 +89,7 @@ impl LinearFitter {
                 calibrated_uncertainty: None,
             },
             intercept: Parameter {
-                name: "intercept".to_string(),
+                name: "intercept".to_owned(),
                 min: f64::NEG_INFINITY,
                 max: f64::INFINITY,
                 initial_guess: intercept.0,
@@ -100,57 +100,51 @@ impl LinearFitter {
                 calibrated_uncertainty: None,
             },
         };
-        LinearFitter {
+        Self {
             data: Data {
                 x: Vec::new(),
                 y: Vec::new(),
             },
             paramaters,
             fit_points,
-            fit_report: "Fitter with other model".to_string(),
+            fit_report: "Fitter with other model".to_owned(),
         }
     }
 
     pub fn lmfit(&mut self) -> PyResult<()> {
         log::info!("Fitting data with a linear line using `lmfit`.");
         Python::with_gil(|py| {
-            // let sys = py.import_bound("sys")?;
+            // let sys = py.import("sys")?;
             // let version: String = sys.getattr("version")?.extract()?;
             // let executable: String = sys.getattr("executable")?.extract()?;
             // println!("Using Python version: {}", version);
             // println!("Python executable: {}", executable);
 
             // Check if the `uproot` module can be imported
-            match py.import_bound("lmfit") {
-                Ok(_) => {
-                    // println!("Successfully imported `lmfit` module.");
-                }
-                Err(_) => {
-                    eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
-                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                        "`lmfit` module not available",
-                    ));
-                }
+            if py.import("numpy").is_ok() {
+                // println!("Successfully imported `lmfit` module.");
+            } else {
+                eprintln!("Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed.");
+                return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                    "`lmfit` module not available",
+                ));
             }
 
-            match py.import_bound("numpy") {
-                Ok(_) => {
-                    // println!("Successfully imported `lmfit` module.");
-                }
-                Err(_) => {
-                    eprintln!("Error: `numpy` module could not be found. Make sure you are using the correct Python environment with `numpy` installed.");
-                    return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                        "`numpy` module not available",
-                    ));
-                }
+            if py.import("numpy").is_ok() {
+                // println!("Successfully imported `lmfit` module.");
+            } else {
+                eprintln!("Error: `numpy` module could not be found. Make sure you are using the correct Python environment with `numpy` installed.");
+                return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
+                    "`numpy` module not available",
+                ));
             }
 
             // Define the Python code as a module
-            let code = r#"
+            let code = c_str!("
 import lmfit
 import numpy as np
 
-def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.inf, 0.0, True), intercept = ("intercept", -np.inf, np.inf, 0.0, True)):    
+def LinearFit(x_data: list, y_data: list, slope: list = ('slope', -np.inf, np.inf, 0.0, True), intercept = ('intercept', -np.inf, np.inf, 0.0, True)):    
     # params
     # slope=[name, min, max, initial_guess, vary]
     # intercept = [name, min, max, initial_guess, vary]
@@ -192,10 +186,10 @@ def LinearFit(x_data: list, y_data: list, slope: list = ("slope", -np.inf, np.in
     fit_report = str(result.fit_report())
 
     return params, x, y, fit_report
-"#;
+");
 
             // Compile the Python code into a module
-            let module = PyModule::from_code_bound(py, code, "linear.py", "linear")?;
+            let module = PyModule::from_code(py, code, c_str!("linear.py"), c_str!("linear"))?;
 
             let x_data = self.data.x.clone();
             let y_data = self.data.y.clone();

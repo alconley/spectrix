@@ -30,7 +30,7 @@ impl Histogram {
                 if ui
                     .selectable_label(
                         self.plot_settings.rebin_factor == factor,
-                        format!("{}", factor),
+                        format!("{factor}"),
                     )
                     .clicked()
                 {

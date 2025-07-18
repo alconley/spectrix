@@ -1,4 +1,4 @@
-#[derive(PartialEq, Debug, Copy, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub enum ColorMap {
     #[default]
     Viridis,
@@ -26,7 +26,7 @@ pub struct ColormapOptions {
 
 impl Default for ColormapOptions {
     fn default() -> Self {
-        ColormapOptions {
+        Self {
             log_norm: true,
             reverse: false,
             custom_display_range: false,
@@ -66,7 +66,7 @@ impl ColormapOptions {
         if self.custom_display_range {
             ui.horizontal(|ui| {
                 ui.label("Z ");
-                let min_z_range = if self.log_norm { 1 } else { 0 };
+                let min_z_range = u64::from(self.log_norm);
                 if ui
                     .add(
                         egui::widgets::DragValue::new(&mut self.display_min)
@@ -111,27 +111,23 @@ impl ColorMap {
         options: ColormapOptions,
     ) -> egui::Color32 {
         match self {
-            ColorMap::Viridis => Self::colormap(viridis(), count, min_count, max_count, options),
-            ColorMap::Fast => Self::colormap(fast(), count, min_count, max_count, options),
-            ColorMap::SmoothCoolWarm => {
+            Self::Viridis => Self::colormap(viridis(), count, min_count, max_count, options),
+            Self::Fast => Self::colormap(fast(), count, min_count, max_count, options),
+            Self::SmoothCoolWarm => {
                 Self::colormap(smooth_cool_warm(), count, min_count, max_count, options)
             }
-            ColorMap::BentCoolWarm => {
+            Self::BentCoolWarm => {
                 Self::colormap(bent_cool_warm(), count, min_count, max_count, options)
             }
-            ColorMap::Plasma => Self::colormap(plasma(), count, min_count, max_count, options),
-            ColorMap::Blackbody => {
-                Self::colormap(blackbody(), count, min_count, max_count, options)
-            }
-            ColorMap::Inferno => Self::colormap(inferno(), count, min_count, max_count, options),
-            ColorMap::Kindlmann => {
-                Self::colormap(kindlmann(), count, min_count, max_count, options)
-            }
-            ColorMap::ExtendedKindlmann => {
+            Self::Plasma => Self::colormap(plasma(), count, min_count, max_count, options),
+            Self::Blackbody => Self::colormap(blackbody(), count, min_count, max_count, options),
+            Self::Inferno => Self::colormap(inferno(), count, min_count, max_count, options),
+            Self::Kindlmann => Self::colormap(kindlmann(), count, min_count, max_count, options),
+            Self::ExtendedKindlmann => {
                 Self::colormap(extended_kindlmann(), count, min_count, max_count, options)
             }
-            ColorMap::Turbo => Self::colormap(turbo(), count, min_count, max_count, options),
-            ColorMap::Jet => Self::colormap(jet(), count, min_count, max_count, options),
+            Self::Turbo => Self::colormap(turbo(), count, min_count, max_count, options),
+            Self::Jet => Self::colormap(jet(), count, min_count, max_count, options),
         }
     }
 
@@ -140,17 +136,17 @@ impl ColorMap {
         let new_colormap = *self;
 
         ui.vertical(|ui| {
-            ui.radio_value(self, ColorMap::Viridis, "Viridis");
-            ui.radio_value(self, ColorMap::Fast, "Fast");
-            ui.radio_value(self, ColorMap::SmoothCoolWarm, "Smooth Cool Warm");
-            ui.radio_value(self, ColorMap::BentCoolWarm, "Bent Cool Warm");
-            ui.radio_value(self, ColorMap::Plasma, "Plasma");
-            ui.radio_value(self, ColorMap::Blackbody, "Blackbody");
-            ui.radio_value(self, ColorMap::Inferno, "Inferno");
-            ui.radio_value(self, ColorMap::Kindlmann, "Kindlmann");
-            ui.radio_value(self, ColorMap::ExtendedKindlmann, "Extended Kindlmann");
-            ui.radio_value(self, ColorMap::Turbo, "Turbo");
-            ui.radio_value(self, ColorMap::Jet, "Jet");
+            ui.radio_value(self, Self::Viridis, "Viridis");
+            ui.radio_value(self, Self::Fast, "Fast");
+            ui.radio_value(self, Self::SmoothCoolWarm, "Smooth Cool Warm");
+            ui.radio_value(self, Self::BentCoolWarm, "Bent Cool Warm");
+            ui.radio_value(self, Self::Plasma, "Plasma");
+            ui.radio_value(self, Self::Blackbody, "Blackbody");
+            ui.radio_value(self, Self::Inferno, "Inferno");
+            ui.radio_value(self, Self::Kindlmann, "Kindlmann");
+            ui.radio_value(self, Self::ExtendedKindlmann, "Extended Kindlmann");
+            ui.radio_value(self, Self::Turbo, "Turbo");
+            ui.radio_value(self, Self::Jet, "Jet");
         });
 
         if new_colormap != *self {
@@ -160,17 +156,17 @@ impl ColorMap {
 
     pub fn next_colormap(&mut self) {
         *self = match self {
-            ColorMap::Viridis => ColorMap::Fast,
-            ColorMap::Fast => ColorMap::SmoothCoolWarm,
-            ColorMap::SmoothCoolWarm => ColorMap::BentCoolWarm,
-            ColorMap::BentCoolWarm => ColorMap::Plasma,
-            ColorMap::Plasma => ColorMap::Blackbody,
-            ColorMap::Blackbody => ColorMap::Inferno,
-            ColorMap::Inferno => ColorMap::Kindlmann,
-            ColorMap::Kindlmann => ColorMap::ExtendedKindlmann,
-            ColorMap::ExtendedKindlmann => ColorMap::Turbo,
-            ColorMap::Turbo => ColorMap::Jet,
-            ColorMap::Jet => ColorMap::Viridis,
+            Self::Viridis => Self::Fast,
+            Self::Fast => Self::SmoothCoolWarm,
+            Self::SmoothCoolWarm => Self::BentCoolWarm,
+            Self::BentCoolWarm => Self::Plasma,
+            Self::Plasma => Self::Blackbody,
+            Self::Blackbody => Self::Inferno,
+            Self::Inferno => Self::Kindlmann,
+            Self::Kindlmann => Self::ExtendedKindlmann,
+            Self::ExtendedKindlmann => Self::Turbo,
+            Self::Turbo => Self::Jet,
+            Self::Jet => Self::Viridis,
         };
     }
 
@@ -227,7 +223,7 @@ impl ColorMap {
         let (min_f64, max_f64) = (display_min as f64, display_max as f64);
 
         // Handle case where min == max to avoid division by zero
-        let normalized: f64 = if max_f64 > min_f64 {
+        let normalized = if max_f64 > min_f64 {
             let value_f64 = value as f64;
             if options.log_norm {
                 // Use logarithmic scale

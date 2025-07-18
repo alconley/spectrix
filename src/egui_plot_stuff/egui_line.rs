@@ -33,12 +33,12 @@ pub struct EguiLine {
 
 impl Default for EguiLine {
     fn default() -> Self {
-        EguiLine {
+        Self {
             draw: true,
             name_in_legend: false,
             log_y: false,
             log_x: false,
-            name: "Line".to_string(),
+            name: "Line".to_owned(),
             highlighted: false,
             stroke: Stroke::new(1.0, Color32::LIGHT_BLUE),
             width: 1.0,
@@ -57,8 +57,8 @@ impl Default for EguiLine {
 
 impl EguiLine {
     pub fn new(color: Color32) -> Self {
-        let line = EguiLine::default();
-        EguiLine {
+        let line = Self::default();
+        Self {
             color,
             color_rgb: Rgb::from_color32(color),
             ..line
@@ -66,9 +66,9 @@ impl EguiLine {
     }
 
     pub fn new_with_points(points: Vec<[f64; 2]>) -> Self {
-        EguiLine {
+        Self {
             points,
-            ..EguiLine::default()
+            ..Self::default()
         }
     }
 
@@ -125,7 +125,7 @@ impl EguiLine {
             }
 
             if self.style.is_some() {
-                line = line.style(self.style.unwrap());
+                line = line.style(self.style.expect("Style should be set"));
             }
 
             plot_ui.line(line);
@@ -134,7 +134,7 @@ impl EguiLine {
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
         ui.menu_button(format!("{} Line", self.name), |ui| {
-            ui.label(self.name.to_string());
+            ui.label(self.name.clone());
             ui.vertical(|ui| {
                 ui.checkbox(&mut self.draw, "Draw Line");
                 ui.checkbox(&mut self.name_in_legend, "Name in Legend")
@@ -217,7 +217,7 @@ impl EguiLine {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         ui.vertical(|ui| {
                             ui.label("X, Y");
-                            for point in self.points.iter_mut() {
+                            for point in &mut self.points {
                                 ui.horizontal(|ui| {
                                     ui.label(format!("{}, {}", point[0], point[1]));
                                 });
@@ -240,7 +240,7 @@ impl EguiLine {
         ui.label("Line Color");
 
         ui.horizontal_wrapped(|ui| {
-            for &(color, name) in COLOR_OPTIONS.iter() {
+            for &(color, name) in COLOR_OPTIONS {
                 if ui
                     .add(egui::Button::new(" ").fill(color))
                     .on_hover_text(name)
@@ -276,7 +276,7 @@ impl EguiLine {
     pub fn stroke_color_selection_buttons(&mut self, ui: &mut Ui) {
         ui.label("Stroke Color");
         ui.horizontal_wrapped(|ui| {
-            for &(color, _) in COLOR_OPTIONS.iter() {
+            for &(color, _) in COLOR_OPTIONS {
                 if ui.add(egui::Button::new(" ").fill(color)).clicked() {
                     self.stroke.color = color;
                     self.stroke_rgb = Rgb::from_color32(color);

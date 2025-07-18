@@ -36,7 +36,7 @@ pub struct Calibration {
 
 impl Default for Calibration {
     fn default() -> Self {
-        Calibration {
+        Self {
             a: Value {
                 value: 0.0,
                 uncertainty: 0.0,
@@ -114,7 +114,7 @@ pub struct Parameter {
 
 impl Default for Parameter {
     fn default() -> Self {
-        Parameter {
+        Self {
             name: String::new(),
             min: f64::NEG_INFINITY,
             max: f64::INFINITY,
@@ -166,7 +166,7 @@ impl Parameter {
             let db = calibration.b.uncertainty;
 
             let dedx = 2.0 * a * x + b;
-            let dedx_unc = ((2.0 * x * da).powi(2) + db.powi(2)).sqrt();
+            let dedx_unc = (2.0 * x * da).hypot(db);
 
             let sigma_e = dedx.abs() * sigma_x;
             let dsigma_e = (dedx * self.uncertainty.unwrap_or(0.0)).hypot(sigma_x * dedx_unc);
@@ -189,7 +189,7 @@ impl Parameter {
             let db = calibration.b.uncertainty;
 
             let dedx = 2.0 * a * x + b;
-            let dedx_unc = ((2.0 * x * da).powi(2) + db.powi(2)).sqrt();
+            let dedx_unc = (2.0 * x * da).hypot(db);
 
             let fwhm_e = dedx.abs() * sigma_x * 2.355;
             let dfwhm_e =
@@ -234,7 +234,7 @@ impl Parameter {
 
         if let Some(value) = self.value {
             ui.separator();
-            ui.label(format!("{:.3}", value));
+            ui.label(format!("{value:.3}"));
             ui.label(format!("{:.3}", self.uncertainty.unwrap_or(0.0)));
         }
     }

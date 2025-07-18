@@ -505,8 +505,8 @@ impl Cebr3 {
     }
 
     #[rustfmt::skip]
-    #[allow(clippy::all)]
-    pub fn cebr3_configs(&self, sps_config: SPSConfig, main_cuts: Option<Cuts>) -> Configs {
+    #[expect(clippy::all)]
+    pub fn cebr3_configs(&self, sps_config: &SPSConfig, main_cuts: &Option<Cuts>) -> Configs {
 
         if !self.active {
             return Configs::default();

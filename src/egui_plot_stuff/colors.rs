@@ -24,7 +24,7 @@ pub const COLOR_OPTIONS: &[(Color32, &str)] = &[
     (Color32::LIGHT_BLUE, "Light Blue"),
 ];
 
-#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize, PartialEq)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 pub struct Rgb {
     pub r: u8,
     pub g: u8,
@@ -33,7 +33,7 @@ pub struct Rgb {
 
 impl Rgb {
     pub fn from_color32(color: Color32) -> Self {
-        Rgb {
+        Self {
             r: color.r(),
             g: color.g(),
             b: color.b(),

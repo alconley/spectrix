@@ -85,7 +85,7 @@ impl BackgroundPair {
 
     pub fn new(start: EguiVerticalLine, end: EguiVerticalLine) -> Self {
         let mut line = EguiLine::new(egui::Color32::from_rgb(0, 200, 0));
-        line.name = "Background Pair".to_string();
+        line.name = "Background Pair".to_owned();
         line.reference_fill = true;
         line.fill = 0.0;
         line.width = 0.0;
@@ -168,23 +168,29 @@ impl FitMarkers {
 
         let mut marker = EguiVerticalLine::new(x, egui::Color32::BLUE);
         marker.width = 0.5;
-        marker.name = format!("Region Marker (x={:.2})", x);
+        marker.name = format!("Region Marker (x={x:.2})");
 
         self.region_markers.push(marker);
 
-        self.region_markers
-            .sort_by(|a, b| a.x_value.partial_cmp(&b.x_value).unwrap());
+        self.region_markers.sort_by(|a, b| {
+            a.x_value
+                .partial_cmp(&b.x_value)
+                .expect("Region markers should be sortable")
+        });
     }
 
     pub fn add_peak_marker(&mut self, x: f64) {
         let mut marker = EguiVerticalLine::new(x, egui::Color32::from_rgb(225, 0, 255));
 
         marker.width = 0.5;
-        marker.name = format!("Peak Marker (x={:.2})", x);
+        marker.name = format!("Peak Marker (x={x:.2})");
 
         self.peak_markers.push(marker);
-        self.peak_markers
-            .sort_by(|a, b| a.x_value.partial_cmp(&b.x_value).unwrap());
+        self.peak_markers.sort_by(|a, b| {
+            a.x_value
+                .partial_cmp(&b.x_value)
+                .expect("Peak markers should be sortable")
+        });
     }
 
     pub fn add_background_pair(&mut self, x: f64, bin_width: f64) {
@@ -222,45 +228,6 @@ impl FitMarkers {
         }
     }
 
-    // pub fn delete_closest_marker(&mut self, cursor_position: Some(PlotPoint)) {
-    //     if let Some(cursor_pos) = self.cursor_position {
-    //         let mut all_markers: Vec<(f64, &str)> = vec![];
-
-    //         all_markers.extend(self.region_markers.iter().map(|x| (x.x_value, "region")));
-    //         all_markers.extend(self.peak_markers.iter().map(|x| (x.x_value, "peak")));
-    //         // all_markers.extend(
-    //         //     self.background_markers
-    //         //         .iter()
-    //         //         .map(|x| (x.x_value, "background")),
-    //         // );
-
-    //         all_markers.extend(
-    //             self.background_markers
-    //                 .iter()
-    //                 .map(|x| (x.average_x(), "background")),
-    //         );
-
-    //         if let Some(&(closest_marker, marker_type)) =
-    //             all_markers.iter().min_by(|(x1, _), (x2, _)| {
-    //                 let dist1 = (cursor_pos.x - x1).abs();
-    //                 let dist2 = (cursor_pos.x - x2).abs();
-    //                 dist1.partial_cmp(&dist2).unwrap()
-    //             })
-    //         {
-    //             match marker_type {
-    //                 "region" => Self::delete_marker(&mut self.region_markers, closest_marker),
-    //                 "peak" => Self::delete_marker(&mut self.peak_markers, closest_marker),
-    //                 "background" => {
-    //                     // Self::delete_marker(&mut self.background_markers, closest_marker)
-    //                     self.background_markers
-    //                         .retain(|x| x.average_x() != closest_marker);
-    //                 }
-    //                 _ => {}
-    //             }
-    //         }
-    //     }
-    // }
-
     pub fn delete_closest_marker(&mut self, cursor_x: f64) {
         let mut all_markers: Vec<(f64, &str)> = vec![];
 
@@ -276,7 +243,7 @@ impl FitMarkers {
             all_markers.iter().min_by(|(x1, _), (x2, _)| {
                 let dist1 = (cursor_x - x1).abs();
                 let dist2 = (cursor_x - x2).abs();
-                dist1.partial_cmp(&dist2).unwrap()
+                dist1.partial_cmp(&dist2).expect("Comparison failed")
             })
         {
             match marker_type {

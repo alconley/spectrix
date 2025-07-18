@@ -31,10 +31,10 @@ impl Configs {
             config.cuts = cuts.clone();
         }
 
-        self.configs.push(Config::Hist1D(config))
+        self.configs.push(Config::Hist1D(config));
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn hist2d(
         &mut self,
         name: &str,
@@ -55,20 +55,15 @@ impl Configs {
         self.configs.push(Config::Hist2D(config));
     }
 
-    pub fn merge(&mut self, other: Configs) -> &mut Self {
+    pub fn merge(&mut self, other: Self) -> &mut Self {
         // Merge configurations
         for config in other.configs {
             match &config {
                 Config::Hist1D(other_hist1d) => {
-                    if let Some(existing) = self
-                        .configs
-                        .iter()
-                        .filter_map(|c| match c {
-                            Config::Hist1D(h) if h.name == other_hist1d.name => Some(h),
-                            _ => None,
-                        })
-                        .next()
-                    {
+                    if let Some(existing) = self.configs.iter().find_map(|c| match c {
+                        Config::Hist1D(h) if h.name == other_hist1d.name => Some(h),
+                        _ => None,
+                    }) {
                         if existing.column_name != other_hist1d.column_name
                             && existing.range == other_hist1d.range
                             && existing.bins == other_hist1d.bins
@@ -86,15 +81,10 @@ impl Configs {
                     }
                 }
                 Config::Hist2D(other_hist2d) => {
-                    if let Some(existing) = self
-                        .configs
-                        .iter()
-                        .filter_map(|c| match c {
-                            Config::Hist2D(h) if h.name == other_hist2d.name => Some(h),
-                            _ => None,
-                        })
-                        .next()
-                    {
+                    if let Some(existing) = self.configs.iter().find_map(|c| match c {
+                        Config::Hist2D(h) if h.name == other_hist2d.name => Some(h),
+                        _ => None,
+                    }) {
                         if (existing.x_column_name != other_hist2d.x_column_name
                             || existing.y_column_name != other_hist2d.y_column_name)
                             && existing.x_range == other_hist2d.x_range
@@ -139,11 +129,11 @@ impl Configs {
         self
     }
 
-    pub fn valid_configs(&mut self, lf: &mut LazyFrame) -> Configs {
+    pub fn valid_configs(&mut self, lf: &mut LazyFrame) -> Self {
         // Add new computed columns to the LazyFrame
         for (expression, alias) in &self.columns {
             if let Err(e) = add_computed_column(lf, expression, alias) {
-                log::error!("Error adding computed column '{}': {}", alias, e);
+                log::error!("Error adding computed column '{alias}': {e}");
             }
         }
 
@@ -151,8 +141,8 @@ impl Configs {
         let column_names = match get_column_names_from_lazyframe(lf) {
             Ok(names) => names,
             Err(e) => {
-                log::error!("Failed to retrieve column names: {:?}", e);
-                return Configs::default(); // Return default Configs on error
+                log::error!("Failed to retrieve column names: {e:?}");
+                return Self::default(); // Return default Configs on error
             }
         };
 
@@ -286,7 +276,7 @@ impl Configs {
         }
 
         // Return a new Configs instance with validated configurations and cuts
-        Configs {
+        Self {
             configs: valid_configs,
             columns: self.columns.clone(),
             cuts: valid_cuts,
@@ -351,7 +341,7 @@ impl Configs {
         used_column_names
     }
 
-    fn expand(&self) -> Configs {
+    fn expand(&self) -> Self {
         let mut expanded_configs: Vec<Config> = Vec::new();
 
         for config in &self.configs {
@@ -371,7 +361,7 @@ impl Configs {
             }
         }
 
-        Configs {
+        Self {
             configs: expanded_configs,
             columns: self.columns.clone(),
             cuts: self.cuts.clone(),
@@ -388,8 +378,8 @@ impl Configs {
 
             if ui.button("+1D").clicked() {
                 self.configs.push(Config::Hist1D(Hist1DConfig {
-                    name: "".to_string(),
-                    column_name: "".to_string(),
+                    name: String::new(),
+                    column_name: String::new(),
                     range: (0.0, 4096.0),
                     bins: 512,
                     cuts: Cuts::default(),
@@ -400,9 +390,9 @@ impl Configs {
 
             if ui.button("+2D").clicked() {
                 self.configs.push(Config::Hist2D(Hist2DConfig {
-                    name: "".to_string(),
-                    x_column_name: "".to_string(),
-                    y_column_name: "".to_string(),
+                    name: String::new(),
+                    x_column_name: String::new(),
+                    y_column_name: String::new(),
                     x_range: (0.0, 4096.0),
                     y_range: (0.0, 4096.0),
                     bins: (512, 512),
@@ -458,10 +448,7 @@ impl Configs {
                 for (index, config) in self.configs.iter_mut().enumerate() {
                     body.row(18.0, |mut row| {
                         row.col(|ui| match config {
-                            Config::Hist1D(_) => {
-                                ui.label(format!("{index}"));
-                            }
-                            Config::Hist2D(_) => {
+                            Config::Hist2D(_) | Config::Hist1D(_) => {
                                 ui.label(format!("{index}"));
                             }
                         });
@@ -491,7 +478,7 @@ impl Configs {
             ui.label("Column Creation");
 
             if ui.button("+").clicked() {
-                self.columns.push(("".to_string(), "".to_string()));
+                self.columns.push((String::new(), String::new()));
             }
 
             ui.separator();
@@ -616,7 +603,7 @@ impl Configs {
         self.config_ui(ui);
     }
 
-    pub fn set_prefix(&mut self, prefix: String) {
+    pub fn set_prefix(&mut self, prefix: &str) {
         for config in &mut self.configs {
             match config {
                 Config::Hist1D(hist1d) => {
@@ -643,8 +630,8 @@ pub struct Hist1DConfig {
 impl Hist1DConfig {
     pub fn new(name: &str, column_name: &str, range: (f64, f64), bins: usize) -> Self {
         Self {
-            name: name.to_string(),
-            column_name: column_name.to_string(),
+            name: name.to_owned(),
+            column_name: column_name.to_owned(),
             range,
             bins,
             cuts: Cuts::default(),
@@ -738,10 +725,10 @@ impl Hist1DConfig {
 
     pub fn expand(&self) -> Vec<Self> {
         // Regex for range pattern `{start-end}`
-        let range_re = regex::Regex::new(r"\{(\d+)-(\d+)\}").unwrap();
+        let range_re = regex::Regex::new(r"\{(\d+)-(\d+)\}").expect("Failed to create range regex");
 
         // Regex for discrete comma-separated values `{val1,val2,...}`
-        let list_re = regex::Regex::new(r"\{([\d,]+)\}").unwrap();
+        let list_re = regex::Regex::new(r"\{([\d,]+)\}").expect("Failed to create list regex");
 
         let mut configs = Vec::new();
 
@@ -749,13 +736,13 @@ impl Hist1DConfig {
             if self.name.contains("{}") {
                 // name has {} and column_name has a range pattern
                 if let Some(caps) = range_re.captures(&self.column_name) {
-                    let start: usize = caps[1].parse().unwrap();
-                    let end: usize = caps[2].parse().unwrap();
+                    let start: usize = caps[1].parse().expect("Failed to parse start range");
+                    let end: usize = caps[2].parse().expect("Failed to parse end range");
 
                     // Loop through start and end values
                     for i in start..=end {
                         let mut new_config = self.clone();
-                        new_config.name = self.name.replace("{}", &i.to_string()).to_string();
+                        new_config.name = self.name.replace("{}", &i.to_string());
                         new_config.column_name = range_re
                             .replace(&self.column_name, i.to_string())
                             .to_string();
@@ -768,7 +755,7 @@ impl Hist1DConfig {
                     let values: Vec<&str> = caps[1].split(',').collect();
                     for val in values {
                         let mut new_config = self.clone();
-                        new_config.name = self.name.replace("{}", val).to_string();
+                        new_config.name = self.name.replace("{}", val);
                         new_config.column_name =
                             list_re.replace(&self.column_name, val).to_string();
                         configs.push(new_config);
@@ -784,8 +771,8 @@ impl Hist1DConfig {
             } else {
                 // No {} in name, but column_name has a range pattern
                 if let Some(caps) = range_re.captures(&self.column_name) {
-                    let start: usize = caps[1].parse().unwrap();
-                    let end: usize = caps[2].parse().unwrap();
+                    let start: usize = caps[1].parse().expect("Failed to parse start range");
+                    let end: usize = caps[2].parse().expect("Failed to parse end range");
 
                     for i in start..=end {
                         let mut new_config = self.clone();
@@ -837,9 +824,9 @@ impl Hist2DConfig {
         bins: (usize, usize),
     ) -> Self {
         Self {
-            name: name.to_string(),
-            x_column_name: x_column_name.to_string(),
-            y_column_name: y_column_name.to_string(),
+            name: name.to_owned(),
+            x_column_name: x_column_name.to_owned(),
+            y_column_name: y_column_name.to_owned(),
             x_range,
             y_range,
             bins,
@@ -969,10 +956,10 @@ impl Hist2DConfig {
 
     pub fn expand(&self) -> Vec<Self> {
         // Regex for range pattern `{start-end}`
-        let range_re = regex::Regex::new(r"\{(\d+)-(\d+)\}").unwrap();
+        let range_re = regex::Regex::new(r"\{(\d+)-(\d+)\}").expect("Failed to create range regex");
 
         // Regex for discrete comma-separated values `{val1,val2,...}`
-        let list_re = regex::Regex::new(r"\{([\d,]+)\}").unwrap();
+        let list_re = regex::Regex::new(r"\{([\d,]+)\}").expect("Failed to create list regex");
 
         let mut configs = Vec::new();
 
@@ -980,8 +967,8 @@ impl Hist2DConfig {
             if self.name.contains("{}") {
                 // Case 1: `{}` in `name`, `x_column_name` has a pattern
                 if let Some(caps) = range_re.captures(&self.x_column_name) {
-                    let start: usize = caps[1].parse().unwrap();
-                    let end: usize = caps[2].parse().unwrap();
+                    let start: usize = caps[1].parse().expect("Failed to parse start range");
+                    let end: usize = caps[2].parse().expect("Failed to parse end range");
                     for i in start..=end {
                         let mut new_config = self.clone();
                         new_config.name = self.name.replace("{}", &i.to_string());
@@ -1004,8 +991,8 @@ impl Hist2DConfig {
                 }
                 // Case 2: `{}` in `name`, `y_column_name` has a pattern
                 else if let Some(caps) = range_re.captures(&self.y_column_name) {
-                    let start: usize = caps[1].parse().unwrap();
-                    let end: usize = caps[2].parse().unwrap();
+                    let start: usize = caps[1].parse().expect("Failed to parse start range");
+                    let end: usize = caps[2].parse().expect("Failed to parse end range");
                     for i in start..=end {
                         let mut new_config = self.clone();
                         new_config.name = self.name.replace("{}", &i.to_string());
@@ -1034,8 +1021,8 @@ impl Hist2DConfig {
             } else {
                 // Static `name`, expand `x_column_name` or `y_column_name` with range or list patterns
                 if let Some(caps) = range_re.captures(&self.x_column_name) {
-                    let start: usize = caps[1].parse().unwrap();
-                    let end: usize = caps[2].parse().unwrap();
+                    let start: usize = caps[1].parse().expect("Failed to parse start range");
+                    let end: usize = caps[2].parse().expect("Failed to parse end range");
                     for i in start..=end {
                         let mut new_config = self.clone();
                         new_config.x_column_name = range_re
@@ -1052,8 +1039,8 @@ impl Hist2DConfig {
                         configs.push(new_config);
                     }
                 } else if let Some(caps) = range_re.captures(&self.y_column_name) {
-                    let start: usize = caps[1].parse().unwrap();
-                    let end: usize = caps[2].parse().unwrap();
+                    let start: usize = caps[1].parse().expect("Failed to parse start range");
+                    let end: usize = caps[2].parse().expect("Failed to parse end range");
                     for i in start..=end {
                         let mut new_config = self.clone();
                         new_config.y_column_name = range_re
@@ -1082,17 +1069,17 @@ use polars::prelude::*;
 use regex::Regex;
 
 fn expr_from_string(expression: &str) -> Result<Expr, PolarsError> {
-    let re = Regex::new(r"(-?\d+\.?\d*|\w+|\*\*|[+*/()-])").unwrap();
+    let re = Regex::new(r"(-?\d+\.?\d*|\w+|\*\*|[+*/()-])").expect("Failed to create regex");
     let tokens: Vec<String> = re
         .find_iter(expression)
-        .map(|m| m.as_str().to_string())
+        .map(|m| m.as_str().to_owned())
         .collect();
 
     let mut expr_stack: Vec<Expr> = Vec::new();
     let mut op_stack: Vec<String> = Vec::new();
 
-    log::debug!("Starting evaluation of expression: '{}'", expression);
-    log::debug!("Tokens: {:?}", tokens);
+    log::debug!("Starting evaluation of expression: '{expression}'");
+    log::debug!("Tokens: {tokens:?}");
 
     let mut i = 0;
     while i < tokens.len() {
@@ -1111,7 +1098,7 @@ fn expr_from_string(expression: &str) -> Result<Expr, PolarsError> {
 
                     if j < tokens.len() && tokens[j].parse::<f64>().is_ok() {
                         // Combine the collapsed operators with the number
-                        let number = tokens[j].parse::<f64>().unwrap();
+                        let number = tokens[j].parse::<f64>().expect("Failed to parse number");
                         expr_stack.push(lit(sign * number));
                         i = j; // Skip to the next token after the number
                         continue;
@@ -1123,7 +1110,10 @@ fn expr_from_string(expression: &str) -> Result<Expr, PolarsError> {
                     if precedence(op) > precedence(token)
                         || (precedence(op) == precedence(token) && is_left_associative(token))
                     {
-                        apply_op(&mut expr_stack, op_stack.pop().unwrap().as_str());
+                        apply_op(
+                            &mut expr_stack,
+                            op_stack.pop().expect("Failed to pop operator").as_str(),
+                        );
                     } else {
                         break;
                     }
@@ -1142,7 +1132,7 @@ fn expr_from_string(expression: &str) -> Result<Expr, PolarsError> {
                 }
             }
             _ if token.parse::<f64>().is_ok() => {
-                let number = token.parse::<f64>().unwrap();
+                let number = token.parse::<f64>().expect("Failed to parse number");
                 expr_stack.push(lit(number));
             }
             _ => {
@@ -1157,7 +1147,7 @@ fn expr_from_string(expression: &str) -> Result<Expr, PolarsError> {
     }
 
     if expr_stack.len() == 1 {
-        Ok(expr_stack.pop().unwrap())
+        Ok(expr_stack.pop().expect("Failed to pop final expression"))
     } else {
         log::error!("Error: Stack ended with more than one expression, invalid expression");
         Err(PolarsError::ComputeError("Invalid expression".into()))
@@ -1174,21 +1164,17 @@ fn precedence(op: &str) -> i32 {
 }
 
 fn is_left_associative(op: &str) -> bool {
-    match op {
-        "+" | "-" | "*" | "/" => true,
-        "**" => false, // Exponentiation is right-associative
-        _ => false,
-    }
+    matches!(op, "+" | "-" | "*" | "/")
 }
 
 fn apply_op(expr_stack: &mut Vec<Expr>, operator: &str) {
     if expr_stack.len() < 2 {
-        log::warn!("Error: Not enough operands for '{}'", operator);
+        log::warn!("Error: Not enough operands for '{operator}'");
         return;
     }
 
-    let right = expr_stack.pop().unwrap();
-    let left = expr_stack.pop().unwrap();
+    let right = expr_stack.pop().expect("Failed to pop right operand");
+    let left = expr_stack.pop().expect("Failed to pop left operand");
 
     let result = match operator {
         "+" => left + right,
@@ -1197,24 +1183,13 @@ fn apply_op(expr_stack: &mut Vec<Expr>, operator: &str) {
         "/" => left / right,
         "**" => left.pow(right),
         _ => {
-            log::error!("Unknown operator: '{}'", operator);
+            log::error!("Unknown operator: '{operator}'");
             return;
         }
     };
 
     expr_stack.push(result);
 }
-
-// fn add_computed_column(
-//     lf: &mut LazyFrame,
-//     expression: &str,
-//     alias: &str,
-// ) -> Result<(), PolarsError> {
-//     let computed_expr = expr_from_string(expression)?;
-//     log::info!("Computed expression: {:?}", computed_expr);
-//     *lf = lf.clone().with_column(computed_expr.alias(alias)); // Use alias for the new column name
-//     Ok(())
-// }
 
 fn add_computed_column(
     lf: &mut LazyFrame,
@@ -1223,44 +1198,24 @@ fn add_computed_column(
 ) -> Result<(), PolarsError> {
     // Attempt to create the computed expression
     let computed_expr = expr_from_string(expression).map_err(|err| {
-        log::error!(
-            "Failed to parse expression: {}. Error: {:?}",
-            expression,
-            err
-        );
-        PolarsError::ComputeError(format!("Error parsing expression: {}", expression).into())
+        log::error!("Failed to parse expression: {expression}. Error: {err:?}");
+        PolarsError::ComputeError(format!("Error parsing expression: {expression}").into())
     })?;
 
     // Safely add the computed column to the LazyFrame
-    log::info!(
-        "Adding computed column '{}' with expression '{}'",
-        alias,
-        expression
-    );
+    log::info!("Adding computed column '{alias}' with expression '{expression}'");
     *lf = lf.clone().with_column(computed_expr.alias(alias));
-    log::info!("Successfully added computed column '{}'", alias);
+    log::info!("Successfully added computed column '{alias}'");
 
     Ok(())
 }
 
-// pub fn get_column_names_from_lazyframe(lf: &LazyFrame) -> Vec<String> {
-//     let lf: LazyFrame = lf.clone().limit(1);
-//     let df: DataFrame = lf.collect().unwrap();
-//     let columns: Vec<String> = df
-//         .get_column_names_owned()
-//         .into_iter()
-//         .map(|name| name.to_string())
-//         .collect();
-
-//     columns
-// }
-
 pub fn get_column_names_from_lazyframe(lf: &LazyFrame) -> Result<Vec<String>, PolarsError> {
-    let lf: LazyFrame = lf.clone().limit(1);
+    let lf = lf.clone().limit(1);
 
     // Attempt to collect the LazyFrame into a DataFrame
-    let df: DataFrame = lf.collect().map_err(|err| {
-        log::error!("Failed to collect LazyFrame: {:?}", err);
+    let df = lf.collect().map_err(|err| {
+        log::error!("Failed to collect LazyFrame: {err:?}");
         err
     })?;
 
