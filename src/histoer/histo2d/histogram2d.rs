@@ -26,21 +26,21 @@ impl Histogram2D {
             name: name.to_owned(),
             bins: Bins {
                 x: bins.0,
-                x_width: (range.0.1 - range.0.0) / bins.0 as f64,
+                x_width: (range.0 .1 - range.0 .0) / bins.0 as f64,
                 y: bins.1,
-                y_width: (range.1.1 - range.1.0) / bins.1 as f64,
+                y_width: (range.1 .1 - range.1 .0) / bins.1 as f64,
                 counts: FnvHashMap::default(),
                 min_count: u64::MAX,
                 max_count: u64::MIN,
             },
             range: Range {
                 x: Value {
-                    min: range.0.0,
-                    max: range.0.1,
+                    min: range.0 .0,
+                    max: range.0 .1,
                 },
                 y: Value {
-                    min: range.1.0,
-                    max: range.1.1,
+                    min: range.1 .0,
+                    max: range.1 .1,
                 },
             },
             overflow: 0,
@@ -48,8 +48,8 @@ impl Histogram2D {
             plot_settings: PlotSettings::default(),
             image: EguiImage::heatmap(
                 name.to_owned(),
-                [range.0.0, range.0.1],
-                [range.1.0, range.1.1],
+                [range.0 .0, range.0 .1],
+                [range.1 .0, range.1 .1],
             ),
             backup_bins: None,
         }

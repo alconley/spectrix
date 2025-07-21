@@ -612,6 +612,11 @@ def load_result(filename: str):
     gaussian_params = []
     additional_params = []
     for i in range(len(peak_markers)):
+        keys = [f'g{i}_amplitude', f'g{i}_center', f'g{i}_sigma', f'g{i}_fwhm', f'g{i}_area']
+        if not all(k in result.params for k in keys):
+            print(f'Skipping peak g{i} due to missing parameters.')
+            continue
+
         amplitude = float(result.params[f'g{i}_amplitude'].value)
         amplitude_uncertainty = result.params[f'g{i}_amplitude'].stderr or 0.0
         mean = float(result.params[f'g{i}_center'].value)

@@ -2,7 +2,7 @@ use egui::{Color32, DragValue, Id, Slider, Stroke, Ui};
 use egui_plot::{LineStyle, PlotResponse, PlotUi, Polygon};
 use geo::Contains as _;
 
-use crate::egui_plot_stuff::colors::{COLOR_OPTIONS, Rgb};
+use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
 pub struct EguiPolygon {

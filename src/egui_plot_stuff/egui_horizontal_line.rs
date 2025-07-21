@@ -1,7 +1,7 @@
 use egui::{Color32, DragValue, Id, Slider, Stroke, Ui};
 use egui_plot::{HLine, LineStyle, PlotResponse, PlotUi};
 
-use crate::egui_plot_stuff::colors::{COLOR_OPTIONS, Rgb};
+use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct EguiHorizontalLine {
