@@ -221,6 +221,12 @@ impl SPSConfig {
             configs.columns.push(("DelayBackRightTime - ScintLeftTime".into(), "DelayBackRightTime_ScintLeftTime".into()));
             configs.columns.push(("ScintRightTime - ScintLeftTime".into(), "ScintRightTime_ScintLeftTime".into()));
 
+            configs.columns.push(("DelayFrontLeftTime_AnodeFrontTime + DelayFrontRightTime_AnodeFrontTime".into(),"tsumF".into()));
+            configs.columns.push(("DelayBackLeftTime_AnodeBackTime + DelayBackRightTime_AnodeBackTime".into(),"tsumB".into()));
+
+            configs.hist2d(&format!("{base_path}/Timing/Timing Sums/tsumF vs X1"), "X1","tsumF", (-400.0, 400.0), (-1000.0, 3000.0), (800, 4000), main_cuts);
+            configs.hist2d(&format!("{base_path}/Timing/Timing Sums/tsumB vs X2"), "X2","tsumB", (-400.0, 400.0), (-1000.0, 3000.0), (800, 4000), main_cuts);
+
             configs.hist1d(&format!("{base_path}/Timing/AnodeFrontTime-AnodeBackTime"), "AnodeFrontTime_AnodeBackTime", (-3000.0, 3000.0), 1000, &cut_timing);
             configs.hist1d(&format!("{base_path}/Timing/AnodeBackTime-AnodeFrontTime"), "AnodeBackTime_AnodeFrontTime", (-3000.0, 3000.0), 1000, &cut_timing);
             configs.hist1d(&format!("{base_path}/Timing/AnodeFrontTime-ScintLeftTime"), "AnodeFrontTime_ScintLeftTime", (-3000.0, 3000.0), 1000, &cut_timing);
