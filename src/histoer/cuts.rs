@@ -3,6 +3,7 @@ use regex::Regex;
 use std::fs::File;
 use std::io::{BufReader, Write as _};
 use std::ops::BitAnd as _;
+use std::path::PathBuf;
 
 use polars::prelude::*;
 
@@ -60,11 +61,15 @@ impl Cut {
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default)]
 pub struct Cuts {
     pub cuts: Vec<Cut>,
+    pub cut_folder: Option<PathBuf>,
 }
 
 impl Cuts {
     pub fn new(cuts: Vec<Cut>) -> Self {
-        Self { cuts }
+        Self {
+            cuts,
+            cut_folder: None,
+        }
     }
 
     pub fn get_active_cuts(&self) -> Self {
@@ -84,6 +89,41 @@ impl Cuts {
         self.cuts.is_empty()
     }
 
+    pub fn get_cuts_in_folder(&self) -> Vec<Cut> {
+        let mut cuts = Vec::new();
+
+        if let Some(folder) = &self.cut_folder {
+            if folder.exists() && folder.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(folder) {
+                    for entry in entries {
+                        let path = entry.expect("Failed to read entry").path();
+                        if let Some(ext) = path.extension() {
+                            if ext == "json" {
+                                let content = std::fs::read_to_string(&path).unwrap_or_default();
+                                let cut1d: Result<Cut1D, _> = serde_json::from_str(&content);
+                                if let Ok(mut cut) = cut1d {
+                                    cut.active = false; // Set active to false by default
+                                    cuts.push(Cut::Cut1D(cut));
+                                    continue;
+                                }
+
+                                let cut2d: Result<Cut2D, _> = serde_json::from_str(&content);
+                                if let Ok(mut cut) = cut2d {
+                                    cut.active = false; // Set active to false by default
+                                    cuts.push(Cut::Cut2D(cut));
+                                    continue;
+                                }
+
+                                log::error!("Invalid cut file: {}. Skipping...", path.display());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        cuts
+    }
     // Add a new cut
     pub fn add_cut(&mut self, cut: Cut) {
         if self.cuts.iter().any(|c| c.name() == cut.name()) {
@@ -120,7 +160,7 @@ impl Cuts {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Cuts");
 
             if ui.button("+1D").clicked() {
@@ -140,10 +180,54 @@ impl Cuts {
 
             ui.separator();
 
+            if ui.button("Add Cut Folder").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("cuts")
+                    .set_directory(self.cut_folder.clone().unwrap_or_default())
+                    .pick_folder()
+                {
+                    self.cut_folder = Some(path);
+
+                    self.cuts = self.get_cuts_in_folder();
+                }
+            }
+
+            // Display an X button to clear the cut folder if it exists
+            if self.cut_folder.is_some() {
+                // Add a refresh button (logo) to reload cuts from the folder
+                if ui.button("🔄").clicked() {
+                    if let Some(folder) = &self.cut_folder {
+                        if folder.exists() && folder.is_dir() {
+                            self.cuts = self.get_cuts_in_folder();
+                        } else {
+                            log::error!("Cut folder is invalid: {}", folder.display());
+                        }
+                    }
+                }
+
+                if ui.button("❌").clicked() {
+                    self.cut_folder = None;
+                    self.cuts.clear(); // Clear cuts when folder is removed
+                }
+            }
+
+            ui.separator();
+
             if ui.button("Remove All").clicked() {
                 self.cuts.clear();
             }
         });
+
+        ui.horizontal_wrapped(|ui| {
+            // Display the path of the cut folder if it exists
+            if let Some(ref path) = self.cut_folder {
+                ui.label(format!("Cut Folder: {}", path.display()));
+            }
+        });
+
+        if self.cut_folder.is_some() {
+            ui.separator();
+        }
 
         if !self.cuts.is_empty() {
             let mut indices_to_remove_cut = Vec::new();

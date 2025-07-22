@@ -4,7 +4,9 @@ impl Histogram {
     // Calculate the statistics for the histogram within the specified x range.
     pub fn get_statistics(&self, start_x: f64, end_x: f64) -> (u64, f64, f64) {
         let start_bin = self.get_bin_index(start_x).unwrap_or(0);
-        let end_bin = self.get_bin_index(end_x).unwrap_or(self.bins.len() - 1);
+        let end_bin = self
+            .get_bin_index(end_x)
+            .unwrap_or(self.bins.len().saturating_sub(1));
 
         let mut sum_product = 0.0;
         let mut total_count = 0;
@@ -46,7 +48,7 @@ impl Histogram {
 
     // Get the legend stat entries for the histogram
     pub fn show_stats(&self, plot_ui: &mut egui_plot::PlotUi<'_>) {
-        if self.plot_settings.stats_info {
+        if self.plot_settings.stats_info && !self.fits.settings.calibrated {
             let plot_min_x = plot_ui.plot_bounds().min()[0];
             let plot_max_x = plot_ui.plot_bounds().max()[0];
 

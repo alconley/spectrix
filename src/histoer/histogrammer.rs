@@ -11,8 +11,8 @@ use pyo3::{prelude::*, types::PyModule};
 use std::collections::HashMap;
 // use std::convert::TryInto;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 
 // Project modules
