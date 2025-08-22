@@ -182,6 +182,7 @@ impl PIPS {
             configs.hist1d(&format!("{base_path}/PIPS{det}/SPS/{pips_rel_time_to_sps_column}"), &pips_rel_time_to_sps_column, no_sps_tcut_time_range, no_sps_tcut_time_bins, &main_cuts);
             configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/{pips_rel_time_to_sps_column} v Xavg"), &pips_rel_time_to_sps_column, &format!("Xavg"), no_sps_tcut_time_range, (-300.0, 300.0), (no_sps_tcut_time_bins, 600), &main_cuts);
             configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/{pips_energy_column} v Xavg"), &format!("Xavg"), &pips_energy_column,(-300.0, 300.0), pips_range, (pips_bins, 600), &main_cuts);
+            configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/{pips_rel_time_to_sps_column} v {pips_energy_column}"), &pips_rel_time_to_sps_column, &pips_energy_column, no_sps_tcut_time_range, pips_range, (no_sps_tcut_time_bins, pips_bins), &main_cuts);
 
             if sps_config.xavg.active {
                 configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/{pips_rel_time_to_sps_column} v XavgEnergyCalibrated"), &pips_rel_time_to_sps_column, &format!("XavgEnergyCalibrated"), no_sps_tcut_time_range, sps_config.xavg.range, (no_sps_tcut_time_bins, sps_config.xavg.bins), &main_cuts);

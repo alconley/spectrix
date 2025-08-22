@@ -5,14 +5,12 @@ use indicatif::{ProgressBar, ProgressStyle};
 use polars::prelude::*;
 use pyo3::ffi::c_str;
 use pyo3::{prelude::*, types::PyModule};
-// use rayon::prelude::*;
 
 // Standard library
 use std::collections::HashMap;
-// use std::convert::TryInto;
 use std::sync::{
-    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
 };
 
 // Project modules
@@ -26,6 +24,12 @@ use super::cuts::Cuts;
 
 use crate::histoer::configs::Hist1DConfig;
 use crate::histoer::configs::Hist2DConfig;
+
+// ADD:
+use crate::egui_plot_stuff::egui_line::EguiLine;
+use crate::fitter::main_fitter::{FitResult, Fitter};
+use crate::fitter::models::gaussian::GaussianFitter;
+use std::path::Path;
 
 #[derive(serde::Deserialize, serde::Serialize, PartialEq, Eq, Debug)]
 pub enum ContainerType {
@@ -192,232 +196,6 @@ impl Histogrammer {
             self.create_2d_pane(name, bins, range);
         }
     }
-
-    // pub fn fill_histograms_row_wise(
-    //     &mut self,
-    //     mut configs: Configs,
-    //     lf: &LazyFrame,
-    //     estimated_memory: f64, // chunk size in GB
-    // ) {
-    //     let calculating = Arc::clone(&self.calculating);
-    //     let abort_flag = Arc::clone(&self.abort_flag);
-    //     let progress = Arc::clone(&self.progress);
-
-    //     // Set calculating to true at the start
-    //     calculating.store(true, Ordering::SeqCst);
-    //     abort_flag.store(false, Ordering::SeqCst);
-
-    //     let mut lf = lf.clone();
-
-    //     let row_count = lf
-    //         .clone()
-    //         .select([len().alias("count")])
-    //         .collect()
-    //         .unwrap()
-    //         .column("count")
-    //         .unwrap()
-    //         .u32()
-    //         .unwrap()
-    //         .get(0)
-    //         .unwrap();
-
-    //     // Validate configurations and prepare histograms
-    //     let valid_configs = configs.valid_configs(&mut lf);
-    //     valid_configs.check_and_add_panes(self);
-
-    //     // if valid configs is empty, return early
-    //     if valid_configs.is_empty() {
-    //         calculating.store(false, Ordering::SeqCst);
-    //         log::error!("No valid configurations found for histograms.");
-    //         return;
-    //     }
-
-    //     // Select required columns from the LazyFrame
-    //     let used_columns = valid_configs.get_used_columns();
-    //     let selected_columns: Vec<_> = used_columns.iter().map(col).collect();
-
-    //     let columns = used_columns.len() as u64;
-    //     let rows = row_count as u64;
-    //     let estimated_gb = estimate_gb(rows, columns);
-
-    //     // Estimate rows per chunk
-    //     let bytes_per_row = columns as f64 * 8.0; // Each f64 is 8 bytes
-    //     let chunk_size_bytes = estimated_memory * 1_073_741_824.0;
-    //     let rows_per_chunk = (chunk_size_bytes / bytes_per_row).floor() as usize;
-
-    //     let progress_bar = ProgressBar::new(row_count as u64);
-    //     progress_bar.set_style(
-    //         ProgressStyle::default_bar()
-    //             .template(
-    //                 "[{elapsed_precise}] {bar:40.cyan/blue} {percent}% ({pos}/{len}) ETA: {eta}",
-    //             )
-    //             .expect("Failed to set progress bar template")
-    //             .progress_chars("#>-"),
-    //     );
-    //     progress_bar.println(format!("Processing ~{:.2} GB of raw data", estimated_gb));
-
-    //     // Apply the selection to the LazyFrame
-    //     let lf = Arc::new(lf.clone().select(selected_columns.clone()));
-
-    //     // Initialize histogram maps
-    //     let hist1d_map: Vec<_> = valid_configs
-    //         .configs
-    //         .iter()
-    //         .filter_map(|config| {
-    //             if let Config::Hist1D(hist1d) = config {
-    //                 self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
-    //                     egui_tiles::Tile::Pane(Pane::Histogram(hist))
-    //                         if hist.lock().unwrap().name == hist1d.name =>
-    //                     {
-    //                         Some((Arc::clone(hist), hist1d.clone()))
-    //                     }
-    //                     _ => None,
-    //                 })
-    //             } else {
-    //                 None
-    //             }
-    //         })
-    //         .collect();
-
-    //     let hist2d_map: Vec<_> = valid_configs
-    //         .configs
-    //         .iter()
-    //         .filter_map(|config| {
-    //             if let Config::Hist2D(hist2d) = config {
-    //                 self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
-    //                     egui_tiles::Tile::Pane(Pane::Histogram2D(hist))
-    //                         if hist.lock().unwrap().name == hist2d.name =>
-    //                     {
-    //                         Some((Arc::clone(hist), hist2d.clone()))
-    //                     }
-    //                     _ => None,
-    //                 })
-    //             } else {
-    //                 None
-    //             }
-    //         })
-    //         .collect();
-
-    //     // let pool = rayon::ThreadPoolBuilder::new()
-    //     //     .num_threads(4) // choose a number lower than the total core count
-    //     //     .build()
-    //     //     .unwrap();
-
-    //     // Spawn the batch processing task asynchronously
-    //     rayon::spawn({
-    //         // pool.spawn({
-    //         let calculating = Arc::clone(&calculating);
-    //         let lf = Arc::clone(&lf); // Clone lf to move into the spawn closure
-    //         let progress_bar = progress_bar.clone();
-    //         let total_rows = row_count as f32;
-
-    //         move || {
-    //             let mut row_start = 0;
-    //             loop {
-    //                 if abort_flag.load(Ordering::SeqCst) {
-    //                     println!("Processing aborted by user.");
-    //                     break;
-    //                 }
-    //                 // Slice the LazyFrame into batches
-    //                 let batch_lf = lf
-    //                     .as_ref()
-    //                     .clone()
-    //                     .slice(row_start as i64, rows_per_chunk.try_into().unwrap());
-
-    //                 // Break if no rows are left to process
-    //                 if batch_lf.clone().limit(1).collect().unwrap().height() == 0 {
-    //                     break;
-    //                 }
-
-    //                 if let Ok(df) = batch_lf.collect() {
-    //                     let height = df.height();
-
-    //                     // --- Process 1D histograms ---
-    //                     hist1d_map.par_iter().for_each(|(hist, meta)| {
-    //                         if let Ok(column) = df.column(&meta.column_name).and_then(|c| c.f64()) {
-    //                             // Buffer valid updates outside the lock:
-    //                             let valid_values: Vec<f64> = column
-    //                                 .into_no_null_iter()
-    //                                 .enumerate()
-    //                                 .filter_map(|(index, value)| {
-    //                                     if value != -1e6 && meta.cuts.valid(&df, index) {
-    //                                         Some(value)
-    //                                     } else {
-    //                                         None
-    //                                     }
-    //                                 })
-    //                                 .collect();
-
-    //                             // Lock only once to update the histogram:
-    //                             {
-    //                                 let mut hist_guard = hist.lock().unwrap();
-    //                                 for value in valid_values {
-    //                                     hist_guard.fill(value);
-    //                                 }
-    //                                 // Update the plot settings once after processing the batch.
-    //                                 hist_guard.plot_settings.egui_settings.reset_axis = true;
-    //                             }
-    //                         }
-    //                     });
-
-    //                     // --- Process 2D histograms ---
-    //                     hist2d_map.par_iter().for_each(|(hist, meta)| {
-    //                         if let (Ok(x_col), Ok(y_col)) = (
-    //                             df.column(&meta.x_column_name).and_then(|c| c.f64()),
-    //                             df.column(&meta.y_column_name).and_then(|c| c.f64()),
-    //                         ) {
-    //                             // Buffer valid (x, y) pairs outside the lock:
-    //                             let valid_pairs: Vec<(f64, f64)> = x_col
-    //                                 .into_no_null_iter()
-    //                                 .zip(y_col.into_no_null_iter())
-    //                                 .enumerate()
-    //                                 .filter_map(|(index, (x, y))| {
-    //                                     if x != -1e6 && y != -1e6 && meta.cuts.valid(&df, index) {
-    //                                         Some((x, y))
-    //                                     } else {
-    //                                         None
-    //                                     }
-    //                                 })
-    //                                 .collect();
-
-    //                             // Lock once to update the 2D histogram:
-    //                             {
-    //                                 let mut hist_guard = hist.lock().unwrap();
-    //                                 for (x, y) in valid_pairs {
-    //                                     hist_guard.fill(x, y);
-    //                                 }
-    //                                 // Update plot settings after processing the batch.
-    //                                 hist_guard.plot_settings.recalculate_image = true;
-    //                                 hist_guard.plot_settings.egui_settings.reset_axis = true;
-    //                                 hist_guard.plot_settings.x_column = meta.x_column_name.clone();
-    //                                 hist_guard.plot_settings.y_column = meta.y_column_name.clone();
-    //                             }
-    //                         }
-    //                     });
-
-    //                     progress_bar.inc(height as u64);
-
-    //                     // Update progress as a percentage
-    //                     let completed_rows = row_start as f32 + height as f32;
-    //                     let percentage = completed_rows / total_rows;
-    //                     {
-    //                         let mut progress_lock = progress.lock().unwrap();
-    //                         *progress_lock = percentage;
-    //                     }
-    //                 }
-
-    //                 row_start += rows_per_chunk;
-    //             }
-
-    //             let mut progress_lock = progress.lock().unwrap();
-    //             *progress_lock = 1.0;
-
-    //             progress_bar.finish_with_message("Processing complete.");
-    //             // Set calculating to false when processing is complete
-    //             calculating.store(false, Ordering::SeqCst);
-    //         }
-    //     });
-    // }
 
     pub fn fill_histograms_column_wise(
         &mut self,
@@ -889,6 +667,11 @@ impl Histogrammer {
                         }
                     }
                 }
+
+                // ADD directly after the export button block:
+                if ui.button("Import All lmfit Fits to Histograms").clicked() {
+                    self.import_all_lmfit_to_histograms_from_folder();
+                }
             }
         });
     }
@@ -1268,6 +1051,7 @@ import uproot
 def write_histograms(output_file, hist1d_data, hist2d_data):
     with uproot.recreate(output_file) as file:
         for name, title, bins, underflow, overflow, range in hist1d_data:
+            name = name.replace(' ', '_')
             # Create bin edges for the histogram
             bin_edges = np.linspace(range[0], range[1], len(bins) + 1)
             
@@ -1309,6 +1093,7 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
             
         # Write 2D histograms
         for name, title, bins, range_x, range_y in hist2d_data:
+            name = name.replace(' ', '_')
             bins = np.array(bins, dtype=np.float32)
             # Flatten the 2D array with added underflow/overflow bins
             bins_with_overflow = np.zeros((bins.shape[0] + 2, bins.shape[1] + 2), dtype=np.float32)
@@ -1447,6 +1232,124 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
             Ok(())
         })
     }
+
+    pub fn import_all_lmfit_to_histograms_from_folder_path(&mut self, folder: &Path) {
+        fn sanitize_name_for_filename(s: &str) -> String {
+            s.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
+        }
+        fn stem_before_fit(stem: &str) -> &str {
+            stem.split_once("_fit").map(|(lhs, _)| lhs).unwrap_or(stem)
+        }
+
+        // Build a lookup of sanitized histogram names -> Arc<Mutex<Box<Histogram>>>
+        use std::collections::HashMap;
+        let mut lookup: HashMap<String, Arc<Mutex<Box<Histogram>>>> = HashMap::new();
+        for (_id, tile) in self.tree.tiles.iter_mut() {
+            if let egui_tiles::Tile::Pane(Pane::Histogram(h)) = tile {
+                let name = {
+                    let guard = h.lock().expect("Failed to lock histogram");
+                    guard.name.clone()
+                };
+                let key = sanitize_name_for_filename(&name);
+                lookup.insert(key, Arc::clone(h));
+            }
+        }
+
+        let read_dir = match std::fs::read_dir(folder) {
+            Ok(it) => it,
+            Err(e) => {
+                log::error!("Failed to read folder {}: {:?}", folder.display(), e);
+                return;
+            }
+        };
+
+        // Collect & sort .sav files for stable ordering
+        let mut sav_paths: Vec<_> = read_dir
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("sav"))
+            })
+            .collect();
+        sav_paths.sort();
+
+        let mut imported = 0usize;
+
+        for path in sav_paths {
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            let base = stem_before_fit(stem).to_owned();
+
+            // primary: sanitized match; fallback: exact (unsanitized) match if export never sanitized
+            let target_hist = lookup
+                .get(&base)
+                .or_else(|| lookup.get(&sanitize_name_for_filename(&base)));
+
+            let Some(hist_arc) = target_hist.cloned() else {
+                log::warn!(
+                    "No matching histogram for '{}'; file '{}'",
+                    base,
+                    path.display()
+                );
+                continue;
+            };
+
+            let mut gaussian_fitter = GaussianFitter::default();
+            match gaussian_fitter.lmfit(Some(path.clone())) {
+                Ok(_) => {
+                    let mut new_fitter = Fitter::default();
+                    new_fitter.set_name(base.clone());
+
+                    // Composition (total fit curve)
+                    new_fitter.composition_line.points = gaussian_fitter.fit_points.clone();
+
+                    // Decomposition (components)
+                    for (i, fit) in gaussian_fitter.fit_result.iter().enumerate() {
+                        let mut line = EguiLine::new(egui::Color32::from_rgb(150, 0, 255));
+                        line.points = fit.fit_points.clone();
+                        line.name = format!("{base} Decomposition {i}");
+                        new_fitter.decomposition_lines.push(line);
+                    }
+
+                    // Background
+                    if let Some(background_result) = &gaussian_fitter.background_result {
+                        new_fitter.background_result = Some(background_result.clone());
+                        new_fitter.background_line.points = background_result.get_fit_points();
+                    }
+
+                    new_fitter.fit_result = Some(FitResult::Gaussian(gaussian_fitter.clone()));
+
+                    {
+                        let mut hist = hist_arc.lock().expect("Failed to lock histogram");
+                        hist.fits.stored_fits.push(new_fitter);
+                        hist.plot_settings.egui_settings.reset_axis = true;
+                    }
+
+                    imported += 1;
+                    log::info!("Imported lmfit for '{}' from {}", base, path.display());
+                }
+                Err(e) => {
+                    log::error!("Failed to import {}: {:?}", path.display(), e);
+                }
+            }
+        }
+
+        if imported == 0 {
+            log::warn!("No .sav files were imported; check filename ↔ histogram name mapping.");
+        } else {
+            log::info!("Imported {imported} lmfit file(s).");
+        }
+    }
+
+    // ADD: convenience wrapper that opens a folder picker
+    pub fn import_all_lmfit_to_histograms_from_folder(&mut self) {
+        if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+            self.import_all_lmfit_to_histograms_from_folder_path(&folder);
+        }
+    }
 }
 
 fn tree_ui(
@@ -1509,4 +1412,230 @@ fn tree_ui(
 //     let total_bytes = rows * columns * 8;
 //     // Convert bytes to gigabytes
 //     total_bytes as f64 / 1024.0 / 1024.0 / 1024.0
+// }
+
+// pub fn fill_histograms_row_wise(
+//     &mut self,
+//     mut configs: Configs,
+//     lf: &LazyFrame,
+//     estimated_memory: f64, // chunk size in GB
+// ) {
+//     let calculating = Arc::clone(&self.calculating);
+//     let abort_flag = Arc::clone(&self.abort_flag);
+//     let progress = Arc::clone(&self.progress);
+
+//     // Set calculating to true at the start
+//     calculating.store(true, Ordering::SeqCst);
+//     abort_flag.store(false, Ordering::SeqCst);
+
+//     let mut lf = lf.clone();
+
+//     let row_count = lf
+//         .clone()
+//         .select([len().alias("count")])
+//         .collect()
+//         .unwrap()
+//         .column("count")
+//         .unwrap()
+//         .u32()
+//         .unwrap()
+//         .get(0)
+//         .unwrap();
+
+//     // Validate configurations and prepare histograms
+//     let valid_configs = configs.valid_configs(&mut lf);
+//     valid_configs.check_and_add_panes(self);
+
+//     // if valid configs is empty, return early
+//     if valid_configs.is_empty() {
+//         calculating.store(false, Ordering::SeqCst);
+//         log::error!("No valid configurations found for histograms.");
+//         return;
+//     }
+
+//     // Select required columns from the LazyFrame
+//     let used_columns = valid_configs.get_used_columns();
+//     let selected_columns: Vec<_> = used_columns.iter().map(col).collect();
+
+//     let columns = used_columns.len() as u64;
+//     let rows = row_count as u64;
+//     let estimated_gb = estimate_gb(rows, columns);
+
+//     // Estimate rows per chunk
+//     let bytes_per_row = columns as f64 * 8.0; // Each f64 is 8 bytes
+//     let chunk_size_bytes = estimated_memory * 1_073_741_824.0;
+//     let rows_per_chunk = (chunk_size_bytes / bytes_per_row).floor() as usize;
+
+//     let progress_bar = ProgressBar::new(row_count as u64);
+//     progress_bar.set_style(
+//         ProgressStyle::default_bar()
+//             .template(
+//                 "[{elapsed_precise}] {bar:40.cyan/blue} {percent}% ({pos}/{len}) ETA: {eta}",
+//             )
+//             .expect("Failed to set progress bar template")
+//             .progress_chars("#>-"),
+//     );
+//     progress_bar.println(format!("Processing ~{:.2} GB of raw data", estimated_gb));
+
+//     // Apply the selection to the LazyFrame
+//     let lf = Arc::new(lf.clone().select(selected_columns.clone()));
+
+//     // Initialize histogram maps
+//     let hist1d_map: Vec<_> = valid_configs
+//         .configs
+//         .iter()
+//         .filter_map(|config| {
+//             if let Config::Hist1D(hist1d) = config {
+//                 self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
+//                     egui_tiles::Tile::Pane(Pane::Histogram(hist))
+//                         if hist.lock().unwrap().name == hist1d.name =>
+//                     {
+//                         Some((Arc::clone(hist), hist1d.clone()))
+//                     }
+//                     _ => None,
+//                 })
+//             } else {
+//                 None
+//             }
+//         })
+//         .collect();
+
+//     let hist2d_map: Vec<_> = valid_configs
+//         .configs
+//         .iter()
+//         .filter_map(|config| {
+//             if let Config::Hist2D(hist2d) = config {
+//                 self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
+//                     egui_tiles::Tile::Pane(Pane::Histogram2D(hist))
+//                         if hist.lock().unwrap().name == hist2d.name =>
+//                     {
+//                         Some((Arc::clone(hist), hist2d.clone()))
+//                     }
+//                     _ => None,
+//                 })
+//             } else {
+//                 None
+//             }
+//         })
+//         .collect();
+
+//     // let pool = rayon::ThreadPoolBuilder::new()
+//     //     .num_threads(4) // choose a number lower than the total core count
+//     //     .build()
+//     //     .unwrap();
+
+//     // Spawn the batch processing task asynchronously
+//     rayon::spawn({
+//         // pool.spawn({
+//         let calculating = Arc::clone(&calculating);
+//         let lf = Arc::clone(&lf); // Clone lf to move into the spawn closure
+//         let progress_bar = progress_bar.clone();
+//         let total_rows = row_count as f32;
+
+//         move || {
+//             let mut row_start = 0;
+//             loop {
+//                 if abort_flag.load(Ordering::SeqCst) {
+//                     println!("Processing aborted by user.");
+//                     break;
+//                 }
+//                 // Slice the LazyFrame into batches
+//                 let batch_lf = lf
+//                     .as_ref()
+//                     .clone()
+//                     .slice(row_start as i64, rows_per_chunk.try_into().unwrap());
+
+//                 // Break if no rows are left to process
+//                 if batch_lf.clone().limit(1).collect().unwrap().height() == 0 {
+//                     break;
+//                 }
+
+//                 if let Ok(df) = batch_lf.collect() {
+//                     let height = df.height();
+
+//                     // --- Process 1D histograms ---
+//                     hist1d_map.par_iter().for_each(|(hist, meta)| {
+//                         if let Ok(column) = df.column(&meta.column_name).and_then(|c| c.f64()) {
+//                             // Buffer valid updates outside the lock:
+//                             let valid_values: Vec<f64> = column
+//                                 .into_no_null_iter()
+//                                 .enumerate()
+//                                 .filter_map(|(index, value)| {
+//                                     if value != -1e6 && meta.cuts.valid(&df, index) {
+//                                         Some(value)
+//                                     } else {
+//                                         None
+//                                     }
+//                                 })
+//                                 .collect();
+
+//                             // Lock only once to update the histogram:
+//                             {
+//                                 let mut hist_guard = hist.lock().unwrap();
+//                                 for value in valid_values {
+//                                     hist_guard.fill(value);
+//                                 }
+//                                 // Update the plot settings once after processing the batch.
+//                                 hist_guard.plot_settings.egui_settings.reset_axis = true;
+//                             }
+//                         }
+//                     });
+
+//                     // --- Process 2D histograms ---
+//                     hist2d_map.par_iter().for_each(|(hist, meta)| {
+//                         if let (Ok(x_col), Ok(y_col)) = (
+//                             df.column(&meta.x_column_name).and_then(|c| c.f64()),
+//                             df.column(&meta.y_column_name).and_then(|c| c.f64()),
+//                         ) {
+//                             // Buffer valid (x, y) pairs outside the lock:
+//                             let valid_pairs: Vec<(f64, f64)> = x_col
+//                                 .into_no_null_iter()
+//                                 .zip(y_col.into_no_null_iter())
+//                                 .enumerate()
+//                                 .filter_map(|(index, (x, y))| {
+//                                     if x != -1e6 && y != -1e6 && meta.cuts.valid(&df, index) {
+//                                         Some((x, y))
+//                                     } else {
+//                                         None
+//                                     }
+//                                 })
+//                                 .collect();
+
+//                             // Lock once to update the 2D histogram:
+//                             {
+//                                 let mut hist_guard = hist.lock().unwrap();
+//                                 for (x, y) in valid_pairs {
+//                                     hist_guard.fill(x, y);
+//                                 }
+//                                 // Update plot settings after processing the batch.
+//                                 hist_guard.plot_settings.recalculate_image = true;
+//                                 hist_guard.plot_settings.egui_settings.reset_axis = true;
+//                                 hist_guard.plot_settings.x_column = meta.x_column_name.clone();
+//                                 hist_guard.plot_settings.y_column = meta.y_column_name.clone();
+//                             }
+//                         }
+//                     });
+
+//                     progress_bar.inc(height as u64);
+
+//                     // Update progress as a percentage
+//                     let completed_rows = row_start as f32 + height as f32;
+//                     let percentage = completed_rows / total_rows;
+//                     {
+//                         let mut progress_lock = progress.lock().unwrap();
+//                         *progress_lock = percentage;
+//                     }
+//                 }
+
+//                 row_start += rows_per_chunk;
+//             }
+
+//             let mut progress_lock = progress.lock().unwrap();
+//             *progress_lock = 1.0;
+
+//             progress_bar.finish_with_message("Processing complete.");
+//             // Set calculating to false when processing is complete
+//             calculating.store(false, Ordering::SeqCst);
+//         }
+//     });
 // }
