@@ -6,6 +6,7 @@ use pyo3::ffi::c_str;
 use pyo3::{prelude::*, types::PyModule};
 
 use egui_file_dialog::FileDialog;
+use polars::prelude::PlPath;
 use polars::prelude::*;
 
 use std::path::PathBuf;
@@ -262,7 +263,12 @@ def get_2d_histograms(file_name):
             return;
         }
 
-        let files_arc: Arc<[PathBuf]> = Arc::from(parquet_files);
+        let files_arc: Arc<[PlPath]> = Arc::from(
+            parquet_files
+                .into_iter()
+                .map(|p: PathBuf| PlPath::Local(Arc::from(p.into_boxed_path())))
+                .collect::<Vec<_>>(),
+        );
         let args = ScanArgsParquet::default();
         log::info!("Processing Parquet files: {files_arc:?}");
 
@@ -324,7 +330,7 @@ def get_2d_histograms(file_name):
 
                 // Load and collect one file at a time
                 match LazyFrame::scan_parquet(
-                    file.to_str().expect("Failed to convert path to str"),
+                    PlPath::Local(Arc::from(file.clone().into_boxed_path())),
                     Default::default(),
                 ) {
                     Ok(lf) => {
@@ -389,7 +395,7 @@ def get_2d_histograms(file_name):
                 for file in &parquet_files {
                     log::info!("Reading file: {file:?}");
                     match LazyFrame::scan_parquet(
-                        file.to_str().expect("Failed to convert path to str"),
+                        PlPath::Local(Arc::from(file.clone().into_boxed_path())),
                         Default::default(),
                     ) {
                         Ok(lf) => lazyframes.push(lf),
@@ -478,7 +484,7 @@ def get_2d_histograms(file_name):
                     .map(|stem| stem.to_string_lossy().to_string());
 
                 if file.extension().is_some_and(|ext| ext == "parquet") {
-                    self.create_lazyframe(&[file.clone()]);
+                    self.create_lazyframe(std::slice::from_ref(file));
                     self.perform_histogrammer_from_lazyframe(prefix);
                 }
             }
@@ -524,11 +530,10 @@ def get_2d_histograms(file_name):
                                 if let Ok(entries) = std::fs::read_dir(&path) {
                                     for entry in entries.flatten() {
                                         let file_path = entry.path();
-                                        if let Some(ext) = file_path.extension() {
-                                            if (ext == "parquet" || ext == "root") && !self.selected_files.iter().any(|(f, _)| f == &file_path) {
+                                        if let Some(ext) = file_path.extension()
+                                            && (ext == "parquet" || ext == "root") && !self.selected_files.iter().any(|(f, _)| f == &file_path) {
                                                 self.selected_files.push((file_path, true)); // Default to selected
                                             }
-                                        }
                                     }
                                 }
                             } else if let Some(ext) = path.extension() {
@@ -668,8 +673,8 @@ def get_2d_histograms(file_name):
                             if let Ok(entries) = std::fs::read_dir(common_dir) {
                                 for entry in entries.flatten() {
                                     let file_path = entry.path();
-                                    if let Some(ext) = file_path.extension() {
-                                        if (ext == "parquet" || ext == "root")
+                                    if let Some(ext) = file_path.extension()
+                                        && (ext == "parquet" || ext == "root")
                                             && !self
                                                 .selected_files
                                                 .iter()
@@ -678,7 +683,6 @@ def get_2d_histograms(file_name):
                                             self.selected_files.push((file_path, false));
                                             // Default to selected
                                         }
-                                    }
                                 }
                             }
                             // sort the selected files by name

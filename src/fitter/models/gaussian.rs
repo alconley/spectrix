@@ -253,11 +253,10 @@ impl GaussianFitter {
                 params.energy.uncertainty,
                 params.mean.value,
                 params.mean.uncertainty,
-            ) {
-                if energy != -1.0 {
+            )
+                && energy != -1.0 {
                     calibration_data.push((mean, mean_unc, energy, energy_unc));
                 }
-            }
         }
 
         calibration_data
@@ -1508,9 +1507,9 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
             });
 
             if i == 0 {
-                if let Some(ref text) = self.lmfit_result {
-                    if ui.button("Export").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
+                if let Some(ref text) = self.lmfit_result
+                    && ui.button("Export").clicked()
+                        && let Some(path) = rfd::FileDialog::new()
                             .set_file_name("fit_result.txt")
                             .save_file()
                         {
@@ -1520,8 +1519,6 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
                                 log::info!("Saved lmfit result to {path:?}");
                             }
                         }
-                    }
-                }
 
                 ui.menu_button("Fit Report", |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {

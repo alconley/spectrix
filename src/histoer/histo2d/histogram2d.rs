@@ -26,21 +26,21 @@ impl Histogram2D {
             name: name.to_owned(),
             bins: Bins {
                 x: bins.0,
-                x_width: (range.0 .1 - range.0 .0) / bins.0 as f64,
+                x_width: (range.0.1 - range.0.0) / bins.0 as f64,
                 y: bins.1,
-                y_width: (range.1 .1 - range.1 .0) / bins.1 as f64,
+                y_width: (range.1.1 - range.1.0) / bins.1 as f64,
                 counts: FnvHashMap::default(),
                 min_count: u64::MAX,
                 max_count: u64::MIN,
             },
             range: Range {
                 x: Value {
-                    min: range.0 .0,
-                    max: range.0 .1,
+                    min: range.0.0,
+                    max: range.0.1,
                 },
                 y: Value {
-                    min: range.1 .0,
-                    max: range.1 .1,
+                    min: range.1.0,
+                    max: range.1.1,
                 },
             },
             overflow: 0,
@@ -48,8 +48,8 @@ impl Histogram2D {
             plot_settings: PlotSettings::default(),
             image: EguiImage::heatmap(
                 name.to_owned(),
-                [range.0 .0, range.0 .1],
-                [range.1 .0, range.1 .1],
+                [range.0.0, range.0.1],
+                [range.1.0, range.1.1],
             ),
             backup_bins: None,
         }
@@ -309,8 +309,8 @@ impl Histogram2D {
         let plot_response = plot.show(ui, |plot_ui| {
             self.draw(plot_ui);
 
-            if self.plot_settings.cursor_position.is_some() {
-                if let Some(delta_pos) = scroll {
+            if self.plot_settings.cursor_position.is_some()
+                && let Some(delta_pos) = scroll {
                     if delta_pos.y > 0.0 {
                         plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.1));
                     } else if delta_pos.y < 0.0 {
@@ -321,7 +321,6 @@ impl Histogram2D {
                         plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 0.9));
                     }
                 }
-            }
         });
 
         plot_response.response.context_menu(|ui| {

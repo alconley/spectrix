@@ -1,7 +1,7 @@
 use egui::{Color32, DragValue, Id, Slider, Stroke, Ui};
 use egui_plot::{LineStyle, PlotResponse, PlotUi, VLine};
 
-use crate::egui_plot_stuff::colors::{Rgb, COLOR_OPTIONS};
+use crate::egui_plot_stuff::colors::{COLOR_OPTIONS, Rgb};
 use crate::fitter::common::Calibration;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]

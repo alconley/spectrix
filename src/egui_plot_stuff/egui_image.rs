@@ -1,6 +1,6 @@
 use egui::{
-    pos2, Color32, ColorImage, DragValue, ImageData, Rect, TextureFilter, TextureHandle,
-    TextureOptions, TextureWrapMode, Ui,
+    Color32, ColorImage, DragValue, ImageData, Rect, TextureFilter, TextureHandle, TextureOptions,
+    TextureWrapMode, Ui, pos2,
 };
 use egui_plot::{PlotImage, PlotPoint, PlotUi};
 

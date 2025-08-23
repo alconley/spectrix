@@ -140,8 +140,8 @@ impl Fits {
     pub fn export_all_lmfit_individual_files(&self) {
         if let Some(folder_path) = rfd::FileDialog::new().pick_folder() {
             for (i, fit) in self.stored_fits.iter().enumerate() {
-                if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result {
-                    if let Some(text) = &gauss.lmfit_result {
+                if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result
+                    && let Some(text) = &gauss.lmfit_result {
                         let mut filename = format!("{}_fit_{}.sav", fit.name, i);
                         filename =
                             filename.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_"); // Sanitize filename
@@ -162,15 +162,14 @@ impl Fits {
                             }
                         }
                     }
-                }
             }
         }
     }
 
     pub fn export_lmfit(&self, dir: &PathBuf) {
         for (i, fit) in self.stored_fits.iter().enumerate() {
-            if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result {
-                if let Some(text) = &gauss.lmfit_result {
+            if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result
+                && let Some(text) = &gauss.lmfit_result {
                     let mut filename = format!("{}_fit_{}.sav", fit.name, i);
                     filename =
                         filename.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_"); // Sanitize filename
@@ -191,7 +190,6 @@ impl Fits {
                         }
                     }
                 }
-            }
         }
     }
 
@@ -313,8 +311,8 @@ impl Fits {
 
             ui.separator();
 
-            if ui.button("Load lmfit .sav").clicked() {
-                if let Some(paths) = FileDialog::new().add_filter("SAV", &["sav"]).pick_files() {
+            if ui.button("Load lmfit .sav").clicked()
+                && let Some(paths) = FileDialog::new().add_filter("SAV", &["sav"]).pick_files() {
                     for path in paths {
                         let mut gaussian_fitter = GaussianFitter::default();
 
@@ -359,7 +357,6 @@ impl Fits {
                         }
                     }
                 }
-            }
         });
     }
 

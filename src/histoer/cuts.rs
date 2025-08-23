@@ -92,13 +92,13 @@ impl Cuts {
     pub fn get_cuts_in_folder(&self) -> Vec<Cut> {
         let mut cuts = Vec::new();
 
-        if let Some(folder) = &self.cut_folder {
-            if folder.exists() && folder.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(folder) {
+        if let Some(folder) = &self.cut_folder
+            && folder.exists() && folder.is_dir()
+                && let Ok(entries) = std::fs::read_dir(folder) {
                     for entry in entries {
                         let path = entry.expect("Failed to read entry").path();
-                        if let Some(ext) = path.extension() {
-                            if ext == "json" {
+                        if let Some(ext) = path.extension()
+                            && ext == "json" {
                                 let content = std::fs::read_to_string(&path).unwrap_or_default();
                                 let cut1d: Result<Cut1D, _> = serde_json::from_str(&content);
                                 if let Ok(mut cut) = cut1d {
@@ -116,11 +116,8 @@ impl Cuts {
 
                                 log::error!("Invalid cut file: {}. Skipping...", path.display());
                             }
-                        }
                     }
                 }
-            }
-        }
 
         cuts
     }
@@ -180,8 +177,8 @@ impl Cuts {
 
             ui.separator();
 
-            if ui.button("Add Cut Folder").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
+            if ui.button("Add Cut Folder").clicked()
+                && let Some(path) = rfd::FileDialog::new()
                     .set_file_name("cuts")
                     .set_directory(self.cut_folder.clone().unwrap_or_default())
                     .pick_folder()
@@ -190,20 +187,18 @@ impl Cuts {
 
                     self.cuts = self.get_cuts_in_folder();
                 }
-            }
 
             // Display an X button to clear the cut folder if it exists
             if self.cut_folder.is_some() {
                 // Add a refresh button (logo) to reload cuts from the folder
-                if ui.button("🔄").clicked() {
-                    if let Some(folder) = &self.cut_folder {
+                if ui.button("🔄").clicked()
+                    && let Some(folder) = &self.cut_folder {
                         if folder.exists() && folder.is_dir() {
                             self.cuts = self.get_cuts_in_folder();
                         } else {
                             log::error!("Cut folder is invalid: {}", folder.display());
                         }
                     }
-                }
 
                 if ui.button("❌").clicked() {
                     self.cut_folder = None;
@@ -432,28 +427,25 @@ impl Default for Cut2D {
 
 impl Cut2D {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        if ui.button("Load").clicked() {
-            if let Err(e) = self.load_cut_from_json() {
+        if ui.button("Load").clicked()
+            && let Err(e) = self.load_cut_from_json() {
                 log::error!("Error loading cut: {e:?}");
             }
-        }
 
-        if ui.button("Save").clicked() {
-            if let Err(e) = self.save_cut_to_json() {
+        if ui.button("Save").clicked()
+            && let Err(e) = self.save_cut_to_json() {
                 log::error!("Error saving cut: {e:?}");
             }
-        }
         self.polygon.menu_button(ui);
     }
 
     pub fn single_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("2D Cut");
-            if ui.button("Load").clicked() {
-                if let Err(e) = self.load_cut_from_json() {
+            if ui.button("Load").clicked()
+                && let Err(e) = self.load_cut_from_json() {
                     log::error!("Error loading cut: {e:?}");
                 }
-            }
 
             ui.add(
                 egui::TextEdit::singleline(&mut self.polygon.name)
@@ -491,17 +483,15 @@ impl Cut2D {
     }
 
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
-        if ui.button("Load").clicked() {
-            if let Err(e) = self.load_cut_from_json() {
+        if ui.button("Load").clicked()
+            && let Err(e) = self.load_cut_from_json() {
                 log::error!("Error loading cut: {e:?}");
             }
-        }
 
-        if ui.button("Save").clicked() {
-            if let Err(e) = self.save_cut_to_json() {
+        if ui.button("Save").clicked()
+            && let Err(e) = self.save_cut_to_json() {
                 log::error!("Error saving cut: {e:?}");
             }
-        }
 
         self.polygon.menu_button(ui);
     }
