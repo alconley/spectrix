@@ -140,10 +140,11 @@ impl BackgroundPair {
 
         // Ensure the last point is included at the end marker
         if let Some(last_edge) = bin_edges.last()
-            && *last_edge <= end_x {
-                let last_count = *bin_counts.last().unwrap_or(&0) as f64;
-                line_points.push([*last_edge, last_count]);
-            }
+            && *last_edge <= end_x
+        {
+            let last_count = *bin_counts.last().unwrap_or(&0) as f64;
+            line_points.push([*last_edge, last_count]);
+        }
 
         self.histogram_line.points = line_points;
     }

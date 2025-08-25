@@ -675,14 +675,11 @@ def get_2d_histograms(file_name):
                                     let file_path = entry.path();
                                     if let Some(ext) = file_path.extension()
                                         && (ext == "parquet" || ext == "root")
-                                            && !self
-                                                .selected_files
-                                                .iter()
-                                                .any(|(f, _)| f == &file_path)
-                                        {
-                                            self.selected_files.push((file_path, false));
-                                            // Default to selected
-                                        }
+                                        && !self.selected_files.iter().any(|(f, _)| f == &file_path)
+                                    {
+                                        self.selected_files.push((file_path, false));
+                                        // Default to selected
+                                    }
                                 }
                             }
                             // sort the selected files by name

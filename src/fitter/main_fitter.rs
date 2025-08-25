@@ -142,10 +142,11 @@ impl Fitter {
                         }
 
                         if self.background_result.is_none()
-                            && let Some(background_result) = &fit.background_result {
-                                self.background_line.points = background_result.get_fit_points();
-                                self.background_result = Some(background_result.clone());
-                            }
+                            && let Some(background_result) = &fit.background_result
+                        {
+                            self.background_line.points = background_result.get_fit_points();
+                            self.background_result = Some(background_result.clone());
+                        }
 
                         self.fit_result = Some(FitResult::Gaussian(fit));
                     }

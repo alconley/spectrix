@@ -182,15 +182,15 @@ impl Histogram {
                         }
 
                         if self.plot_settings.cursor_position.is_some()
-                            && let Some(delta_pos) = scroll {
-                                let zoom_factor = if delta_pos.y > 0.0 || delta_pos.x > 0.0 {
-                                    1.1
-                                } else {
-                                    0.9
-                                };
-                                plot_ui
-                                    .zoom_bounds_around_hovered(egui::Vec2::new(zoom_factor, 1.0));
-                            }
+                            && let Some(delta_pos) = scroll
+                        {
+                            let zoom_factor = if delta_pos.y > 0.0 || delta_pos.x > 0.0 {
+                                1.1
+                            } else {
+                                0.9
+                            };
+                            plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(zoom_factor, 1.0));
+                        }
                     });
 
                     plot_response.response.context_menu(|ui| {

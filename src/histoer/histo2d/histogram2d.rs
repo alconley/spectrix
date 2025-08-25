@@ -310,17 +310,18 @@ impl Histogram2D {
             self.draw(plot_ui);
 
             if self.plot_settings.cursor_position.is_some()
-                && let Some(delta_pos) = scroll {
-                    if delta_pos.y > 0.0 {
-                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.1));
-                    } else if delta_pos.y < 0.0 {
-                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 0.9));
-                    } else if delta_pos.x > 0.0 {
-                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.1));
-                    } else if delta_pos.x < 0.0 {
-                        plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 0.9));
-                    }
+                && let Some(delta_pos) = scroll
+            {
+                if delta_pos.y > 0.0 {
+                    plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.1));
+                } else if delta_pos.y < 0.0 {
+                    plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 0.9));
+                } else if delta_pos.x > 0.0 {
+                    plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.1));
+                } else if delta_pos.x < 0.0 {
+                    plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 0.9));
                 }
+            }
         });
 
         plot_response.response.context_menu(|ui| {

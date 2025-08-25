@@ -95,8 +95,9 @@ impl Histogram {
 
         // calibrate temp fit if calibration is enabled
         if self.fits.settings.calibrated
-            && let Some(temp_fit) = &mut self.fits.temp_fit {
-                temp_fit.calibrate(&self.fits.calibration);
-            }
+            && let Some(temp_fit) = &mut self.fits.temp_fit
+        {
+            temp_fit.calibrate(&self.fits.calibration);
+        }
     }
 }

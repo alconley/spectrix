@@ -652,20 +652,21 @@ impl Histogrammer {
                 }
 
                 if ui.button("Export All lmfit Fits").clicked()
-                    && let Some(dir_path) = rfd::FileDialog::new().pick_folder() {
-                        let dir_path = dir_path.clone();
+                    && let Some(dir_path) = rfd::FileDialog::new().pick_folder()
+                {
+                    let dir_path = dir_path.clone();
 
-                        for (_id, tile) in self.tree.tiles.iter() {
-                            if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                                let hist = hist.lock().expect("Failed to lock histogram");
-                                let fits = &hist.fits;
+                    for (_id, tile) in self.tree.tiles.iter() {
+                        if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+                            let hist = hist.lock().expect("Failed to lock histogram");
+                            let fits = &hist.fits;
 
-                                fits.export_lmfit(&dir_path);
-                            }
-
-                            log::info!("All lmfit results exported.");
+                            fits.export_lmfit(&dir_path);
                         }
+
+                        log::info!("All lmfit results exported.");
                     }
+                }
 
                 // ADD directly after the export button block:
                 if ui.button("Import All lmfit Fits to Histograms").clicked() {
@@ -755,9 +756,10 @@ impl Histogrammer {
                 {
                     // If a parent exists, add the new tab/grid as a child
                     if let Some(parent_info) = self.histogram_map.get_mut(parent_path)
-                        && !parent_info.children.contains(&new_id) {
-                            parent_info.children.push(new_id);
-                        }
+                        && !parent_info.children.contains(&new_id)
+                    {
+                        parent_info.children.push(new_id);
+                    }
                 } else {
                     // If no parent path (i.e., root level), add to main tab
                     let main_tab = self
@@ -993,9 +995,10 @@ impl Histogrammer {
                 && matches!(
                     tile,
                     egui_tiles::Tile::Pane(Pane::Histogram(_) | Pane::Histogram2D(_))
-                ) {
-                    self.tree.move_tile_to_container(tile_id, grid_id, 0, true);
-                }
+                )
+            {
+                self.tree.move_tile_to_container(tile_id, grid_id, 0, true);
+            }
         }
 
         log::info!("All histograms moved to a single grid container.");
