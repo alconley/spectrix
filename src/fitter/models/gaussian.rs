@@ -496,6 +496,8 @@ def GaussianFit(counts: list, centers: list,
 
         params.add(f'g{i}_area', expr=f'g{i}_amplitude / {bin_width}')
         params[f'g{i}_area'].set(min=0)  # Use estimated area
+        params[f'g{i}_amplitude'].set(min=0)  # Use estimated area
+
 
         if not free_position:
             params[f'g{i}_center'].set(vary=False)
