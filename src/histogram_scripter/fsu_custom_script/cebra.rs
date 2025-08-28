@@ -527,7 +527,7 @@ impl Cebr3 {
         if self.gainmatch.active {
             configs.columns.push(self.gainmatch.new_column(&format!("Cebra{number}Energy"),&format!("Cebra{number}GainMatched")));
             configs.hist1d(&format!("{base_path}/Cebra{number}/Cebra{number} Gain Matched"), &format!("Cebra{number}GainMatched"), self.gainmatch.range, self.gainmatch.bins, &main_cuts); 
-            configs.hist1d(&format!("{base_path}/CeBrA/Gain Matched"), &format!("Cebra{number}GainMatched"),  self.gainmatch.range, self.gainmatch.bins, &main_cuts); 
+            // configs.hist1d(&format!("{base_path}/CeBrA/Gain Matched"), &format!("Cebra{number}GainMatched"),  self.gainmatch.range, self.gainmatch.bins, &main_cuts); 
         }
 
         if self.energy_calibration.active {
@@ -537,7 +537,7 @@ impl Cebr3 {
                 configs.columns.push(self.energy_calibration.new_column(&format!("Cebra{number}Energy"),&format!("Cebra{number}EnergyCalibrated")));
             }
             configs.hist1d(&format!("{base_path}/Cebra{number}/Cebra{number} Energy Calibrated"), &format!("Cebra{number}EnergyCalibrated"), self.energy_calibration.range, self.energy_calibration.bins, &main_cuts);
-            configs.hist1d(&format!("{base_path}/CeBrA/Energy Calibrated"), &format!("Cebra{number}EnergyCalibrated"), self.energy_calibration.range, self.energy_calibration.bins, &main_cuts);
+            // configs.hist1d(&format!("{base_path}/CeBrA/Energy Calibrated"), &format!("Cebra{number}EnergyCalibrated"), self.energy_calibration.range, self.energy_calibration.bins, &main_cuts);
         }
 
         if sps_config.active {
@@ -560,7 +560,7 @@ impl Cebr3 {
 
                 configs.columns.push((format!("Cebra{number}RelTime - {sps_tcut_mean}"), format!("Cebra{number}RelTimeShifted")));
                 configs.hist1d(&format!("{base_path}/Cebra{number}/Cebra{number}RelTimeShifted"), &format!("Cebra{number}RelTimeShifted"), sps_tcut_range, sps_tcut_bins, &main_cuts);
-                configs.hist1d(&format!("{base_path}/CeBrA/CeBrARelTimeShifted"), &format!("Cebra{number}RelTimeShifted"), sps_tcut_range, sps_tcut_bins, &main_cuts);
+                // configs.hist1d(&format!("{base_path}/CeBrA/CeBrARelTimeShifted"), &format!("Cebra{number}RelTimeShifted"), sps_tcut_range, sps_tcut_bins, &main_cuts);
 
 
                 let cebra_time_cut = Cut::new_1d(&format!("Cebra{number} Time Cut"), &format!("Cebra{number}RelTime >= {sps_tcut_low} && Cebra{number}RelTime <= {sps_tcut_high}"));
@@ -587,13 +587,13 @@ impl Cebr3 {
                     configs.hist2d(&format!("{base_path}/Cebra{number}/Time Cut/Cebra{number} Gain Matched v Xavg"), &format!("Xavg"), &format!("Cebra{number}GainMatched"), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), &tcut);
                     configs.hist2d(&format!("{base_path}/Cebra{number}/Time Cut/Cebra{number} Gain Matched v X1"), &format!("X1"), &format!("Cebra{number}GainMatched"), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), &tcut);
 
-                    configs.hist1d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Gain Matched"), &format!("Cebra{number}GainMatched"), self.gainmatch.range, self.gainmatch.bins, &tcut);
-                    configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Gain Matched v Xavg"), &format!("Xavg"), &format!("Cebra{number}Energy"), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), &tcut);
-                    configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Gain Matched v X1"), &format!("X1"), &format!("Cebra{number}Energy"), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), &tcut);   
+                    // configs.hist1d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Gain Matched"), &format!("Cebra{number}GainMatched"), self.gainmatch.range, self.gainmatch.bins, &tcut);
+                    // configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Gain Matched v Xavg"), &format!("Xavg"), &format!("Cebra{number}Energy"), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), &tcut);
+                    // configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Gain Matched v X1"), &format!("X1"), &format!("Cebra{number}Energy"), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), &tcut);   
 
                     if sps_config.xavg.active {
                         configs.hist2d(&format!("{base_path}/Cebra{number}/Time Cut/Cebra{number} v Xavg- Gain Matched"), &format!("XavgEnergyCalibrated"), &format!("Cebra{number}GainMatched"), sps_config.xavg.range, self.gainmatch.range, (sps_config.xavg.bins, self.gainmatch.bins), &tcut);
-                        configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA v Xavg- Gain Matched"), &format!("XavgEnergyCalibrated"), &format!("Cebra{number}GainMatched"), sps_config.xavg.range, self.gainmatch.range, (sps_config.xavg.bins, self.gainmatch.bins), &tcut);
+                        // configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA v Xavg- Gain Matched"), &format!("XavgEnergyCalibrated"), &format!("Cebra{number}GainMatched"), sps_config.xavg.range, self.gainmatch.range, (sps_config.xavg.bins, self.gainmatch.bins), &tcut);
                     }
                 }
                 if self.energy_calibration.active {
@@ -606,9 +606,9 @@ impl Cebr3 {
                         configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA v Xavg- Energy Calibrated"), &format!("XavgEnergyCalibrated"), &format!("Cebra{number}EnergyCalibrated"), sps_config.xavg.range, self.energy_calibration.range, (sps_config.xavg.bins, self.energy_calibration.bins), &tcut);
                     }
 
-                    configs.hist1d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Energy Calibrated"), &format!("Cebra{number}EnergyCalibrated"), self.energy_calibration.range, self.energy_calibration.bins, &tcut);
-                    configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Energy Calibrated v Xavg"), &format!("Xavg"), &format!("Cebra{number}EnergyCalibrated"), (-300.0, 300.0), self.energy_calibration.range, (600, self.energy_calibration.bins), &tcut);
-                    configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Energy Calibrated v X1"), &format!("X1"), &format!("Cebra{number}EnergyCalibrated"), (-300.0, 300.0), self.energy_calibration.range, (600, self.energy_calibration.bins), &tcut);
+                    // configs.hist1d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Energy Calibrated"), &format!("Cebra{number}EnergyCalibrated"), self.energy_calibration.range, self.energy_calibration.bins, &tcut);
+                    // configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Energy Calibrated v Xavg"), &format!("Xavg"), &format!("Cebra{number}EnergyCalibrated"), (-300.0, 300.0), self.energy_calibration.range, (600, self.energy_calibration.bins), &tcut);
+                    // configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Energy Calibrated v X1"), &format!("X1"), &format!("Cebra{number}EnergyCalibrated"), (-300.0, 300.0), self.energy_calibration.range, (600, self.energy_calibration.bins), &tcut);
                 }
             }
         }

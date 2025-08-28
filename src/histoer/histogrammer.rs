@@ -15,20 +15,16 @@ use std::sync::{
 
 // Project modules
 use super::configs::{Config, Configs};
+use super::cuts::Cuts;
 use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
 use super::tree::TreeBehavior;
-
-use super::cuts::Cuts;
-
-use crate::histoer::configs::Hist1DConfig;
-use crate::histoer::configs::Hist2DConfig;
-
-// ADD:
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::main_fitter::{FitResult, Fitter};
 use crate::fitter::models::gaussian::GaussianFitter;
+use crate::histoer::configs::Hist1DConfig;
+use crate::histoer::configs::Hist2DConfig;
 use std::path::Path;
 
 #[derive(serde::Deserialize, serde::Serialize, PartialEq, Eq, Debug)]
@@ -52,14 +48,13 @@ pub struct Histogrammer {
     pub name: String,
     pub tree: egui_tiles::Tree<Pane>,
     pub behavior: TreeBehavior,
+    pub histogram_map: HashMap<String, ContainerInfo>, // Map full path to TabInfo
     #[serde(skip)]
     pub calculating: Arc<AtomicBool>, // Use AtomicBool for thread-safe status tracking
     #[serde(skip)]
     pub abort_flag: Arc<AtomicBool>, // Use AtomicBool for thread-safe abort flag
     #[serde(skip)]
     pub progress: Arc<Mutex<f32>>,
-    pub histogram_map: HashMap<String, ContainerInfo>, // Map full path to TabInfo
-
     #[serde(skip)]
     pub fill_column_wise: bool,
 }

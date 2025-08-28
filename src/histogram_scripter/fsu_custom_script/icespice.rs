@@ -148,7 +148,7 @@ impl PIPS {
                         };
 
                         configs.hist1d(&format!("{}/Time Cut/PIPS{}TimeRelToCebra{}TimeShifted", base_path, self.name, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), cebra_time_range, cebra_time_bins, &cebra_tcut_valid);
-                        configs.hist1d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut - PIPS{}TimeRelToCeBrA", self.name, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), cebra_time_range, cebra_time_bins, &cebra_tcut_valid);
+                        // configs.hist1d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut - PIPS{}TimeRelToCeBrA", self.name, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), cebra_time_range, cebra_time_bins, &cebra_tcut_valid);
 
                         configs.hist2d(&format!("{}/Time Cut/PIPS{}Energy v Cebra{}Energy", base_path, self.name, cebr3.number), &cebr3_energy_column, &pips_energy_column, cebr3_range, pips_range, (cebr3_bins, pips_bins), &cebra_tcut_valid);
                         configs.hist2d(&format!("{}/Time Cut/PIPS{}RelToCebra{}Shifted v Cebra{}Energy", base_path, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_column, cebra_time_range, cebr3_range, (cebra_time_bins, cebr3_bins), &cebra_tcut_valid);
@@ -157,11 +157,11 @@ impl PIPS {
                             configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}Energy", base_path, self.name, cebr3.number), &cebr3_energy_column, &pips_energy_calibrated_column, cebr3_range, self.energy_calibration.range, (cebr3_bins, self.energy_calibration.bins), &cebra_tcut_valid);
                         } else if cebr3.energy_calibration.active & self.energy_calibration.active {
                             configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}EnergyCalibrated", base_path, self.name, cebr3.number), &cebr3_energy_calibrated_column, &pips_energy_calibrated_column, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), &cebra_tcut_valid);
-                            configs.hist2d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut- PIPS{}EnergyCalibrated v CeBrA", self.name, self.name), &cebr3_energy_calibrated_column, &pips_energy_calibrated_column, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), &cebra_tcut_valid);
+                            // configs.hist2d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut- PIPS{}EnergyCalibrated v CeBrA", self.name, self.name), &cebr3_energy_calibrated_column, &pips_energy_calibrated_column, cebr3.energy_calibration.range, self.energy_calibration.range, (cebr3.energy_calibration.bins, self.energy_calibration.bins), &cebra_tcut_valid);
                         }
                         if cebr3.energy_calibration.active {
                             configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}TimeRelToCebra{}TimeShifted v Cebra{}EnergyCalibrated", base_path, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated_column, cebra_time_range, cebr3.energy_calibration.range, (cebra_time_bins, cebr3.energy_calibration.bins), &cebra_tcut_valid);
-                            configs.hist2d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut - PIPS{}TimeRelToCeBrA v CeBrA", self.name, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated_column, cebra_time_range, cebr3.energy_calibration.range, (cebra_time_bins, cebr3.energy_calibration.bins), &cebra_tcut_valid);
+                            // configs.hist2d(&format!("ICESPICE/PIPS{}/CeBrA/Time Cut - PIPS{}TimeRelToCeBrA v CeBrA", self.name, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_calibrated_column, cebra_time_range, cebr3.energy_calibration.range, (cebra_time_bins, cebr3.energy_calibration.bins), &cebra_tcut_valid);
                         }
                     }
                 }
