@@ -471,6 +471,7 @@ impl Fits {
 
         ui.separator();
     }
+
     pub fn ui(&mut self, ui: &mut egui::Ui, show: bool) {
         if show {
             egui::ScrollArea::both()
