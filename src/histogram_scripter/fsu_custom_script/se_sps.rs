@@ -143,6 +143,9 @@ impl SPSConfig {
             configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Raw- X2"), "X2", fp_range, fp_bins, main_cuts);
             configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Both Planes- X2"), "X2", fp_range, fp_bins, &cut_bothplanes);
             configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Only 1 Plane- X2"), "X2", fp_range, fp_bins, &cut_only_x2_plane);
+
+            configs.hist1d(&format!("{base_path}/Focal Plane/MonitorEnergy"), "MonitorEnergy", range, bins, main_cuts);
+
         }
 
         // Particle Identification histograms
