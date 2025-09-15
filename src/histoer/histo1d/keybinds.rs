@@ -69,9 +69,9 @@ impl Histogram {
                 self.plot_settings.egui_settings.reset_axis = true;
             }
 
-            if ui.input(|i| i.key_pressed(egui::Key::O)) {
-                self.find_peaks();
-            }
+            // if ui.input(|i| i.key_pressed(egui::Key::O)) {
+            //     self.find_peaks();
+            // }
 
             if ui.input(|i| i.key_pressed(egui::Key::Tab)) {
                 self.fits.settings.show_fit_stats = !self.fits.settings.show_fit_stats;
@@ -103,9 +103,9 @@ impl Histogram {
             ui.label("Plot");
             ui.label("I: Toggle Stats");
             ui.label("L: Toggle Log Y");
-            ui.separator();
-            ui.label("Peak Finder");
-            ui.label("O: Detect Peaks").on_hover_text("Detect peaks in the spectrum using the peak finding parameters");
+            // ui.separator();
+            // ui.label("Peak Finder");
+            // ui.label("O: Detect Peaks").on_hover_text("Detect peaks in the spectrum using the peak finding parameters");
 
         });
     }

@@ -141,7 +141,7 @@ impl Histogram {
 
         if show_stats {
             table =
-                table.column(Column::auto_with_initial_suggestion(width * 0.25).resizable(true));
+                table.column(Column::auto_with_initial_suggestion(width * 0.5).resizable(true));
         }
 
         table = table.column(Column::remainder()).vscroll(false);
@@ -212,88 +212,4 @@ impl Histogram {
             });
         });
     }
-
-    // pub fn render(&mut self, ui: &mut egui::Ui) {
-    //     // if light mode, se the color to black
-    //     if ui.visuals().dark_mode {
-    //         self.line.set_color(egui::Color32::LIGHT_BLUE);
-    //     } else {
-    //         self.line.set_color(egui::Color32::BLACK);
-    //     }
-
-    //     self.update_line_points(); // Ensure line points are updated for projections
-    //     self.keybinds(ui); // Handle interactive elements
-
-    //     let height = ui.available_height();
-
-    //     // egui_extras column
-    //     TableBuilder::new(ui)
-    //         .column(Column::auto().resizable(true))
-    //         .column(Column::remainder())
-    //         .body(|mut body| {
-    //             body.row(height, |mut row| {
-    //                 // Left column: fits/settings
-
-    //                 row.col(|ui| {
-    //                     self.fits.ui(ui, self.fits.settings.show_fit_stats);
-    //                 });
-
-    //                 // Right column: plot
-    //                 row.col(|ui| {
-    //                     let mut plot = egui_plot::Plot::new(self.name.clone());
-
-    //                     plot = self.plot_settings.egui_settings.apply_to_plot(plot);
-
-    //                     let (scroll, _pointer_down, _modifiers) = ui.input(|i| {
-    //                         let scroll = i.events.iter().find_map(|e| match e {
-    //                             egui::Event::MouseWheel {
-    //                                 unit: _,
-    //                                 delta,
-    //                                 modifiers: _,
-    //                             } => Some(*delta),
-    //                             _ => None,
-    //                         });
-    //                         (scroll, i.pointer.primary_down(), i.modifiers)
-    //                     });
-
-    //                     let plot_response = plot.show(ui, |plot_ui| {
-    //                         self.draw(plot_ui);
-
-    //                         if self.plot_settings.progress.is_some() {
-    //                             let y_max = self.bins.iter().max().cloned().unwrap_or(0) as f64;
-    //                             let mut plot_bounds = plot_ui.plot_bounds();
-    //                             plot_bounds.extend_with_y(y_max * 1.1);
-    //                             plot_ui.set_plot_bounds(plot_bounds);
-    //                         }
-
-    //                         if self.plot_settings.egui_settings.reset_axis {
-    //                             plot_ui.auto_bounds();
-    //                             self.plot_settings.egui_settings.reset_axis = false;
-    //                         }
-
-    //                         if self.plot_settings.cursor_position.is_some() {
-    //                             if let Some(delta_pos) = scroll {
-    //                                 if delta_pos.y > 0.0 {
-    //                                     plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.0));
-    //                                 } else if delta_pos.y < 0.0 {
-    //                                     plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 1.0));
-    //                                 } else if delta_pos.x > 0.0 {
-    //                                     plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(1.1, 1.0));
-    //                                 } else if delta_pos.x < 0.0 {
-    //                                     plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(0.9, 1.0));
-    //                                 }
-    //                             }
-    //                         }
-    //                     });
-
-    //                     plot_response.response.context_menu(|ui| {
-    //                         self.context_menu(ui);
-    //                     });
-
-    //                     self.plot_settings.interactive_response(&plot_response);
-
-    //                 });
-    //             })
-    //         });
-    // }
 }
