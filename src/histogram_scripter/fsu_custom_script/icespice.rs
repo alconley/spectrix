@@ -152,6 +152,8 @@ impl PIPS {
 
                         configs.hist2d(&format!("{}/Time Cut/PIPS{}Energy v Cebra{}Energy", base_path, self.name, cebr3.number), &cebr3_energy_column, &pips_energy_column, cebr3_range, pips_range, (cebr3_bins, pips_bins), &cebra_tcut_valid);
                         configs.hist2d(&format!("{}/Time Cut/PIPS{}RelToCebra{}Shifted v Cebra{}Energy", base_path, self.name, cebr3.number, cebr3.number), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &cebr3_energy_column, cebra_time_range, cebr3_range, (cebra_time_bins, cebr3_bins), &cebra_tcut_valid);
+                        configs.hist2d(&format!("{}/Time Cut/PIPS{}RelToCebra{}Shifted v PIPS{}Energy", base_path, self.name, cebr3.number, self.name), &format!("PIPS{}TimeRelToCebra{}TimeShifted", self.name, cebr3.number), &pips_energy_column, cebra_time_range, pips_range, (cebra_time_bins, pips_bins), &cebra_tcut_valid);
+
                         // energy calibrated histograms
                         if self.energy_calibration.active & !cebr3.energy_calibration.active {
                             configs.hist2d(&format!("{}/Time Cut/Energy Calibrated/PIPS{}EnergyCalibrated v Cebra{}Energy", base_path, self.name, cebr3.number), &cebr3_energy_column, &pips_energy_calibrated_column, cebr3_range, self.energy_calibration.range, (cebr3_bins, self.energy_calibration.bins), &cebra_tcut_valid);
@@ -183,6 +185,7 @@ impl PIPS {
             configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/{pips_rel_time_to_sps_column} v Xavg"), &pips_rel_time_to_sps_column, &format!("Xavg"), no_sps_tcut_time_range, (-300.0, 300.0), (no_sps_tcut_time_bins, 600), &main_cuts);
             configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/{pips_energy_column} v Xavg"), &format!("Xavg"), &pips_energy_column,(-300.0, 300.0), pips_range, (pips_bins, 600), &main_cuts);
             configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/{pips_rel_time_to_sps_column} v {pips_energy_column}"), &pips_rel_time_to_sps_column, &pips_energy_column, no_sps_tcut_time_range, pips_range, (no_sps_tcut_time_bins, pips_bins), &main_cuts);
+            configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/{pips_rel_time_to_sps_column} v ScintLeftEnergy"), &pips_rel_time_to_sps_column, &format!("ScintLeftEnergy"), no_sps_tcut_time_range, (0.0, 4096.0), (no_sps_tcut_time_bins, 4096), &main_cuts);
 
             if sps_config.xavg.active {
                 configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/{pips_rel_time_to_sps_column} v XavgEnergyCalibrated"), &pips_rel_time_to_sps_column, &format!("XavgEnergyCalibrated"), no_sps_tcut_time_range, sps_config.xavg.range, (no_sps_tcut_time_bins, sps_config.xavg.bins), &main_cuts);
@@ -214,6 +217,10 @@ impl PIPS {
                 }
                 configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/Time Cut/{pips_energy_column} v Xavg"), &format!("Xavg"), &pips_energy_column, (-300.0, 300.0), pips_range, (600, pips_bins), &sps_tcut);
                 configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/Time Cut/{pips_rel_time_to_sps_column_shifted} v Xavg"), &format!("Xavg"), &pips_rel_time_to_sps_column_shifted, (-300.0, 300.0), sps_tcut_time_range, (600, sps_tcut_time_bins), &sps_tcut);
+
+                configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/Time Cut/{pips_rel_time_to_sps_column} v {pips_energy_column}"), &pips_rel_time_to_sps_column, &pips_energy_column, no_sps_tcut_time_range, pips_range, (no_sps_tcut_time_bins, pips_bins), &sps_tcut);
+                configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/Time Cut/{pips_rel_time_to_sps_column} v ScintLeftEnergy"), &pips_rel_time_to_sps_column, &format!("ScintLeftEnergy"), no_sps_tcut_time_range, (0.0, 4096.0), (no_sps_tcut_time_bins, 4096), &sps_tcut);
+
             }
         }
 

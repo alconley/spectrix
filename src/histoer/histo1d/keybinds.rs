@@ -72,39 +72,41 @@ impl Histogram {
             if ui.input(|i| i.key_pressed(egui::Key::O)) {
                 self.find_peaks();
             }
+
+            if ui.input(|i| i.key_pressed(egui::Key::Tab)) {
+                self.fits.settings.show_fit_stats = !self.fits.settings.show_fit_stats;
+            }
         }
     }
 
     // create a ui function to show the keybinds in the context menu
     pub fn keybinds_ui(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Keybind Help", |ui| {
-            egui::ScrollArea::vertical()
-            .id_salt("keybinds_scroll")
-            .max_height(300.0)
-            .show(ui, |ui| {
-                ui.heading("Keybinds");
-                ui.separator();
-                ui.label("Markers");
-                ui.label("P: Add Marker");
-                ui.label("B: Add Background Marker");
-                ui.label("R: Add Region Marker");
-                ui.label("-: Remove Marker Closest to Cursor");
-                ui.label("Delete: Remove All Markers & Temp Fits");
-                ui.label("Left click/Drag to Move Marker").on_hover_text("Markers can be dragged to new positions with the left clicking and dragingong when hovered over center point");
-                ui.separator();
-                ui.label("Fitting");
-                ui.label("G: Fit Background").on_hover_text("Fit a linear background using the background markers");
-                ui.label("F: Fit Gaussians").on_hover_text("Fit gaussians at the peak markers give some region with a linear background");
-                ui.label("S: Store Fit").on_hover_text("Store the current fit as a permanent fit which can be saved and loaded later");
-                ui.separator();
-                ui.label("Plot");
-                ui.label("I: Toggle Stats");
-                ui.label("L: Toggle Log Y");
-                ui.separator();
-                ui.label("Peak Finder");
-                ui.label("O: Detect Peaks").on_hover_text("Detect peaks in the spectrum using the peak finding parameters");
+        egui::ScrollArea::vertical()
+        .id_salt("keybinds_scroll")
+        .max_height(300.0)
+        .show(ui, |ui| {
+            ui.heading("Keybinds");
+            ui.separator();
+            ui.label("Markers");
+            ui.label("P: Add Marker");
+            ui.label("B: Add Background Marker");
+            ui.label("R: Add Region Marker");
+            ui.label("-: Remove Marker Closest to Cursor");
+            ui.label("Delete: Remove All Markers & Temp Fits");
+            ui.label("Left click/Drag to Move Marker").on_hover_text("Markers can be dragged to new positions with the left clicking and dragingong when hovered over center point");
+            ui.separator();
+            ui.label("Fitting");
+            ui.label("G: Fit Background").on_hover_text("Fit a linear background using the background markers");
+            ui.label("F: Fit Gaussians").on_hover_text("Fit gaussians at the peak markers give some region with a linear background");
+            ui.label("S: Store Fit").on_hover_text("Store the current fit as a permanent fit which can be saved and loaded later");
+            ui.separator();
+            ui.label("Plot");
+            ui.label("I: Toggle Stats");
+            ui.label("L: Toggle Log Y");
+            ui.separator();
+            ui.label("Peak Finder");
+            ui.label("O: Detect Peaks").on_hover_text("Detect peaks in the spectrum using the peak finding parameters");
 
-            });
         });
     }
 }

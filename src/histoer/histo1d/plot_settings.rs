@@ -3,6 +3,9 @@ use super::peak_finder::PeakFindingSettings;
 use crate::egui_plot_stuff::egui_plot_settings::EguiPlotSettings;
 use crate::fitter::common::Calibration;
 
+use egui::PopupCloseBehavior;
+use egui::containers::menu::{MenuConfig, SubMenuButton};
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlotSettings {
     #[serde(skip)]
@@ -31,9 +34,19 @@ impl Default for PlotSettings {
 }
 impl PlotSettings {
     pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
-        // self.egui_settings.menu_button(ui);
         ui.checkbox(&mut self.stats_info, "Show Statistics");
-        self.markers.menu_button(ui);
+
+        SubMenuButton::new("Markers")
+            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
+            .ui(ui, |ui| {
+                self.markers.menu_button(ui);
+            });
+
+        SubMenuButton::new("Visual Settings")
+            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
+            .ui(ui, |ui| {
+                self.egui_settings.menu_button(ui);
+            });
     }
 
     pub fn interactive_response(
@@ -43,15 +56,4 @@ impl PlotSettings {
     ) {
         self.markers.interactive_dragging(response, calibration);
     }
-
-    // pub fn progress_ui(&mut self, ui: &mut egui::Ui) {
-    //     if let Some(progress) = self.progress {
-    //         ui.add(
-    //             egui::ProgressBar::new(progress)
-    //                 .show_percentage()
-    //                 .animate(true)
-    //                 .text(format!("{:.0}%", progress * 100.0)),
-    //         );
-    //     }
-    // }
 }

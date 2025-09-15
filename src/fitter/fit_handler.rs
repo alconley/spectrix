@@ -494,14 +494,9 @@ impl Fits {
     }
 
     pub fn fit_context_menu_ui(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Fits", |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Fit Panel: ");
-                ui.checkbox(&mut self.settings.show_fit_stats, "Show")
-                    .on_hover_text("Show the fit statistics above the histogram");
-            });
+        ui.checkbox(&mut self.settings.show_fit_stats, "Show Fit Panel")
+            .on_hover_text("Show the fit statistics to the left of the histogram");
 
-            self.ui(ui, true);
-        });
+        self.ui(ui, true);
     }
 }

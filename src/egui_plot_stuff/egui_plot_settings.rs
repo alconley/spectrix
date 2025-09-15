@@ -51,41 +51,40 @@ impl Default for EguiPlotSettings {
 
 impl EguiPlotSettings {
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Plot Maniupulation Settings", |ui| {
-            ui.vertical(|ui| {
-                ui.checkbox(&mut self.legend, "Legend");
-                ui.checkbox(&mut self.log_x, "Log X");
-                ui.checkbox(&mut self.log_y, "Log Y");
-                ui.checkbox(&mut self.show_x_value, "Show X Value");
-                ui.checkbox(&mut self.show_y_value, "Show Y Value");
-                ui.checkbox(&mut self.center_x_axis, "Center X Axis");
-                ui.checkbox(&mut self.center_y_axis, "Center Y Axis");
-                ui.checkbox(&mut self.allow_zoom, "Allow Zoom");
-                ui.checkbox(&mut self.allow_boxed_zoom, "Allow Boxed Zoom");
-                ui.checkbox(&mut self.allow_drag, "Allow Drag");
-                ui.checkbox(&mut self.allow_scroll, "Allow Scroll");
-                ui.checkbox(&mut self.clamp_grid, "Clamp Grid");
-                ui.checkbox(&mut self.show_grid, "Show Grid");
-                ui.checkbox(&mut self.sharp_grid_lines, "Sharp Grid Lines");
-                ui.checkbox(&mut self.show_background, "Show Background");
-                ui.checkbox(
-                    &mut self.allow_double_click_reset,
-                    "Allow Double Click to Reset",
-                );
-                ui.text_edit_singleline(&mut self.x_label);
-                ui.text_edit_singleline(&mut self.y_label);
-                ui.checkbox(&mut self.limit_scrolling, "Limit Scrolling"); // custom setting
+        ui.vertical(|ui| {
+            ui.heading("Visual Settings");
+            ui.checkbox(&mut self.legend, "Legend");
+            ui.checkbox(&mut self.log_x, "Log X");
+            ui.checkbox(&mut self.log_y, "Log Y");
+            ui.checkbox(&mut self.show_x_value, "Show X Value");
+            ui.checkbox(&mut self.show_y_value, "Show Y Value");
+            ui.checkbox(&mut self.center_x_axis, "Center X Axis");
+            ui.checkbox(&mut self.center_y_axis, "Center Y Axis");
+            ui.checkbox(&mut self.allow_zoom, "Allow Zoom");
+            ui.checkbox(&mut self.allow_boxed_zoom, "Allow Boxed Zoom");
+            ui.checkbox(&mut self.allow_drag, "Allow Drag");
+            ui.checkbox(&mut self.allow_scroll, "Allow Scroll");
+            ui.checkbox(&mut self.clamp_grid, "Clamp Grid");
+            ui.checkbox(&mut self.show_grid, "Show Grid");
+            ui.checkbox(&mut self.sharp_grid_lines, "Sharp Grid Lines");
+            ui.checkbox(&mut self.show_background, "Show Background");
+            ui.checkbox(
+                &mut self.allow_double_click_reset,
+                "Allow Double Click to Reset",
+            );
+            ui.add(egui::TextEdit::singleline(&mut self.x_label).hint_text("X Axis Label"));
+            ui.add(egui::TextEdit::singleline(&mut self.y_label).hint_text("Y Axis Label"));
+            ui.checkbox(&mut self.limit_scrolling, "Limit Scrolling"); // custom setting
 
-                if ui.button("Reset Axis").clicked() {
-                    self.reset_axis = true;
-                }
+            if ui.button("Reset Axis").clicked() {
+                self.reset_axis = true;
+            }
 
-                ui.separator();
+            ui.separator();
 
-                if ui.button("Reset").clicked() {
-                    *self = Self::default();
-                }
-            });
+            if ui.button("Reset").clicked() {
+                *self = Self::default();
+            }
         });
     }
 

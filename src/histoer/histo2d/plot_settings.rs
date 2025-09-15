@@ -5,6 +5,9 @@ use crate::egui_plot_stuff::egui_plot_settings::EguiPlotSettings;
 use super::colormaps::{ColorMap, ColormapOptions};
 use super::projections::Projections;
 
+use egui::PopupCloseBehavior;
+use egui::containers::menu::{MenuConfig, SubMenuButton};
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlotSettings {
     #[serde(skip)]
@@ -42,23 +45,28 @@ impl Default for PlotSettings {
 }
 impl PlotSettings {
     pub fn settings_ui(&mut self, ui: &mut egui::Ui, max_z_range: u64) {
-        ui.menu_button("Colormaps", |ui| {
-            self.colormap_options
-                .ui(ui, &mut self.recalculate_image, max_z_range);
-            ui.separator();
-            self.colormap.color_maps_ui(ui, &mut self.recalculate_image);
-        });
+        SubMenuButton::new("Colormaps")
+            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
+            .ui(ui, |ui| {
+                self.colormap_options
+                    .ui(ui, &mut self.recalculate_image, max_z_range);
+                ui.separator();
+                self.colormap.color_maps_ui(ui, &mut self.recalculate_image);
+            });
 
-        ui.separator();
+        SubMenuButton::new("Settings")
+            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
+            .ui(ui, |ui| {
+                ui.checkbox(&mut self.stats_info, "Show Statitics");
+                ui.separator();
+                self.egui_settings.menu_button(ui);
+            });
 
-        ui.checkbox(&mut self.stats_info, "Show Statitics");
-        // self.egui_settings.menu_button(ui);
-
-        ui.separator();
-
-        self.projections.menu_button(ui);
-
-        ui.separator();
+        SubMenuButton::new("Projections")
+            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
+            .ui(ui, |ui| {
+                self.projections.menu_button(ui);
+            });
     }
 
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {

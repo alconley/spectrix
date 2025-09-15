@@ -136,96 +136,94 @@ impl EguiImage {
     }
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
-        ui.menu_button(format!("{} Image", self.name), |ui| {
-            ui.label(self.name.clone());
+        ui.label(self.name.clone());
 
-            ui.vertical(|ui| {
-                ui.checkbox(&mut self.draw, "Draw");
+        ui.vertical(|ui| {
+            ui.checkbox(&mut self.draw, "Draw");
 
-                ui.checkbox(&mut self.name_in_legend, "Name in Legend")
-                    .on_hover_text("Show in legend");
-                ui.checkbox(&mut self.highlighted, "Highlighted");
+            ui.checkbox(&mut self.name_in_legend, "Name in Legend")
+                .on_hover_text("Show in legend");
+            ui.checkbox(&mut self.highlighted, "Highlighted");
 
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.add_background, "Add Background Color");
-                    if self.add_background {
-                        ui.color_edit_button_srgba(&mut self.bg_color);
-                    }
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Tint Color (Default: White)");
-                    ui.color_edit_button_srgba(&mut self.tint);
-                });
-
-                ui.add(
-                    DragValue::new(&mut self.rotate)
-                        .prefix("Rotate: ")
-                        .suffix("°")
-                        .range(0.0..=360.0)
-                        .speed(0.1),
-                );
-            });
-
-            ui.separator();
-
-            ui.label("Texture Options");
             ui.horizontal(|ui| {
-                ui.label("Magnification");
-                ui.radio_value(
-                    &mut self.texture_options.magnification,
-                    TextureFilter::Nearest,
-                    "Nearest",
-                );
-                ui.radio_value(
-                    &mut self.texture_options.magnification,
-                    TextureFilter::Linear,
-                    "Linear",
-                );
+                ui.checkbox(&mut self.add_background, "Add Background Color");
+                if self.add_background {
+                    ui.color_edit_button_srgba(&mut self.bg_color);
+                }
             });
 
             ui.horizontal(|ui| {
-                ui.label("Minification");
-                ui.radio_value(
-                    &mut self.texture_options.minification,
-                    TextureFilter::Nearest,
-                    "Nearest",
-                );
-                ui.radio_value(
-                    &mut self.texture_options.minification,
-                    TextureFilter::Linear,
-                    "Linear",
-                );
+                ui.label("Tint Color (Default: White)");
+                ui.color_edit_button_srgba(&mut self.tint);
             });
 
-            ui.horizontal(|ui| {
-                ui.label("Wrap Mode");
-                ui.radio_value(
-                    &mut self.texture_options.wrap_mode,
-                    TextureWrapMode::ClampToEdge,
-                    "ClampToEdge",
-                );
-                ui.radio_value(
-                    &mut self.texture_options.wrap_mode,
-                    TextureWrapMode::Repeat,
-                    "Repeat",
-                );
-                ui.radio_value(
-                    &mut self.texture_options.wrap_mode,
-                    TextureWrapMode::MirroredRepeat,
-                    "MirroredRepeat",
-                );
-            });
-
-            ui.separator();
-
-            ui.label("Image Information");
-            ui.label(format!("Image Width: {}", self.image_width));
-            ui.label(format!("Image Height: {}", self.image_height));
-            ui.label(format!(
-                "Image Center: ({}, {})",
-                self.image_center[0], self.image_center[1]
-            ));
+            ui.add(
+                DragValue::new(&mut self.rotate)
+                    .prefix("Rotate: ")
+                    .suffix("°")
+                    .range(0.0..=360.0)
+                    .speed(0.1),
+            );
         });
+
+        ui.separator();
+
+        ui.label("Texture Options");
+        ui.horizontal(|ui| {
+            ui.label("Magnification");
+            ui.radio_value(
+                &mut self.texture_options.magnification,
+                TextureFilter::Nearest,
+                "Nearest",
+            );
+            ui.radio_value(
+                &mut self.texture_options.magnification,
+                TextureFilter::Linear,
+                "Linear",
+            );
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Minification");
+            ui.radio_value(
+                &mut self.texture_options.minification,
+                TextureFilter::Nearest,
+                "Nearest",
+            );
+            ui.radio_value(
+                &mut self.texture_options.minification,
+                TextureFilter::Linear,
+                "Linear",
+            );
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Wrap Mode");
+            ui.radio_value(
+                &mut self.texture_options.wrap_mode,
+                TextureWrapMode::ClampToEdge,
+                "ClampToEdge",
+            );
+            ui.radio_value(
+                &mut self.texture_options.wrap_mode,
+                TextureWrapMode::Repeat,
+                "Repeat",
+            );
+            ui.radio_value(
+                &mut self.texture_options.wrap_mode,
+                TextureWrapMode::MirroredRepeat,
+                "MirroredRepeat",
+            );
+        });
+
+        ui.separator();
+
+        ui.label("Image Information");
+        ui.label(format!("Image Width: {}", self.image_width));
+        ui.label(format!("Image Height: {}", self.image_height));
+        ui.label(format!(
+            "Image Center: ({}, {})",
+            self.image_center[0], self.image_center[1]
+        ));
     }
 }

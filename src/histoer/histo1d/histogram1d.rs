@@ -140,7 +140,8 @@ impl Histogram {
         let mut table = TableBuilder::new(ui);
 
         if show_stats {
-            table = table.column(Column::auto().resizable(true));
+            table =
+                table.column(Column::auto_with_initial_suggestion(width * 0.25).resizable(true));
         }
 
         table = table.column(Column::remainder()).vscroll(false);

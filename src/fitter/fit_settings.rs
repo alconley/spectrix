@@ -43,12 +43,6 @@ impl Default for FitSettings {
 
 impl FitSettings {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        // ui.horizontal(|ui| {
-        //     ui.label("Fit Panel: ");
-        //     ui.checkbox(&mut self.show_fit_stats, "Show")
-        //         .on_hover_text("Show the fit statistics above the histogram");
-        // });
-
         ui.separator();
 
         ui.horizontal_wrapped(|ui| {

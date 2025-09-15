@@ -1,94 +1,107 @@
 use super::histogram2d::Histogram2D;
 use crate::histoer::cuts::Cut2D;
 
+use egui::PopupCloseBehavior;
+use egui::containers::menu::{MenuConfig, SubMenuButton};
+
 impl Histogram2D {
-    // Context menu for the plot (when you right-click on the plot)
     pub fn context_menu(&mut self, ui: &mut egui::Ui) {
-        self.image.menu_button(ui);
+        SubMenuButton::new("Image")
+            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
+            .ui(ui, |ui| {
+                self.image.menu_button(ui);
+            });
+
         self.plot_settings.settings_ui(ui, self.bins.max_count);
 
-        ui.horizontal(|ui| {
-            ui.heading("Cuts");
+        SubMenuButton::new("Cuts")
+            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
+            .ui(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("Cuts");
 
-            if ui.button("+").clicked() {
-                self.new_cut();
-            }
-        });
+                    if ui.button("+").clicked() {
+                        self.new_cut();
+                    }
+                });
 
-        ui.horizontal(|ui| {
-            ui.label("X: ");
-            ui.add(
-                egui::TextEdit::singleline(&mut self.plot_settings.x_column)
-                    .hint_text("X Column Name"),
-            );
-        });
+                ui.horizontal(|ui| {
+                    ui.label("X: ");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.plot_settings.x_column)
+                            .hint_text("X Column Name"),
+                    );
+                });
 
-        ui.horizontal(|ui| {
-            ui.label("Y: ");
-            ui.add(
-                egui::TextEdit::singleline(&mut self.plot_settings.y_column)
-                    .hint_text("Y Column Name"),
-            );
-        });
+                ui.horizontal(|ui| {
+                    ui.label("Y: ");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.plot_settings.y_column)
+                            .hint_text("Y Column Name"),
+                    );
+                });
 
-        let mut to_remove = None;
+                let mut to_remove = None;
 
-        for (index, cut) in self.plot_settings.cuts.iter_mut().enumerate() {
-            ui.horizontal(|ui| {
-                if ui.button("X").clicked() {
-                    to_remove = Some(index);
+                for (index, cut) in self.plot_settings.cuts.iter_mut().enumerate() {
+                    ui.horizontal(|ui| {
+                        if ui.button("X").clicked() {
+                            to_remove = Some(index);
+                        }
+
+                        ui.separator();
+
+                        cut.ui(ui);
+                    });
                 }
 
-                ui.separator();
-
-                cut.ui(ui);
+                if let Some(index) = to_remove {
+                    self.plot_settings.cuts.remove(index);
+                }
             });
-        }
 
-        if let Some(index) = to_remove {
-            self.plot_settings.cuts.remove(index);
-        }
+        SubMenuButton::new("Rebin")
+            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
+            .ui(ui, |ui| {
+                ui.heading("Rebin");
 
-        ui.separator();
+                let possible_x_factors = self.possible_x_rebin_factors();
+                let possible_y_factors = self.possible_y_rebin_factors();
 
-        ui.heading("Rebin");
+                ui.label("Rebin Factor");
 
-        let possible_x_factors = self.possible_x_rebin_factors();
-        let possible_y_factors = self.possible_y_rebin_factors();
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("X: ");
+                    for &factor in &possible_x_factors {
+                        if ui
+                            .selectable_label(
+                                self.plot_settings.rebin_x_factor == factor,
+                                format!("{factor}"),
+                            )
+                            .clicked()
+                        {
+                            self.plot_settings.rebin_x_factor = factor;
+                            self.rebin();
+                        }
+                    }
+                });
 
-        ui.label("Rebin Factor");
-
-        ui.horizontal_wrapped(|ui| {
-            ui.label("X: ");
-            for &factor in &possible_x_factors {
-                if ui
-                    .selectable_label(
-                        self.plot_settings.rebin_x_factor == factor,
-                        format!("{factor}"),
-                    )
-                    .clicked()
-                {
-                    self.plot_settings.rebin_x_factor = factor;
-                    self.rebin();
-                }
-            }
-        });
-
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Y: ");
-            for &factor in &possible_y_factors {
-                if ui
-                    .selectable_label(
-                        self.plot_settings.rebin_y_factor == factor,
-                        format!("{factor}"),
-                    )
-                    .clicked()
-                {
-                    self.plot_settings.rebin_y_factor = factor;
-                    self.rebin();
-                }
-            }
-        });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Y: ");
+                    for &factor in &possible_y_factors {
+                        if ui
+                            .selectable_label(
+                                self.plot_settings.rebin_y_factor == factor,
+                                format!("{factor}"),
+                            )
+                            .clicked()
+                        {
+                            self.plot_settings.rebin_y_factor = factor;
+                            self.rebin();
+                        }
+                    }
+                });
+            });
     }
 
     pub fn new_cut(&mut self) {

@@ -127,53 +127,51 @@ impl EguiHorizontalLine {
     }
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
-        ui.menu_button(format!("{} Line", self.name), |ui| {
-            ui.label(self.name.clone());
-            ui.vertical(|ui| {
-                ui.checkbox(&mut self.draw, "Draw Line");
-                ui.add(
-                    DragValue::new(&mut self.y_value)
-                        .speed(1.0)
-                        .prefix("Y Value: "),
+        ui.label(self.name.clone());
+        ui.vertical(|ui| {
+            ui.checkbox(&mut self.draw, "Draw Line");
+            ui.add(
+                DragValue::new(&mut self.y_value)
+                    .speed(1.0)
+                    .prefix("Y Value: "),
+            );
+            ui.checkbox(&mut self.name_in_legend, "Name in Legend")
+                .on_hover_text("Show in legend");
+            ui.checkbox(&mut self.highlighted, "Highlighted");
+
+            self.color_selection_buttons(ui);
+            ui.add(Slider::new(&mut self.width, 0.0..=10.0).text("Line Width"));
+
+            // self.stroke_color_selection_buttons(ui);
+            // ui.add(Slider::new(&mut self.stroke.width, 0.0..=10.0).text("Stroke Width"));
+
+            ui.horizontal(|ui| {
+                ui.label("Line Style: ");
+                ui.radio_value(&mut self.style, Some(LineStyle::Solid), "Solid");
+                ui.radio_value(
+                    &mut self.style,
+                    Some(LineStyle::Dotted {
+                        spacing: self.style_length,
+                    }),
+                    "Dotted",
                 );
-                ui.checkbox(&mut self.name_in_legend, "Name in Legend")
-                    .on_hover_text("Show in legend");
-                ui.checkbox(&mut self.highlighted, "Highlighted");
-
-                self.color_selection_buttons(ui);
-                ui.add(Slider::new(&mut self.width, 0.0..=10.0).text("Line Width"));
-
-                // self.stroke_color_selection_buttons(ui);
-                // ui.add(Slider::new(&mut self.stroke.width, 0.0..=10.0).text("Stroke Width"));
-
-                ui.horizontal(|ui| {
-                    ui.label("Line Style: ");
-                    ui.radio_value(&mut self.style, Some(LineStyle::Solid), "Solid");
-                    ui.radio_value(
-                        &mut self.style,
-                        Some(LineStyle::Dotted {
-                            spacing: self.style_length,
-                        }),
-                        "Dotted",
-                    );
-                    ui.radio_value(
-                        &mut self.style,
-                        Some(LineStyle::Dashed {
-                            length: self.style_length,
-                        }),
-                        "Dashed",
-                    );
-                    ui.add(
-                        DragValue::new(&mut self.style_length)
-                            .speed(1.0)
-                            .range(0.0..=f32::INFINITY)
-                            .prefix("Length: "),
-                    );
-                });
-
-                ui.checkbox(&mut self.interactive_dragging, "Interactive Dragging")
-                    .on_hover_text("Enable interactive dragging of the line. Make sure to have a unique name for each line and add the function to the response of the plot.");
+                ui.radio_value(
+                    &mut self.style,
+                    Some(LineStyle::Dashed {
+                        length: self.style_length,
+                    }),
+                    "Dashed",
+                );
+                ui.add(
+                    DragValue::new(&mut self.style_length)
+                        .speed(1.0)
+                        .range(0.0..=f32::INFINITY)
+                        .prefix("Length: "),
+                );
             });
+
+            ui.checkbox(&mut self.interactive_dragging, "Interactive Dragging")
+                .on_hover_text("Enable interactive dragging of the line. Make sure to have a unique name for each line and add the function to the response of the plot.");
         });
     }
 

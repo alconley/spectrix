@@ -4,6 +4,12 @@ use geo::Contains as _;
 
 use crate::egui_plot_stuff::colors::{COLOR_OPTIONS, Rgb};
 
+use egui::color_picker::{Alpha, color_picker_color32};
+use egui::{Atom, Button, RichText};
+
+use egui::PopupCloseBehavior;
+use egui::containers::menu::{MenuConfig, SubMenuButton};
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
 pub struct EguiPolygon {
     pub draw: bool,
@@ -196,57 +202,69 @@ impl EguiPolygon {
     }
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
-        ui.menu_button(self.name.clone(), |ui| {
-            ui.vertical(|ui| {
-                ui.text_edit_singleline(&mut self.name);
-                ui.checkbox(&mut self.draw, "Draw Polygon");
-                ui.checkbox(
-                    &mut self.interactive_clicking,
-                    "Interactive Adding Vertices",
-                );
-                ui.checkbox(
-                    &mut self.interactive_dragging,
-                    "Interactive Dragging Vertices",
-                );
-                ui.checkbox(&mut self.name_in_legend, "Name in Legend")
-                    .on_hover_text("Show in legend");
-                ui.checkbox(&mut self.highlighted, "Highlighted");
-
-                ui.add(Slider::new(&mut self.width, 0.0..=10.0).text("Line Width"));
-
-                self.stroke_color_selection_buttons(ui);
-
-                ui.horizontal(|ui| {
-                    ui.label("Line Style: ");
-                    ui.radio_value(&mut self.style, Some(LineStyle::Solid), "Solid");
-                    ui.radio_value(
-                        &mut self.style,
-                        Some(LineStyle::Dotted {
-                            spacing: self.style_length,
-                        }),
-                        "Dotted",
+        ui.text_edit_singleline(&mut self.name);
+        SubMenuButton::new("Settings")
+            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
+            .ui(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.checkbox(&mut self.draw, "Draw Polygon");
+                    ui.checkbox(
+                        &mut self.interactive_clicking,
+                        "Interactive Adding Vertices",
                     );
-                    ui.radio_value(
-                        &mut self.style,
-                        Some(LineStyle::Dashed {
-                            length: self.style_length,
-                        }),
-                        "Dashed",
+                    ui.checkbox(
+                        &mut self.interactive_dragging,
+                        "Interactive Dragging Vertices",
                     );
-                    ui.add(
-                        DragValue::new(&mut self.style_length)
-                            .speed(1.0)
-                            .range(0.0..=f32::INFINITY)
-                            .prefix("Length: "),
-                    );
+                    ui.checkbox(&mut self.name_in_legend, "Name in Legend")
+                        .on_hover_text("Show in legend");
+                    ui.checkbox(&mut self.highlighted, "Highlighted");
+
+                    ui.add(Slider::new(&mut self.width, 0.0..=10.0).text("Line Width"));
+
+                    let button = Button::new((
+                        RichText::new("Color").color(self.stroke.color),
+                        Atom::grow(),
+                        RichText::new(SubMenuButton::RIGHT_ARROW).color(self.stroke.color),
+                    ))
+                    .fill(self.stroke.color);
+
+                    SubMenuButton::from_button(button).ui(ui, |ui| {
+                        ui.spacing_mut().slider_width = 200.0;
+                        color_picker_color32(ui, &mut self.stroke.color, Alpha::Opaque);
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Line Style: ");
+                        ui.radio_value(&mut self.style, Some(LineStyle::Solid), "Solid");
+                        ui.radio_value(
+                            &mut self.style,
+                            Some(LineStyle::Dotted {
+                                spacing: self.style_length,
+                            }),
+                            "Dotted",
+                        );
+                        ui.radio_value(
+                            &mut self.style,
+                            Some(LineStyle::Dashed {
+                                length: self.style_length,
+                            }),
+                            "Dashed",
+                        );
+                        ui.add(
+                            DragValue::new(&mut self.style_length)
+                                .speed(1.0)
+                                .range(0.0..=f32::INFINITY)
+                                .prefix("Length: "),
+                        );
+                    });
                 });
-            });
 
-            ui.separator();
-            if ui.button("Clear Vertices").clicked() {
-                self.clear_vertices();
-            }
-        });
+                ui.separator();
+                if ui.button("Clear Vertices").clicked() {
+                    self.clear_vertices();
+                }
+            });
     }
 
     pub fn polygon_info_menu_button(&mut self, ui: &mut Ui) {

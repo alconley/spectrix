@@ -149,125 +149,123 @@ impl Default for PeakFindingSettings {
 
 impl PeakFindingSettings {
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Peak Finder Parameters", |ui| {
-            ui.heading("Peak Finder Settings");
+        ui.heading("Peak Finder Settings");
 
-            if ui.button("Reset").clicked() {
-                *self = Self::default();
-            }
+        if ui.button("Reset").clicked() {
+            *self = Self::default();
+        }
 
-            ui.separator();
+        ui.separator();
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.enable_min_height, "Enable Min Height");
-                    if self.enable_min_height {
-                        ui.add(
-                            egui::DragValue::new(&mut self.min_height)
-                                .speed(1.0)
-                                .range(0.0..=f32::INFINITY),
-                        );
-                    }
-                });
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.enable_min_height, "Enable Min Height");
+                if self.enable_min_height {
+                    ui.add(
+                        egui::DragValue::new(&mut self.min_height)
+                            .speed(1.0)
+                            .range(0.0..=f32::INFINITY),
+                    );
+                }
+            });
 
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.enable_max_height, "Enable Max Height");
-                    if self.enable_max_height {
-                        ui.add(
-                            egui::DragValue::new(&mut self.max_height)
-                                .speed(1.0)
-                                .range(0.0..=f32::INFINITY),
-                        );
-                    }
-                });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.enable_max_height, "Enable Max Height");
+                if self.enable_max_height {
+                    ui.add(
+                        egui::DragValue::new(&mut self.max_height)
+                            .speed(1.0)
+                            .range(0.0..=f32::INFINITY),
+                    );
+                }
+            });
 
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.enable_min_prominence, "Enable Min Prominence");
-                    if self.enable_min_prominence {
-                        ui.add(
-                            egui::DragValue::new(&mut self.min_prominence)
-                                .speed(1.0)
-                                .range(0.0..=f32::INFINITY),
-                        );
-                    }
-                });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.enable_min_prominence, "Enable Min Prominence");
+                if self.enable_min_prominence {
+                    ui.add(
+                        egui::DragValue::new(&mut self.min_prominence)
+                            .speed(1.0)
+                            .range(0.0..=f32::INFINITY),
+                    );
+                }
+            });
 
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.enable_max_prominence, "Enable Max Prominence");
-                    if self.enable_max_prominence {
-                        ui.add(
-                            egui::DragValue::new(&mut self.max_prominence)
-                                .speed(1.0)
-                                .range(0.0..=f32::INFINITY),
-                        );
-                    }
-                });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.enable_max_prominence, "Enable Max Prominence");
+                if self.enable_max_prominence {
+                    ui.add(
+                        egui::DragValue::new(&mut self.max_prominence)
+                            .speed(1.0)
+                            .range(0.0..=f32::INFINITY),
+                    );
+                }
+            });
 
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.enable_min_difference, "Enable Min Difference");
-                    if self.enable_min_difference {
-                        ui.add(
-                            egui::DragValue::new(&mut self.min_difference)
-                                .speed(1.0)
-                                .range(0.0..=f32::INFINITY),
-                        );
-                    }
-                });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.enable_min_difference, "Enable Min Difference");
+                if self.enable_min_difference {
+                    ui.add(
+                        egui::DragValue::new(&mut self.min_difference)
+                            .speed(1.0)
+                            .range(0.0..=f32::INFINITY),
+                    );
+                }
+            });
 
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.enable_max_difference, "Enable Max Difference");
-                    if self.enable_max_difference {
-                        ui.add(
-                            egui::DragValue::new(&mut self.max_difference)
-                                .speed(1.0)
-                                .range(0.0..=f32::INFINITY),
-                        );
-                    }
-                });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.enable_max_difference, "Enable Max Difference");
+                if self.enable_max_difference {
+                    ui.add(
+                        egui::DragValue::new(&mut self.max_difference)
+                            .speed(1.0)
+                            .range(0.0..=f32::INFINITY),
+                    );
+                }
+            });
 
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.enable_min_plateau_size, "Enable Min Plateau Size");
-                    if self.enable_min_plateau_size {
-                        ui.add(
-                            egui::DragValue::new(&mut self.min_plateau_size)
-                                .speed(1.0)
-                                .range(0.0..=f32::INFINITY),
-                        );
-                    }
-                });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.enable_min_plateau_size, "Enable Min Plateau Size");
+                if self.enable_min_plateau_size {
+                    ui.add(
+                        egui::DragValue::new(&mut self.min_plateau_size)
+                            .speed(1.0)
+                            .range(0.0..=f32::INFINITY),
+                    );
+                }
+            });
 
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.enable_max_plateau_size, "Enable Max Plateau Size");
-                    if self.enable_max_plateau_size {
-                        ui.add(
-                            egui::DragValue::new(&mut self.max_plateau_size)
-                                .speed(1.0)
-                                .range(0.0..=f32::INFINITY),
-                        );
-                    }
-                });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.enable_max_plateau_size, "Enable Max Plateau Size");
+                if self.enable_max_plateau_size {
+                    ui.add(
+                        egui::DragValue::new(&mut self.max_plateau_size)
+                            .speed(1.0)
+                            .range(0.0..=f32::INFINITY),
+                    );
+                }
+            });
 
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.enable_min_distance, "Enable Min Distance");
-                    if self.enable_min_distance {
-                        ui.add(
-                            egui::DragValue::new(&mut self.min_distance)
-                                .speed(1.0)
-                                .range(0.0..=f32::INFINITY),
-                        );
-                    }
-                });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.enable_min_distance, "Enable Min Distance");
+                if self.enable_min_distance {
+                    ui.add(
+                        egui::DragValue::new(&mut self.min_distance)
+                            .speed(1.0)
+                            .range(0.0..=f32::INFINITY),
+                    );
+                }
+            });
 
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.enable_max_distance, "Enable Max Distance");
-                    if self.enable_max_distance {
-                        ui.add(
-                            egui::DragValue::new(&mut self.max_distance)
-                                .speed(1.0)
-                                .range(0.0..=f32::INFINITY),
-                        );
-                    }
-                });
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.enable_max_distance, "Enable Max Distance");
+                if self.enable_max_distance {
+                    ui.add(
+                        egui::DragValue::new(&mut self.max_distance)
+                            .speed(1.0)
+                            .range(0.0..=f32::INFINITY),
+                    );
+                }
             });
         });
     }

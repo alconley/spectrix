@@ -327,77 +327,75 @@ impl FitMarkers {
     }
 
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Markers", |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add(
-                    egui::DragValue::new(&mut self.manual_marker_position)
-                        .speed(1.0)
-                        .prefix("Marker Position: "),
-                );
+        ui.vertical_centered(|ui| {
+            ui.add(
+                egui::DragValue::new(&mut self.manual_marker_position)
+                    .speed(1.0)
+                    .prefix("Marker Position: "),
+            );
 
-                ui.horizontal(|ui| {
-                    if ui.button("Peak").clicked() {
-                        self.add_peak_marker(self.manual_marker_position);
-                    }
-
-                    ui.separator();
-
-                    if ui.button("Background").clicked() {
-                        self.add_background_pair(self.manual_marker_position, 1.0);
-                    }
-
-                    ui.separator();
-
-                    if ui.button("Region").clicked() {
-                        if self.region_markers.len() > 1 {
-                            self.clear_region_markers();
-                        }
-                        self.add_region_marker(self.manual_marker_position);
-                    }
-                });
+            ui.horizontal(|ui| {
+                if ui.button("Peak").clicked() {
+                    self.add_peak_marker(self.manual_marker_position);
+                }
 
                 ui.separator();
 
-                ui.horizontal(|ui| {
-                    ui.label("Clear");
+                if ui.button("Background").clicked() {
+                    self.add_background_pair(self.manual_marker_position, 1.0);
+                }
 
-                    if ui.button("All").clicked() {
-                        self.clear_background_markers();
-                        self.clear_peak_markers();
+                ui.separator();
+
+                if ui.button("Region").clicked() {
+                    if self.region_markers.len() > 1 {
                         self.clear_region_markers();
                     }
-
-                    if ui.button("Region").clicked() {
-                        self.clear_region_markers();
-                    }
-
-                    if ui.button("Peaks").clicked() {
-                        self.clear_peak_markers();
-                    }
-
-                    if ui.button("Background").clicked() {
-                        self.clear_background_markers();
-                    }
-                });
+                    self.add_region_marker(self.manual_marker_position);
+                }
             });
 
             ui.separator();
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for marker in &mut self.region_markers {
-                    marker.menu_button(ui);
+            ui.horizontal(|ui| {
+                ui.label("Clear");
+
+                if ui.button("All").clicked() {
+                    self.clear_background_markers();
+                    self.clear_peak_markers();
+                    self.clear_region_markers();
                 }
 
-                for marker in &mut self.peak_markers {
-                    marker.menu_button(ui);
+                if ui.button("Region").clicked() {
+                    self.clear_region_markers();
                 }
 
-                for pair in &mut self.background_markers {
-                    pair.start.menu_button(ui);
-                    pair.end.menu_button(ui);
-                    pair.histogram_line.menu_button(ui);
+                if ui.button("Peaks").clicked() {
+                    self.clear_peak_markers();
+                }
+
+                if ui.button("Background").clicked() {
+                    self.clear_background_markers();
                 }
             });
+        });
+
+        ui.separator();
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for marker in &mut self.region_markers {
+                marker.menu_button(ui);
+            }
+
+            for marker in &mut self.peak_markers {
+                marker.menu_button(ui);
+            }
+
+            for pair in &mut self.background_markers {
+                pair.start.menu_button(ui);
+                pair.end.menu_button(ui);
+                pair.histogram_line.menu_button(ui);
+            }
         });
     }
 }

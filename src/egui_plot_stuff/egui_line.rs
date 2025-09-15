@@ -1,6 +1,6 @@
 use egui::color_picker::{Alpha, color_picker_color32};
-use egui::containers::menu::{MenuConfig, SubMenuButton};
-use egui::{Atom, Button, Color32, DragValue, PopupCloseBehavior, RichText, Slider, Stroke, Ui};
+use egui::containers::menu::SubMenuButton;
+use egui::{Atom, Button, Color32, DragValue, RichText, Slider, Stroke, Ui};
 use egui_plot::{Line, LineStyle, PlotPoint, PlotPoints, PlotUi};
 
 use crate::{
@@ -135,114 +135,109 @@ impl EguiLine {
     }
 
     pub fn menu_button(&mut self, ui: &mut Ui) {
-        SubMenuButton::new(self.name.clone())
-            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
-            .ui(ui, |ui| {
-                // ui.menu_button(format!("{} Line", self.name), |ui| {
-                ui.label(self.name.clone());
-                ui.vertical(|ui| {
-                    ui.checkbox(&mut self.draw, "Draw Line");
-                    ui.checkbox(&mut self.name_in_legend, "Name in Legend")
-                        .on_hover_text("Show in legend");
-                    ui.checkbox(&mut self.highlighted, "Highlighted");
+        ui.label(self.name.clone());
+        ui.vertical(|ui| {
+            ui.checkbox(&mut self.draw, "Draw Line");
+            ui.checkbox(&mut self.name_in_legend, "Name in Legend")
+                .on_hover_text("Show in legend");
+            ui.checkbox(&mut self.highlighted, "Highlighted");
 
-                    // Color automatically changed based of light/dark mode in histogram1d.rs
-                    let button = Button::new((
-                        RichText::new("Color").color(self.color),
-                        Atom::grow(),
-                        RichText::new(SubMenuButton::RIGHT_ARROW).color(self.color),
-                    ))
-                    .fill(self.color);
+            // Color automatically changed based of light/dark mode in histogram1d.rs
+            let button = Button::new((
+                RichText::new("Color").color(self.color),
+                Atom::grow(),
+                RichText::new(SubMenuButton::RIGHT_ARROW).color(self.color),
+            ))
+            .fill(self.color);
 
-                    SubMenuButton::from_button(button).ui(ui, |ui| {
-                        ui.spacing_mut().slider_width = 200.0;
-                        color_picker_color32(ui, &mut self.color, Alpha::Opaque);
-                    });
+            SubMenuButton::from_button(button).ui(ui, |ui| {
+                ui.spacing_mut().slider_width = 200.0;
+                color_picker_color32(ui, &mut self.color, Alpha::Opaque);
+            });
 
-                    ui.add(Slider::new(&mut self.width, 0.0..=10.0).text("Line Width"));
+            ui.add(Slider::new(&mut self.width, 0.0..=10.0).text("Line Width"));
 
-                    // self.stroke_color_selection_buttons(ui);
-                    // ui.add(Slider::new(&mut self.stroke.width, 0.0..=10.0).text("Stroke Width"));
+            // self.stroke_color_selection_buttons(ui);
+            // ui.add(Slider::new(&mut self.stroke.width, 0.0..=10.0).text("Stroke Width"));
 
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut self.reference_fill, "Reference Fill")
-                            .on_hover_text("Fill the area under the line");
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.reference_fill, "Reference Fill")
+                    .on_hover_text("Fill the area under the line");
 
-                        if self.reference_fill {
-                            ui.add(
-                                DragValue::new(&mut self.fill)
-                                    .speed(1.0)
-                                    .prefix("Fill Reference: "),
-                            );
-                            ui.add(
-                                DragValue::new(&mut self.fill_alpha)
-                                    .speed(0.01)
-                                    .range(0.0..=1.0)
-                                    .prefix("Fill Alpha: "),
-                            );
-                        }
-                    });
+                if self.reference_fill {
+                    ui.add(
+                        DragValue::new(&mut self.fill)
+                            .speed(1.0)
+                            .prefix("Fill Reference: "),
+                    );
+                    ui.add(
+                        DragValue::new(&mut self.fill_alpha)
+                            .speed(0.01)
+                            .range(0.0..=1.0)
+                            .prefix("Fill Alpha: "),
+                    );
+                }
+            });
 
-                    // ui.horizontal(|ui| {
-                    //     ui.checkbox(&mut self.log_x, "Log X")
-                    //         .on_hover_text("Logarithmic scale data on the x-axis");
-                    //     ui.checkbox(&mut self.log_y, "Log Y")
-                    //         .on_hover_text("Logarithmic scale data on the y-axis");
-                    // });
+            // ui.horizontal(|ui| {
+            //     ui.checkbox(&mut self.log_x, "Log X")
+            //         .on_hover_text("Logarithmic scale data on the x-axis");
+            //     ui.checkbox(&mut self.log_y, "Log Y")
+            //         .on_hover_text("Logarithmic scale data on the y-axis");
+            // });
 
-                    ui.horizontal(|ui| {
-                        ui.label("Line Style: ");
-                        ui.radio_value(&mut self.style, Some(LineStyle::Solid), "Solid");
-                        ui.radio_value(
-                            &mut self.style,
-                            Some(LineStyle::Dotted {
-                                spacing: self.style_length,
-                            }),
-                            "Dotted",
-                        );
-                        ui.radio_value(
-                            &mut self.style,
-                            Some(LineStyle::Dashed {
-                                length: self.style_length,
-                            }),
-                            "Dashed",
-                        );
-                        ui.add(
-                            DragValue::new(&mut self.style_length)
-                                .speed(1.0)
-                                .range(0.0..=f32::INFINITY)
-                                .prefix("Length: "),
-                        );
-                    });
+            ui.horizontal(|ui| {
+                ui.label("Line Style: ");
+                ui.radio_value(&mut self.style, Some(LineStyle::Solid), "Solid");
+                ui.radio_value(
+                    &mut self.style,
+                    Some(LineStyle::Dotted {
+                        spacing: self.style_length,
+                    }),
+                    "Dotted",
+                );
+                ui.radio_value(
+                    &mut self.style,
+                    Some(LineStyle::Dashed {
+                        length: self.style_length,
+                    }),
+                    "Dashed",
+                );
+                ui.add(
+                    DragValue::new(&mut self.style_length)
+                        .speed(1.0)
+                        .range(0.0..=f32::INFINITY)
+                        .prefix("Length: "),
+                );
+            });
 
-                    ui.collapsing("Points", |ui| {
-                        if ui
-                            .button("📋")
-                            .on_hover_text("Copy points to clipboard")
-                            .clicked()
-                        {
-                            let points_str = self
-                                .points
-                                .iter()
-                                .map(|point| format!("{}, {}", point[0], point[1]))
-                                .collect::<Vec<String>>()
-                                .join("\n");
-                            ui.ctx().copy_text(points_str);
-                        }
+            ui.collapsing("Points", |ui| {
+                if ui
+                    .button("📋")
+                    .on_hover_text("Copy points to clipboard")
+                    .clicked()
+                {
+                    let points_str = self
+                        .points
+                        .iter()
+                        .map(|point| format!("{}, {}", point[0], point[1]))
+                        .collect::<Vec<String>>()
+                        .join("\n");
+                    ui.ctx().copy_text(points_str);
+                }
 
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            ui.vertical(|ui| {
-                                ui.label("X, Y");
-                                for point in &mut self.points {
-                                    ui.horizontal(|ui| {
-                                        ui.label(format!("{}, {}", point[0], point[1]));
-                                    });
-                                }
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        ui.label("X, Y");
+                        for point in &mut self.points {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("{}, {}", point[0], point[1]));
                             });
-                        });
+                        }
                     });
                 });
             });
+        });
     }
 
     pub fn set_color(&mut self, color: Color32) {
