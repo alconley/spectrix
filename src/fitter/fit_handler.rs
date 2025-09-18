@@ -11,11 +11,13 @@ use super::models::gaussian::GaussianFitter;
 
 use super::common::Calibration;
 
+use crate::custom_analysis::se_sps::FitUUID;
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::common::Data;
 use crate::fitter::models::linear::LinearFitter;
 use crate::fitter::models::quadratic;
 
+use std::collections::HashMap;
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Fits {
     pub temp_fit: Option<Fitter>,
@@ -499,4 +501,41 @@ impl Fits {
 
         self.ui(ui, true);
     }
+
+    pub fn sync_uuid(&mut self, uuid_map: &[FitUUID]) {
+        // UUID -> (energy, uncertainty)
+        let lut: HashMap<usize, (f64, f64)> = uuid_map
+            .iter()
+            .map(|m| (m.uuid, (m.energy.0, m.energy.1)))
+            .collect();
+
+        // helper to apply to a single fitter
+        let apply = |fitter: &mut Fitter| {
+            if let Some(FitResult::Gaussian(gauss)) = &mut fitter.fit_result {
+                // iterate by index so we can also call &mut methods on `gauss`
+                for peak_idx in 0..gauss.fit_result.len() {
+                    let uuid = gauss.fit_result[peak_idx].uuid;
+                    if let Some(&(e, de)) = lut.get(&uuid)
+                        && let Err(err) = gauss.update_energy_for_peak(peak_idx, e, de)
+                    {
+                        log::error!(
+                            "Failed to update energy for UUID {uuid} (peak {peak_idx}): {err:?}"
+                        );
+                    }
+                }
+            }
+        };
+
+        // Stored fits
+        for fitter in &mut self.stored_fits {
+            apply(fitter);
+        }
+
+        // Temp fit
+        if let Some(ref mut temp) = self.temp_fit {
+            apply(temp);
+        }
+    }
+
+    // pub fn
 }

@@ -1,3 +1,4 @@
+use crate::custom_analysis::analysis::AnalysisScripts;
 use crate::histoer::cuts::Cuts;
 use crate::histoer::histogrammer::Histogrammer;
 
@@ -52,6 +53,7 @@ pub struct Processor {
     pub histogrammer: Histogrammer,
     pub histogram_script: HistogramScript,
     pub settings: ProcessorSettings,
+    pub analysis: AnalysisScripts,
 }
 
 impl Processor {
@@ -71,6 +73,7 @@ impl Processor {
             histogrammer: Histogrammer::default(),
             histogram_script: HistogramScript::new(),
             settings: ProcessorSettings::default(),
+            analysis: AnalysisScripts::default(),
         }
     }
 
@@ -590,12 +593,17 @@ def get_2d_histograms(file_name):
                                 }
                             });
                         }
+
+                        ui.separator();
+
+                        ui.checkbox(&mut self.analysis.open, "Open Analysis");
                     });
                 });
 
                 ui.separator();
 
                 self.selected_files_ui(ui);
+
             },
         );
 
@@ -767,6 +775,9 @@ def get_2d_histograms(file_name):
         self.left_side_panels_ui(ctx);
         self.bottom_panel(ctx);
         self.central_panel_ui(ctx);
+
+        self.analysis
+            .ui(ctx, &self.selected_files, &mut self.histogrammer);
 
         self.file_dialog.update(ctx);
     }
