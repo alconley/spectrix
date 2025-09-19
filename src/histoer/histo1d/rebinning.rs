@@ -6,7 +6,7 @@ impl Histogram {
         let mut factors = vec![];
         factors.push(1);
         let mut factor = 1;
-        while self.original_bins.len() % (factor * 2) == 0 {
+        while self.original_bins.len().is_multiple_of(factor * 2) {
             factor *= 2;
             factors.push(factor);
         }

@@ -126,7 +126,7 @@ impl EguiPoints {
                             vec![[x, y_lo], [x, y_hi]],
                         )
                         .color(self.color)
-                        .width(1.0);
+                        .width(self.radius / 3.0);
 
                         plot_ui.line(bar);
                     } else {
@@ -139,7 +139,7 @@ impl EguiPoints {
                             vec![[x, y_lo], [x, y_hi]],
                         )
                         .color(self.color)
-                        .width(1.0);
+                        .width(self.radius / 3.0);
 
                         plot_ui.line(bar);
                     }

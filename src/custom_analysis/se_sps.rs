@@ -4,11 +4,13 @@ use std::path::{Path, PathBuf};
 use crate::fitter::main_fitter::FitResult;
 use crate::histoer::histogrammer;
 use egui::{Color32, Vec2b};
+use egui_plot::MarkerShape;
 use std::cmp::Ordering;
 use std::fs::File;
 use std::io::{BufRead as _, BufReader, Write as _};
 
 use crate::egui_plot_stuff::egui_points::EguiPoints;
+use crate::fitter::models::gaussian::GaussianParameters;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Run {
@@ -22,6 +24,7 @@ pub struct Run {
     magnetic_field: f64,    // kG
     normalization_factor: Option<(f64, f64)>,
     color: egui::Color32,
+    markershape: String,
 }
 
 impl Run {
@@ -100,6 +103,26 @@ impl Run {
         }
 
         changed |= ui.color_edit_button_srgba(&mut self.color).changed();
+
+        changed |= egui::ComboBox::from_id_salt(format!("marker_shape_combo_{}", self.file_name))
+            .selected_text(self.markershape.clone())
+            .show_ui(ui, |ui| {
+                let mut any = false;
+                for option in &[
+                    "Circle", "Diamond", "Square", "Cross", "Plus", "Up", "Down", "Left", "Right",
+                    "Asterisk",
+                ] {
+                    if ui
+                        .selectable_value(&mut self.markershape, (*option).to_owned(), *option)
+                        .changed()
+                    {
+                        any = true;
+                    }
+                }
+                any
+            })
+            .inner
+            .unwrap_or(false);
 
         changed
     }
@@ -187,6 +210,23 @@ impl Run {
             color: egui::Color32::from_rgb(255, 0, 0),
             magnetic_field,
             normalization_factor: None,
+            markershape: "Circle".to_owned(),
+        }
+    }
+
+    pub fn get_egui_markershape(&self) -> MarkerShape {
+        match self.markershape.as_str() {
+            // "Circle" => MarkerShape::Circle,
+            "Diamond" => MarkerShape::Diamond,
+            "Square" => MarkerShape::Square,
+            "Cross" => MarkerShape::Cross,
+            "Plus" => MarkerShape::Plus,
+            "Up" => MarkerShape::Up,
+            "Down" => MarkerShape::Down,
+            "Left" => MarkerShape::Left,
+            "Right" => MarkerShape::Right,
+            "Asterisk" => MarkerShape::Asterisk,
+            _ => MarkerShape::Circle,
         }
     }
 }
@@ -254,6 +294,7 @@ impl Runs {
                 ui.label("Normalization")
                     .on_hover_text("Divide area by this to get cross section [μb/sr]");
                 ui.label("Color");
+                ui.label("Marker Shape");
                 ui.end_row();
 
                 for (i, run) in self.runs.iter_mut().enumerate() {
@@ -357,7 +398,7 @@ impl Runs {
             // Header
             if let Err(e) = writeln!(
                 f,
-                "file_name,bci_scale,bci_scaler,bci_uncertainty,angle,slits,slits_uncertainty,magnetic_field,color_r,color_g,color_b,color_a"
+                "file_name,bci_scale,bci_scaler,bci_uncertainty,angle,slits,slits_uncertainty,magnetic_field,color_r,color_g,color_b,color_a,markershape"
             ) {
                 log::error!("Failed to write header: {e}");
                 return;
@@ -367,7 +408,7 @@ impl Runs {
                 let (r, g, b, a) = (run.color.r(), run.color.g(), run.color.b(), run.color.a());
                 if let Err(e) = writeln!(
                     f,
-                    "{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{},{},{},{}",
+                    "{},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{},{},{},{},{}",
                     Self::escape_csv(&run.file_name),
                     run.bci_scale,
                     run.bci_scaler,
@@ -379,7 +420,8 @@ impl Runs {
                     r,
                     g,
                     b,
-                    a
+                    a,
+                    run.markershape,
                 ) {
                     log::error!("Failed to write row for {}: {e}", run.file_name);
                     return;
@@ -482,6 +524,9 @@ impl Runs {
                         let b: u8 = cols[10].parse().unwrap_or(0);
                         let a: u8 = cols[11].parse().unwrap_or(255);
                         run.color = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
+                        if cols.len() >= 13 {
+                            run.markershape = cols[12].clone();
+                        }
                         updated += 1;
                     }
                 } else {
@@ -1118,15 +1163,20 @@ impl SPSAnalysis {
         }
     }
 
+    #[expect(clippy::type_complexity)]
     pub fn get_data_from_histogrammer(
         &self,
         histogrammer: &histogrammer::Histogrammer,
-    ) -> HashMap<usize, Vec<(f64, f64, f64, Color32)>> {
-        let mut map: HashMap<usize, Vec<(f64, f64, f64, Color32)>> = HashMap::new();
+    ) -> HashMap<usize, Vec<(f64, f64, f64, GaussianParameters, Color32, MarkerShape)>> {
+        let mut map: HashMap<
+            usize,
+            Vec<(f64, f64, f64, GaussianParameters, Color32, MarkerShape)>,
+        > = HashMap::new();
 
         for run in &self.runs.runs {
             let angle = run.angle;
             let color = run.color;
+            let markershape = run.get_egui_markershape();
 
             let (norm, norm_unc) = match run.normalization_factor {
                 Some((n, dn)) if n != 0.0 => (n, dn),
@@ -1167,7 +1217,9 @@ impl SPSAnalysis {
                                         angle,
                                         cross_section_ub_sr,
                                         cross_section_uncertainty,
+                                        params.clone(),
                                         color,
+                                        markershape,
                                     ));
                                 }
                             }
@@ -1227,8 +1279,65 @@ impl SPSAnalysis {
                                 return;
                             }
                             let uuid = uuids[idx];
-                            let pts = &data[&uuid]; // Vec<(angle, sigma, dsigma, color)>
+                            let pts: &Vec<(f64, f64, f64, GaussianParameters, Color32, MarkerShape)> = &data[&uuid];
 
+                            // ---------- Build a per-UUID label from params ----------
+                            fn auto_fmt(value: Option<f64>, unc: Option<f64>, units: &str) -> String {
+                                match value {
+                                    Some(val) => {
+                                        let unc = unc.unwrap_or(0.0);
+                                        if unc > 0.0 && unc.is_finite() {
+                                            // 2 sig figs in the uncertainty → decimals from its magnitude
+                                            let exp = unc.abs().log10().floor() as i32;
+                                            let digits = (-(exp) + 1).max(0) as usize;
+                                            format!("{val:.digits$} ± {unc:.digits$} {units}")
+                                        } else {
+                                            format!("{val:.3} {units}")
+                                        }
+                                    }
+                                    None => "—".to_owned(),
+                                }
+                            }
+
+                            // Assigned energy (expect same for all points; show “(mixed)” if not)
+                            let mut energy_val: Option<f64> = None;
+                            let mut energy_unc: Option<f64> = None;
+                            let mut energy_mixed = false;
+
+                            for &(_ang, _y, _dy, ref params, _col, _shape) in pts {
+                                if let Some(e) = params.energy.value && e != -1.0 {
+                                    match energy_val {
+                                        None => {
+                                            energy_val = Some(e);
+                                            energy_unc = params.energy.uncertainty;
+                                        }
+                                        Some(prev) if (prev - e).abs() > f64::EPSILON => {
+                                            energy_mixed = true;
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+
+
+
+                            // Compose the label shown on-plot (top-left)
+                            let mut label = format!("UUID {uuid}");
+                            if let Some(e) = energy_val {
+                                let mut line = format!("\nAssigned Energy: {}", auto_fmt(Some(e), energy_unc, "keV"));
+                                if energy_mixed {
+                                    line.push_str(" (mixed)");
+                                }
+                                label.push_str(&line);
+                            }
+                            let (avg_cal_mean, avg_cal_mean_unc) = avg_calibrated_mean(pts);
+                            if avg_cal_mean.is_some() {
+                                label.push_str(&format!(
+                                    "\nAverage Calibrated Mean: {}",
+                                    auto_fmt(avg_cal_mean, avg_cal_mean_unc, "keV")
+                                ));
+                            }
+                            // --------------------------------------------------------
                             // ---- Bounds (linear space first) ----
                             let xmin_lin = 0.0;
                             let xmax_lin = 65.0;
@@ -1236,7 +1345,7 @@ impl SPSAnalysis {
                             let mut y_max_lin = 1e-9;
                             let mut y_min_lin = f64::INFINITY;
 
-                            for &(_ang, y, dy, _col) in pts {
+                            for &(_ang, y, dy, ref _params, _col, _markershape) in pts {
                                 // Upper always includes the +unc
                                 let hi = (y + dy).max(EPS);
 
@@ -1320,14 +1429,31 @@ impl SPSAnalysis {
                                 );
                             }
 
+
+                            let label_color = if ui.visuals().dark_mode {
+                                egui::Color32::LIGHT_BLUE
+                            } else {
+                                egui::Color32::BLACK
+                            };
+
                             // Render
                             plot.show(ui, |pui| {
                                 // One marker per datum
-                                for &(ang, y, dy, col) in pts {
+                                for &(ang, y, dy, ref params, col, markershape) in pts {
+                                    let uuid: usize = params.uuid;
+
+                                    // Base label
+                                    let mut name = format!(
+                                        "UUID {uuid}\nAngle: {ang:.1}°\ndΩ/dσ: {y:.2} ± {dy:.2} [μb/sr]"
+                                    );
+
+                                    let gaussian_summary = params.summary_string(Some("keV"), Some("mm"));
+                                    if !gaussian_summary.is_empty() {
+                                        name.push_str(&format!("\n{gaussian_summary}"));
+                                    }
+
                                     let mut point = EguiPoints::new_cross_section(
-                                        &format!(
-                                            "UUID {uuid}\nAngle: {ang:.1}°\ndΩ/dσ: {y:.2} ± {dy:.2} [μb/sr]"
-                                        ),
+                                        &name,
                                         ang,
                                         y,
                                         dy,
@@ -1335,19 +1461,19 @@ impl SPSAnalysis {
                                     );
                                     point.log_y = self.settings.log_scale;
                                     point.radius = self.settings.markersize;
+                                    point.shape = Some(markershape);
                                     point.draw(pui);
                                 }
 
-                                // UUID text in the top-left corner of the plot
-                                let label = egui_plot::Text::new(
-                                    format!("uuid_label_{uuid}"),                         // item name/id
-                                    egui_plot::PlotPoint::new(xmin_lin + 1.0, ymax_plot), // plot-space position
-                                    format!("UUID {uuid}"), // visible text
+                                // Put the per-UUID label in the top-left corner
+                                let label_item = egui_plot::Text::new(
+                                    format!("uuid_label_{uuid}"),              // item name/id
+                                    egui_plot::PlotPoint::new(xmin_lin + 1.0, ymax_plot),
+                                    label,                                     // the string we built
                                 )
-                                .anchor(egui::Align2::LEFT_TOP); // top-left
-                                // .color(egui::Color32::WHITE);
+                                .anchor(egui::Align2::LEFT_TOP).color(label_color);
 
-                                pui.text(label);
+                                pui.text(label_item);
 
                                 // X bounds are linear in both modes
                                 pui.set_plot_bounds_x(xmin_lin..=xmax_lin);
@@ -1432,4 +1558,69 @@ fn nice_log_floor(x: f64) -> f64 {
     let mant = x / base; // in [1,10)
     let m = if mant >= 3.0 { 3.0 } else { 1.0 };
     m * base
+}
+
+/// Compute inverse-variance weighted average of calibrated means (and its uncertainty).
+/// Falls back to unweighted mean + standard error if uncertainties are missing/invalid.
+/// Returns (mean, uncertainty). Both None if no calibrated means found.
+fn avg_calibrated_mean(
+    pts: &[(
+        f64,
+        f64,
+        f64,
+        GaussianParameters,
+        egui::Color32,
+        egui_plot::MarkerShape,
+    )],
+) -> (Option<f64>, Option<f64>) {
+    // Collect (mean, sigma) pairs where calibrated mean exists
+    let mut with_unc: Vec<(f64, f64)> = Vec::new(); // (m_i, σ_i)
+    let mut bare: Vec<f64> = Vec::new(); // m_i when σ_i missing
+
+    for (_, _, _, params, _, _) in pts {
+        if let Some(m) = params.mean.calibrated_value {
+            if let Some(dm) = params.mean.calibrated_uncertainty
+                && dm.is_finite()
+                && dm > 0.0
+            {
+                with_unc.push((m, dm));
+                continue;
+            }
+            bare.push(m);
+        }
+    }
+
+    if !with_unc.is_empty() {
+        // Inverse-variance weighted mean
+        let mut wsum = 0.0;
+        let mut wmsum = 0.0;
+        for (m, dm) in with_unc {
+            let w = 1.0 / (dm * dm);
+            wsum += w;
+            wmsum += w * m;
+        }
+        if wsum > 0.0 {
+            let mean = wmsum / wsum;
+            let unc = 1.0 / wsum.sqrt();
+            return (Some(mean), Some(unc));
+        }
+    }
+
+    // Fallback: unweighted mean + standard error (if possible)
+    let all: Vec<f64> = if !bare.is_empty() {
+        bare
+    } else {
+        // No valid values at all
+        return (None, None);
+    };
+
+    let n = all.len() as f64;
+    let mean = all.iter().copied().sum::<f64>() / n;
+    if all.len() >= 2 {
+        let var = all.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0);
+        let se = (var / n).sqrt();
+        (Some(mean), Some(se))
+    } else {
+        (Some(mean), None)
+    }
 }

@@ -10,7 +10,7 @@ impl Histogram2D {
         let mut factor = 1;
 
         if self.backup_bins.is_none() {
-            while self.bins.x % (factor * 2) == 0 {
+            while self.bins.x.is_multiple_of(factor * 2) {
                 factor *= 2;
                 factors.push(factor);
             }
@@ -26,8 +26,7 @@ impl Histogram2D {
                 .as_ref()
                 .expect("Backup bins should be set")
                 .x
-                % (factor * 2)
-                == 0
+                .is_multiple_of(factor * 2)
             {
                 factor *= 2;
                 factors.push(factor);
@@ -56,7 +55,7 @@ impl Histogram2D {
         let mut factor = 1;
 
         if self.backup_bins.is_none() {
-            while self.bins.y % (factor * 2) == 0 {
+            while self.bins.y.is_multiple_of(factor * 2) {
                 factor *= 2;
                 factors.push(factor);
             }
@@ -72,8 +71,7 @@ impl Histogram2D {
                 .as_ref()
                 .expect("Backup bins should be set")
                 .y
-                % (factor * 2)
-                == 0
+                .is_multiple_of(factor * 2)
             {
                 factor *= 2;
                 factors.push(factor);

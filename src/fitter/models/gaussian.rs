@@ -17,6 +17,36 @@ use std::fs::File;
 use std::io::Write as _;
 use std::path::PathBuf;
 
+fn auto_fmt(value: Option<f64>, unc: Option<f64>, units: Option<&str>) -> String {
+    match value {
+        Some(val) => {
+            let unc = unc.unwrap_or(0.0);
+
+            if unc > 0.0 && unc.is_finite() {
+                // Get order of magnitude of the uncertainty
+                let digits = if unc == 0.0 {
+                    2
+                } else {
+                    let exp = unc.abs().log10().floor() as i32;
+                    // show 2 significant figures in uncertainty
+                    (-(exp) + 1).max(0) as usize
+                };
+
+                if let Some(units) = units {
+                    format!("{val:.digits$} ± {unc:.digits$} {units}")
+                } else {
+                    format!("{val:.digits$} ± {unc:.digits$}")
+                }
+            } else if let Some(units) = units {
+                format!("{val:.3} {units}")
+            } else {
+                format!("{val:.3}")
+            }
+        }
+        None => "—".to_owned(),
+    }
+}
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct GaussianParameters {
     pub amplitude: Parameter,
@@ -190,6 +220,70 @@ impl GaussianParameters {
                 self.sigma.uncertainty.unwrap_or(0.0)
             ));
         }
+    }
+
+    pub fn summary_string(
+        &self,
+        calibrated_units: Option<&str>,
+        uncalibrated_units: Option<&str>,
+    ) -> String {
+        let mut out = String::new();
+
+        out.push_str("\nGaussian Fit Parameters:\n");
+        out.push_str(&format!(
+            "Mean: {}\n",
+            auto_fmt(self.mean.value, self.mean.uncertainty, uncalibrated_units)
+        ));
+        out.push_str(&format!(
+            "Amplitude: {}\n",
+            auto_fmt(self.amplitude.value, self.amplitude.uncertainty, None)
+        ));
+        out.push_str(&format!(
+            "Sigma: {}\n",
+            auto_fmt(self.sigma.value, self.sigma.uncertainty, uncalibrated_units)
+        ));
+        out.push_str(&format!(
+            "FWHM: {}\n",
+            auto_fmt(self.fwhm.value, self.fwhm.uncertainty, uncalibrated_units)
+        ));
+        out.push_str(&format!(
+            "Area: {}\n",
+            auto_fmt(self.area.value, self.area.uncertainty, None)
+        ));
+
+        out.push_str("\nCalibrated Parameters:\n");
+        if let Some(e) = self.energy.value
+            && e != -1.0
+        {
+            out.push_str(&format!(
+                "Assigned Energy: {}\n",
+                auto_fmt(Some(e), self.energy.uncertainty, calibrated_units)
+            ));
+        }
+
+        if let Some(cal_mean) = self.mean.calibrated_value {
+            out.push_str(&format!(
+                "Calibrated Mean: {}\n",
+                auto_fmt(
+                    Some(cal_mean),
+                    self.mean.calibrated_uncertainty,
+                    calibrated_units
+                )
+            ));
+        }
+
+        if let Some(cal_fwhm) = self.fwhm.calibrated_value {
+            out.push_str(&format!(
+                "Calibrated FWHM: {}\n",
+                auto_fmt(
+                    Some(cal_fwhm),
+                    self.fwhm.calibrated_uncertainty,
+                    calibrated_units
+                )
+            ));
+        }
+
+        out.trim_end().to_owned()
     }
 }
 
