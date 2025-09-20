@@ -113,7 +113,7 @@ impl LinearFitter {
 
     pub fn lmfit(&mut self) -> PyResult<()> {
         log::info!("Fitting data with a linear line using `lmfit`.");
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // let sys = py.import("sys")?;
             // let version: String = sys.getattr("version")?.extract()?;
             // let executable: String = sys.getattr("executable")?.extract()?;

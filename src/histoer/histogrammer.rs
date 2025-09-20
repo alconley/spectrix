@@ -1018,7 +1018,7 @@ impl Histogrammer {
         // export PYTHONPATH=$(pwd)/.venv/lib/python3.12/site-packages
         // cargo run --release
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let sys = py.import("sys")?;
             let version: String = sys.getattr("version")?.extract()?;
             let executable: String = sys.getattr("executable")?.extract()?;

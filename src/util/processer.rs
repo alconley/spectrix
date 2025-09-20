@@ -82,7 +82,7 @@ impl Processor {
     }
 
     pub fn get_histograms_from_root_files(&mut self, checked_files: &[PathBuf]) -> PyResult<()> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // Attempt to import Python modules and handle errors
             let sys = py.import("sys").map_err(|e| {
                 eprintln!("Error importing `sys` module: {e:?}");

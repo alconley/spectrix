@@ -388,7 +388,7 @@ impl GaussianFitter {
     }
 
     pub fn lmfit(&mut self, load_result_path: Option<PathBuf>) -> PyResult<()> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             // let sys = py.import("sys")?;
             // let version: String = sys.getattr("version")?.extract()?;
             // let executable: String = sys.getattr("executable")?.extract()?;
@@ -1270,7 +1270,7 @@ def load_result(filename: str):
         }
 
         // Step 2: Python call to update UUID
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let module = PyModule::from_code(
                 py,
                 c_str!(
@@ -1333,7 +1333,7 @@ def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
         }
 
         // Step 2: Python call to update energy
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let module = PyModule::from_code(
                 py,
                 c_str!("
@@ -1484,7 +1484,7 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
         }
 
         // Step 2: Python call to update energy
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let module = PyModule::from_code(
                 py,
                 c_str!(

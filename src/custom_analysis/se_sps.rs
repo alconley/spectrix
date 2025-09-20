@@ -993,7 +993,7 @@ impl SPSAnalysis {
             .resizable(true)
             .default_width(300.0)
             .show_animated(ctx.ctx(), self.settings.panel_open, |ui| {
-                egui::ScrollArea::vertical()
+                egui::ScrollArea::both()
                     .id_salt("sps_left_scroll_area")
                     .show(ui, |ui| {
                         self.left_panel(ui, histogrammer);
