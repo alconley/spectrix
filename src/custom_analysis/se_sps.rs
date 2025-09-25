@@ -1057,7 +1057,12 @@ impl SPSAnalysis {
 
         egui::CollapsingHeader::new("Settings")
             .default_open(false)
-            .show(ui, |ui| self.settings.ui(ui));
+            .show(ui, |ui| {
+                self.settings.ui(ui);
+                if ui.button("Export [.csv]").clicked() {
+                    self.export_cross_section_csv(histogrammer);
+                }
+            });
 
         // Recompute once if anything changed
         if dirty {
@@ -1123,6 +1128,7 @@ impl SPSAnalysis {
                             .range(1..=92),
                     )
                     .changed();
+                ui.end_row();
             });
 
         changed
@@ -1167,16 +1173,17 @@ impl SPSAnalysis {
     pub fn get_data_from_histogrammer(
         &self,
         histogrammer: &histogrammer::Histogrammer,
-    ) -> HashMap<usize, Vec<(f64, f64, f64, GaussianParameters, Color32, MarkerShape)>> {
+    ) -> HashMap<usize, Vec<(f64, f64, f64, f64, GaussianParameters, Color32, MarkerShape)>> {
         let mut map: HashMap<
             usize,
-            Vec<(f64, f64, f64, GaussianParameters, Color32, MarkerShape)>,
+            Vec<(f64, f64, f64, f64, GaussianParameters, Color32, MarkerShape)>,
         > = HashMap::new();
 
         for run in &self.runs.runs {
             let angle = run.angle;
             let color = run.color;
             let markershape = run.get_egui_markershape();
+            let field = run.magnetic_field;
 
             let (norm, norm_unc) = match run.normalization_factor {
                 Some((n, dn)) if n != 0.0 => (n, dn),
@@ -1217,6 +1224,7 @@ impl SPSAnalysis {
                                         angle,
                                         cross_section_ub_sr,
                                         cross_section_uncertainty,
+                                        field,
                                         params.clone(),
                                         color,
                                         markershape,
@@ -1230,6 +1238,95 @@ impl SPSAnalysis {
         }
 
         map
+    }
+
+    pub fn export_cross_section_csv(
+        &self,
+        histogrammer: &crate::histoer::histogrammer::Histogrammer,
+    ) {
+        let data = self.get_data_from_histogrammer(histogrammer);
+        if data.is_empty() {
+            log::warn!("No cross-section data to export.");
+            return;
+        }
+
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("CSV", &["csv"])
+            .set_file_name("cross_sections.csv")
+            .save_file()
+        else {
+            return;
+        };
+
+        let mut f = match std::fs::File::create(&path) {
+            Ok(f) => f,
+            Err(e) => {
+                log::error!("Failed to create CSV: {e}");
+                return;
+            }
+        };
+
+        // Header
+        if let Err(e) = writeln!(
+            f,
+            "UUID,Angle,Magnetic Field,Cross Section,Cross Section Uncertainty,\
+             Mean,Mean Unc,Sigma,Sigma Unc,FWHM,FWHM Unc,Amplitude,Amplitude Unc,\
+             Area,Area Unc,Assigned Energy,Energy Unc,Calibrated Mean,Calibrated Mean Unc,\
+             Calibrated FWHM,Calibrated FWHM Unc"
+        ) {
+            log::error!("Failed to write header: {e}");
+            return;
+        }
+
+        // Sort UUIDs
+        let mut uuids: Vec<_> = data.keys().copied().collect();
+        uuids.sort_unstable();
+
+        for uuid in uuids {
+            for (angle, cs, dcs, field, params, _, _) in &data[&uuid] {
+                let fmt = |v: Option<f64>| v.map(|x| format!("{x:.6}")).unwrap_or_default();
+                let fmt_u = |u: Option<f64>| u.map(|x| format!("{x:.6}")).unwrap_or_default();
+
+                if let Err(e) = writeln!(
+                    f,
+                    "{},{:.6},{:.6},{:.6},{:.6},\
+                     {},{},\
+                     {},{},\
+                     {},{},\
+                     {},{},\
+                     {},{},\
+                     {},{},\
+                     {},{},\
+                     {},{}",
+                    uuid,
+                    angle,
+                    field,
+                    cs,
+                    dcs,
+                    fmt(params.mean.value),
+                    fmt_u(params.mean.uncertainty),
+                    fmt(params.sigma.value),
+                    fmt_u(params.sigma.uncertainty),
+                    fmt(params.fwhm.value),
+                    fmt_u(params.fwhm.uncertainty),
+                    fmt(params.amplitude.value),
+                    fmt_u(params.amplitude.uncertainty),
+                    fmt(params.area.value),
+                    fmt_u(params.area.uncertainty),
+                    fmt(params.energy.value),
+                    fmt_u(params.energy.uncertainty),
+                    fmt(params.mean.calibrated_value),
+                    fmt_u(params.mean.calibrated_uncertainty),
+                    fmt(params.fwhm.calibrated_value),
+                    fmt_u(params.fwhm.calibrated_uncertainty),
+                ) {
+                    log::error!("Failed to write row for UUID {uuid}: {e}");
+                    return;
+                }
+            }
+        }
+
+        log::info!("Saved full cross sections CSV to {path:?}");
     }
 
     pub fn cross_section_ui(
@@ -1279,7 +1376,7 @@ impl SPSAnalysis {
                                 return;
                             }
                             let uuid = uuids[idx];
-                            let pts: &Vec<(f64, f64, f64, GaussianParameters, Color32, MarkerShape)> = &data[&uuid];
+                            let pts: &Vec<(f64, f64, f64, f64, GaussianParameters, Color32, MarkerShape)> = &data[&uuid];
 
                             // ---------- Build a per-UUID label from params ----------
                             fn auto_fmt(value: Option<f64>, unc: Option<f64>, units: &str) -> String {
@@ -1304,7 +1401,7 @@ impl SPSAnalysis {
                             let mut energy_unc: Option<f64> = None;
                             let mut energy_mixed = false;
 
-                            for &(_ang, _y, _dy, ref params, _col, _shape) in pts {
+                            for &(_ang, _y, _dy, _field, ref params, _col, _shape) in pts {
                                 if let Some(e) = params.energy.value && e != -1.0 {
                                     match energy_val {
                                         None => {
@@ -1345,7 +1442,7 @@ impl SPSAnalysis {
                             let mut y_max_lin = 1e-9;
                             let mut y_min_lin = f64::INFINITY;
 
-                            for &(_ang, y, dy, ref _params, _col, _markershape) in pts {
+                            for &(_ang, y, dy, _field, ref _params, _col, _markershape) in pts {
                                 // Upper always includes the +unc
                                 let hi = (y + dy).max(EPS);
 
@@ -1439,12 +1536,12 @@ impl SPSAnalysis {
                             // Render
                             plot.show(ui, |pui| {
                                 // One marker per datum
-                                for &(ang, y, dy, ref params, col, markershape) in pts {
+                                for &(ang, y, dy, field, ref params, col, markershape) in pts {
                                     let uuid: usize = params.uuid;
 
                                     // Base label
                                     let mut name = format!(
-                                        "UUID {uuid}\nAngle: {ang:.1}°\ndΩ/dσ: {y:.2} ± {dy:.2} [μb/sr]"
+                                        "UUID {uuid}\nAngle: {ang:.1}°\ndΩ/dσ: {y:.2} ± {dy:.2} [μb/sr]\nMagnetic Field: {field:.2} kG"
                                     );
 
                                     let gaussian_summary = params.summary_string(Some("keV"), Some("mm"));
@@ -1568,6 +1665,7 @@ fn avg_calibrated_mean(
         f64,
         f64,
         f64,
+        f64,
         GaussianParameters,
         egui::Color32,
         egui_plot::MarkerShape,
@@ -1577,7 +1675,7 @@ fn avg_calibrated_mean(
     let mut with_unc: Vec<(f64, f64)> = Vec::new(); // (m_i, σ_i)
     let mut bare: Vec<f64> = Vec::new(); // m_i when σ_i missing
 
-    for (_, _, _, params, _, _) in pts {
+    for (_, _, _, _, params, _, _) in pts {
         if let Some(m) = params.mean.calibrated_value {
             if let Some(dm) = params.mean.calibrated_uncertainty
                 && dm.is_finite()

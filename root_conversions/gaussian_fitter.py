@@ -9,6 +9,10 @@ def formatted_round(value, uncertainty):
     else:
         return sigfig.round(value, uncertainty, style='Drake', sep='external_brackets', spacer='')
 
+import numpy as np
+import lmfit
+from lmfit.model import load_modelresult, save_modelresult
+
 def GaussianFit(counts: list, centers: list,
                 region_markers: list, peak_markers: list = [], background_markers: list = [],
                 equal_sigma: bool = True, free_position: bool = True,                 
@@ -21,41 +25,12 @@ def GaussianFit(counts: list, centers: list,
                                             'amplitude': (0, -np.inf, np.inf, 1.0, True),
                                             'decay': (0, -np.inf, np.inf, 1.0, True),
                                             'exponent': (0, -np.inf, np.inf, 1.0, True)
-                                            }):
-    """
-    Performs a multi-Gaussian fit with an optional background model on a 1D histogram.
-
-    This function fits one or more Gaussian peaks to a specified region of a 1D histogram,
-    optionally using background subtraction and energy assignments. It supports constraints
-    such as fixing peak positions, enforcing equal widths (σ), and calculating physical quantities 
-    such as integrated area and cross sections.
-
-    Parameters:
-    ----------
-    region_markers : tuple of float
-        Two values defining the fitting region boundaries (in channel or calibrated units).
-    peak_markers : list of float, optional
-        Initial guesses for peak positions. If empty, the function guesses based on the maximum bin.
-    background_markers : list of tuple, optional
-        List of (start, end) ranges used to fit the background model. If empty, uses the full region.
-    background_params : dict
-        Dictionary specifying the background model type and its initial parameters.
-        Supported types: 'linear', 'quadratic', 'exponential', 'powerlaw', or None.
-    equal_sigma : bool, default=True
-        If True, all Gaussians share the same sigma (FWHM). If False, each peak can vary independently.
-    free_position : bool, default=True
-        If True, allows peak positions to vary during fitting. If False, positions are fixed at initial guesses.
-    print_info : bool, default=True
-        If True, prints background and final fit reports to stdout.
-
-    Notes:
-    ------
-    - The fit includes background + sum of Gaussian peaks.
-    """
+                                            },
+                sigma_bounds: tuple | None = None):
 
     # ensure the edges is the same length as counts + 1
     if len(centers) != len(counts):
-        raise ValueError("The length of edges must be one more than the length of counts.")
+        raise ValueError('The length of edges must be one more than the length of counts.')
     
     centers = np.array(centers)
     counts = np.array(counts)
@@ -64,14 +39,14 @@ def GaussianFit(counts: list, centers: list,
     
     # Ensure there are 2 region markers
     if len(region_markers) != 2:
-        raise ValueError("Region markers must have exactly 2 values.")
+        raise ValueError('Region markers must have exactly 2 values.')
     
     # sort the region markers
     region_markers = sorted(region_markers)
 
-    # enrsure there are only 2 region markers
+    # ensure there are only 2 region markers
     if len(region_markers) != 2:
-        raise ValueError("Region markers must have exactly 2 values.")
+        raise ValueError('Region markers must have exactly 2 values.')
     
     # Extract fitting region
     region_mask = (centers >= region_markers[0]) & (centers <= region_markers[1])
@@ -114,12 +89,12 @@ def GaussianFit(counts: list, centers: list,
         params = bg_model.make_params(amplitude=background_params['amplitude'][3], exponent=background_params['exponent'][3])
         params['bg_amplitude'].set(vary=background_params['amplitude'][4])
         params['bg_exponent'].set(vary=background_params['exponent'][4])
-    elif bg_type == "None":
+    elif bg_type == 'None':
         bg_model = lmfit.models.ConstantModel(prefix='bg_')
         params = bg_model.make_params(c=0)
         params['bg_c'].set(vary=False)
     else:
-        raise ValueError("Unsupported background model")
+        raise ValueError('Unsupported background model')
     
     # Fit the background model to the data of the background markers before fitting the peaks
     if len(background_markers) == 0:
@@ -142,11 +117,11 @@ def GaussianFit(counts: list, centers: list,
     bg_result = bg_model.fit(bg_y, params, x=bg_x)
 
     # print intial parameter guesses
-    print("\nInitial Background Parameter Guesses:")
+    print('Initial Background Parameter Guesses:')
     params.pretty_print()
 
     # print fit report
-    print("\nBackground Fit Report:")
+    print('Background Fit Report:')
     print(bg_result.fit_report())
 
     # **Adjust background parameters based on their errors**
@@ -183,6 +158,34 @@ def GaussianFit(counts: list, centers: list,
     # **Get the estimated sigma from the strongest peak**
     estimated_sigma = estimate_sigma(x_data, y_data, peak_with_max_count)
 
+    # --- NEW: per-peak auto-estimated sigmas (one per peak) ---
+    per_peak_sigma_est = [estimate_sigma(x_data, y_data, pk) for pk in peak_markers]
+
+    # --- NEW: normalize user-provided sigma bounds ---
+    def _as_list(v, n):
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return [float(v)] * n
+        if len(v) != n:
+            raise ValueError(f'sigma_bounds list length must match number of peaks ({n}).')
+        return [float(x) for x in v]
+
+    n_peaks = len(peak_markers)
+    if sigma_bounds is not None:
+        min_in, max_in = sigma_bounds
+        if equal_sigma:
+            # only expect 1 value for min/max (float or 1-element list); use first if list given
+            min_list = _as_list(min_in, 1)
+            max_list = _as_list(max_in, 1)
+        else:
+            # expect as many values as peak markers (or a single float to broadcast)
+            min_list = _as_list(min_in, n_peaks)
+            max_list = _as_list(max_in, n_peaks)
+    else:
+        min_list = None
+        max_list = None
+
     # **Estimate Amplitude for Each Peak**
     estimated_amplitude = []
     for peak in peak_markers:
@@ -209,19 +212,48 @@ def GaussianFit(counts: list, centers: list,
 
         params.update(g.make_params(amplitude=estimated_amplitude[i], mean=peak, sigma=estimated_sigma))
 
-        if equal_sigma and i > 0:
-            params[f'g{i}_sigma'].set(expr='g0_sigma')
+        # if equal_sigma and i > 0:
+        #     params[f'g{i}_sigma'].set(expr='g0_sigma')
+        # else:
+        #     params[f'g{i}_sigma'].set(min=0)
+
+        # Set sigma value and (optional) bounds
+        if equal_sigma:
+            if i == 0:
+                # initial guess for the shared sigma = auto estimate from the strongest peak
+                params['g0_sigma'].set(value=estimated_sigma)
+                # apply optional bounds (single value expected)
+                if min_list is not None:
+                    params['g0_sigma'].set(min=min_list[0])
+                else:
+                    params['g0_sigma'].set(min=0)  # default behavior
+                if max_list is not None:
+                    params['g0_sigma'].set(max=max_list[0])
+            else:
+                params[f'g{i}_sigma'].set(expr='g0_sigma')
         else:
-            params[f'g{i}_sigma'].set(min=0)
+            # per-peak sigma: auto-estimated unless user constrains with bounds
+            params[f'g{i}_sigma'].set(value=per_peak_sigma_est[i])
+            if min_list is not None:
+                params[f'g{i}_sigma'].set(min=min_list[i])
+            else:
+                params[f'g{i}_sigma'].set(min=0)
+            if max_list is not None:
+                params[f'g{i}_sigma'].set(max=max_list[i])
+
+
+
 
         params.add(f'g{i}_area', expr=f'g{i}_amplitude / {bin_width}')
-        params[f"g{i}_area"].set(min=0)  # Use estimated area
+        params[f'g{i}_area'].set(min=0)  # Use estimated area
+        params[f'g{i}_amplitude'].set(min=0)  # Use estimated area
+
 
         if not free_position:
             params[f'g{i}_center'].set(vary=False)
 
         if len(peak_markers) == 1:
-            params[f'g{i}_center'].set(value=peak, min=region_markers[0], max=region_markers[1])
+            params[f'g{i}_center'].set(value=peak, min=region_markers[0], max=region_markers[1])  
         else:
             # Default to using neighboring peaks
             prev_peak = region_markers[0] if i == 0 else peak_markers[i - 1]
@@ -247,17 +279,18 @@ def GaussianFit(counts: list, centers: list,
     result = model.fit(y_data, params, x=x_data)
 
     # Print initial parameter guesses
-    print("\nInitial Parameter Guesses:")
+    print('Initial Parameter Guesses:')
     params.pretty_print()
 
     # Print fit report
-    print("\nFit Report:")
+    print('Fit Report:')
 
     fit_report = result.fit_report()
     print(fit_report)
 
     # Extract Gaussian and background parameters
     gaussian_params = []
+    additional_params = []
     for i in range(len(peak_markers)):
         amplitude = float(result.params[f'g{i}_amplitude'].value)
         amplitude_uncertainty = result.params[f'g{i}_amplitude'].stderr or 0.0
@@ -270,9 +303,18 @@ def GaussianFit(counts: list, centers: list,
         area = float(result.params[f'g{i}_area'].value)
         area_uncertainty = result.params[f'g{i}_area'].stderr or 0.0
 
+        # default
+        uuid = 0
+        energy = -1.0
+        energy_uncertainty = 0.0
+
         gaussian_params.append((
             amplitude, amplitude_uncertainty, mean, mean_uncertainty,
-            sigma, sigma_uncertainty, fwhm, fwhm_uncertainty, area, area_uncertainty
+            sigma, sigma_uncertainty, fwhm, fwhm_uncertainty, area, area_uncertainty, uuid
+        ))
+
+        additional_params.append((
+            energy, energy_uncertainty,
         ))
 
         # Extract background parameters
@@ -291,7 +333,7 @@ def GaussianFit(counts: list, centers: list,
     # save the fit result to a temp file
     save_modelresult(result, 'temp_fit.sav')
 
-    return gaussian_params, background_params, x_data_line, y_data_line, fit_report
+    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params, result
 
 def load_result(filename: str):
     """
@@ -402,7 +444,7 @@ fig, axs = plt.subplots(1, 1, figsize=(10, 5))
 
 axs.stairs(counts, edges, color='black', linewidth=0.5)
 
-# _,_,_,_,_,result = GaussianFit(counts, centers, region_markers=[145, 155], peak_markers=[], background_params={'bg_type': "None"})
+_,_,_,_,_,_,result = GaussianFit(counts, centers, region_markers=[145, 155], peak_markers=[], background_params={'bg_type': "None"}, equal_sigma=True, sigma_bounds=(0.05, 1.0))
 
 # save_modelresult(result, 'gauss_modelresult.sav')
 
@@ -433,25 +475,25 @@ def plot_result(result, axs):
             color = "green"
         axs.plot(comp_x, y, linewidth=0.5, color=color)
 
-with open("/Users/alconley/Downloads/all_lmfit_results.json") as f:
-    result_dict = json.load(f)
+# with open("/Users/alconley/Downloads/all_lmfit_results.json") as f:
+#     result_dict = json.load(f)
 
-fits = {}
-for name, sav_text in result_dict.items():
-    with open(f"{name}.sav", "w") as tmp:
-        tmp.write(sav_text)
-    result = load_modelresult(f"{name}.sav")
+# fits = {}
+# for name, sav_text in result_dict.items():
+#     with open(f"{name}.sav", "w") as tmp:
+#         tmp.write(sav_text)
+#     result = load_modelresult(f"{name}.sav")
 
-    # remove the temp file
-    import os
-    os.remove(f"{name}.sav")
+#     # remove the temp file
+#     import os
+#     os.remove(f"{name}.sav")
 
-    plot_result(result, axs)
+#     plot_result(result, axs)
 
 
 # # plot the result
-# x = np.linspace(edges[0], edges[-1], 1000)
-# axs.plot(x, result.eval(x=x), 'r-', label='fit')
+x = np.linspace(edges[0], edges[-1], 1000)
+axs.plot(x, result.eval(x=x), 'r-', label='fit')
 # axs.plot(x, result.eval_components(x=x), 'g--', label='components')
 # axs.plot(x, result.eval(x=x) - result.eval_components(x=x), 'b--', label='background')
 

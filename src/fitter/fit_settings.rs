@@ -19,6 +19,9 @@ pub struct FitSettings {
     pub power_law_params: PowerLawParameters,
     pub exponential_params: ExponentialParameters,
     pub calibrated: bool,
+    pub constrain_sigma: bool,
+    pub sigma_min: f64,
+    pub sigma_max: f64,
 }
 
 impl Default for FitSettings {
@@ -37,6 +40,9 @@ impl Default for FitSettings {
             power_law_params: PowerLawParameters::default(),
             exponential_params: ExponentialParameters::default(),
             calibrated: false,
+            constrain_sigma: false,
+            sigma_min: 0.1,
+            sigma_max: 10.0,
         }
     }
 }
@@ -95,11 +101,31 @@ impl FitSettings {
 
         ui.horizontal_wrapped(|ui| {
             ui.label("Gaussian Fit Settings");
-            ui.checkbox(&mut self.equal_stddev, "Equal Standard Deviation")
+            ui.checkbox(&mut self.equal_stddev, "Equal σ")
                 .on_hover_text("Allow the standard deviation of the Gaussian to be free");
             ui.checkbox(&mut self.free_position, "Free Position")
                 .on_hover_text("Allow the position of the Gaussian to be free");
         });
+
+        ui.horizontal_wrapped(|ui| {
+            ui.checkbox(&mut self.constrain_sigma, "Constrain σ")
+                .on_hover_text(
+                    "Enable optional lower/upper bounds for σ.\n\
+                   If Equal Standard Deviation is ON, a single pair applies to all peaks.\n\
+                   If OFF, this pair is broadcast to all peaks.",
+                );
+            ui.add_enabled_ui(self.constrain_sigma, |ui| {
+                ui.label("min:");
+                ui.add(egui::DragValue::new(&mut self.sigma_min).speed(0.01));
+                ui.label("max:");
+                ui.add(egui::DragValue::new(&mut self.sigma_max).speed(0.01));
+            });
+        });
+
+        // keep min ≤ max (when enabled)
+        if self.constrain_sigma && self.sigma_max < self.sigma_min {
+            std::mem::swap(&mut self.sigma_min, &mut self.sigma_max);
+        }
 
         ui.separator();
 

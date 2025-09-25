@@ -9,7 +9,15 @@ use crate::fitter::common::Calibration;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
 pub enum FitModel {
-    Gaussian(Vec<f64>, Vec<f64>, Vec<(f64, f64)>, bool, bool), // region markers, initial peak locations, free sigma, free position
+    Gaussian(
+        Vec<f64>,
+        Vec<f64>,
+        Vec<(f64, f64)>,
+        bool,
+        bool,
+        Option<(f64, f64)>,
+        bool,
+    ),
     None,
 }
 
@@ -70,6 +78,8 @@ pub struct Fitter {
     pub background_line: EguiLine,
     pub composition_line: EguiLine,
     pub decomposition_lines: Vec<EguiLine>,
+
+    pub calibration: Calibration,
 }
 
 impl Default for Fitter {
@@ -88,6 +98,8 @@ impl Default for Fitter {
             background_line: EguiLine::new(egui::Color32::GREEN),
             composition_line: EguiLine::new(egui::Color32::BLUE),
             decomposition_lines: Vec::new(),
+
+            calibration: Calibration::default(),
         }
     }
 }
@@ -109,6 +121,8 @@ impl Fitter {
             background_line: EguiLine::new(egui::Color32::GREEN),
             composition_line: EguiLine::new(egui::Color32::BLUE),
             decomposition_lines: Vec::new(),
+
+            calibration: Calibration::default(),
         }
     }
 
@@ -120,7 +134,76 @@ impl Fitter {
                 background_markrs,
                 equal_stdev,
                 free_position,
+                sigma_bounds_ui,
+                bounds_are_calibrated,
             ) => {
+                if peak_markers.is_empty() && region_markers.len() < 2 {
+                    log::error!(
+                        "Fit aborted: need either ≥1 peak marker or two region markers (got {}).",
+                        region_markers.len()
+                    );
+                    return;
+                }
+
+                // choose reference x positions (peaks if any, else region midpoint)
+                let xs: Vec<f64> = if !peak_markers.is_empty() {
+                    peak_markers.clone()
+                } else {
+                    let xm = 0.5 * (region_markers[0] + region_markers[1]);
+                    vec![xm]
+                };
+
+                // build x-space bounds (or None)
+                let sigma_bounds_x: Option<(Vec<f64>, Vec<f64>)> = if let Some((min_e, max_e)) =
+                    sigma_bounds_ui
+                {
+                    if *bounds_are_calibrated {
+                        // convert energy bounds to x using dE/dx = 2ax + b
+                        let a = self.calibration.a.value;
+                        let b = self.calibration.b.value;
+
+                        // avoid zero derivative; clamp tiny to epsilon
+                        let eps = 1e-12;
+                        let deds: Vec<f64> = xs
+                            .iter()
+                            .map(|&x| (2.0 * a * x + b).abs().max(eps))
+                            .collect();
+
+                        if *equal_stdev {
+                            let min_x = deds
+                                .iter()
+                                .map(|d| min_e / *d)
+                                .fold(f64::NEG_INFINITY, f64::max);
+                            let max_x = deds
+                                .iter()
+                                .map(|d| max_e / *d)
+                                .fold(f64::INFINITY, f64::min);
+                            if min_x.is_finite() && max_x.is_finite() && min_x <= max_x {
+                                Some((vec![min_x], vec![max_x]))
+                            } else {
+                                log::warn!(
+                                    "σ(E) bounds incompatible across peaks; dropping equal-σ bounds"
+                                );
+                                None
+                            }
+                        } else {
+                            let mins_x: Vec<f64> = deds.iter().map(|d| min_e / *d).collect();
+                            let maxs_x: Vec<f64> = deds.iter().map(|d| max_e / *d).collect();
+                            Some((mins_x, maxs_x))
+                        }
+                    } else {
+                        // bounds entered in x already; broadcast as needed
+                        if *equal_stdev {
+                            Some((vec![*min_e], vec![*max_e]))
+                        } else {
+                            let n = xs.len().max(1);
+                            Some((vec![*min_e; n], vec![*max_e; n]))
+                        }
+                    }
+                } else {
+                    None
+                };
+
                 let mut fit = GaussianFitter::new(
                     self.data.clone(),
                     region_markers.clone(),
@@ -131,6 +214,8 @@ impl Fitter {
                     *equal_stdev,
                     *free_position,
                 );
+
+                fit.sigma_bounds = sigma_bounds_x;
 
                 match fit.lmfit(None) {
                     Ok(_) => {
@@ -256,7 +341,7 @@ impl Fitter {
     pub fn get_peak_markers(&self) -> Vec<f64> {
         if self.fit_result.is_none() {
             match &self.fit_model {
-                FitModel::Gaussian(_, peak_markers, _, _, _) => peak_markers.clone(),
+                FitModel::Gaussian(_, peak_markers, _, _, _, _, _) => peak_markers.clone(),
                 FitModel::None => Vec::new(),
             }
         } else {

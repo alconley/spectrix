@@ -291,6 +291,8 @@ impl GaussianParameters {
 pub struct GaussianFitSettings {
     pub equal_stdev: bool,
     pub free_position: bool,
+    pub sigma_bounds: Option<(f64, f64)>,
+    pub per_peak_sigma_bounds: Option<(Vec<f64>, Vec<f64>)>,
 }
 
 #[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -306,6 +308,7 @@ pub struct GaussianFitter {
     pub fit_points: Vec<[f64; 2]>,
     pub fit_report: String,
     pub lmfit_result: Option<String>,
+    pub sigma_bounds: Option<(Vec<f64>, Vec<f64>)>, // (mins_x, maxs_x)
 }
 
 impl GaussianFitter {
@@ -330,11 +333,13 @@ impl GaussianFitter {
             fit_settings: GaussianFitSettings {
                 equal_stdev,
                 free_position,
+                ..Default::default()
             },
             fit_result: Vec::new(),
             fit_points: Vec::new(),
             fit_report: String::new(),
             lmfit_result: None,
+            sigma_bounds: None,
         }
     }
 
@@ -425,7 +430,8 @@ def GaussianFit(counts: list, centers: list,
                                             'amplitude': (0, -np.inf, np.inf, 1.0, True),
                                             'decay': (0, -np.inf, np.inf, 1.0, True),
                                             'exponent': (0, -np.inf, np.inf, 1.0, True)
-                                            }):
+                                            },
+                sigma_bounds: tuple | None = None):
 
     # ensure the edges is the same length as counts + 1
     if len(centers) != len(counts):
@@ -557,6 +563,34 @@ def GaussianFit(counts: list, centers: list,
     # **Get the estimated sigma from the strongest peak**
     estimated_sigma = estimate_sigma(x_data, y_data, peak_with_max_count)
 
+    # --- NEW: per-peak auto-estimated sigmas (one per peak) ---
+    per_peak_sigma_est = [estimate_sigma(x_data, y_data, pk) for pk in peak_markers]
+
+    # --- NEW: normalize user-provided sigma bounds ---
+    def _as_list(v, n):
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return [float(v)] * n
+        if len(v) != n:
+            raise ValueError(f'sigma_bounds list length must match number of peaks ({n}).')
+        return [float(x) for x in v]
+
+    n_peaks = len(peak_markers)
+    if sigma_bounds is not None:
+        min_in, max_in = sigma_bounds
+        if equal_sigma:
+            # only expect 1 value for min/max (float or 1-element list); use first if list given
+            min_list = _as_list(min_in, 1)
+            max_list = _as_list(max_in, 1)
+        else:
+            # expect as many values as peak markers (or a single float to broadcast)
+            min_list = _as_list(min_in, n_peaks)
+            max_list = _as_list(max_in, n_peaks)
+    else:
+        min_list = None
+        max_list = None
+
     # **Estimate Amplitude for Each Peak**
     estimated_amplitude = []
     for peak in peak_markers:
@@ -583,10 +617,37 @@ def GaussianFit(counts: list, centers: list,
 
         params.update(g.make_params(amplitude=estimated_amplitude[i], mean=peak, sigma=estimated_sigma))
 
-        if equal_sigma and i > 0:
-            params[f'g{i}_sigma'].set(expr='g0_sigma')
+        # if equal_sigma and i > 0:
+        #     params[f'g{i}_sigma'].set(expr='g0_sigma')
+        # else:
+        #     params[f'g{i}_sigma'].set(min=0)
+
+        # Set sigma value and (optional) bounds
+        if equal_sigma:
+            if i == 0:
+                # initial guess for the shared sigma = auto estimate from the strongest peak
+                params['g0_sigma'].set(value=estimated_sigma)
+                # apply optional bounds (single value expected)
+                if min_list is not None:
+                    params['g0_sigma'].set(min=min_list[0])
+                else:
+                    params['g0_sigma'].set(min=0)  # default behavior
+                if max_list is not None:
+                    params['g0_sigma'].set(max=max_list[0])
+            else:
+                params[f'g{i}_sigma'].set(expr='g0_sigma')
         else:
-            params[f'g{i}_sigma'].set(min=0)
+            # per-peak sigma: auto-estimated unless user constrains with bounds
+            params[f'g{i}_sigma'].set(value=per_peak_sigma_est[i])
+            if min_list is not None:
+                params[f'g{i}_sigma'].set(min=min_list[i])
+            else:
+                params[f'g{i}_sigma'].set(min=0)
+            if max_list is not None:
+                params[f'g{i}_sigma'].set(max=max_list[i])
+
+
+
 
         params.add(f'g{i}_area', expr=f'g{i}_amplitude / {bin_width}')
         params[f'g{i}_area'].set(min=0)  # Use estimated area
@@ -677,7 +738,7 @@ def GaussianFit(counts: list, centers: list,
     # save the fit result to a temp file
     save_modelresult(result, 'temp_fit.sav')
 
-    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params
+    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params, result
 
 def load_result(filename: str):
     result = load_modelresult(filename)
@@ -774,8 +835,12 @@ def load_result(filename: str):
             let region_markers = self.region_markers.clone();
             let peak_markers = self.peak_markers.clone();
             let background_markers = self.background_markers.clone();
+
             let equal_sigma = self.fit_settings.equal_stdev;
             let free_position = self.fit_settings.free_position;
+
+            // replace the old builder if you had one; now just forward what's stored
+            let sigma_bounds_arg = self.sigma_bounds.clone(); // Option<(Vec<f64>, Vec<f64>)>
 
             // Form the `background_params` dictionary
             let background_params = PyDict::new(py);
@@ -1049,6 +1114,7 @@ def load_result(filename: str):
                     equal_sigma,
                     free_position,
                     background_params,
+                    sigma_bounds_arg,
                 ))?
             };
 
@@ -1396,11 +1462,14 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
         dx_dE = 2 * a * center + b
 
         # Propagated uncertainty for calibrated center
+        d_a_term = a * center * center * np.sqrt( (a_uncertainty/a)**2 + 2*(center_unc/center)**2 )
+        d_b_term = b * center * np.sqrt( (b_uncertainty/b)**2 + (center_unc/center)**2 )
+        d_c_term = c_uncertainty
+
         d_center_cal = np.sqrt(
-            (center ** 2 * a_uncertainty) ** 2 +
-            (center * b_uncertainty) ** 2 +
-            c_uncertainty ** 2 +
-            ((2 * a * center + b) * center_unc) ** 2
+            d_a_term**2 +
+            d_b_term**2 +
+            d_c_term**2
         )
 
         # Calibrated sigma

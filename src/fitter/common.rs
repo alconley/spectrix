@@ -143,11 +143,11 @@ impl Parameter {
 
             let energy = a * x * x + b * x + c;
 
-            let de = ((x * x * da).powi(2)
-                + (x * db).powi(2)
-                + dc.powi(2)
-                + ((2.0 * a * x + b) * dx).powi(2))
-            .sqrt();
+            let da_term = a * x * x * ((da / a).powi(2) + 2.0 * (dx / x).powi(2)).sqrt();
+            let db_term = b * x * (db / b).hypot(dx / x);
+            let dc_term = dc;
+
+            let de = (da_term.powi(2) + db_term.powi(2) + dc_term.powi(2)).sqrt();
 
             self.calibrated_value = Some(energy);
             self.calibrated_uncertainty = Some(de);

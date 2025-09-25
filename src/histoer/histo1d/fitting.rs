@@ -71,8 +71,18 @@ impl Histogram {
         let equal_stdev = self.fits.settings.equal_stddev;
         let free_position = self.fits.settings.free_position;
 
+        fitter.calibration = self.fits.calibration.clone();
+
         fitter.background_model = background_model;
         fitter.background_result = background_result;
+
+        // build optional σ-bounds from UI; when UI is “calibrated”, these are energy-bounds
+        let sigma_bounds_ui = if self.fits.settings.constrain_sigma {
+            Some((self.fits.settings.sigma_min, self.fits.settings.sigma_max))
+        } else {
+            None
+        };
+        let bounds_are_calibrated = self.fits.settings.calibrated;
 
         fitter.fit_model = FitModel::Gaussian(
             region_markers.clone(),
@@ -80,6 +90,8 @@ impl Histogram {
             background_markers.clone(),
             equal_stdev,
             free_position,
+            sigma_bounds_ui,       // <- NEW: (min,max) from UI if enabled
+            bounds_are_calibrated, // <- NEW: interpret bounds as energy if true
         );
 
         fitter.fit();
