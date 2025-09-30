@@ -409,61 +409,6 @@ impl Fits {
         }
     }
 
-    // pub fn fit_stats_grid_ui(&mut self, ui: &mut egui::Ui) {
-    //     // only show the grid if there is something to show
-    //     if self.temp_fit.is_none() && self.stored_fits.is_empty() {
-    //         return;
-    //     }
-
-    //     let mut to_remove = None;
-
-    //     egui::Grid::new("fit_params_grid")
-    //         .striped(true)
-    //         .show(ui, |ui| {
-    //             ui.label("Fit");
-    //             ui.label("Peak");
-    //             ui.label("Mean");
-    //             ui.label("FWHM");
-    //             ui.label("Area");
-    //             ui.label("Amplitude");
-    //             ui.label("Sigma");
-    //             ui.label("UUID");
-    //             ui.label("Energy");
-    //             ui.label("lmfit");
-
-    //             ui.end_row();
-
-    //             if self.temp_fit.is_some() {
-    //                 ui.label("Temp");
-
-    //                 if let Some(temp_fit) = &mut self.temp_fit {
-    //                     temp_fit.fitter_stats(ui, true, self.settings.calibrated);
-    //                 }
-    //             }
-
-    //             if !self.stored_fits.is_empty() {
-    //                 for (i, fit) in self.stored_fits.iter_mut().enumerate() {
-    //                     ui.horizontal(|ui| {
-    //                         ui.label(format!("{i}"));
-
-    //                         ui.separator();
-
-    //                         if ui.button("X").clicked() {
-    //                             to_remove = Some(i);
-    //                         }
-
-    //                         ui.separator();
-    //                     });
-    //                     fit.fitter_stats(ui, false, self.settings.calibrated);
-    //                 }
-    //             }
-    //         });
-
-    //     if let Some(index) = to_remove {
-    //         self.stored_fits.remove(index);
-    //     }
-    // }
-
     pub fn fit_stats_grid_ui(&mut self, ui: &mut egui::Ui) {
         // only show the grid if there is something to show
         if self.temp_fit.is_none() && self.stored_fits.is_empty() {
@@ -762,13 +707,13 @@ impl Fits {
                                         log::info!("Saved lmfit result to {path:?}");
                                     }
                                 }
-                                // ui.menu_button("Fit Report", |ui| {
-                                //     egui::ScrollArea::vertical().show(ui, |ui| {
-                                //         ui.horizontal_wrapped(|ui| {
-                                //             ui.label(self.stored_fits[i].fit_report.clone());
-                                //         });
-                                //     });
-                                // });
+                                ui.menu_button("Fit Report", |ui| {
+                                    egui::ScrollArea::vertical().show(ui, |ui| {
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.label(self.stored_fits[i].get_fit_report());
+                                        });
+                                    });
+                                });
                             } else {
                                 ui.label("—");
                             }
@@ -794,13 +739,13 @@ impl Fits {
                                             log::info!("Saved lmfit result to {path:?}");
                                         }
                                     }
-                                    // ui.menu_button("Fit Report", |ui| {
-                                    //     egui::ScrollArea::vertical().show(ui, |ui| {
-                                    //         ui.horizontal_wrapped(|ui| {
-                                    //             ui.label(temp.fit_report.clone());
-                                    //         });
-                                    //     });
-                                    // });
+                                    ui.menu_button("Fit Report", |ui| {
+                                        egui::ScrollArea::vertical().show(ui, |ui| {
+                                            ui.horizontal_wrapped(|ui| {
+                                                ui.label(temp.get_fit_report());
+                                            });
+                                        });
+                                    });
                                 } else {
                                     ui.label("—");
                                 }

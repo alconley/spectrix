@@ -1713,4 +1713,8 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
             }
         }
     }
+
+    pub fn get_fit_report(&self) -> String {
+        self.fit_report.clone()
+    }
 }

@@ -479,4 +479,14 @@ impl Fitter {
         self.background_line.log_y = log_y;
         self.background_line.log_x = log_x;
     }
+
+    pub fn get_fit_report(&self) -> String {
+        if let Some(fit_result) = &self.fit_result {
+            match fit_result {
+                FitResult::Gaussian(fit) => fit.get_fit_report(),
+            }
+        } else {
+            "No fit result available.".to_owned()
+        }
+    }
 }
