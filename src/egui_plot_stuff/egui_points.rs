@@ -66,7 +66,7 @@ impl EguiPoints {
         self.points.push([x, y]);
     }
 
-    pub fn draw(&self, plot_ui: &mut PlotUi<'_>) {
+    pub fn draw(&self, plot_ui: &mut PlotUi<'_>, clamp: bool) {
         if self.draw {
             const EPS: f64 = 1e-12; // clamp in linear space only
 
@@ -131,7 +131,8 @@ impl EguiPoints {
                         plot_ui.line(bar);
                     } else {
                         // Linear space: symmetric, but clamp at 0.0
-                        let y_lo = (y - unc).max(0.0);
+                        let y_lo = if clamp { (y - unc).max(0.0) } else { y - unc };
+                        // let y_lo = (y - unc).max(0.0);
                         let y_hi = y + unc;
 
                         let bar = egui_plot::Line::new(

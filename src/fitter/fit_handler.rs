@@ -18,12 +18,33 @@ use crate::fitter::models::linear::LinearFitter;
 use crate::fitter::models::quadratic;
 
 use std::collections::HashMap;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub enum SortCol {
+    Fit,
+    Peak,
+    Mean,
+    Fwhm,
+    Area,
+    Amplitude,
+    Sigma,
+    Uuid,
+    Energy,
+}
+
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+pub struct SortState {
+    pub col: SortCol,
+    pub asc: bool,
+}
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Fits {
     pub temp_fit: Option<Fitter>,
     pub stored_fits: Vec<Fitter>,
     pub settings: FitSettings,
     pub calibration: Calibration,
+    pub sort_state: SortState,
 }
 
 impl Default for Fits {
@@ -36,10 +57,13 @@ impl Fits {
     pub fn new() -> Self {
         Self {
             temp_fit: None,
-            // temp_background_fit: None,
             stored_fits: Vec::new(),
             settings: FitSettings::default(),
             calibration: Calibration::default(),
+            sort_state: SortState {
+                col: SortCol::Fit,
+                asc: true,
+            },
         }
     }
 
@@ -385,58 +409,465 @@ impl Fits {
         }
     }
 
+    // pub fn fit_stats_grid_ui(&mut self, ui: &mut egui::Ui) {
+    //     // only show the grid if there is something to show
+    //     if self.temp_fit.is_none() && self.stored_fits.is_empty() {
+    //         return;
+    //     }
+
+    //     let mut to_remove = None;
+
+    //     egui::Grid::new("fit_params_grid")
+    //         .striped(true)
+    //         .show(ui, |ui| {
+    //             ui.label("Fit");
+    //             ui.label("Peak");
+    //             ui.label("Mean");
+    //             ui.label("FWHM");
+    //             ui.label("Area");
+    //             ui.label("Amplitude");
+    //             ui.label("Sigma");
+    //             ui.label("UUID");
+    //             ui.label("Energy");
+    //             ui.label("lmfit");
+
+    //             ui.end_row();
+
+    //             if self.temp_fit.is_some() {
+    //                 ui.label("Temp");
+
+    //                 if let Some(temp_fit) = &mut self.temp_fit {
+    //                     temp_fit.fitter_stats(ui, true, self.settings.calibrated);
+    //                 }
+    //             }
+
+    //             if !self.stored_fits.is_empty() {
+    //                 for (i, fit) in self.stored_fits.iter_mut().enumerate() {
+    //                     ui.horizontal(|ui| {
+    //                         ui.label(format!("{i}"));
+
+    //                         ui.separator();
+
+    //                         if ui.button("X").clicked() {
+    //                             to_remove = Some(i);
+    //                         }
+
+    //                         ui.separator();
+    //                     });
+    //                     fit.fitter_stats(ui, false, self.settings.calibrated);
+    //                 }
+    //             }
+    //         });
+
+    //     if let Some(index) = to_remove {
+    //         self.stored_fits.remove(index);
+    //     }
+    // }
+
     pub fn fit_stats_grid_ui(&mut self, ui: &mut egui::Ui) {
         // only show the grid if there is something to show
         if self.temp_fit.is_none() && self.stored_fits.is_empty() {
             return;
         }
 
-        let mut to_remove = None;
+        // --- helper row & collectors (local to this fn) ---
+        #[derive(Clone)]
+        struct Row {
+            fit_idx: Option<usize>, // None => Temp
+            peak: usize,            // peak index
+            mean: (f64, f64),       // (val, unc)
+            fwhm: (f64, f64),
+            area: (f64, f64),
+            amplitude: (f64, f64),
+            sigma: (f64, f64),
+            uuid: usize,
+            energy: (f64, f64),
+        }
 
-        egui::Grid::new("fit_params_grid")
+        let fmt = |v: f64, u: f64| -> String {
+            if v.is_finite() && u.is_finite() {
+                format!("{v:.2} ± {u:.2}")
+            } else if v.is_finite() {
+                format!("{v:.2}")
+            } else {
+                "—".to_owned()
+            }
+        };
+
+        let pick = |v: Option<f64>, u: Option<f64>| -> (f64, f64) {
+            (v.unwrap_or(f64::NAN), u.unwrap_or(f64::NAN))
+        };
+
+        let pick_cal = |raw: (Option<f64>, Option<f64>),
+                        cal: (Option<f64>, Option<f64>),
+                        use_cal: bool|
+         -> (f64, f64) {
+            if use_cal {
+                pick(cal.0, cal.1)
+            } else {
+                pick(raw.0, raw.1)
+            }
+        };
+
+        let mut rows: Vec<Row> = Vec::new();
+        let calibrated = self.settings.calibrated;
+
+        // Temp fit rows (if any)
+        if let Some(temp) = &mut self.temp_fit
+            && let Some(super::main_fitter::FitResult::Gaussian(g)) = &temp.fit_result
+        {
+            for (i, p) in g.fit_result.iter().enumerate() {
+                rows.push(Row {
+                    fit_idx: None,
+                    peak: i,
+                    mean: pick_cal(
+                        (p.mean.value, p.mean.uncertainty),
+                        (p.mean.calibrated_value, p.mean.calibrated_uncertainty),
+                        calibrated,
+                    ),
+                    fwhm: pick_cal(
+                        (p.fwhm.value, p.fwhm.uncertainty),
+                        (p.fwhm.calibrated_value, p.fwhm.calibrated_uncertainty),
+                        calibrated,
+                    ),
+                    area: pick_cal(
+                        (p.area.value, p.area.uncertainty),
+                        (p.area.calibrated_value, p.area.calibrated_uncertainty),
+                        calibrated,
+                    ),
+                    amplitude: pick_cal(
+                        (p.amplitude.value, p.amplitude.uncertainty),
+                        (
+                            p.amplitude.calibrated_value,
+                            p.amplitude.calibrated_uncertainty,
+                        ),
+                        calibrated,
+                    ),
+                    sigma: pick_cal(
+                        (p.sigma.value, p.sigma.uncertainty),
+                        (p.sigma.calibrated_value, p.sigma.calibrated_uncertainty),
+                        calibrated,
+                    ),
+                    uuid: p.uuid,
+                    energy: pick(p.energy.value, p.energy.uncertainty),
+                });
+            }
+        }
+
+        // Stored fits rows
+        for (fi, fit) in self.stored_fits.iter().enumerate() {
+            if let Some(super::main_fitter::FitResult::Gaussian(g)) = &fit.fit_result {
+                for (i, p) in g.fit_result.iter().enumerate() {
+                    rows.push(Row {
+                        fit_idx: Some(fi),
+                        peak: i,
+                        mean: pick_cal(
+                            (p.mean.value, p.mean.uncertainty),
+                            (p.mean.calibrated_value, p.mean.calibrated_uncertainty),
+                            calibrated,
+                        ),
+                        fwhm: pick_cal(
+                            (p.fwhm.value, p.fwhm.uncertainty),
+                            (p.fwhm.calibrated_value, p.fwhm.calibrated_uncertainty),
+                            calibrated,
+                        ),
+                        area: pick_cal(
+                            (p.area.value, p.area.uncertainty),
+                            (p.area.calibrated_value, p.area.calibrated_uncertainty),
+                            calibrated,
+                        ),
+                        amplitude: pick_cal(
+                            (p.amplitude.value, p.amplitude.uncertainty),
+                            (
+                                p.amplitude.calibrated_value,
+                                p.amplitude.calibrated_uncertainty,
+                            ),
+                            calibrated,
+                        ),
+                        sigma: pick_cal(
+                            (p.sigma.value, p.sigma.uncertainty),
+                            (p.sigma.calibrated_value, p.sigma.calibrated_uncertainty),
+                            calibrated,
+                        ),
+                        uuid: p.uuid,
+                        energy: pick(p.energy.value, p.energy.uncertainty),
+                    });
+                }
+            }
+        }
+
+        // local snapshot (read-only this frame) + click stash
+        let current = self.sort_state;
+        let mut new_state = current;
+
+        // NEW: stash a pending deletion
+        let mut to_remove: Option<usize> = None;
+
+        // NEW: sorting key helper
+        let key = |r: &Row, col: SortCol| -> f64 {
+            let nan_hi = |v: f64| if v.is_nan() { f64::INFINITY } else { v };
+            match col {
+                SortCol::Fit => r.fit_idx.map(|x| x as f64).unwrap_or(-1.0),
+                SortCol::Peak => r.peak as f64,
+                SortCol::Mean => nan_hi(r.mean.0),
+                SortCol::Fwhm => nan_hi(r.fwhm.0),
+                SortCol::Area => nan_hi(r.area.0),
+                SortCol::Amplitude => nan_hi(r.amplitude.0),
+                SortCol::Sigma => nan_hi(r.sigma.0),
+                SortCol::Uuid => r.uuid as f64,
+                SortCol::Energy => nan_hi(r.energy.0),
+            }
+        };
+
+        let mut uuid_updates: Vec<(Option<usize>, usize, usize)> = Vec::new(); // (fit_idx, peak, new_uuid)
+        let mut energy_updates: Vec<(Option<usize>, usize, f64, f64)> = Vec::new(); // (fit_idx, peak, energy, unc)
+
+        egui::Grid::new("fit_params_grid_sortable")
             .striped(true)
             .show(ui, |ui| {
-                ui.label("Fit");
-                ui.label("Peak");
-                ui.label("Mean");
-                ui.label("FWHM");
-                ui.label("Area");
-                ui.label("Amplitude");
-                ui.label("Sigma");
-                ui.label("UUID");
-                ui.label("Energy");
-                ui.label("lmfit");
+                // define these INSIDE this closure to avoid cross-borrows
+                let mut pending: Option<SortState> = None;
 
+                let mut header = |ui: &mut egui::Ui, label: &str, col: SortCol| {
+                    let arrow = if current.col == col {
+                        if current.asc { " ⬆" } else { " ⬇" }
+                    } else {
+                        ""
+                    };
+                    if ui.button(format!("{label}{arrow}")).clicked() {
+                        pending = Some(if current.col == col {
+                            SortState {
+                                col,
+                                asc: !current.asc,
+                            }
+                        } else {
+                            SortState { col, asc: true }
+                        });
+                    }
+                };
+
+                // header row (sets `pending` if clicked)
+                header(ui, "Fit #", SortCol::Fit);
+                header(ui, "Peak #", SortCol::Peak);
+                header(ui, "Mean", SortCol::Mean);
+                header(ui, "FWHM", SortCol::Fwhm);
+                header(ui, "Area", SortCol::Area);
+                header(ui, "Amplitude", SortCol::Amplitude);
+                header(ui, "Sigma", SortCol::Sigma);
+                header(ui, "UUID", SortCol::Uuid);
+                header(ui, "Energy", SortCol::Energy);
+                ui.label("lmfit");
                 ui.end_row();
 
-                if self.temp_fit.is_some() {
-                    ui.label("Temp");
+                // decide effective sort *after* header clicks
+                let effective = pending.unwrap_or(current);
+                let sort_col = effective.col;
+                let asc = effective.asc;
 
-                    if let Some(temp_fit) = &mut self.temp_fit {
-                        temp_fit.fitter_stats(ui, true, self.settings.calibrated);
-                    }
-                }
+                // ADD THIS so the choice persists next frame
+                new_state = effective;
 
-                if !self.stored_fits.is_empty() {
-                    for (i, fit) in self.stored_fits.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{i}"));
+                // apply sort
+                rows.sort_by(|a, b| {
+                    let ka = key(a, sort_col);
+                    let kb = key(b, sort_col);
+                    let ord = ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal);
+                    if asc { ord } else { ord.reverse() }
+                });
 
+                // draw rows (your existing rendering code stays the same)
+                for r in &rows {
+                    // Fit cell: name + (X) button for stored fits
+                    ui.horizontal(|ui| {
+                        ui.label(match r.fit_idx {
+                            // Some(i) => format!("{i} ({})", r.fit_name),
+                            Some(i) => format!("{i}"),
+                            None => "Temp".to_owned(),
+                        });
+
+                        if let Some(i) = r.fit_idx {
                             ui.separator();
-
                             if ui.button("X").clicked() {
                                 to_remove = Some(i);
                             }
+                        }
+                    });
 
-                            ui.separator();
-                        });
-                        fit.fitter_stats(ui, true, self.settings.calibrated);
+                    ui.label(format!("{}", r.peak));
+                    ui.label(fmt(r.mean.0, r.mean.1));
+                    ui.label(fmt(r.fwhm.0, r.fwhm.1));
+                    ui.label(fmt(r.area.0, r.area.1));
+                    ui.label(fmt(r.amplitude.0, r.amplitude.1));
+                    ui.label(fmt(r.sigma.0, r.sigma.1));
+                    let mut uuid_edit = r.uuid;
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut uuid_edit)
+                                .speed(1)
+                                .update_while_editing(false),
+                        )
+                        .changed()
+                    {
+                        uuid_updates.push((r.fit_idx, r.peak, uuid_edit));
                     }
+                    let mut e_val = if r.energy.0.is_finite() {
+                        r.energy.0
+                    } else {
+                        0.0
+                    };
+                    let mut e_unc = if r.energy.1.is_finite() {
+                        r.energy.1
+                    } else {
+                        0.0
+                    };
+                    let mut changed = false;
+                    ui.horizontal(|ui| {
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut e_val)
+                                    .speed(0.1)
+                                    .update_while_editing(false),
+                            )
+                            .changed();
+                        ui.label("±");
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut e_unc)
+                                    .speed(0.1)
+                                    .update_while_editing(false),
+                            )
+                            .changed();
+                    });
+                    if changed {
+                        energy_updates.push((r.fit_idx, r.peak, e_val, e_unc));
+                    }
+
+                    // lmfit cell: show buttons only on first peak of a given fit (optional)
+                    if let Some(i) = r.fit_idx {
+                        // show export/report on the first peak row of that fit
+                        let is_first_peak = r.peak == 0;
+                        if is_first_peak {
+                            if let Some(super::main_fitter::FitResult::Gaussian(g)) =
+                                &self.stored_fits[i].fit_result
+                            {
+                                if let Some(ref text) = g.lmfit_result
+                                    && ui.button("Export").clicked()
+                                    && let Some(path) = rfd::FileDialog::new()
+                                        .set_file_name("fit_result.txt")
+                                        .save_file()
+                                {
+                                    if let Err(e) = std::fs::write(&path, text) {
+                                        eprintln!("Failed to save lmfit result: {e}");
+                                    } else {
+                                        log::info!("Saved lmfit result to {path:?}");
+                                    }
+                                }
+                                // ui.menu_button("Fit Report", |ui| {
+                                //     egui::ScrollArea::vertical().show(ui, |ui| {
+                                //         ui.horizontal_wrapped(|ui| {
+                                //             ui.label(self.stored_fits[i].fit_report.clone());
+                                //         });
+                                //     });
+                                // });
+                            } else {
+                                ui.label("—");
+                            }
+                        } else {
+                            ui.label("—");
+                        }
+                    } else {
+                        // Temp fit lmfit cell
+                        if let Some(temp) = &self.temp_fit {
+                            if let Some(super::main_fitter::FitResult::Gaussian(g)) =
+                                &temp.fit_result
+                            {
+                                if r.peak == 0 {
+                                    if let Some(ref text) = g.lmfit_result
+                                        && ui.button("Export").clicked()
+                                        && let Some(path) = rfd::FileDialog::new()
+                                            .set_file_name("fit_result.txt")
+                                            .save_file()
+                                    {
+                                        if let Err(e) = std::fs::write(&path, text) {
+                                            eprintln!("Failed to save lmfit result: {e}");
+                                        } else {
+                                            log::info!("Saved lmfit result to {path:?}");
+                                        }
+                                    }
+                                    // ui.menu_button("Fit Report", |ui| {
+                                    //     egui::ScrollArea::vertical().show(ui, |ui| {
+                                    //         ui.horizontal_wrapped(|ui| {
+                                    //             ui.label(temp.fit_report.clone());
+                                    //         });
+                                    //     });
+                                    // });
+                                } else {
+                                    ui.label("—");
+                                }
+                            } else {
+                                ui.label("—");
+                            }
+                        } else {
+                            ui.label("—");
+                        }
+                    }
+
+                    ui.end_row();
                 }
             });
 
-        if let Some(index) = to_remove {
-            self.stored_fits.remove(index);
+        self.sort_state = new_state;
+
+        // Apply UUID changes
+        for (fit_idx, peak, new_uuid) in uuid_updates {
+            match fit_idx {
+                Some(i) => {
+                    if let Some(super::main_fitter::FitResult::Gaussian(g)) =
+                        &mut self.stored_fits[i].fit_result
+                        && let Err(e) = g.update_uuid_for_peak(peak, new_uuid)
+                    {
+                        eprintln!("UUID update failed: {e}");
+                    }
+                }
+                None => {
+                    if let Some(temp) = &mut self.temp_fit
+                        && let Some(super::main_fitter::FitResult::Gaussian(g)) =
+                            &mut temp.fit_result
+                        && let Err(e) = g.update_uuid_for_peak(peak, new_uuid)
+                    {
+                        eprintln!("UUID update failed: {e}");
+                    }
+                }
+            }
+        }
+        // Apply Energy changes
+        for (fit_idx, peak, e, du) in energy_updates {
+            match fit_idx {
+                Some(i) => {
+                    if let Some(super::main_fitter::FitResult::Gaussian(g)) =
+                        &mut self.stored_fits[i].fit_result
+                        && let Err(e) = g.update_energy_for_peak(peak, e, du)
+                    {
+                        eprintln!("Energy update failed: {e}");
+                    }
+                }
+                None => {
+                    if let Some(temp) = &mut self.temp_fit
+                        && let Some(super::main_fitter::FitResult::Gaussian(g)) =
+                            &mut temp.fit_result
+                        && let Err(e) = g.update_energy_for_peak(peak, e, du)
+                    {
+                        eprintln!("Energy update failed: {e}");
+                    }
+                }
+            }
+        }
+
+        // apply deletion (single fit index)
+        if let Some(i) = to_remove
+            && i < self.stored_fits.len()
+        {
+            self.stored_fits.remove(i);
         }
     }
 

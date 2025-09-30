@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::main_fitter::FitResult;
 use crate::histoer::histogrammer;
 use egui::{Color32, Vec2b};
@@ -906,6 +907,7 @@ pub struct SPSAnalysisSettings {
     log_scale: bool,
     view_aspect: f32,
     markersize: f32,
+    fit_mean: bool,
 }
 
 impl Default for SPSAnalysisSettings {
@@ -916,6 +918,7 @@ impl Default for SPSAnalysisSettings {
             log_scale: true,
             view_aspect: 2.0,
             markersize: 3.0,
+            fit_mean: true,
         }
     }
 }
@@ -949,6 +952,9 @@ impl SPSAnalysisSettings {
                         .speed(0.1)
                         .range(0.1..=10.0),
                 );
+                ui.end_row();
+                ui.label("Show Fit Mean:");
+                ui.checkbox(&mut self.fit_mean, "");
                 ui.end_row();
             });
     }
@@ -1351,7 +1357,8 @@ impl SPSAnalysis {
         let ncols = self.settings.n_columns.max(1);
         let nrows = uuids.len().div_ceil(ncols);
 
-        let available_w = ui.available_width() - 10.0;
+        let available_w = ui.available_width() - 8.0 * (ncols as f32); // 8px gap per column
+
         let col_w = available_w / (ncols as f32);
 
         // Build dynamic table: ncols equal plot columns
@@ -1401,6 +1408,22 @@ impl SPSAnalysis {
                             let mut energy_unc: Option<f64> = None;
                             let mut energy_mixed = false;
 
+                            // Expand bounds by calibrated uncertainty if available (1σ)
+                            let (min_calibrated_mean, max_calibrated_mean) = pts
+                                .iter()
+                                .filter_map(|(_, _, _, _, p, _, _)| {
+                                    if let Some(m) = p.mean.calibrated_value {
+                                        let u = p.mean.calibrated_uncertainty.unwrap_or(0.0).abs();
+                                        // include both ends so points with uncertainty expand the envelope
+                                        Some((m - u, m + u))
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), (a, b)| {
+                                    (lo.min(a), hi.max(b))
+                                });
+
                             for &(_ang, _y, _dy, _field, ref params, _col, _shape) in pts {
                                 if let Some(e) = params.energy.value && e != -1.0 {
                                     match energy_val {
@@ -1415,8 +1438,6 @@ impl SPSAnalysis {
                                     }
                                 }
                             }
-
-
 
                             // Compose the label shown on-plot (top-left)
                             let mut label = format!("UUID {uuid}");
@@ -1434,6 +1455,7 @@ impl SPSAnalysis {
                                     auto_fmt(avg_cal_mean, avg_cal_mean_unc, "keV")
                                 ));
                             }
+
                             // --------------------------------------------------------
                             // ---- Bounds (linear space first) ----
                             let xmin_lin = 0.0;
@@ -1482,12 +1504,12 @@ impl SPSAnalysis {
                             let plot_id = ui.id().with(("cs_plot_uuid", uuid));
                             let available_w = ui.available_width();
 
-                            let padding = 4.0;
-                            ui.add_space(padding);
+                            let cs_height = if self.settings.fit_mean { row_h * 0.75 } else { row_h };
 
+                            // ---- Build the Cross section vs Angle plot ----
                             let mut plot = Plot::new(plot_id)
                                 .width(available_w)
-                                .height(row_h - padding * 2.0)
+                                .height(cs_height)
                                 .allow_zoom(false)
                                 .allow_drag(false)
                                 .allow_scroll(false)
@@ -1514,7 +1536,7 @@ impl SPSAnalysis {
                                 plot = plot.y_axis_label("dΩ/dσ [μb/sr]");
                             }
 
-                            if r == nrows - 1 {
+                            if r == nrows - 1 && !self.settings.fit_mean {
                                 plot = plot.x_axis_label("θ [°]");
                             }
 
@@ -1526,14 +1548,25 @@ impl SPSAnalysis {
                                 );
                             }
 
-
                             let label_color = if ui.visuals().dark_mode {
                                 egui::Color32::LIGHT_BLUE
                             } else {
                                 egui::Color32::BLACK
                             };
 
-                            // Render
+                            let mean_color = if ui.visuals().dark_mode {
+                                egui::Color32::LIGHT_BLUE
+                            } else {
+                                egui::Color32::DARK_BLUE
+                            };
+
+                            let assigned_energy_color = if ui.visuals().dark_mode {
+                                egui::Color32::LIGHT_GREEN
+                            } else {
+                                egui::Color32::DARK_GREEN
+                            };
+
+                            // Render Cross section vs angle
                             plot.show(ui, |pui| {
                                 // One marker per datum
                                 for &(ang, y, dy, field, ref params, col, markershape) in pts {
@@ -1559,7 +1592,7 @@ impl SPSAnalysis {
                                     point.log_y = self.settings.log_scale;
                                     point.radius = self.settings.markersize;
                                     point.shape = Some(markershape);
-                                    point.draw(pui);
+                                    point.draw(pui, true);
                                 }
 
                                 // Put the per-UUID label in the top-left corner
@@ -1577,6 +1610,111 @@ impl SPSAnalysis {
                                 // Y bounds are in plot coords (log-transformed if log mode)
                                 pui.set_plot_bounds_y(ymin_plot..=ymax_plot);
                             });
+
+                            if self.settings.fit_mean {
+                                let mut mean_plot = Plot::new(plot_id)
+                                    .width(available_w)
+                                    .height(row_h * 0.25)
+                                    .allow_zoom(false)
+                                    .allow_drag(false)
+                                    .allow_scroll(false)
+                                    .allow_double_click_reset(false)
+                                    .auto_bounds(Vec2b::new(false, false))
+                                    .label_formatter({
+                                        move |name, value| {
+                                            let x = value.x;
+                                            let y = value.y;
+                                            if !name.is_empty() {
+                                                name.to_owned()
+                                            } else {
+                                                format!("{x:.2}, {y:.2}")
+                                            }
+                                        }
+                                });
+
+                                if c == 0 {
+                                    mean_plot = mean_plot.y_axis_label("Mean [keV]");
+                                }
+                                if r == nrows - 1 {
+                                    mean_plot = mean_plot.x_axis_label("θ [°]");
+                                }
+
+                                mean_plot.show(ui, |pui| {
+                                    for &(ang, _y, _dy, field, ref params, col, markershape) in pts {
+
+                                        if let Some(mean) = params.mean.calibrated_value {
+                                            let mean_unc = params.mean.calibrated_uncertainty.unwrap_or(0.0);
+                                            let name = format!(
+                                                "Mean Check\nUUID {}\nAngle: {ang:.1}°\nCalibrated Mean: {mean:.2} ± {mean_unc:.2} keV\nMagnetic Field: {field:.2} kG",
+                                                params.uuid
+                                            );
+                                            let mut mean_point = EguiPoints::new_cross_section(
+                                                &name,
+                                                ang,
+                                                mean,
+                                                mean_unc,
+                                                col,
+                                            );
+                                            mean_point.log_y = false;
+                                            mean_point.radius = self.settings.markersize;
+                                            mean_point.shape = Some(markershape);
+                                            mean_point.draw(pui, false);
+                                        }
+                                    }
+
+                                    // horizontal line at the average calibrated mean
+                                    if let Some(avg) = avg_cal_mean {
+                                        let avg_cal_unc = avg_cal_mean_unc.unwrap_or(0.0);
+                                        let upper_value = avg + avg_cal_unc;
+                                        let lower_value = avg - avg_cal_unc;
+
+                                        let points = vec![
+                                            [xmin_lin, avg],
+                                            [xmax_lin, avg],
+                                        ];
+                                        let mut upper_line = EguiLine::new_with_points(points.clone());
+                                        let mut lower_line = EguiLine::new_with_points(points);
+
+                                        upper_line.color = mean_color;
+                                        upper_line.reference_fill = true;
+                                        upper_line.fill = upper_value as f32;
+
+                                        lower_line.color = mean_color;
+                                        lower_line.reference_fill = true;
+                                        lower_line.fill = lower_value as f32;
+
+                                        upper_line.draw(pui, None);
+                                        lower_line.draw(pui, None);
+
+                                    }
+
+                                    if let Some(e) = energy_val {
+                                        let assigned_energy_unc = energy_unc.unwrap_or(0.0);
+                                        let lower_energy = e - assigned_energy_unc;
+                                        let upper_energy = e + assigned_energy_unc;
+
+                                        let points = vec![
+                                            [xmin_lin, e],
+                                            [xmax_lin, e],
+                                        ];
+                                        let mut energy_line_upper = EguiLine::new_with_points(points.clone());
+                                        let mut energy_line_lower = EguiLine::new_with_points(points);
+                                        energy_line_lower.color = assigned_energy_color;
+                                        energy_line_lower.reference_fill = true;
+                                        energy_line_lower.fill = lower_energy as f32;
+
+                                        energy_line_upper.color = assigned_energy_color;
+                                        energy_line_upper.reference_fill = true;
+                                        energy_line_upper.fill = upper_energy as f32;
+                                        energy_line_lower.draw(pui, None);
+                                        energy_line_upper.draw(pui, None);
+                                    }
+
+                                    pui.set_plot_bounds_x(xmin_lin..=xmax_lin);
+                                    pui.set_plot_bounds_y(min_calibrated_mean..=max_calibrated_mean);
+
+                                });
+                            }
                         });
                     }
                 });

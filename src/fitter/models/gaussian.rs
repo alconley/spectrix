@@ -1637,14 +1637,14 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
         }
     }
 
-    pub fn fit_params_ui(&mut self, ui: &mut egui::Ui, skip_one: bool, calibrate: bool) {
+    pub fn fit_params_ui(&mut self, ui: &mut egui::Ui, _skip_one: bool, calibrate: bool) {
         let mut uuid_updates = Vec::new();
         let mut energy_updates = Vec::new();
 
         for (i, params) in self.fit_result.iter_mut().enumerate() {
-            if skip_one && i != 0 {
-                ui.label("");
-            }
+            // if skip_one && i != 0 {
+            //     ui.label("");
+            // }
             ui.label(format!("{i}"));
             params.params_ui(ui, calibrate);
 
