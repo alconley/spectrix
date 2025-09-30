@@ -32,6 +32,7 @@ pub struct Calibration {
     pub a: Value,
     pub b: Value,
     pub c: Value,
+    pub cov: Option<[[f64; 3]; 3]>,
 }
 
 impl Default for Calibration {
@@ -49,6 +50,7 @@ impl Default for Calibration {
                 value: 0.0,
                 uncertainty: 0.0,
             },
+            cov: None,
         }
     }
 }
@@ -143,11 +145,33 @@ impl Parameter {
 
             let energy = a * x * x + b * x + c;
 
-            let da_term = a * x * x * ((da / a).powi(2) + 2.0 * (dx / x).powi(2)).sqrt();
-            let db_term = b * x * (db / b).hypot(dx / x);
-            let dc_term = dc;
+            // let da_term = a * x * x * ((da / a).powi(2) + 2.0 * (dx / x).powi(2)).sqrt();
+            // let db_term = b * x * (db / b).hypot(dx / x);
+            // let dc_term = dc;
 
-            let de = (da_term.powi(2) + db_term.powi(2) + dc_term.powi(2)).sqrt();
+            // let de = (da_term.powi(2) + db_term.powi(2) + dc_term.powi(2)).sqrt();
+
+            let j0 = x.powi(2);
+            let j1 = x;
+            let j2 = 1.0;
+
+            let sigma_params_sq = if let Some(cov) = &calibration.cov {
+                println!("Using full covariance matrix for uncertainty propagation");
+                // J Σ J^T
+                let t0 = j0 * (cov[0][0] * j0 + cov[0][1] * j1 + cov[0][2] * j2);
+                let t1 = j1 * (cov[1][0] * j0 + cov[1][1] * j1 + cov[1][2] * j2);
+                let t2 = j2 * (cov[2][0] * j0 + cov[2][1] * j1 + cov[2][2] * j2);
+                t0 + t1 + t2
+            } else {
+                // Fallback: assume independence (no covariances)
+                (j0 * da).powi(2) + (j1 * db).powi(2) + (j2 * dc).powi(2)
+            };
+
+            // x uncertainty (assumed independent of {a,b,c})
+            let dy_dx = 2.0 * a * x + b;
+            let sigma_x_sq = (dy_dx * dx).powi(2);
+
+            let de = (sigma_params_sq + sigma_x_sq).sqrt();
 
             self.calibrated_value = Some(energy);
             self.calibrated_uncertainty = Some(de);

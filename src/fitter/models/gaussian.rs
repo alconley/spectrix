@@ -1406,7 +1406,7 @@ def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
 from lmfit.model import load_modelresult, save_modelresult
 import numpy as np
 
-def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: float, b_uncertainty: float, c: float, c_uncertainty: float):
+def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: float, b_uncertainty: float, c: float, c_uncertainty: float, cov: list | None = None):
     result = load_modelresult(file_path)
 
     def set_param(name, value, uncertainty):
@@ -1425,6 +1425,13 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
     set_param('calibration_a', a, a_uncertainty)
     set_param('calibration_b', b, b_uncertainty)
     set_param('calibration_c', c, c_uncertainty)
+
+    if cov is None:
+        Sigma = np.array([[a_uncertainty**2, 0.0, 0.0],
+                          [0.0, b_uncertainty**2, 0.0],
+                          [0.0, 0.0, c_uncertainty**2]], dtype=float)
+    else:
+        Sigma = np.array(cov, dtype=float).reshape(3,3)
 
     i = 0
     while f'g{i}_center' in result.params:
@@ -1459,27 +1466,28 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
         sigma = result.params[f'g{i}_sigma'].value
         sigma_unc = result.params[f'g{i}_sigma'].stderr or 0.0
 
-        dx_dE = 2 * a * center + b
+        # dE/dx and Jacobians
+        dEdx = 2*a*center + b
 
-        # Propagated uncertainty for calibrated center
-        d_a_term = a * center * center * np.sqrt( (a_uncertainty/a)**2 + 2*(center_unc/center)**2 )
-        d_b_term = b * center * np.sqrt( (b_uncertainty/b)**2 + (center_unc/center)**2 )
-        d_c_term = c_uncertainty
+        # --- NEW: Var(E_center) = J Σ J^T + (dE/dx)^2 Var(x)
+        J = np.array([center**2, center, 1.0], dtype=float)
+        var_center_params = float(J @ Sigma @ J.T)
+        var_center_x = (dEdx * center_unc)**2
+        d_center_cal = np.sqrt(var_center_params + var_center_x)
 
-        d_center_cal = np.sqrt(
-            d_a_term**2 +
-            d_b_term**2 +
-            d_c_term**2
-        )
+        # --- NEW: Sigma for energy resolution
+        # sigma_E = |(2 a x + b)| * sigma_x  with covariance in (a,b,c) and x
+        M = dEdx
+        Mabs = abs(M)
+        # gradient of M wrt (a,b,c) is [2x, 1, 0]
+        H = np.array([2.0*center, 1.0, 0.0], dtype=float)
+        var_M_params = float(H @ Sigma @ H.T)
+        var_M_x = (2.0*a * center_unc)**2
+        var_M = var_M_params + var_M_x
 
-        # Calibrated sigma
-        d_sigma_cal = np.sqrt(
-            (2 * center * a_uncertainty * sigma) ** 2 +
-            (b_uncertainty * sigma) ** 2 +
-            (dx_dE * sigma_unc) ** 2
-        )
+        var_sigmaE = (sigma**2) * var_M + (Mabs**2) * (sigma_unc**2)
+        d_sigma_cal = np.sqrt(var_sigmaE)
 
-        # FWHM
         d_fwhm_cal = 2.3548200 * d_sigma_cal
 
         result.params[f'g{i}_center_calibrated'].stderr = d_center_cal
@@ -1506,6 +1514,13 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
             let b_uncertainty = calibration.b.uncertainty;
             let c = calibration.c.value;
             let c_uncertainty = calibration.c.uncertainty;
+            let cov_arg: Option<Vec<Vec<f64>>> = calibration.cov.as_ref().map(|m| {
+                vec![
+                    vec![m[0][0], m[0][1], m[0][2]],
+                    vec![m[1][0], m[1][1], m[1][2]],
+                    vec![m[2][0], m[2][1], m[2][2]],
+                ]
+            });
 
             let fit_report: String = module
                 .getattr("Update_EnergyCalibration")?
@@ -1517,6 +1532,7 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
                     b_uncertainty,
                     c,
                     c_uncertainty,
+                    cov_arg,
                 ))?
                 .extract()?;
 

@@ -61,6 +61,7 @@ pub struct QuadraticFitter {
     pub paramaters: QuadraticParameters,
     pub fit_points: Vec<[f64; 2]>,
     pub fit_report: String,
+    pub covar: Option<[[f64; 3]; 3]>, // NEW
 }
 
 impl QuadraticFitter {
@@ -70,6 +71,7 @@ impl QuadraticFitter {
             paramaters: QuadraticParameters::default(),
             fit_points: Vec::new(),
             fit_report: String::new(),
+            covar: None, // NEW
         }
     }
 
@@ -85,6 +87,7 @@ impl QuadraticFitter {
             paramaters: QuadraticParameters::default(),
             fit_points: Vec::new(),
             fit_report: "Fitted with other model".to_owned(),
+            covar: None, // NEW
         };
 
         // Set the parameter values and uncertainties
@@ -192,8 +195,10 @@ def QuadraticFit(x_data: list, y_data: list, a: list = ('a', -np.inf, np.inf, 0.
     y = result.eval(x=x)
 
     fit_report = str(result.fit_report())
+    cov = result.covar.tolist() if result.covar is not None else None
 
-    return params, x, y, fit_report
+
+    return params, x, y, fit_report, cov
 ");
 
             // Compile the Python code into a module
@@ -232,6 +237,18 @@ def QuadraticFit(x_data: list, y_data: list, a: list = ('a', -np.inf, np.inf, 0.
             let x = result.get_item(1)?.extract::<Vec<f64>>()?;
             let y = result.get_item(2)?.extract::<Vec<f64>>()?;
             let fit_report = result.get_item(3)?.extract::<String>()?;
+            let cov_opt = result.get_item(4)?.extract::<Option<Vec<Vec<f64>>>>()?;
+            self.covar = cov_opt.and_then(|m| {
+                if m.len() == 3 && m.iter().all(|r| r.len() == 3) {
+                    Some([
+                        [m[0][0], m[0][1], m[0][2]],
+                        [m[1][0], m[1][1], m[1][2]],
+                        [m[2][0], m[2][1], m[2][2]],
+                    ])
+                } else {
+                    None
+                }
+            });
 
             self.paramaters.a.value = Some(params[0].1);
             self.paramaters.a.uncertainty = Some(params[0].2);

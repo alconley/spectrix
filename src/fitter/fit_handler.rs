@@ -297,6 +297,7 @@ impl Fits {
                         value: fitter.paramaters.c.value.unwrap_or(0.0),
                         uncertainty: fitter.paramaters.c.uncertainty.unwrap_or(0.0),
                     };
+                    self.calibration.cov = fitter.covar;
                 }
                 Err(e) => {
                     log::error!("Calibration fit failed: {e:?}");
