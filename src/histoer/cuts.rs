@@ -363,7 +363,16 @@ impl Cuts {
         df: &DataFrame,
         file_path: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mask = self.create_combined_mask(df, &self.cuts.iter().collect::<Vec<_>>())?;
+        // get only valid cuts
+        let valid_cuts: Vec<&Cut> = self
+            .cuts
+            .iter()
+            .filter(|cut| match cut {
+                Cut::Cut1D(cut1d) => cut1d.active,
+                Cut::Cut2D(cut2d) => cut2d.active,
+            })
+            .collect();
+        let mask = self.create_combined_mask(df, &valid_cuts)?;
         let mut filtered_df = df.filter(&mask)?; // Make filtered_df mutable
 
         let file = std::fs::File::create(file_path)?;
@@ -604,19 +613,19 @@ impl Cut2D {
         vec![self.x_column.clone(), self.y_column.clone()]
     }
 
-    pub fn filter_df_and_save(
-        &self,
-        df: &DataFrame,
-        file_path: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let mask = self.create_mask(df)?;
-        let mut filtered_df = df.filter(&mask)?; // Make filtered_df mutable
+    // pub fn filter_df_and_save(
+    //     &self,
+    //     df: &DataFrame,
+    //     file_path: &str,
+    // ) -> Result<(), Box<dyn std::error::Error>> {
+    //     let mask = self.create_mask(df)?;
+    //     let mut filtered_df = df.filter(&mask)?; // Make filtered_df mutable
 
-        let file = std::fs::File::create(file_path)?;
-        ParquetWriter::new(file).finish(&mut filtered_df)?; // Pass as mutable reference
+    //     let file = std::fs::File::create(file_path)?;
+    //     ParquetWriter::new(file).finish(&mut filtered_df)?; // Pass as mutable reference
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }
 
 // Struct to hold each parsed condition
