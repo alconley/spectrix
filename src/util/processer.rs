@@ -305,76 +305,6 @@ def get_2d_histograms(file_name):
         }
     }
 
-    // pub fn filter_selected_files_and_save(&self) {
-    //     let checked_files: Vec<PathBuf> = self
-    //         .selected_files
-    //         .iter()
-    //         .filter(|(_, checked)| *checked)
-    //         .map(|(file, _)| file.clone())
-    //         .collect();
-
-    //     if checked_files.is_empty() {
-    //         log::error!("No files selected for filtering.");
-    //         return;
-    //     }
-
-    //     let parquet_files: Vec<PathBuf> = checked_files
-    //         .into_iter()
-    //         .filter(|file| file.extension().is_some_and(|ext| ext == "parquet"))
-    //         .collect();
-
-    //     if parquet_files.is_empty() {
-    //         log::warn!("No selected Parquet files to process.");
-    //         return;
-    //     }
-
-    //     // Clone necessary data for the thread
-    //     let cut = self.settings.cuts.clone();
-    //     let saved_cut_suffix = self.settings.saved_cut_suffix.clone();
-
-    //     // Spawn the filtering task on a new thread
-    //     thread::spawn(move || {
-    //         for file in parquet_files {
-    //             eprintln!("Processing file: {file:?}");
-    //             let file_stem = file
-    //                 .file_stem()
-    //                 .expect("Failed to get file stem")
-    //                 .to_string_lossy();
-    //             let new_file_name = format!("{file_stem}_{saved_cut_suffix}");
-    //             let new_file_path = file.with_file_name(format!("{new_file_name}.parquet"));
-
-    //             log::info!("Processing file: {file:?}");
-    //             log::info!("Saving filtered file as: {new_file_path:?}");
-
-    //             // Load and collect one file at a time
-    //             match LazyFrame::scan_parquet(
-    //                 PlPath::Local(Arc::from(file.clone().into_boxed_path())),
-    //                 Default::default(),
-    //             ) {
-    //                 Ok(lf) => {
-    //                     if let Ok(df) = lf.collect() {
-    //                         if let Err(e) = cut.filter_df_and_save(
-    //                             &df,
-    //                             new_file_path
-    //                                 .to_str()
-    //                                 .expect("Failed to convert path to str"),
-    //                         ) {
-    //                             log::error!("Failed to save filtered DataFrame for {file:?}: {e}");
-    //                         } else {
-    //                             log::info!(
-    //                                 "Successfully saved filtered DataFrame: {new_file_path:?}"
-    //                             );
-    //                         }
-    //                     } else {
-    //                         log::error!("Failed to collect DataFrame from LazyFrame: {file:?}");
-    //                     }
-    //                 }
-    //                 Err(e) => log::error!("Failed to read Parquet file {file:?}: {e}"),
-    //             }
-    //         }
-    //     });
-    // }
-
     pub fn filter_selected_files_and_save(&self) {
         // Gather checked files
         let checked_files: Vec<PathBuf> = self
@@ -621,84 +551,6 @@ def get_2d_histograms(file_name):
             log::warn!("User canceled the save operation.");
         }
     }
-
-    // pub fn combine_and_save_selected_files(&self) {
-    //     let checked_files: Vec<PathBuf> = self
-    //         .selected_files
-    //         .iter()
-    //         .filter(|(_, checked)| *checked)
-    //         .map(|(file, _)| file.clone())
-    //         .collect();
-
-    //     if checked_files.is_empty() {
-    //         log::error!("No files selected for combination.");
-    //         return;
-    //     }
-
-    //     let parquet_files: Vec<PathBuf> = checked_files
-    //         .into_iter()
-    //         .filter(|file| file.extension().is_some_and(|ext| ext == "parquet"))
-    //         .collect();
-
-    //     if parquet_files.is_empty() {
-    //         log::warn!("No selected Parquet files to combine.");
-    //         return;
-    //     }
-
-    //     // Ask the user to select a file name and path
-    //     if let Some(output_file) = rfd::FileDialog::new()
-    //         .set_title("Save Combined Parquet File")
-    //         .add_filter("Parquet Files", &["parquet"])
-    //         .save_file()
-    //     {
-    //         let output_file_clone = output_file.clone();
-
-    //         // Spawn a new thread for processing
-    //         thread::spawn(move || {
-    //             let mut lazyframes = Vec::new();
-
-    //             for file in &parquet_files {
-    //                 log::info!("Reading file: {file:?}");
-    //                 match LazyFrame::scan_parquet(
-    //                     PlPath::Local(Arc::from(file.clone().into_boxed_path())),
-    //                     Default::default(),
-    //                 ) {
-    //                     Ok(lf) => lazyframes.push(lf),
-    //                     Err(e) => log::error!("Failed to read Parquet file {file:?}: {e}"),
-    //                 }
-    //             }
-
-    //             if lazyframes.is_empty() {
-    //                 log::error!("No valid Parquet files loaded.");
-    //                 return;
-    //             }
-
-    //             let combined_lazyframe = concat(lazyframes, UnionArgs::default())
-    //                 .expect("Failed to concatenate LazyFrames");
-    //             match combined_lazyframe.collect() {
-    //                 Ok(mut df) => {
-    //                     if let Err(e) = ParquetWriter::new(
-    //                         &mut std::fs::File::create(&output_file_clone)
-    //                             .expect("Failed to create output file"),
-    //                     )
-    //                     .finish(&mut df)
-    //                     {
-    //                         log::error!(
-    //                             "Failed to save combined DataFrame to {output_file_clone:?}: {e}"
-    //                         );
-    //                     } else {
-    //                         log::info!(
-    //                             "Successfully saved combined Parquet file: {output_file_clone:?}"
-    //                         );
-    //                     }
-    //                 }
-    //                 Err(e) => log::error!("Failed to collect combined LazyFrame: {e}"),
-    //             }
-    //         });
-    //     } else {
-    //         log::warn!("User canceled the save operation.");
-    //     }
-    // }
 
     fn get_column_names_from_lazyframe(lazyframe: &LazyFrame) -> Vec<String> {
         let lf = lazyframe.clone().limit(1);
@@ -1060,7 +912,6 @@ def get_2d_histograms(file_name):
                             ui.add(egui::widgets::ProgressBar::new(p).animate(true).show_percentage().desired_width(100.0));
                         }
                     });
-// …to here
                 });
             }
         });
@@ -1117,21 +968,6 @@ def get_2d_histograms(file_name):
             });
         }
     }
-
-    // pub fn bottom_panel(&mut self, ctx: &egui::Context) {
-    //     if self.histogrammer.calculating.load(Ordering::Relaxed) {
-    //         egui::TopBottomPanel::bottom("spectrix_bottom_panel").show(ctx, |ui| {
-    //             ui.add(
-    //                 egui::widgets::ProgressBar::new(match self.histogrammer.progress.lock() {
-    //                     Ok(x) => *x,
-    //                     Err(_) => 0.0,
-    //                 })
-    //                 .animate(true)
-    //                 .show_percentage(),
-    //             );
-    //         });
-    //     }
-    // }
 
     fn central_panel_ui(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
