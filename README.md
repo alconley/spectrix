@@ -1,120 +1,334 @@
 # Spectrix
 
-Spectrix is a comprehensive software designed for nucelar spectrum analysis. It provides functionalities for histogramming, gaussian fitting, and interactive data visualization of 1D and 2D histograms using crates: `egui`, `egui-tiles`, `egui_plot`, and `polars`. Additionally, using uproot, you can view 1d and 2d root histograms.
+**Spectrix** is a comprehensive software package for **nuclear spectrum analysis**. It provides tools for histogramming, Gaussian fitting, and interactive visualization of 1D and 2D histograms using the crates:  
+`egui`, `egui-tiles`, `egui_plot`, and `polars`.
 
-### Running
+Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting is performed using Python’s **lmfit** library.
 
-Currently have tested this on Apple M3 Macbook Pro (Memory: 18 GB) running macOS Sonoma Version 14.6.1, Ubuntu 22.04.5 LTS and Windows 10. Both use python 3.13.
+![general overview gif](./example/general_overview.gif)
 
-If you are using this on Windows, make sure your python is downloaded from [python.org](https://www.python.org/downloads/).
+---
 
-Make sure you are using the latest version of stable rust by running `rustup update`. Rust is very easy to install on any computer. First, you'll need to install the Rust toolchain (compiler, cargo, etc). Go to the [Rust website](https://www.rust-lang.org/tools/install) and follow the instructions there.
+## 🧩 Features
 
-```sh
-# For Linux/Mac OS
+- Read and analyze `.parquet` and `.root` files  
+- Interactive histogramming (1D & 2D)  
+- Gaussian fitting with Python’s lmfit  
+- UI-based histogram and cut definition  
+- Custom histogram scripting  
+- Integration with Polars for high-performance data processing  
 
-# Linux
-sudo apt-get install libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libgtk-3-dev
+---
 
-# clone the repository
-git clone https://github.com/alconley/spectrix.git
+## 🚀 Running Spectrix
 
-# Go into the spectrix folder
-cd spectrix
+### Tested Platforms
 
-# Create a Python virtual environment
-python3 -m venv .venv
+- **macOS Sonoma 14.6.1** on Apple M3 MacBook Pro (18 GB RAM)  
+- **Ubuntu 22.04.5 LTS**  
+- **Windows 10**
 
-# Activate the virtual environment
-source .venv/bin/activate
+> ⚠️ Both use Python 3.13.  
+> On Windows, ensure that Python is downloaded from [python.org](https://www.python.org/downloads/).
 
-# Install the required python packages (lmfit and uproot)
-pip install -r requirements.txt
+---
 
-# You might need to set the python environment/packages  (I need to do this on my mac)
-# Set the PYO3_PYTHON environment variable to point to the Python in the virtual environment
-export PYO3_PYTHON=$(pwd)/.venv/bin/python
+### Install Rust
 
-# Set the PYTHONPATH to include the site-packages directory of the virtual environment
-# Adjust the python version path
-export PYTHONPATH=$(pwd)/.venv/lib/python3.*/site-packages
+Ensure you’re using the latest stable version of Rust:
 
-# Run the Rust project in release mode
-cargo run --release
-
+```bash
+rustup update
 ```
-Tips if the program doesn't run:
-`rustup update`
-`cargo clean`
-`cargo update`
 
-On Linux you need to first run:
+If you don’t have Rust installed, visit the [Rust website](https://www.rust-lang.org/tools/install) and follow the instructions.
 
-`sudo apt-get install libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libgtk-3-dev`
+---
 
-On Fedora Rawhide you need to run:
+### System Dependencies
 
-`dnf install clang clang-devel clang-tools-extra libxkbcommon-devel pkg-config openssl-devel libxcb-devel gtk3-devel atk fontconfig-devel`
+**For Linux/macOS:**
+
+```bash
+sudo apt-get install libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libgtk-3-dev
+```
+
+---
+
+### Installation Steps
+
+**Clone the repository**
+
+```bash
+git clone https://github.com/alconley/spectrix.git
+cd spectrix
+```
+
+**Create a Python virtual environment and activate it**
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+**Install the required python packages**
+```bash
+pip install -r requirements.txt
+```
+
+**(Optional, but often required on macOS (see ./spectrix.sh script))
+Set the Python environment for Rust (PyO3)**
+```bash
+export PYO3_PYTHON=$(pwd)/.venv/bin/python
+export PYTHONPATH=$(pwd)/.venv/lib/python3.*/site-packages
+```
+
+Run the Rust project in release mode**
+```bash
+cargo run --elease
+```
+
+**Tips if the program doesn't run**
+```bash
+rustup update
+cargo clean
+cargo update
+```
 
 ## Overview
 
-Spectrix program reads in `.parquet` files using the [Polars](https://docs.rs/polars/latest/polars/) crate. Personally, the .parquet files that I use are from [Eventbuilder](https://github.com/alconley/Eventbuilder). Here the parquet files are a dataframe (similar to a root tree) that stores the raw data as an f64. The histograms can be configured in the right panel in the ui. New column creation/cuts can also be done in the ui.
+The **Spectrix** program reads `.parquet` files using the [Polars](https://docs.rs/polars/latest/polars/) crate.  
+Typically, `.parquet` files are generated by [Eventbuilder](https://github.com/alconley/Eventbuilder). These files store raw data as `f64` in a dataframe format (similar to a ROOT tree).  
 
-Additionally, the user can read in a 1D and 2D histograms from a root file using the python package: uproot. The user has to select "Root Files" in the Workspace for the files to appear in the gui. If there is an issure reading root files/additional requests let me know and I can try to add them. In the future, I would like to have the option to read in a root tree, and perform histogramming. However, for now, a root tree can be easily converted to a the parquet format using [hep-convert](https://hepconvert.readthedocs.io/en/latest/root_to_parquet.html).
+Histograms can be configured in the left panel of the UI. New column creation and cuts can also be performed directly in the UI.
+
+Additionally, users can read 1D and 2D histograms from ROOT files using the Python package **uproot**.  
+
+If there are issues reading ROOT files or you have additional requests, please open an issue or contact me — I can add support for more ROOT structures.  
+In the future, I plan to add the ability to read ROOT trees directly and perform histogramming within Spectrix.  
+For now, ROOT trees can easily be converted to `.parquet` format using [HEP-Convert](https://hepconvert.readthedocs.io/en/latest/root_to_parquet.html).
+
+---
+
+## Getting Files
+
+Use the **`Get Files`** button and select either a folder or a file.  
+If a folder is selected, Spectrix will automatically load any `.parquet` or `.root` files it finds.
+
+### Root Files
+
+If a `.root` file is selected, Spectrix will attempt to load all 1D and 2D histograms from the file.  
+ROOT histogram paths such as `/name1/name2/histogram_name` will be used to organize histograms into container hierarchies.
+
+### Parquet Files
+
+This is the **preferred format**, as Spectrix can calculate histograms directly from the raw data using its internal histogram script system.
+
+If you’re unsure of all available column names, open the collapsible **“Selected File Settings”** section and click **“Get Column Names.”**  
+Spectrix will display all columns from the selected `.parquet` files.
+
+In this same section, you can:
+- Save filtered versions of your `.parquet` files.
+- Combine multiple files into one.
+
+When saving filtered files, Spectrix will apply any **active 1D or 2D cuts** and save the output as `filename_{prefix}.parquet`.
+
+> ⚠️ **Warning:**  
+> Combining files loads all data into memory. If the datasets are large, this may crash your system.  
+> It’s best to apply a filtering cut first (reducing the data size) before combining.
+
+---
+
+## Histogram Script
+
+The **Histogram Script** panel can be opened or closed using the **“Histograms”** button under the **“Get Files”** button.
+
+This tool allows you to:
+- Define new columns within `.parquet` data.
+- Define relevant **1D and 2D cuts**.
+- Define **1D and 2D histograms** (name, data columns, binning, range, and applied cuts).
+
+If you create histogram scripts in the UI, they can be **saved or loaded** as `.json` configuration files.
+
+---
+
+### Example
+
+Below are example images of Spectrix using the sample file located at  
+`./examples/run_83_reduced.parquet`.
+
+This dataset comes from a one-hour measurement of the **52Cr(d,pγ)53Cr** reaction.  
+The file is pre-filtered to include only proton data (the full dataset was too large for GitHub).  
+
+Invalid detector values are stored as `-1e6`, which marks cases where a detector did not register a hit within an event window.  
+This ensures that all columns have the same length.  
+The file was generated using [Eventbuilder](https://github.com/alconley/Eventbuilder).
+
+![Custom histogram script image 1](./example/example_custom_config_folder1.png)  
+![Custom histogram script image 2](./example/example_custom_config_folder2.png)
+
+---
+
+The following subsections assume you are in the **“General”** section of the **Histogram Script** panel.
+
+### Column Creation
+
+You can create new columns, such as time differences or averages of existing columns.  
+Examples of both are shown in the images above.
+
+> ⚠️ **Tip:**  
+> Define column aliases (names) without spaces.  
+> This is required for correct parsing in string-based 1D cut expressions.
+
+### Cuts
+
+Users can define 1D cuts by specifying a name and an expression.  
+Use column names and logical operators such as `&` to combine conditions.  
+
+Cuts must be selected in the corresponding UI checkboxes for both 1D and 2D histograms in order to be applied.
+
+### Histogram Definitions
+
+Type in the desired histogram name.  
+Using slashes (`/`) will automatically group histograms into nested containers.
+
+The **“Column(s)”** field must exactly match a column name from the `.parquet` file or a previously created alias.  
+Then, specify the range, number of bins, and any active cuts to apply.
+
+Make sure that all cuts you wish to apply are active in the UI.
+
+---
+
+## Custom Scripts
+
+The **Custom Scripts** section provides a UI-based way to define and load pre-configured histogram setups.  
+These scripts act as a front-end to the **Histogram Script**, allowing users to quickly initialize commonly used columns, cuts, and histograms without manually creating them each time.
+
+In other words, the Custom Scripts system automatically generates a full histogram configuration through the interface — simplifying setup for frequent or experiment-specific analyses.
+
+Currently, the included custom scripts are tailored for work relevant to **Florida State University (FSU)** experiments and setups.  
+These include example configurations for detector systems such as SE-SPS, ICESPICE, and CeBrA, as well as general analysis tools and fitting utilities.
+
+Each custom script automatically populates the **Histogram Script** panel with:
+- Commonly used **columns** (e.g., timing differences)  
+- Predefined **cuts** for data selection  
+- Standard **1D and 2D histograms** for quick visualization and analysis  
+
+The Custom Scripts system was designed to be easily adaptable for adding new configurations — feel free to ask ChatGPT if you need help creating one.  
+
+For those at FSU, the **SE-SPS** custom configuration is currently the most complete and ready for use.  
+The other scripts are still under development as part of the ongoing experimental setup.
 
 ## 1D Histograms
 
-The goal was to create a very user-friendly UI that makes fitting peaks fun and enjoyable, unlike ROOT...
+The goal of the 1D histogram interface in **Spectrix** is to make peak fitting **fun, intuitive, and user-friendly** — unlike traditional tools such as ROOT.  
 
 ### Features
 
-- Very Interactive UI
-- Customizable elements
-- Multiple Gaussian Fitting
-- Different Background Models
-- Rebinning Data
-- Peak Finding
+- Highly interactive and responsive UI  
+- Customizable display elements  
+- Support for **multiple Gaussian fits**  
+- Multiple **background models** (linear, quadratic, power law, exponential)  
+- **Rebinning** functionality  
+- **Peak finding** tools  
+- **Keyboard shortcuts** for a fast workflow  
+
+---
 
 ### Fitting
- 
-I opted to use python's [lmfit](https://lmfit.github.io/lmfit-py/builtin_models.html) to data in spectrix. Previously I used an awesome crate [varpro](https://github.com/geo-ant/varpro), however, I felt like I was reinventing the wheel for a lot. Therefore, I call python functions through the [pyo3](https://docs.rs/pyo3/latest/pyo3/). This adds extra dependencies and overhead but I think it is worth it to use the awesome fitting libray that lmfit has created while also making it easier for me to maintain/add new fitting functionalities to spectrix in the future.
 
-Keybinds (cursor must be in the plot):
+Spectrix uses Python’s [lmfit](https://lmfit.github.io/lmfit-py/builtin_models.html) library for curve fitting.  
+Originally, fitting was handled with the excellent Rust crate [varpro](https://github.com/geo-ant/varpro), but I found myself reimplementing much of what `lmfit` already does — so I switched.  
 
-- P: Add Marker at cursor position
-- B: Add Background Marker at cursor position
-- R: Add Region Marker at cursor position
-    - All markers can be moved by holding the middle mouse button on the center line dot and dragging it to the desired position.
-    - Line settings are accessible in the context menu (right click) under the markers menu button.
-- -: Remove Marker Closest to Cursor
-- Delete: Remove All Markers and Temp Fits
-- G: Fit Background
-    - The background model can be changed in the Fits menu (right click on plot).
-    - Models: Linear, Quadratic, Power Law, Exponential.
-    - Initial guess, min, and max may need to be adjusted.
-    - Data is evaluated at the bin center for the background marker.
-- O: Peak find
-    - Peak find settings are located in the context menu.
-- F: Fit Gaussians
-    - Settings and results can be found in the context menu.
-    - Requires 2 region markers. Data will be evaluated between the markers.
-    - Multiple Gaussians can be fitted together when multiple peak markers are between the region markers. By default, all peaks have the same standard deviation. This can be changed by checking the "Equal Standard Deviation" button. The position can also be locked if needed.
-    - If no peak markers are between the region markers, the program will assume there is only 1 peak approximately at the max value in the data.
-    - If there is no background fit when the fit button is clicked, the selected background model will be used and fitted. This can result in longer and potentially incorrect fits due to more parameters being fit. A fix would be adjusting the initial guess', min, and max value or fiting the background with the background markers.
-    - The lmfit fit report, fit stats, and fit lines can be viewed in the Fits menu.
-- S: Store Fit
-    - Saves the fit.
-    - Can save/load the fit to/from a file in the context menu.
-- I: Toggle Stats
-    - Display the mean, counts, and sigma on the histogram.
-- L: Toggle Log Y
+Through [PyO3](https://docs.rs/pyo3/latest/pyo3/), Spectrix directly calls Python fitting functions.  
+While this adds a bit of overhead and dependency complexity, it’s absolutely worth it — `lmfit` is powerful, easy to extend, and makes it straightforward to maintain or add new fitting capabilities in the future.
 
-## 2D Histogram
+I’ve included a short GIF below demonstrating the fitting and interaction workflow — but you should really **try it out yourself!**
+
+![Fitting demonstration](./example/fitting_example.gif)
+
+---
+
+### Keybinds (cursor must be in the plot)
+
+- **P** – Add marker at cursor position  
+- **B** – Add background marker at cursor position  
+- **R** – Add region markers at cursor position  
+  - Markers can be moved by holding the **middle mouse button** on the central dot and dragging.  
+  - Line and marker settings are available in the **context menu** (right-click → *Markers*).  
+- **-** – Remove marker closest to cursor  
+- **Delete** – Remove all markers and temporary fits  
+- **G** – Fit background  
+  - Background model can be changed in the *Fits* menu (right-click on plot).  
+  - Models: *Linear*, *Quadratic*, *Power Law*, *Exponential*.  
+  - Initial guesses, minimums, and maximums can be adjusted as needed.  
+  - Data is evaluated at bin centers based on the background markers.  
+- **F** – Fit Gaussians  
+  - Settings and results appear in the *Fits* context menu.  
+  - Requires **two region markers** — data is evaluated between them.  
+  - Multiple Gaussians can be fitted simultaneously when multiple peak markers are within the region.  
+  - By default, all peaks share the same standard deviation (this can be changed).  
+  - Peaks can be locked, and standard deviations can be constrained.  
+  - If no peak markers exist, Spectrix assumes one peak near the data’s maximum.  
+  - If no background fit exists, the selected background model will be fitted automatically (may produce slower or less accurate fits).  
+  - Fit reports, statistics, and curves are available in the *Fits* menu.  
+- **S** – Store fit  
+  - Saves the current fit results.  
+- **Tab** – Toggle Fit Panel / View Fits  
+  - Opens a side panel to view and manage stored fits.  
+- **I** – Toggle statistics display (mean, counts, sigma)  
+- **L** – Toggle logarithmic Y-axis  
+
+> Additional features such as **rebinning** and **display options** are accessible by **right-clicking on the plot**.
+
+---
+
+## 2D Histograms
 
 ### Features
 
-- Very Interactive UI
-- X and Y Projections
-- Different Colormaps with that can be reversed, log norm, and adjustable Z range
-- Easy to draw cut/gates
-- Rebinning
+- Interactive UI for fast visualization and navigation  
+- **X and Y projections**  
+- Multiple **colormaps** (reversible, log-normalized, adjustable Z range)  
+- **Graphical cut/gate drawing**  
+- **Rebinning** support  
+
+---
+
+### Keybinds (cursor must be in the plot)
+
+- **X** – Create an X-axis projection  
+  - Markers can be adjusted by dragging the middle circle of the line or using the right-click context menu.  
+- **Y** – Create a Y-axis projection  
+  - Same controls as X projection.  
+- **I** – Toggle statistics (mean, counts, sigma)  
+- **M** – Change colormap  
+- **Z** – Toggle between **log** and **linear** color normalization (default: log)  
+- **R** – Reverse the colormap  
+- **C** – Create a new graphical cut  
+  - Click to create vertices, drag to adjust, double-click to complete the polygon.  
+  - Column names are auto-populated (verify correctness).  
+  - Assign a unique cut name, then **save** it for reuse.  
+  - Cuts can be loaded or modified via the **right-click menu**, which also includes options to change color, re-enable vertex editing, and more.  
+
+> **Right-click** on the plot for additional options, including **rebinning**, **colormap adjustments**, and **cut management**.
+
+---
+
+## Analysis
+
+The **Analysis** feature in Spectrix is still in a **preliminary stage**, but it establishes the groundwork for more advanced data interpretation and reaction analysis tools planned for future versions.
+
+At this stage, the focus is on **cross-section analysis** for **SE-SPS** experiments.
+
+### SE-SPS Cross-Section Analysis
+
+This analysis module utilizes the **fit results** generated in the **Histogrammer** to extract information about the yield of each excited state.  
+By combining the fitting data with experimental parameters — such as **reaction information**, **beam current integrator data**, and other relevant metadata — Spectrix can calculate and plot the **cross section** for each excited state.
+
+Each state is tracked and referenced using a **UUID (Universally Unique Identifier)**, which ensures that every fitted peak and corresponding physical quantity can be uniquely identified and associated across multiple analysis steps.  
+This makes it straightforward to compare results between datasets or refine fits without losing the connection to the original event or energy level.
+
+While the SE-SPS analysis is currently the only implemented module, the system is designed to be **modular and easily expandable** 
+
+> ⚠️ **Note:**  
+> The SE-SPS cross-section analysis is still experimental and under active development

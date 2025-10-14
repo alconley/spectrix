@@ -845,6 +845,24 @@ def get_2d_histograms(file_name):
                 ui.separator();
 
                 ui.collapsing("Selected File Settings", |ui| {
+
+                    // button to get the column names from the selected files
+                    if ui.button("Get Column Names").on_hover_text("Get the column names from the selected files").clicked() {
+                        let checked_files: Vec<PathBuf> = self.selected_files.iter()
+                            .filter(|(_, checked)| *checked)
+                            .map(|(file, _)| file.clone())
+                            .collect();
+                        self.create_lazyframe(&checked_files);
+                    }
+
+                    if self.lazyframe.is_some() {
+                        ui.label(format!("Columns: {}", self.settings.column_names.join(", ")));
+                    } else {
+                        ui.label("Columns: (none loaded)");
+                    }
+
+                    ui.separator();
+
                     ui.label("Save Filtered Files:");
                     self.settings.cuts.ui(ui);
 
