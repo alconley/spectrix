@@ -11,7 +11,7 @@ use super::models::gaussian::GaussianFitter;
 
 use super::common::Calibration;
 
-use crate::custom_analysis::se_sps::FitUUID;
+use crate::custom_analysis::se_sps_analysis::uuid_map::FitUUID;
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::common::Data;
 use crate::fitter::models::linear::LinearFitter;

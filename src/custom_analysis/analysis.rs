@@ -1,6 +1,6 @@
 use crate::histoer::histogrammer;
 
-use super::se_sps::SPSAnalysis;
+use super::se_sps_analysis::se_sps::SPSAnalysis;
 use egui::viewport::{ViewportBuilder, ViewportClass, ViewportId};
 use std::path::PathBuf;
 
