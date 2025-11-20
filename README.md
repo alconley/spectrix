@@ -84,7 +84,7 @@ export PYTHONPATH=$(pwd)/.venv/lib/python3.*/site-packages
 
 Run the Rust project in release mode**
 ```bash
-cargo run --elease
+cargo run --release
 ```
 
 **Tips if the program doesn't run**
