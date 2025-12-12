@@ -9,6 +9,7 @@ use pyo3::{prelude::*, types::PyModule};
 use egui_file_dialog::FileDialog;
 use polars::prelude::PlPath;
 use polars::prelude::*;
+use polars_arrow::buffer::Buffer;
 
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -290,7 +291,8 @@ def get_2d_histograms(file_name):
         let args = ScanArgsParquet::default();
         log::info!("Processing Parquet files: {files_arc:?}");
 
-        match LazyFrame::scan_parquet_files(files_arc, args) {
+        let paths: Buffer<PlPath> = files_arc.iter().cloned().collect();
+        match LazyFrame::scan_parquet_files(paths, args) {
             Ok(lf) => {
                 log::info!("Successfully loaded selected Parquet files.");
                 let column_names = Self::get_column_names_from_lazyframe(&lf);

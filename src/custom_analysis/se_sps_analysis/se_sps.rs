@@ -221,7 +221,7 @@ impl SPSAnalysis {
 
     fn calculate_normalization_factor(&mut self) {
         for run in &mut self.runs.runs {
-            let q_b = run.bci_scaler * (run.bci_scale as f64) * 1e-9 / 100.0; // total charge of particles incident on the target
+            let q_b = run.bci_scaler * run.bci_scale * 1e-9 / 100.0; // total charge of particles incident on the target
             let n_b = q_b / ((self.beam_z as f64) * 1.602e-19); // number of incident particles
             let f_target =
                 1.0e-24 * 6.023e23 * (self.target_thickness.0 / 1.0e6) / self.target_molar_mass; // areal density of target atoms in atoms/cm^2

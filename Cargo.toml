@@ -3,45 +3,46 @@ name = "spectrix"
 version = "0.5.0"
 authors = ["Alex Conley <imaconley1@gmail.com>"]
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.92"
 
 [package.metadata.docs.rs]
 all-features = true
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
-eframe = { version = "0.33.0", default-features = false, features = [
+eframe = { version = "0.33.3", default-features = false, features = [
     "default_fonts", # Embed the default egui fonts.
     "glow",          # Use the glow rendering backend. Alternative: "wgpu".
     "persistence",   # Enable restoring app state when restarting the app.
     "x11",       # To support Linux (and CI) use x11 or wayland
     "wayland",
 ] }
-egui = "0.33.0"
+egui = "0.33.3"
 egui-file-dialog = "0.12.0"
 egui_plot = {version = "0.34.0", features = ["serde"] }
-egui_extras = {version = "0.33.0", features = ["syntect"] }
+egui_extras = {version = "0.33.3", features = ["syntect"] }
 egui_tiles = "0.14"
 epaint = "0.33.0"
 
 
-rfd = "0.15.4"
-log = "0.4.28"
+rfd = "0.16.0"
+log = "0.4.29"
 serde = { version = "1.0.225", features = ["derive"] }
 env_logger = "0.11.8"
-polars = { version = "0.51.0", features = ["lazy", "parquet", "performant"] }
-polars-lazy = { version = "0.51.0"}
+polars = { version = "0.52.0", features = ["lazy", "parquet", "performant", "dtype-full", "timezones"] }
+polars-lazy = { version = "0.52.0"}
 rayon = "1.11.0"
 serde_yaml = "0.9.34"
 serde_json = "1.0.145"
-geo = "0.31.0"
+geo = "0.32.0"
 fnv = "1.0.7"
 nalgebra = "0.34.1"
 compute = "0.2.3"
 find_peaks = "0.1.5"
-pyo3 = { version = "0.26.0", features = ["auto-initialize"] }
+pyo3 = { version = "0.27.2", features = ["auto-initialize"] }
 regex = "1.12.2"
-indicatif = "0.18.2"
+indicatif = "0.18.3"
+polars-arrow = "0.52.0"
 
 [profile.release]
 opt-level = 2 # fast and small wasm

@@ -6,7 +6,7 @@ use std::path::Path;
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Run {
     pub file_name: String,
-    pub bci_scale: u32,
+    pub bci_scale: f64,
     pub bci_scaler: f64,
     pub bci_uncertainty: f64,   // percentage, e.g. 10 for 10%
     pub angle: f64,             // lab degrees
@@ -44,7 +44,7 @@ impl Run {
             .selected_text(format!("{} nA", self.bci_scale))
             .show_ui(ui, |ui| {
                 let mut any = false;
-                for &option in &[1, 3, 10, 30, 100, 300] {
+                for &option in &[0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0, 300.0] {
                     if ui
                         .selectable_value(&mut self.bci_scale, option, format!("{option} nA"))
                         .changed()
@@ -192,7 +192,7 @@ impl Run {
 
         Self {
             file_name: file_name_full,
-            bci_scale: 300,
+            bci_scale: 300.0,
             bci_uncertainty: 10.0,
             bci_scaler: 1.0,
             angle,
@@ -326,7 +326,11 @@ impl Runs {
                     self.runs.sort_by(|a, b| a.file_name.cmp(&b.file_name));
                 }
                 SortColumn::BciScale => {
-                    self.runs.sort_by(|a, b| a.bci_scale.cmp(&b.bci_scale));
+                    self.runs.sort_by(|a, b| {
+                        a.bci_scale
+                            .partial_cmp(&b.bci_scale)
+                            .unwrap_or(Ordering::Equal)
+                    });
                 }
                 SortColumn::Angle => {
                     self.runs
