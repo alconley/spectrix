@@ -117,8 +117,8 @@ impl SPSConfig {
             Some(Cuts::new(vec![valid_sps_timing.clone()]))
         };
 
-        let fp_range = (-300.0, 300.0);
-        let fp_bins = 600;
+        let fp_range = (-350.0, 350.0);
+        let fp_bins = 700;
 
         let range = (0.0, 4096.0);
         let bins = 512;
@@ -128,14 +128,13 @@ impl SPSConfig {
             configs.hist1d(&format!("{base_path}/Focal Plane/X1"), "X1", fp_range, fp_bins, main_cuts);
             configs.hist1d(&format!("{base_path}/Focal Plane/X2"), "X2", fp_range, fp_bins, main_cuts);
             configs.hist1d(&format!("{base_path}/Focal Plane/Xavg"), "Xavg", fp_range, fp_bins, main_cuts);
-
-            configs.hist2d(&format!("{base_path}/Focal Plane/Both Planes- AnodeBack v ScintLeft"), "ScintLeftEnergy", "AnodeBackEnergy", range, range, (bins,bins), &cut_bothplanes);
+            configs.hist1d(&format!("{base_path}/Focal Plane/Xshap"), "Xshap", fp_range, fp_bins, main_cuts); //JCE 2026
 
             if self.xavg.active {
                 configs.hist1d(&format!("{base_path}/Focal Plane/Xavg Energy Calibrated"), "XavgEnergyCalibrated", self.xavg.range, self.xavg.bins, main_cuts);
             }
             configs.hist2d(&format!("{base_path}/Focal Plane/X2 v X1"), "X1", "X2", fp_range, fp_range, (fp_bins, fp_bins), main_cuts);
-            configs.hist2d(&format!("{base_path}/Focal Plane/Theta v Xavg"), "Xavg", "Theta", fp_range, (0.0, PI), (fp_bins, fp_bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Focal Plane/Both Planes- AnodeBack v ScintLeft"), "ScintLeftEnergy", "AnodeBackEnergy", range, range, (bins,bins), &cut_bothplanes);
             configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Xavg"), "Xavg", fp_range, fp_bins, main_cuts);
             configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Raw- X1"), "X1", fp_range, fp_bins, main_cuts);
             configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Both Planes- X1"), "X1", fp_range, fp_bins, &cut_bothplanes);
@@ -144,7 +143,11 @@ impl SPSConfig {
             configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Both Planes- X2"), "X2", fp_range, fp_bins, &cut_bothplanes);
             configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Only 1 Plane- X2"), "X2", fp_range, fp_bins, &cut_only_x2_plane);
 
-            configs.hist1d(&format!("{base_path}/Focal Plane/MonitorEnergy"), "MonitorEnergy", range, bins, main_cuts);
+            configs.hist1d(&format!("{base_path}/Monitor/MonitorEnergy"), "MonitorEnergy", range, bins, main_cuts);
+
+            // JCE 12/2025
+            configs.hist2d(&format!("{base_path}/Focal Plane/Theta v Xavg"), "Xavg", "Theta", fp_range, (0.0, PI), (fp_bins, fp_bins), main_cuts);
+            configs.hist2d(&format!("{base_path}/Focal Plane/ThetaShap v Xshap"), "Xshap", "ThetaShap", fp_range, (0.0, PI), (fp_bins, fp_bins), main_cuts); //JCE 2026
 
         }
 
