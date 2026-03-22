@@ -543,8 +543,8 @@ impl Configs {
         }
     }
 
-    pub fn cut_ui(&mut self, ui: &mut egui::Ui) {
-        self.cuts.ui(ui);
+    pub fn cut_ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&Cuts>) {
+        self.cuts.ui(ui, active_cuts, "general");
 
         // verify/sync cuts with histograms
         for hist_config in &mut self.configs {
@@ -591,12 +591,12 @@ impl Configs {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&Cuts>) {
         self.column_ui(ui);
 
         ui.separator();
 
-        self.cut_ui(ui);
+        self.cut_ui(ui, active_cuts);
 
         ui.separator();
 

@@ -727,7 +727,7 @@ def get_2d_histograms(file_name):
             ctx,
             self.settings.histogram_script_open && self.settings.left_panel_open,
             |ui| {
-                self.histogram_script.ui(ui);
+                self.histogram_script.ui(ui, &self.histogrammer);
             },
         );
 
@@ -866,7 +866,7 @@ def get_2d_histograms(file_name):
                     ui.separator();
 
                     ui.label("Save Filtered Files:");
-                    self.settings.cuts.ui(ui);
+                    self.settings.cuts.ui(ui, None, "save_filtered_files");
 
                     ui.separator();
 

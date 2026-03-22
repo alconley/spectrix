@@ -36,7 +36,7 @@ impl Default for CustomConfigs {
 }
 
 impl CustomConfigs {
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&Cuts>) {
         ui.horizontal(|ui| {
             ui.label("Custom Configs: ");
             ui.checkbox(&mut self.sps.active, "SPS");
@@ -55,7 +55,7 @@ impl CustomConfigs {
 
         ui.separator();
 
-        self.cuts.ui(ui);
+        self.cuts.ui(ui, active_cuts, "custom");
 
         ui.separator();
 

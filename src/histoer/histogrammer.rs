@@ -999,16 +999,28 @@ impl Histogrammer {
         log::info!("All histograms moved to a single grid container.");
     }
 
-    pub fn retrieve_active_2d_cuts(&self) {
+    pub fn retrieve_active_2d_cuts(&self) -> Cuts {
         let mut active_cuts = Vec::new();
         for (_id, tile) in self.tree.tiles.iter() {
             if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
                 let hist = hist.lock().expect("Failed to lock 2D histogram");
                 for cut in &hist.plot_settings.cuts {
-                    active_cuts.push(cut.clone());
+                    if cut.active
+                        && !active_cuts.iter().any(|existing: &super::cuts::Cut2D| {
+                            existing.polygon.name == cut.polygon.name
+                        })
+                    {
+                        active_cuts.push(cut.clone());
+                    }
                 }
             }
         }
+        Cuts::new(
+            active_cuts
+                .into_iter()
+                .map(super::cuts::Cut::Cut2D)
+                .collect(),
+        )
     }
 
     pub fn histograms_to_root(&mut self, output_file: &str) -> PyResult<()> {

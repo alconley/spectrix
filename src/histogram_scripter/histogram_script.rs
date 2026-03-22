@@ -47,7 +47,9 @@ impl HistogramScript {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, histogrammer: &Histogrammer) {
+        let active_cuts = histogrammer.retrieve_active_2d_cuts();
+
         ui.horizontal(|ui| {
             ui.heading("Histogram Script");
 
@@ -67,7 +69,7 @@ impl HistogramScript {
             egui::CollapsingHeader::new("General")
                 .default_open(false)
                 .show(ui, |ui| {
-                    self.configs.ui(ui);
+                    self.configs.ui(ui, Some(&active_cuts));
                 });
 
             ui.separator();
@@ -75,7 +77,7 @@ impl HistogramScript {
             egui::CollapsingHeader::new("Custom")
                 .default_open(false)
                 .show(ui, |ui| {
-                    self.custom_scripts.ui(ui);
+                    self.custom_scripts.ui(ui, Some(&active_cuts));
                 });
         });
     }

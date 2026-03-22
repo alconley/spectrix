@@ -65,6 +65,73 @@ pub struct Cuts {
 }
 
 impl Cuts {
+    fn active_cut_rows(
+        ui: &mut egui::Ui,
+        active_cuts: &Cuts,
+        target_cuts: &mut Vec<Cut>,
+        id_suffix: &str,
+    ) {
+        if active_cuts.cuts.is_empty() {
+            return;
+        }
+
+        ui.label("Active Histogram Cuts");
+        TableBuilder::new(ui)
+            .id_salt(format!("active_histogram_cuts_{id_suffix}"))
+            .column(Column::auto())
+            .column(Column::auto())
+            .column(Column::auto())
+            .column(Column::remainder())
+            .striped(true)
+            .vscroll(false)
+            .header(20.0, |mut header| {
+                header.col(|ui| {
+                    ui.label("Name");
+                });
+                header.col(|ui| {
+                    ui.label("Type");
+                });
+                header.col(|ui| {
+                    ui.label("Active");
+                });
+                header.col(|ui| {
+                    ui.label("Link");
+                });
+            })
+            .body(|mut body| {
+                for cut in &active_cuts.cuts {
+                    let linked = target_cuts
+                        .iter()
+                        .any(|existing| existing.name() == cut.name());
+                    body.row(18.0, |mut row| {
+                        row.col(|ui| {
+                            ui.label(cut.name());
+                        });
+                        row.col(|ui| match cut {
+                            Cut::Cut1D(_) => {
+                                ui.label("1D");
+                            }
+                            Cut::Cut2D(_) => {
+                                ui.label("2D");
+                            }
+                        });
+                        row.col(|ui| {
+                            ui.label("Yes");
+                        });
+                        row.col(|ui| {
+                            if linked {
+                                ui.label("Linked");
+                            } else if ui.button("Link").clicked() {
+                                target_cuts.push(cut.clone());
+                            }
+                        });
+                    });
+                }
+            });
+
+        ui.separator();
+    }
+
     pub fn new(cuts: Vec<Cut>) -> Self {
         Self {
             cuts,
@@ -159,7 +226,7 @@ impl Cuts {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&Cuts>, id_suffix: &str) {
         ui.horizontal_wrapped(|ui| {
             ui.label("Cuts");
 
@@ -228,6 +295,10 @@ impl Cuts {
             ui.separator();
         }
 
+        if let Some(active_cuts) = active_cuts {
+            Self::active_cut_rows(ui, active_cuts, &mut self.cuts, id_suffix);
+        }
+
         if !self.cuts.is_empty() {
             let mut indices_to_remove_cut = Vec::new();
 
@@ -281,8 +352,6 @@ impl Cuts {
                 TableBuilder::new(ui)
                     .id_salt("cuts_2d_table")
                     .column(Column::auto()) // Name
-                    .column(Column::auto()) // X Column
-                    .column(Column::auto()) // Y Column
                     .column(Column::auto()) // Active
                     .column(Column::remainder()) // Actions
                     .striped(true)
@@ -292,10 +361,7 @@ impl Cuts {
                             ui.label("Name");
                         });
                         header.col(|ui| {
-                            ui.label("X Column");
-                        });
-                        header.col(|ui| {
-                            ui.label("Y Column");
+                            ui.label("Active");
                         });
                     })
                     .body(|mut body| {
@@ -513,20 +579,6 @@ impl Cut2D {
             ui.add(
                 egui::TextEdit::singleline(&mut self.polygon.name)
                     .hint_text("Cut Name")
-                    .clip_text(false),
-            );
-        });
-        row.col(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.x_column)
-                    .hint_text("X Column")
-                    .clip_text(false),
-            );
-        });
-        row.col(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.y_column)
-                    .hint_text("Y Column")
                     .clip_text(false),
             );
         });
