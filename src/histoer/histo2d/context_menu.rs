@@ -115,7 +115,8 @@ impl Histogram2D {
             y_column: self.plot_settings.y_column.clone(),
             ..Default::default()
         };
-        cut.polygon.name = format!("Cut {}", self.plot_settings.cuts.len());
+        // cut.polygon.name = format!("Cut {}", self.plot_settings.cuts.len());
+        cut.polygon.name = Cut2D::default_name(&cut.x_column, &cut.y_column);
 
         cut.polygon.interactive_clicking = true;
         self.plot_settings.cuts.push(cut);

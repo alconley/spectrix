@@ -6,4 +6,5 @@
 *.root
 *.VSCodeCounter
 *.DS_Store
+*.*env
 __pycache__

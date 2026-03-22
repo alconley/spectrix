@@ -439,6 +439,43 @@ impl Default for Cut2D {
 }
 
 impl Cut2D {
+    pub fn default_name(x_column: &str, y_column: &str) -> String {
+        format!("{y_column} v {x_column} Cut")
+    }
+
+    pub fn sanitized_file_name(&self) -> String {
+        let trimmed_name = self.polygon.name.trim();
+        let base_name = if trimmed_name.is_empty() {
+            Self::default_name(&self.x_column, &self.y_column)
+        } else {
+            trimmed_name.to_owned()
+        };
+
+        let sanitized: String = base_name
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | ' ') {
+                    character
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+
+        let collapsed = sanitized
+            .split_whitespace()
+            .filter(|segment| !segment.is_empty())
+            .collect::<Vec<_>>()
+            .join("_");
+
+        let trimmed = collapsed.trim_matches('_');
+        if trimmed.is_empty() {
+            "cut".to_owned()
+        } else {
+            trimmed.to_owned()
+        }
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         if ui.button("Load").clicked()
             && let Err(e) = self.load_cut_from_json()
@@ -552,6 +589,7 @@ impl Cut2D {
 
     pub fn save_cut_to_json(&self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(file_path) = rfd::FileDialog::new()
+            .set_file_name(format!("{}.json", self.sanitized_file_name()))
             .add_filter("JSON Files", &["json"]) // Add a filter for json files
             .save_file()
         {
