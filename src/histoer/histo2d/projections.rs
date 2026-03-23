@@ -44,6 +44,12 @@ impl Histogram2D {
 
     pub fn check_projections(&mut self) {
         if self.plot_settings.projections.add_y_projection {
+            if self.plot_settings.projections.y_projection.is_none() {
+                self.plot_settings
+                    .projections
+                    .initialize_y_projection_lines((self.range.x.min, self.range.x.max));
+            }
+
             let x1 = self.plot_settings.projections.y_projection_line_1.x_value;
             let x2 = self.plot_settings.projections.y_projection_line_2.x_value;
             let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
@@ -74,9 +80,6 @@ impl Histogram2D {
 
                 self.plot_settings.projections.y_projection = Some(y_histogram);
 
-                self.plot_settings.projections.y_projection_line_1.x_value = self.range.x.min;
-                self.plot_settings.projections.y_projection_line_2.x_value = self.range.x.max;
-
                 if let Some(y_projection) = self.plot_settings.projections.y_projection.as_mut() {
                     y_projection.plot_settings.egui_settings.reset_axis = true;
                 }
@@ -91,6 +94,12 @@ impl Histogram2D {
         }
 
         if self.plot_settings.projections.add_x_projection {
+            if self.plot_settings.projections.x_projection.is_none() {
+                self.plot_settings
+                    .projections
+                    .initialize_x_projection_lines((self.range.y.min, self.range.y.max));
+            }
+
             let y1 = self.plot_settings.projections.x_projection_line_1.y_value;
             let y2 = self.plot_settings.projections.x_projection_line_2.y_value;
             let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
@@ -120,9 +129,6 @@ impl Histogram2D {
                 x_histogram.line.color = egui::Color32::from_rgb(0, 0, 255);
 
                 self.plot_settings.projections.x_projection = Some(x_histogram);
-
-                self.plot_settings.projections.x_projection_line_1.y_value = self.range.y.min;
-                self.plot_settings.projections.x_projection_line_2.y_value = self.range.y.max;
 
                 if let Some(x_projection) = self.plot_settings.projections.x_projection.as_mut() {
                     x_projection.plot_settings.egui_settings.reset_axis = true;
@@ -154,8 +160,12 @@ pub struct Projections {
     pub fill_x_line: EguiLine,
 
     pub dragging: bool,
+    #[serde(skip)]
+    pub current_plot_bounds: Option<((f64, f64), (f64, f64))>,
 }
 impl Projections {
+    const DEFAULT_AXIS_OFFSET_FRACTION: f64 = 0.05;
+
     pub fn new() -> Self {
         Self {
             add_y_projection: false,
@@ -208,7 +218,39 @@ impl Projections {
                 ..EguiLine::default()
             },
             dragging: false,
+            current_plot_bounds: None,
         }
+    }
+
+    fn axis_offset(min: f64, max: f64) -> f64 {
+        let width = (max - min).abs();
+        if width > 0.0 {
+            width * Self::DEFAULT_AXIS_OFFSET_FRACTION
+        } else {
+            0.0
+        }
+    }
+
+    pub fn initialize_y_projection_lines(&mut self, fallback_x_range: (f64, f64)) {
+        let (x_min, x_max) = self
+            .current_plot_bounds
+            .map(|(x_range, _)| x_range)
+            .unwrap_or(fallback_x_range);
+        let offset = Self::axis_offset(x_min, x_max);
+
+        self.y_projection_line_1.x_value = x_min + offset;
+        self.y_projection_line_2.x_value = x_max - offset;
+    }
+
+    pub fn initialize_x_projection_lines(&mut self, fallback_y_range: (f64, f64)) {
+        let (y_min, y_max) = self
+            .current_plot_bounds
+            .map(|(_, y_range)| y_range)
+            .unwrap_or(fallback_y_range);
+        let offset = Self::axis_offset(y_min, y_max);
+
+        self.x_projection_line_1.y_value = y_min + offset;
+        self.x_projection_line_2.y_value = y_max - offset;
     }
 
     fn show_y_projection(&mut self, ui: &egui::Ui) {

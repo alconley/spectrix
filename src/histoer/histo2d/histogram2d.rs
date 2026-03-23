@@ -252,6 +252,12 @@ impl Histogram2D {
     fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         self.show_stats(plot_ui);
 
+        let plot_bounds = plot_ui.plot_bounds();
+        self.plot_settings.projections.current_plot_bounds = Some((
+            (plot_bounds.min()[0], plot_bounds.max()[0]),
+            (plot_bounds.min()[1], plot_bounds.max()[1]),
+        ));
+
         let heatmap_image = self.image.get_plot_image_from_texture();
 
         if let Some(image) = heatmap_image {
