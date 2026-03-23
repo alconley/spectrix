@@ -188,8 +188,8 @@ impl EguiPolygon {
                 polygon = polygon.name(self.name.clone());
             }
 
-            if self.style.is_some() {
-                polygon = polygon.style(self.style.expect("Style should be set"));
+            if let Some(style) = self.style {
+                polygon = polygon.style(style);
             }
 
             plot_ui.polygon(polygon);

@@ -9,43 +9,21 @@ impl Histogram2D {
         factors.push(1);
         let mut factor = 1;
 
-        if self.backup_bins.is_none() {
-            while self.bins.x.is_multiple_of(factor * 2) {
-                factor *= 2;
-                factors.push(factor);
-            }
+        let x_bins = self
+            .backup_bins
+            .as_ref()
+            .map_or(self.bins.x, |backup_bins| backup_bins.x);
 
-            // remove the last factor if it is the same as the number of bins
-            if factors.last() == Some(&self.bins.x) {
-                factors.pop();
-            }
-            factors
-        } else {
-            while self
-                .backup_bins
-                .as_ref()
-                .expect("Backup bins should be set")
-                .x
-                .is_multiple_of(factor * 2)
-            {
-                factor *= 2;
-                factors.push(factor);
-            }
-
-            // remove the last factor if it is the same as the number of bins
-            if factors.last()
-                == Some(
-                    &self
-                        .backup_bins
-                        .as_ref()
-                        .expect("Backup bins should be set")
-                        .x,
-                )
-            {
-                factors.pop();
-            }
-            factors
+        while x_bins.is_multiple_of(factor * 2) {
+            factor *= 2;
+            factors.push(factor);
         }
+
+        // remove the last factor if it is the same as the number of bins
+        if factors.last() == Some(&x_bins) {
+            factors.pop();
+        }
+        factors
     }
 
     // Compute the possible rebin factors based on the initial number of bins
@@ -54,43 +32,21 @@ impl Histogram2D {
         factors.push(1);
         let mut factor = 1;
 
-        if self.backup_bins.is_none() {
-            while self.bins.y.is_multiple_of(factor * 2) {
-                factor *= 2;
-                factors.push(factor);
-            }
+        let y_bins = self
+            .backup_bins
+            .as_ref()
+            .map_or(self.bins.y, |backup_bins| backup_bins.y);
 
-            // remove the last factor if it is the same as the number of bins
-            if factors.last() == Some(&self.bins.y) {
-                factors.pop();
-            }
-            factors
-        } else {
-            while self
-                .backup_bins
-                .as_ref()
-                .expect("Backup bins should be set")
-                .y
-                .is_multiple_of(factor * 2)
-            {
-                factor *= 2;
-                factors.push(factor);
-            }
-
-            // remove the last factor if it is the same as the number of bins
-            if factors.last()
-                == Some(
-                    &self
-                        .backup_bins
-                        .as_ref()
-                        .expect("Backup bins should be set")
-                        .y,
-                )
-            {
-                factors.pop();
-            }
-            factors
+        while y_bins.is_multiple_of(factor * 2) {
+            factor *= 2;
+            factors.push(factor);
         }
+
+        // remove the last factor if it is the same as the number of bins
+        if factors.last() == Some(&y_bins) {
+            factors.pop();
+        }
+        factors
     }
     // Rebin the histogram with new bin sizes
     pub fn rebin(&mut self) {
