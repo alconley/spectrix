@@ -4,7 +4,6 @@ use crate::egui_plot_stuff::egui_horizontal_line::EguiHorizontalLine;
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::egui_plot_stuff::egui_vertical_line::EguiVerticalLine;
 use crate::histoer::histo1d::histogram1d::Histogram;
-use egui::Id;
 
 use super::histogram2d::Histogram2D;
 
@@ -170,17 +169,16 @@ pub struct Projections {
     #[serde(skip)]
     pub current_plot_bounds: Option<((f64, f64), (f64, f64))>,
     #[serde(skip)]
-    pub y_center_dragging: bool,
+    pub y_area_dragging: bool,
     #[serde(skip)]
-    pub x_center_dragging: bool,
+    pub x_area_dragging: bool,
+    #[serde(skip)]
+    pub y_drag_anchor: Option<f64>,
+    #[serde(skip)]
+    pub x_drag_anchor: Option<f64>,
 }
 impl Projections {
     const DEFAULT_AXIS_OFFSET_FRACTION: f64 = 0.05;
-    const CENTER_HANDLE_RADIUS: f32 = 6.0;
-    const Y_CENTER_HANDLE_ID: &'static str = "Y Projection Center Handle";
-    const Y_CENTER_CONNECTOR_ID: &'static str = "Y Projection Center Connector";
-    const X_CENTER_HANDLE_ID: &'static str = "X Projection Center Handle";
-    const X_CENTER_CONNECTOR_ID: &'static str = "X Projection Center Connector";
 
     pub fn new() -> Self {
         Self {
@@ -235,8 +233,10 @@ impl Projections {
             },
             dragging: false,
             current_plot_bounds: None,
-            y_center_dragging: false,
-            x_center_dragging: false,
+            y_area_dragging: false,
+            x_area_dragging: false,
+            y_drag_anchor: None,
+            x_drag_anchor: None,
         }
     }
 
@@ -337,52 +337,6 @@ impl Projections {
         }
     }
 
-    fn draw_y_center_handle(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
-        let y_mid = (plot_ui.plot_bounds().min()[1] + plot_ui.plot_bounds().max()[1]) / 2.0;
-        let x1 = self.y_projection_line_1.x_value;
-        let x2 = self.y_projection_line_2.x_value;
-        let center_x = self.y_projection_center();
-
-        let connector = egui_plot::Line::new(
-            "",
-            egui_plot::PlotPoints::Owned(vec![[x1, y_mid].into(), [x2, y_mid].into()]),
-        )
-        .color(self.y_projection_line_1.color)
-        .width(2.0)
-        .allow_hover(false)
-        .id(Id::new(Self::Y_CENTER_CONNECTOR_ID));
-        plot_ui.line(connector);
-
-        let center_point = egui_plot::Points::new("", vec![[center_x, y_mid]])
-            .color(self.y_projection_line_1.color)
-            .radius(Self::CENTER_HANDLE_RADIUS)
-            .id(Id::new(Self::Y_CENTER_HANDLE_ID));
-        plot_ui.points(center_point);
-    }
-
-    fn draw_x_center_handle(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
-        let x_mid = (plot_ui.plot_bounds().min()[0] + plot_ui.plot_bounds().max()[0]) / 2.0;
-        let y1 = self.x_projection_line_1.y_value;
-        let y2 = self.x_projection_line_2.y_value;
-        let center_y = self.x_projection_center();
-
-        let connector = egui_plot::Line::new(
-            "",
-            egui_plot::PlotPoints::Owned(vec![[x_mid, y1].into(), [x_mid, y2].into()]),
-        )
-        .color(self.x_projection_line_1.color)
-        .width(2.0)
-        .allow_hover(false)
-        .id(Id::new(Self::X_CENTER_CONNECTOR_ID));
-        plot_ui.line(connector);
-
-        let center_point = egui_plot::Points::new("", vec![[x_mid, center_y]])
-            .color(self.x_projection_line_1.color)
-            .radius(Self::CENTER_HANDLE_RADIUS)
-            .id(Id::new(Self::X_CENTER_HANDLE_ID));
-        plot_ui.points(center_point);
-    }
-
     fn show_y_projection(&mut self, ui: &egui::Ui) {
         if self.add_y_projection && self.y_projection.is_some() {
             let name = if let Some(histogram) = &self.y_projection {
@@ -425,11 +379,11 @@ impl Projections {
         self.dragging = (self.add_y_projection
             && (self.y_projection_line_1.is_dragging
                 || self.y_projection_line_2.is_dragging
-                || self.y_center_dragging))
+                || self.y_area_dragging))
             || (self.add_x_projection
                 && (self.x_projection_line_1.is_dragging
                     || self.x_projection_line_2.is_dragging
-                    || self.x_center_dragging));
+                    || self.x_area_dragging));
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
@@ -441,14 +395,12 @@ impl Projections {
         if self.add_y_projection {
             self.y_projection_line_1.draw(plot_ui, None);
             self.y_projection_line_2.draw(plot_ui, None);
-            self.draw_y_center_handle(plot_ui);
             self.fill_y_line.draw(plot_ui, None);
         }
 
         if self.add_x_projection {
             self.x_projection_line_1.draw(plot_ui);
             self.x_projection_line_2.draw(plot_ui);
-            self.draw_x_center_handle(plot_ui);
             self.fill_x_line.draw(plot_ui, None);
         }
 
@@ -462,82 +414,112 @@ impl Projections {
             self.y_projection_line_2
                 .interactive_dragging(plot_response, None);
             if self.y_projection_line_1.is_dragging || self.y_projection_line_2.is_dragging {
-                self.y_center_dragging = false;
+                self.y_area_dragging = false;
+                self.y_drag_anchor = None;
             }
-            self.interactive_drag_y_projection_center(plot_response);
+            self.interactive_drag_y_projection_area(plot_response);
         }
 
         if self.add_x_projection {
             self.x_projection_line_1.interactive_dragging(plot_response);
             self.x_projection_line_2.interactive_dragging(plot_response);
             if self.x_projection_line_1.is_dragging || self.x_projection_line_2.is_dragging {
-                self.x_center_dragging = false;
+                self.x_area_dragging = false;
+                self.x_drag_anchor = None;
             }
-            self.interactive_drag_x_projection_center(plot_response);
+            self.interactive_drag_x_projection_area(plot_response);
         }
     }
 
-    fn interactive_drag_y_projection_center(
-        &mut self,
-        plot_response: &egui_plot::PlotResponse<()>,
-    ) {
+    fn interactive_drag_y_projection_area(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
         let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
         if let Some(pointer_pos) = pointer_state.hover_pos() {
-            if let Some(hovered_id) = plot_response.hovered_plot_item
-                && hovered_id == Id::new(Self::Y_CENTER_HANDLE_ID)
-                && pointer_state.button_pressed(egui::PointerButton::Primary)
+            let pointer = plot_response.transform.value_from_position(pointer_pos);
+            let min_x = self
+                .y_projection_line_1
+                .x_value
+                .min(self.y_projection_line_2.x_value);
+            let max_x = self
+                .y_projection_line_1
+                .x_value
+                .max(self.y_projection_line_2.x_value);
+
+            if pointer_state.button_pressed(egui::PointerButton::Primary)
+                && !self.y_projection_line_1.is_dragging
+                && !self.y_projection_line_2.is_dragging
+                && pointer.x >= min_x
+                && pointer.x <= max_x
             {
-                self.y_center_dragging = true;
+                self.y_area_dragging = true;
+                self.y_drag_anchor = Some(pointer.x);
             }
 
-            if self.y_center_dragging {
+            if self.y_area_dragging {
                 if let Some(((x_min, x_max), _)) = self.current_plot_bounds {
-                    let center = plot_response.transform.value_from_position(pointer_pos).x;
+                    let center = self.y_projection_center();
+                    let delta = pointer.x - self.y_drag_anchor.unwrap_or(pointer.x);
                     self.set_y_projection_center_and_width(
-                        center,
+                        center + delta,
                         self.y_projection_width(),
                         (x_min, x_max),
                     );
+                    self.y_drag_anchor = Some(pointer.x);
                 }
 
                 if pointer_state.button_released(egui::PointerButton::Primary) {
-                    self.y_center_dragging = false;
+                    self.y_area_dragging = false;
+                    self.y_drag_anchor = None;
                 }
             }
         } else if pointer_state.button_released(egui::PointerButton::Primary) {
-            self.y_center_dragging = false;
+            self.y_area_dragging = false;
+            self.y_drag_anchor = None;
         }
     }
 
-    fn interactive_drag_x_projection_center(
-        &mut self,
-        plot_response: &egui_plot::PlotResponse<()>,
-    ) {
+    fn interactive_drag_x_projection_area(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
         let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
         if let Some(pointer_pos) = pointer_state.hover_pos() {
-            if let Some(hovered_id) = plot_response.hovered_plot_item
-                && hovered_id == Id::new(Self::X_CENTER_HANDLE_ID)
-                && pointer_state.button_pressed(egui::PointerButton::Primary)
+            let pointer = plot_response.transform.value_from_position(pointer_pos);
+            let min_y = self
+                .x_projection_line_1
+                .y_value
+                .min(self.x_projection_line_2.y_value);
+            let max_y = self
+                .x_projection_line_1
+                .y_value
+                .max(self.x_projection_line_2.y_value);
+
+            if pointer_state.button_pressed(egui::PointerButton::Primary)
+                && !self.x_projection_line_1.is_dragging
+                && !self.x_projection_line_2.is_dragging
+                && pointer.y >= min_y
+                && pointer.y <= max_y
             {
-                self.x_center_dragging = true;
+                self.x_area_dragging = true;
+                self.x_drag_anchor = Some(pointer.y);
             }
 
-            if self.x_center_dragging {
+            if self.x_area_dragging {
                 if let Some((_, (y_min, y_max))) = self.current_plot_bounds {
-                    let center = plot_response.transform.value_from_position(pointer_pos).y;
+                    let center = self.x_projection_center();
+                    let delta = pointer.y - self.x_drag_anchor.unwrap_or(pointer.y);
                     self.set_x_projection_center_and_width(
-                        center,
+                        center + delta,
                         self.x_projection_width(),
                         (y_min, y_max),
                     );
+                    self.x_drag_anchor = Some(pointer.y);
                 }
 
                 if pointer_state.button_released(egui::PointerButton::Primary) {
-                    self.x_center_dragging = false;
+                    self.x_area_dragging = false;
+                    self.x_drag_anchor = None;
                 }
             }
         } else if pointer_state.button_released(egui::PointerButton::Primary) {
-            self.x_center_dragging = false;
+            self.x_area_dragging = false;
+            self.x_drag_anchor = None;
         }
     }
 
