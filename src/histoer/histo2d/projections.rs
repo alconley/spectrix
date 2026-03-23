@@ -178,7 +178,9 @@ impl Projections {
     const DEFAULT_AXIS_OFFSET_FRACTION: f64 = 0.05;
     const CENTER_HANDLE_RADIUS: f32 = 6.0;
     const Y_CENTER_HANDLE_ID: &'static str = "Y Projection Center Handle";
+    const Y_CENTER_CONNECTOR_ID: &'static str = "Y Projection Center Connector";
     const X_CENTER_HANDLE_ID: &'static str = "X Projection Center Handle";
+    const X_CENTER_CONNECTOR_ID: &'static str = "X Projection Center Connector";
 
     pub fn new() -> Self {
         Self {
@@ -347,7 +349,8 @@ impl Projections {
         )
         .color(self.y_projection_line_1.color)
         .width(2.0)
-        .id(Id::new(Self::Y_CENTER_HANDLE_ID));
+        .allow_hover(false)
+        .id(Id::new(Self::Y_CENTER_CONNECTOR_ID));
         plot_ui.line(connector);
 
         let center_point = egui_plot::Points::new("", vec![[center_x, y_mid]])
@@ -369,7 +372,8 @@ impl Projections {
         )
         .color(self.x_projection_line_1.color)
         .width(2.0)
-        .id(Id::new(Self::X_CENTER_HANDLE_ID));
+        .allow_hover(false)
+        .id(Id::new(Self::X_CENTER_CONNECTOR_ID));
         plot_ui.line(connector);
 
         let center_point = egui_plot::Points::new("", vec![[x_mid, center_y]])
@@ -457,12 +461,18 @@ impl Projections {
                 .interactive_dragging(plot_response, None);
             self.y_projection_line_2
                 .interactive_dragging(plot_response, None);
+            if self.y_projection_line_1.is_dragging || self.y_projection_line_2.is_dragging {
+                self.y_center_dragging = false;
+            }
             self.interactive_drag_y_projection_center(plot_response);
         }
 
         if self.add_x_projection {
             self.x_projection_line_1.interactive_dragging(plot_response);
             self.x_projection_line_2.interactive_dragging(plot_response);
+            if self.x_projection_line_1.is_dragging || self.x_projection_line_2.is_dragging {
+                self.x_center_dragging = false;
+            }
             self.interactive_drag_x_projection_center(plot_response);
         }
     }
