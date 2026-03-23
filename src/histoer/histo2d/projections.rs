@@ -56,7 +56,6 @@ impl Histogram2D {
                     y_projection.rebin();
                     y_projection.bins = bins.clone();
                     y_projection.original_bins = bins;
-                    y_projection.plot_settings.egui_settings.reset_axis = true;
                 }
             } else if self.plot_settings.projections.y_projection.is_none() {
                 // create a new histogram and set the bins
@@ -105,7 +104,6 @@ impl Histogram2D {
                     x_projection.rebin();
                     x_projection.bins = bins.clone();
                     x_projection.original_bins = bins;
-                    x_projection.plot_settings.egui_settings.reset_axis = true;
                 }
             } else if self.plot_settings.projections.x_projection.is_none() {
                 let mut x_histogram = Histogram::new(
