@@ -1,4 +1,4 @@
-use super::cuts::{Cut, Cuts};
+use super::cuts::{ActiveCut2D, Cut, Cuts};
 use super::histogrammer::Histogrammer;
 
 use egui_extras::{Column, TableBuilder};
@@ -372,7 +372,7 @@ impl Configs {
         self.configs.is_empty()
     }
 
-    pub fn config_ui(&mut self, ui: &mut egui::Ui) {
+    pub fn config_ui(&mut self, ui: &mut egui::Ui, available_cuts: &mut Cuts) {
         ui.horizontal(|ui| {
             ui.label("Histograms");
 
@@ -454,8 +454,8 @@ impl Configs {
                         });
 
                         match config {
-                            Config::Hist1D(config) => config.table_row(&mut row, &mut self.cuts),
-                            Config::Hist2D(config) => config.table_row(&mut row, &mut self.cuts),
+                            Config::Hist1D(config) => config.table_row(&mut row, available_cuts),
+                            Config::Hist2D(config) => config.table_row(&mut row, available_cuts),
                         }
 
                         row.col(|ui| {
@@ -543,64 +543,70 @@ impl Configs {
         }
     }
 
-    pub fn cut_ui(&mut self, ui: &mut egui::Ui) {
-        self.cuts.ui(ui);
+    pub fn sync_histogram_cuts(&mut self, available_cuts: &Cuts) {
+        let available_cut_names: Vec<String> = available_cuts
+            .cuts
+            .iter()
+            .map(|cut| cut.name().to_owned())
+            .collect();
 
-        // verify/sync cuts with histograms
         for hist_config in &mut self.configs {
             match hist_config {
                 Config::Hist1D(hist1d) => {
                     for hist_cut in &mut hist1d.cuts.cuts {
-                        if let Some(updated_cut) = self
-                            .cuts
+                        if let Some(updated_cut) = available_cuts
                             .cuts
                             .iter()
                             .find(|cut| cut.name() == hist_cut.name())
                         {
-                            // Replace the cut if the operation or content has changed
                             *hist_cut = updated_cut.clone();
                         }
                     }
 
-                    // Remove cuts that no longer exist in `self.cuts`
                     hist1d
                         .cuts
                         .cuts
-                        .retain(|cut| self.cuts.cuts.iter().any(|c| c.name() == cut.name()));
+                        .retain(|cut| available_cut_names.iter().any(|name| name == cut.name()));
                 }
                 Config::Hist2D(hist2d) => {
                     for hist_cut in &mut hist2d.cuts.cuts {
-                        if let Some(updated_cut) = self
-                            .cuts
+                        if let Some(updated_cut) = available_cuts
                             .cuts
                             .iter()
                             .find(|cut| cut.name() == hist_cut.name())
                         {
-                            // Replace the cut if the operation or content has changed
                             *hist_cut = updated_cut.clone();
                         }
                     }
 
-                    // Remove cuts that no longer exist in `self.cuts`
                     hist2d
                         .cuts
                         .cuts
-                        .retain(|cut| self.cuts.cuts.iter().any(|c| c.name() == cut.name()));
+                        .retain(|cut| available_cut_names.iter().any(|name| name == cut.name()));
                 }
             }
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn cut_ui(&mut self, ui: &mut egui::Ui, mut active_cuts: Option<&mut [ActiveCut2D]>) {
+        self.cuts.ui(ui, active_cuts.as_deref_mut(), "general");
+        let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
+
+        self.sync_histogram_cuts(&merged_cuts);
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&mut [ActiveCut2D]>) {
+        let mut merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
+
         self.column_ui(ui);
 
         ui.separator();
 
-        self.cut_ui(ui);
+        self.cut_ui(ui, active_cuts);
 
         ui.separator();
 
-        self.config_ui(ui);
+        self.config_ui(ui, &mut merged_cuts);
     }
 
     pub fn set_prefix(&mut self, prefix: &str) {

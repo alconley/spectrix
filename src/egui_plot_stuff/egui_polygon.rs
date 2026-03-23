@@ -64,6 +64,12 @@ impl Default for EguiPolygon {
 }
 
 impl EguiPolygon {
+    pub fn set_color(&mut self, color: Color32) {
+        self.stroke.color = color;
+        self.color_rgb = Rgb::from_color32(color);
+        self.stroke_rgb = Rgb::from_color32(color);
+    }
+
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_owned(),
