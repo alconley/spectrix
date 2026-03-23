@@ -1,4 +1,5 @@
 use super::histogram2d::Histogram2D;
+use super::projections::ProjectionAxisSettings;
 use crate::histoer::cuts::Cut2D;
 
 use egui::Color32;
@@ -42,7 +43,18 @@ impl Histogram2D {
                 self.image.menu_button(ui);
             });
 
-        self.plot_settings.settings_ui(ui, self.bins.max_count);
+        self.plot_settings.settings_ui(
+            ui,
+            self.bins.max_count,
+            ProjectionAxisSettings {
+                axis_range: (self.range.x.min, self.range.x.max),
+                bin_width: self.bins.x_width,
+            },
+            ProjectionAxisSettings {
+                axis_range: (self.range.y.min, self.range.y.max),
+                bin_width: self.bins.y_width,
+            },
+        );
 
         SubMenuButton::new("Cuts")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))

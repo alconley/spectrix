@@ -7,6 +7,12 @@ use crate::histoer::histo1d::histogram1d::Histogram;
 
 use super::histogram2d::Histogram2D;
 
+#[derive(Debug, Clone, Copy)]
+pub struct ProjectionAxisSettings {
+    pub axis_range: (f64, f64),
+    pub bin_width: f64,
+}
+
 impl Histogram2D {
     pub fn y_projection(&self, x_min: f64, x_max: f64) -> Vec<u64> {
         // Extract the y-projection data
@@ -44,6 +50,12 @@ impl Histogram2D {
 
     pub fn check_projections(&mut self) {
         if self.plot_settings.projections.add_y_projection {
+            if self.plot_settings.projections.y_projection.is_none() {
+                self.plot_settings
+                    .projections
+                    .initialize_y_projection_lines((self.range.x.min, self.range.x.max));
+            }
+
             let x1 = self.plot_settings.projections.y_projection_line_1.x_value;
             let x2 = self.plot_settings.projections.y_projection_line_2.x_value;
             let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
@@ -74,9 +86,6 @@ impl Histogram2D {
 
                 self.plot_settings.projections.y_projection = Some(y_histogram);
 
-                self.plot_settings.projections.y_projection_line_1.x_value = self.range.x.min;
-                self.plot_settings.projections.y_projection_line_2.x_value = self.range.x.max;
-
                 if let Some(y_projection) = self.plot_settings.projections.y_projection.as_mut() {
                     y_projection.plot_settings.egui_settings.reset_axis = true;
                 }
@@ -91,6 +100,12 @@ impl Histogram2D {
         }
 
         if self.plot_settings.projections.add_x_projection {
+            if self.plot_settings.projections.x_projection.is_none() {
+                self.plot_settings
+                    .projections
+                    .initialize_x_projection_lines((self.range.y.min, self.range.y.max));
+            }
+
             let y1 = self.plot_settings.projections.x_projection_line_1.y_value;
             let y2 = self.plot_settings.projections.x_projection_line_2.y_value;
             let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
@@ -120,9 +135,6 @@ impl Histogram2D {
                 x_histogram.line.color = egui::Color32::from_rgb(0, 0, 255);
 
                 self.plot_settings.projections.x_projection = Some(x_histogram);
-
-                self.plot_settings.projections.x_projection_line_1.y_value = self.range.y.min;
-                self.plot_settings.projections.x_projection_line_2.y_value = self.range.y.max;
 
                 if let Some(x_projection) = self.plot_settings.projections.x_projection.as_mut() {
                     x_projection.plot_settings.egui_settings.reset_axis = true;
@@ -154,8 +166,20 @@ pub struct Projections {
     pub fill_x_line: EguiLine,
 
     pub dragging: bool,
+    #[serde(skip)]
+    pub current_plot_bounds: Option<((f64, f64), (f64, f64))>,
+    #[serde(skip)]
+    pub y_area_dragging: bool,
+    #[serde(skip)]
+    pub x_area_dragging: bool,
+    #[serde(skip)]
+    pub y_drag_anchor: Option<f64>,
+    #[serde(skip)]
+    pub x_drag_anchor: Option<f64>,
 }
 impl Projections {
+    const DEFAULT_AXIS_OFFSET_FRACTION: f64 = 0.05;
+
     pub fn new() -> Self {
         Self {
             add_y_projection: false,
@@ -208,6 +232,133 @@ impl Projections {
                 ..EguiLine::default()
             },
             dragging: false,
+            current_plot_bounds: None,
+            y_area_dragging: false,
+            x_area_dragging: false,
+            y_drag_anchor: None,
+            x_drag_anchor: None,
+        }
+    }
+
+    fn axis_offset(min: f64, max: f64) -> f64 {
+        let width = (max - min).abs();
+        if width > 0.0 {
+            width * Self::DEFAULT_AXIS_OFFSET_FRACTION
+        } else {
+            0.0
+        }
+    }
+
+    pub fn initialize_y_projection_lines(&mut self, fallback_x_range: (f64, f64)) {
+        let (x_min, x_max) = self
+            .current_plot_bounds
+            .map(|(x_range, _)| x_range)
+            .unwrap_or(fallback_x_range);
+        let offset = Self::axis_offset(x_min, x_max);
+
+        self.y_projection_line_1.x_value = x_min + offset;
+        self.y_projection_line_2.x_value = x_max - offset;
+    }
+
+    pub fn initialize_x_projection_lines(&mut self, fallback_y_range: (f64, f64)) {
+        let (y_min, y_max) = self
+            .current_plot_bounds
+            .map(|(_, y_range)| y_range)
+            .unwrap_or(fallback_y_range);
+        let offset = Self::axis_offset(y_min, y_max);
+
+        self.x_projection_line_1.y_value = y_min + offset;
+        self.x_projection_line_2.y_value = y_max - offset;
+    }
+
+    fn clamp_projection_center(center: f64, width: f64, axis_range: (f64, f64)) -> f64 {
+        let half_width = width / 2.0;
+        let min_center = axis_range.0 + half_width;
+        let max_center = axis_range.1 - half_width;
+
+        if min_center > max_center {
+            (axis_range.0 + axis_range.1) / 2.0
+        } else {
+            center.clamp(min_center, max_center)
+        }
+    }
+
+    fn y_projection_width(&self) -> f64 {
+        (self.y_projection_line_2.x_value - self.y_projection_line_1.x_value).abs()
+    }
+
+    fn x_projection_width(&self) -> f64 {
+        (self.x_projection_line_2.y_value - self.x_projection_line_1.y_value).abs()
+    }
+
+    fn y_projection_center(&self) -> f64 {
+        (self.y_projection_line_1.x_value + self.y_projection_line_2.x_value) / 2.0
+    }
+
+    fn x_projection_center(&self) -> f64 {
+        (self.x_projection_line_1.y_value + self.x_projection_line_2.y_value) / 2.0
+    }
+
+    fn set_y_projection_center_and_width(
+        &mut self,
+        center: f64,
+        width: f64,
+        axis_range: (f64, f64),
+    ) {
+        let max_width = (axis_range.1 - axis_range.0).abs();
+        let clamped_width = width.clamp(0.0, max_width);
+        let center = Self::clamp_projection_center(center, clamped_width, axis_range);
+        let half_width = clamped_width / 2.0;
+
+        self.y_projection_line_1.x_value = center - half_width;
+        self.y_projection_line_2.x_value = center + half_width;
+    }
+
+    fn set_x_projection_center_and_width(
+        &mut self,
+        center: f64,
+        width: f64,
+        axis_range: (f64, f64),
+    ) {
+        let max_width = (axis_range.1 - axis_range.0).abs();
+        let clamped_width = width.clamp(0.0, max_width);
+        let center = Self::clamp_projection_center(center, clamped_width, axis_range);
+        let half_width = clamped_width / 2.0;
+
+        self.x_projection_line_1.y_value = center - half_width;
+        self.x_projection_line_2.y_value = center + half_width;
+    }
+
+    fn projection_bins(width: f64, bin_width: f64) -> usize {
+        if bin_width <= 0.0 {
+            0
+        } else {
+            (width / bin_width).round().max(0.0) as usize
+        }
+    }
+
+    fn drag_step(axis_settings: ProjectionAxisSettings) -> f64 {
+        let axis_span = (axis_settings.axis_range.1 - axis_settings.axis_range.0).abs();
+        let fallback_step = if axis_span > 0.0 {
+            axis_span / 100.0
+        } else {
+            0.1
+        };
+
+        let step = if axis_settings.bin_width > 0.0 {
+            axis_settings.bin_width.min(fallback_step)
+        } else {
+            fallback_step
+        };
+
+        step.max(0.0001)
+    }
+
+    fn drag_decimals(step: f64) -> usize {
+        if step >= 1.0 {
+            0
+        } else {
+            (-step.log10()).ceil().clamp(0.0, 6.0) as usize
         }
     }
 
@@ -251,9 +402,13 @@ impl Projections {
 
     pub fn is_dragging(&mut self) {
         self.dragging = (self.add_y_projection
-            && (self.y_projection_line_1.is_dragging || self.y_projection_line_2.is_dragging))
+            && (self.y_projection_line_1.is_dragging
+                || self.y_projection_line_2.is_dragging
+                || self.y_area_dragging))
             || (self.add_x_projection
-                && (self.x_projection_line_1.is_dragging || self.x_projection_line_2.is_dragging));
+                && (self.x_projection_line_1.is_dragging
+                    || self.x_projection_line_2.is_dragging
+                    || self.x_area_dragging));
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
@@ -283,30 +438,197 @@ impl Projections {
                 .interactive_dragging(plot_response, None);
             self.y_projection_line_2
                 .interactive_dragging(plot_response, None);
+            if self.y_projection_line_1.is_dragging || self.y_projection_line_2.is_dragging {
+                self.y_area_dragging = false;
+                self.y_drag_anchor = None;
+            }
+            self.interactive_drag_y_projection_area(plot_response);
         }
 
         if self.add_x_projection {
             self.x_projection_line_1.interactive_dragging(plot_response);
             self.x_projection_line_2.interactive_dragging(plot_response);
+            if self.x_projection_line_1.is_dragging || self.x_projection_line_2.is_dragging {
+                self.x_area_dragging = false;
+                self.x_drag_anchor = None;
+            }
+            self.interactive_drag_x_projection_area(plot_response);
         }
     }
 
-    pub fn menu_button(&mut self, ui: &mut egui::Ui) {
+    fn interactive_drag_y_projection_area(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
+        let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
+        if let Some(pointer_pos) = pointer_state.hover_pos() {
+            let pointer = plot_response.transform.value_from_position(pointer_pos);
+            let min_x = self
+                .y_projection_line_1
+                .x_value
+                .min(self.y_projection_line_2.x_value);
+            let max_x = self
+                .y_projection_line_1
+                .x_value
+                .max(self.y_projection_line_2.x_value);
+
+            if pointer_state.button_pressed(egui::PointerButton::Primary)
+                && !self.y_projection_line_1.is_dragging
+                && !self.y_projection_line_2.is_dragging
+                && pointer.x >= min_x
+                && pointer.x <= max_x
+            {
+                self.y_area_dragging = true;
+                self.y_drag_anchor = Some(pointer.x);
+            }
+
+            if self.y_area_dragging {
+                if let Some(((x_min, x_max), _)) = self.current_plot_bounds {
+                    let center = self.y_projection_center();
+                    let delta = pointer.x - self.y_drag_anchor.unwrap_or(pointer.x);
+                    self.set_y_projection_center_and_width(
+                        center + delta,
+                        self.y_projection_width(),
+                        (x_min, x_max),
+                    );
+                    self.y_drag_anchor = Some(pointer.x);
+                }
+
+                if pointer_state.button_released(egui::PointerButton::Primary) {
+                    self.y_area_dragging = false;
+                    self.y_drag_anchor = None;
+                }
+            }
+        } else if pointer_state.button_released(egui::PointerButton::Primary) {
+            self.y_area_dragging = false;
+            self.y_drag_anchor = None;
+        }
+    }
+
+    fn interactive_drag_x_projection_area(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
+        let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
+        if let Some(pointer_pos) = pointer_state.hover_pos() {
+            let pointer = plot_response.transform.value_from_position(pointer_pos);
+            let min_y = self
+                .x_projection_line_1
+                .y_value
+                .min(self.x_projection_line_2.y_value);
+            let max_y = self
+                .x_projection_line_1
+                .y_value
+                .max(self.x_projection_line_2.y_value);
+
+            if pointer_state.button_pressed(egui::PointerButton::Primary)
+                && !self.x_projection_line_1.is_dragging
+                && !self.x_projection_line_2.is_dragging
+                && pointer.y >= min_y
+                && pointer.y <= max_y
+            {
+                self.x_area_dragging = true;
+                self.x_drag_anchor = Some(pointer.y);
+            }
+
+            if self.x_area_dragging {
+                if let Some((_, (y_min, y_max))) = self.current_plot_bounds {
+                    let center = self.x_projection_center();
+                    let delta = pointer.y - self.x_drag_anchor.unwrap_or(pointer.y);
+                    self.set_x_projection_center_and_width(
+                        center + delta,
+                        self.x_projection_width(),
+                        (y_min, y_max),
+                    );
+                    self.x_drag_anchor = Some(pointer.y);
+                }
+
+                if pointer_state.button_released(egui::PointerButton::Primary) {
+                    self.x_area_dragging = false;
+                    self.x_drag_anchor = None;
+                }
+            }
+        } else if pointer_state.button_released(egui::PointerButton::Primary) {
+            self.x_area_dragging = false;
+            self.x_drag_anchor = None;
+        }
+    }
+
+    fn projection_width_controls(
+        ui: &mut egui::Ui,
+        enabled: bool,
+        label: &str,
+        center: f64,
+        width: f64,
+        axis_settings: ProjectionAxisSettings,
+    ) -> Option<(f64, f64)> {
+        let mut next_width = width;
+        let mut width_bins = Self::projection_bins(width, axis_settings.bin_width);
+        let mut changed = false;
+        let drag_step = Self::drag_step(axis_settings);
+        let drag_decimals = Self::drag_decimals(drag_step);
+
+        ui.vertical(|ui| {
+            ui.label(label);
+            ui.horizontal(|ui| {
+                ui.label("Width:");
+                changed |= ui
+                    .add_enabled(
+                        enabled,
+                        egui::DragValue::new(&mut width_bins)
+                            .range(0..=usize::MAX)
+                            .speed(1.0)
+                            .suffix(" bins"),
+                    )
+                    .changed();
+
+                changed |= ui
+                    .add_enabled(
+                        enabled,
+                        egui::DragValue::new(&mut next_width)
+                            .range(
+                                0.0..=((axis_settings.axis_range.1 - axis_settings.axis_range.0)
+                                    .abs()),
+                            )
+                            .speed(drag_step)
+                            .min_decimals(drag_decimals)
+                            .max_decimals(drag_decimals)
+                            .prefix("range: "),
+                    )
+                    .changed();
+            });
+        });
+
+        if changed {
+            let bins_width = width_bins as f64 * axis_settings.bin_width;
+            let width_from_range = next_width;
+            let width = if (width_from_range - width).abs() > f64::EPSILON {
+                width_from_range
+            } else {
+                bins_width
+            };
+            Some((center, width))
+        } else {
+            None
+        }
+    }
+
+    pub fn menu_button(
+        &mut self,
+        ui: &mut egui::Ui,
+        x_axis_settings: ProjectionAxisSettings,
+        y_axis_settings: ProjectionAxisSettings,
+    ) {
         ui.heading("Projections");
+        let x_drag_step = Self::drag_step(x_axis_settings);
+        let x_drag_decimals = Self::drag_decimals(x_drag_step);
+        let y_drag_step = Self::drag_step(y_axis_settings);
+        let y_drag_decimals = Self::drag_decimals(y_drag_step);
 
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.add_y_projection, "Add Y Projection").on_hover_text("Keybinds:\nY = Add Y Projection\nLeft click and drag the line at the center of the plot (cirlce)");
 
-            let range = if let Some(histogram) = &self.y_projection {
-                histogram.range
-            } else {
-                (0.0, 1.0)
-            };
             if ui.add_enabled(
                 self.add_y_projection,
                 egui::DragValue::new(&mut self.y_projection_line_1.x_value)
-                    .range(range.0..=range.1)
-                    .speed(1.0)
+                    .range(x_axis_settings.axis_range.0..=x_axis_settings.axis_range.1)
+                    .speed(x_drag_step)
+                    .min_decimals(x_drag_decimals)
+                    .max_decimals(x_drag_decimals)
                     .prefix("X1: "),
             ).changed() {
                 self.dragging = true;
@@ -315,27 +637,38 @@ impl Projections {
             if ui.add_enabled(
                 self.add_y_projection,
                 egui::DragValue::new(&mut self.y_projection_line_2.x_value)
-                    .speed(1.0)
-                    .range(range.0..=range.1)
+                    .speed(x_drag_step)
+                    .min_decimals(x_drag_decimals)
+                    .max_decimals(x_drag_decimals)
+                    .range(x_axis_settings.axis_range.0..=x_axis_settings.axis_range.1)
                     .prefix("X2: "),
             ).changed() {
                 self.dragging = true;
             }
         });
 
+        if let Some((center, width)) = Self::projection_width_controls(
+            ui,
+            self.add_y_projection,
+            "Y Projection Span",
+            self.y_projection_center(),
+            self.y_projection_width(),
+            x_axis_settings,
+        ) {
+            self.set_y_projection_center_and_width(center, width, x_axis_settings.axis_range);
+            self.dragging = true;
+        }
+
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.add_x_projection, "Add X Projection").on_hover_text("Keybinds:\nX = Add X Projection\nLeft click and drag the line at the center of the plot (cirlce)");
 
-            let range = if let Some(histogram) = &self.x_projection {
-                histogram.range
-            } else {
-                (0.0, 1.0)
-            };
             if ui.add_enabled(
                 self.add_x_projection,
                 egui::DragValue::new(&mut self.x_projection_line_1.y_value)
-                    .speed(1.0)
-                    .range(range.0..=range.1)
+                    .speed(y_drag_step)
+                    .min_decimals(y_drag_decimals)
+                    .max_decimals(y_drag_decimals)
+                    .range(y_axis_settings.axis_range.0..=y_axis_settings.axis_range.1)
                     .prefix("Y1: "),
             ).changed() {
                 self.dragging = true;
@@ -343,12 +676,26 @@ impl Projections {
             if ui.add_enabled(
                 self.add_x_projection,
                 egui::DragValue::new(&mut self.x_projection_line_2.y_value)
-                    .speed(1.0)
-                    .range(range.0..=range.1)
+                    .speed(y_drag_step)
+                    .min_decimals(y_drag_decimals)
+                    .max_decimals(y_drag_decimals)
+                    .range(y_axis_settings.axis_range.0..=y_axis_settings.axis_range.1)
                     .prefix("Y2: "),
             ).changed() {
                 self.dragging = true;
             }
         });
+
+        if let Some((center, width)) = Self::projection_width_controls(
+            ui,
+            self.add_x_projection,
+            "X Projection Span",
+            self.x_projection_center(),
+            self.x_projection_width(),
+            y_axis_settings,
+        ) {
+            self.set_x_projection_center_and_width(center, width, y_axis_settings.axis_range);
+            self.dragging = true;
+        }
     }
 }

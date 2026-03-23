@@ -3,7 +3,7 @@ use crate::histoer::cuts::Cut2D;
 use crate::egui_plot_stuff::egui_plot_settings::EguiPlotSettings;
 
 use super::colormaps::{ColorMap, ColormapOptions};
-use super::projections::Projections;
+use super::projections::{ProjectionAxisSettings, Projections};
 
 use egui::PopupCloseBehavior;
 use egui::containers::menu::{MenuConfig, SubMenuButton};
@@ -44,7 +44,13 @@ impl Default for PlotSettings {
     }
 }
 impl PlotSettings {
-    pub fn settings_ui(&mut self, ui: &mut egui::Ui, max_z_range: u64) {
+    pub fn settings_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        max_z_range: u64,
+        x_axis_settings: ProjectionAxisSettings,
+        y_axis_settings: ProjectionAxisSettings,
+    ) {
         SubMenuButton::new("Colormaps")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
             .ui(ui, |ui| {
@@ -65,7 +71,8 @@ impl PlotSettings {
         SubMenuButton::new("Projections")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
             .ui(ui, |ui| {
-                self.projections.menu_button(ui);
+                self.projections
+                    .menu_button(ui, x_axis_settings, y_axis_settings);
             });
     }
 
