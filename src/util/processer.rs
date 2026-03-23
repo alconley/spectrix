@@ -74,17 +74,12 @@ pub struct Processor {
     pub file_sort: FileSortState,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, Default)]
 pub enum FileSortKey {
+    #[default]
     Name,
     Size,
     Modified,
-}
-
-impl Default for FileSortKey {
-    fn default() -> Self {
-        Self::Name
-    }
 }
 
 impl FileSortKey {
