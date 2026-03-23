@@ -1,10 +1,40 @@
 use super::histogram2d::Histogram2D;
 use crate::histoer::cuts::Cut2D;
 
+use egui::Color32;
 use egui::PopupCloseBehavior;
 use egui::containers::menu::{MenuConfig, SubMenuButton};
 
 impl Histogram2D {
+    fn next_cut_name(&self, x_column: &str, y_column: &str) -> String {
+        let base_name = Cut2D::default_name(x_column, y_column);
+        let mut next_index = 1;
+
+        while self
+            .plot_settings
+            .cuts
+            .iter()
+            .any(|cut| cut.polygon.name == format!("{base_name} {next_index}"))
+        {
+            next_index += 1;
+        }
+
+        format!("{base_name} {next_index}")
+    }
+
+    fn next_cut_color(&self) -> Color32 {
+        const DEFAULT_CUT_COLORS: [Color32; 6] = [
+            Color32::RED,
+            Color32::GREEN,
+            Color32::BLUE,
+            Color32::YELLOW,
+            Color32::from_rgb(255, 0, 255),
+            Color32::from_rgb(0, 255, 255),
+        ];
+
+        DEFAULT_CUT_COLORS[self.plot_settings.cuts.len() % DEFAULT_CUT_COLORS.len()]
+    }
+
     pub fn context_menu(&mut self, ui: &mut egui::Ui) {
         SubMenuButton::new("Image")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
@@ -115,8 +145,8 @@ impl Histogram2D {
             y_column: self.plot_settings.y_column.clone(),
             ..Default::default()
         };
-        // cut.polygon.name = format!("Cut {}", self.plot_settings.cuts.len());
-        cut.polygon.name = Cut2D::default_name(&cut.x_column, &cut.y_column);
+        cut.polygon.name = self.next_cut_name(&cut.x_column, &cut.y_column);
+        cut.polygon.set_color(self.next_cut_color());
 
         cut.polygon.interactive_clicking = true;
         self.plot_settings.cuts.push(cut);
