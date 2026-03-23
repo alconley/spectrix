@@ -15,7 +15,7 @@ use std::sync::{
 
 // Project modules
 use super::configs::{Config, Configs};
-use super::cuts::ActiveCut2D;
+use super::cuts::{ActiveCut2D, Cuts};
 use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
