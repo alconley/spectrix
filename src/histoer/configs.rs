@@ -1,4 +1,4 @@
-use super::cuts::{Cut, Cuts};
+use super::cuts::{ActiveCut2D, Cut, Cuts};
 use super::histogrammer::Histogrammer;
 
 use egui_extras::{Column, TableBuilder};
@@ -588,21 +588,21 @@ impl Configs {
         }
     }
 
-    pub fn cut_ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&Cuts>) {
-        self.cuts.ui(ui, active_cuts, "general");
-        let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts);
+    pub fn cut_ui(&mut self, ui: &mut egui::Ui, mut active_cuts: Option<&mut [ActiveCut2D]>) {
+        self.cuts.ui(ui, active_cuts.as_deref_mut(), "general");
+        let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
 
         self.sync_histogram_cuts(&merged_cuts);
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&Cuts>) {
-        let mut merged_cuts = self.cuts.merged_with_active_cuts(active_cuts);
+    pub fn ui(&mut self, ui: &mut egui::Ui, mut active_cuts: Option<&mut [ActiveCut2D]>) {
+        let mut merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
 
         self.column_ui(ui);
 
         ui.separator();
 
-        self.cut_ui(ui, active_cuts);
+        self.cut_ui(ui, active_cuts.as_deref_mut());
 
         ui.separator();
 

@@ -1,4 +1,7 @@
-use crate::histoer::{configs::Configs, cuts::Cuts};
+use crate::histoer::{
+    configs::Configs,
+    cuts::{ActiveCut2D, Cuts},
+};
 
 use super::fsu_custom_script::cebra::CeBrAConfig;
 use super::fsu_custom_script::general::Calibration;
@@ -36,8 +39,8 @@ impl Default for CustomConfigs {
 }
 
 impl CustomConfigs {
-    pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&Cuts>) {
-        let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts);
+    pub fn ui(&mut self, ui: &mut egui::Ui, mut active_cuts: Option<&mut [ActiveCut2D]>) {
+        let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
 
         ui.horizontal(|ui| {
             ui.label("Custom Configs: ");
@@ -57,7 +60,7 @@ impl CustomConfigs {
 
         ui.separator();
 
-        self.cuts.ui(ui, active_cuts, "custom");
+        self.cuts.ui(ui, active_cuts.as_deref_mut(), "custom");
 
         ui.separator();
 
@@ -116,7 +119,7 @@ impl CustomConfigs {
         }
     }
 
-    pub fn merge_active_configs(&mut self, active_cuts: Option<&Cuts>) -> Configs {
+    pub fn merge_active_configs(&mut self, active_cuts: Option<&[ActiveCut2D]>) -> Configs {
         let mut configs = Configs::default();
         let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts);
 

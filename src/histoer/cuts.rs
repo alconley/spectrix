@@ -16,6 +16,13 @@ pub enum Cut {
     Cut2D(Cut2D),
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct ActiveCut2D {
+    pub histogram_name: String,
+    pub enabled: bool,
+    pub cut: Cut2D,
+}
+
 impl Default for Cut {
     fn default() -> Self {
         Self::Cut2D(Cut2D::default())
@@ -65,8 +72,8 @@ pub struct Cuts {
 }
 
 impl Cuts {
-    fn active_cut_rows(ui: &mut egui::Ui, active_cuts: &Cuts, id_suffix: &str) {
-        if active_cuts.cuts.is_empty() {
+    fn active_cut_rows(ui: &mut egui::Ui, active_cuts: &mut [ActiveCut2D], id_suffix: &str) {
+        if active_cuts.is_empty() {
             return;
         }
 
@@ -74,19 +81,40 @@ impl Cuts {
         TableBuilder::new(ui)
             .id_salt(format!("active_histogram_cuts_{id_suffix}"))
             .column(Column::auto())
-            .column(Column::remainder())
+            .column(Column::auto())
+            .column(Column::auto())
             .striped(true)
             .vscroll(false)
             .header(20.0, |mut header| {
                 header.col(|ui| {
+                    ui.label("Use");
+                });
+                header.col(|ui| {
                     ui.label("Name");
+                });
+                header.col(|ui| {
+                    ui.label("Info");
                 });
             })
             .body(|mut body| {
-                for cut in &active_cuts.cuts {
+                for active_cut in active_cuts {
                     body.row(18.0, |mut row| {
                         row.col(|ui| {
-                            ui.label(cut.name());
+                            ui.checkbox(&mut active_cut.enabled, "");
+                        });
+                        row.col(|ui| {
+                            ui.add(
+                                egui::Label::new(&active_cut.cut.polygon.name)
+                                    .wrap_mode(egui::TextWrapMode::Extend),
+                            );
+                        });
+                        row.col(|ui| {
+                            ui.small_button("?").on_hover_text(format!(
+                                "Histogram: {}\nX Column: {}\nY Column: {}",
+                                active_cut.histogram_name,
+                                active_cut.cut.x_column,
+                                active_cut.cut.y_column
+                            ));
                         });
                     });
                 }
@@ -95,19 +123,19 @@ impl Cuts {
         ui.separator();
     }
 
-    pub fn merged_with_active_cuts(&self, active_cuts: Option<&Cuts>) -> Self {
+    pub fn merged_with_active_cuts(&self, active_cuts: Option<&[ActiveCut2D]>) -> Self {
         let mut merged = self.clone();
 
         if let Some(active_cuts) = active_cuts {
-            for active_cut in &active_cuts.cuts {
+            for active_cut in active_cuts.iter().filter(|active_cut| active_cut.enabled) {
                 if let Some(existing_cut) = merged
                     .cuts
                     .iter_mut()
-                    .find(|existing_cut| existing_cut.name() == active_cut.name())
+                    .find(|existing_cut| existing_cut.name() == active_cut.cut.polygon.name)
                 {
-                    *existing_cut = active_cut.clone();
+                    *existing_cut = Cut::Cut2D(active_cut.cut.clone());
                 } else {
-                    merged.cuts.push(active_cut.clone());
+                    merged.cuts.push(Cut::Cut2D(active_cut.cut.clone()));
                 }
             }
         }
@@ -209,7 +237,12 @@ impl Cuts {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&Cuts>, id_suffix: &str) {
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        active_cuts: Option<&mut [ActiveCut2D]>,
+        id_suffix: &str,
+    ) {
         ui.horizontal_wrapped(|ui| {
             ui.label("Cuts");
 
