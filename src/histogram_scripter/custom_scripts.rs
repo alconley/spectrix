@@ -10,7 +10,6 @@ use super::fsu_custom_script::se_sps::{SPSConfig, SPSOptions};
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Options {
-    pub calculate_cut_histograms: bool,
     pub calculate_no_cut_histograms: bool,
 }
 
@@ -31,7 +30,6 @@ impl Default for CustomConfigs {
             icespice: ICESPICEConfig::default(),
             cuts: Cuts::default(),
             options: Options {
-                calculate_cut_histograms: true,
                 calculate_no_cut_histograms: true,
             },
         }
@@ -68,17 +66,12 @@ impl CustomConfigs {
             ui.horizontal(|ui| {
                 ui.label("Options: ");
                 ui.checkbox(
-                    &mut self.options.calculate_cut_histograms,
-                    "Calculate Cut Histograms",
-                );
-                ui.checkbox(
                     &mut self.options.calculate_no_cut_histograms,
                     "Calculate No Cut Histograms",
                 );
             });
         } else {
-            // make sure to disable the options if no cuts are defined and reset them
-            self.options.calculate_cut_histograms = false;
+            // make sure to reset the no-cut option if no cuts are defined
             self.options.calculate_no_cut_histograms = true;
         }
 
@@ -122,9 +115,10 @@ impl CustomConfigs {
     pub fn merge_active_configs(&mut self, active_cuts: Option<&[ActiveCut2D]>) -> Configs {
         let mut configs = Configs::default();
         let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts);
+        let should_calculate_cut_histograms = !merged_cuts.is_empty();
 
         if self.sps.active {
-            if self.options.calculate_cut_histograms && !merged_cuts.is_empty() {
+            if should_calculate_cut_histograms {
                 let cuts = merged_cuts.clone();
                 let sps_configs = self.sps.sps_configs(&Some(cuts));
                 configs.merge(sps_configs.clone()); // Ensure `merge` handles in-place modifications
@@ -141,7 +135,7 @@ impl CustomConfigs {
                 if det.active {
                     let sps_config = self.sps.clone();
 
-                    if self.options.calculate_cut_histograms && !merged_cuts.is_empty() {
+                    if should_calculate_cut_histograms {
                         let cuts = merged_cuts.clone();
                         let cebr3_configs =
                             det.cebr3_configs(&sps_config.clone(), &Some(cuts.clone()));
@@ -160,7 +154,7 @@ impl CustomConfigs {
             let sps_config = self.sps.clone();
             let cebr_config = self.cebra.clone();
 
-            if self.options.calculate_cut_histograms && !merged_cuts.is_empty() {
+            if should_calculate_cut_histograms {
                 let cuts = merged_cuts.clone();
                 let icespice_configs =
                     self.icespice
