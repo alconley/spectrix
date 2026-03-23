@@ -95,6 +95,14 @@ impl FileSortKey {
             Self::Modified => "Modified",
         }
     }
+
+    fn short_label(self) -> &'static str {
+        match self {
+            Self::Name => "Name",
+            Self::Size => "Size",
+            Self::Modified => "Time",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize)]
@@ -833,13 +841,13 @@ def get_2d_histograms(file_name):
         let sort_state = self.file_sort;
         self.selected_files.sort_by(|a, b| {
             let ordering = match sort_state.key {
-                FileSortKey::Name => a.0.cmp(&b.0),
+                FileSortKey::Name => natural_path_cmp(&a.0, &b.0),
                 FileSortKey::Size => compare_file_size(&a.0, &b.0),
                 FileSortKey::Modified => compare_file_modified(&a.0, &b.0),
             };
 
             let ordering = if ordering == CmpOrdering::Equal {
-                a.0.cmp(&b.0)
+                natural_path_cmp(&a.0, &b.0)
             } else {
                 ordering
             };
@@ -865,6 +873,32 @@ def get_2d_histograms(file_name):
                 if ui.button("Clear").clicked() {
                     self.selected_files.clear();
                 }
+
+                egui::ComboBox::from_id_salt("selected_files_sort_key")
+                    .selected_text(format!("Sort: {}", self.file_sort.key.short_label()))
+                    .show_ui(ui, |ui| {
+                        for key in [FileSortKey::Name, FileSortKey::Size, FileSortKey::Modified] {
+                            if ui
+                                .selectable_value(&mut self.file_sort.key, key, key.label())
+                                .changed()
+                            {
+                                self.sort_selected_files();
+                            }
+                        }
+                    });
+
+                if ui
+                    .button(if self.file_sort.ascending {
+                        "Ascending"
+                    } else {
+                        "Descending"
+                    })
+                    .on_hover_text("Toggle file sort direction")
+                    .clicked()
+                {
+                    self.file_sort.ascending = !self.file_sort.ascending;
+                    self.sort_selected_files();
+                }
             });
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -885,36 +919,6 @@ def get_2d_histograms(file_name):
                     ui.separator();
                     ui.horizontal_wrapped(|ui| {
                         ui.label(format!("Directory: {}", common_dir.to_string_lossy())); // Show common directory
-
-                        egui::ComboBox::from_id_salt("selected_files_sort_key")
-                            .selected_text(format!("Sort: {}", self.file_sort.key.label()))
-                            .show_ui(ui, |ui| {
-                                for key in [
-                                    FileSortKey::Name,
-                                    FileSortKey::Size,
-                                    FileSortKey::Modified,
-                                ] {
-                                    if ui
-                                        .selectable_value(
-                                            &mut self.file_sort.key,
-                                            key,
-                                            key.label(),
-                                        )
-                                        .changed()
-                                    {
-                                        self.sort_selected_files();
-                                    }
-                                }
-                            });
-
-                        if ui
-                            .button(if self.file_sort.ascending { "↑" } else { "↓" })
-                            .on_hover_text("Toggle file sort direction")
-                            .clicked()
-                        {
-                            self.file_sort.ascending = !self.file_sort.ascending;
-                            self.sort_selected_files();
-                        }
 
                         // add a refresh button to update the files in the directory
                         if ui.button("⟳").clicked() {
@@ -1142,4 +1146,78 @@ fn compare_file_modified(path_a: &std::path::Path, path_b: &std::path::Path) -> 
         (Some(_), None) => CmpOrdering::Greater,
         (None, None) => CmpOrdering::Equal,
     }
+}
+
+fn natural_path_cmp(path_a: &std::path::Path, path_b: &std::path::Path) -> CmpOrdering {
+    let name_a = path_a
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let name_b = path_b
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+
+    natural_str_cmp(name_a, name_b).then_with(|| path_a.cmp(path_b))
+}
+
+fn natural_str_cmp(a: &str, b: &str) -> CmpOrdering {
+    let mut a_chars = a.chars().peekable();
+    let mut b_chars = b.chars().peekable();
+
+    loop {
+        match (a_chars.peek(), b_chars.peek()) {
+            (Some(a_char), Some(b_char)) if a_char.is_ascii_digit() && b_char.is_ascii_digit() => {
+                let a_number = take_numeric_chunk(&mut a_chars);
+                let b_number = take_numeric_chunk(&mut b_chars);
+
+                let ordering = compare_numeric_chunks(&a_number, &b_number);
+                if ordering != CmpOrdering::Equal {
+                    return ordering;
+                }
+            }
+            (Some(_), Some(_)) => {
+                let ordering = a_chars
+                    .next()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .cmp(&b_chars.next().unwrap_or_default().to_ascii_lowercase());
+
+                if ordering != CmpOrdering::Equal {
+                    return ordering;
+                }
+            }
+            (Some(_), None) => return CmpOrdering::Greater,
+            (None, Some(_)) => return CmpOrdering::Less,
+            (None, None) => return CmpOrdering::Equal,
+        }
+    }
+}
+
+fn take_numeric_chunk(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
+    let mut chunk = String::new();
+
+    while let Some(ch) = chars.peek() {
+        if ch.is_ascii_digit() {
+            chunk.push(*ch);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    chunk
+}
+
+fn compare_numeric_chunks(a: &str, b: &str) -> CmpOrdering {
+    let trimmed_a = a.trim_start_matches('0');
+    let trimmed_b = b.trim_start_matches('0');
+    let normalized_a = if trimmed_a.is_empty() { "0" } else { trimmed_a };
+    let normalized_b = if trimmed_b.is_empty() { "0" } else { trimmed_b };
+
+    normalized_a
+        .len()
+        .cmp(&normalized_b.len())
+        .then_with(|| normalized_a.cmp(normalized_b))
+        .then_with(|| a.len().cmp(&b.len()))
 }
