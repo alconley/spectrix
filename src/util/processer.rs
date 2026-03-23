@@ -11,6 +11,7 @@ use polars::prelude::PlPath;
 use polars::prelude::*;
 use polars_arrow::buffer::Buffer;
 
+use std::cmp::Ordering as CmpOrdering;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
@@ -70,6 +71,54 @@ pub struct Processor {
     pub histogram_script: HistogramScript,
     pub settings: ProcessorSettings,
     pub analysis: AnalysisScripts,
+    pub file_sort: FileSortState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub enum FileSortKey {
+    Name,
+    Size,
+    Modified,
+}
+
+impl Default for FileSortKey {
+    fn default() -> Self {
+        Self::Name
+    }
+}
+
+impl FileSortKey {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Name => "Name",
+            Self::Size => "Size",
+            Self::Modified => "Modified",
+        }
+    }
+
+    fn short_label(self) -> &'static str {
+        match self {
+            Self::Name => "Name",
+            Self::Size => "Size",
+            Self::Modified => "Time",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct FileSortState {
+    pub key: FileSortKey,
+    pub ascending: bool,
+}
+
+impl Default for FileSortState {
+    fn default() -> Self {
+        Self {
+            key: FileSortKey::Name,
+            ascending: true,
+        }
+    }
 }
 
 impl Processor {
@@ -90,6 +139,7 @@ impl Processor {
             histogram_script: HistogramScript::new(),
             settings: ProcessorSettings::default(),
             analysis: AnalysisScripts::default(),
+            file_sort: FileSortState::default(),
         }
     }
 
@@ -650,20 +700,19 @@ def get_2d_histograms(file_name):
                                     for entry in entries.flatten() {
                                         let file_path = entry.path();
                                         if let Some(ext) = file_path.extension()
-                                            && (ext == "parquet" || ext == "root") && !self.selected_files.iter().any(|(f, _)| f == &file_path) {
-                                                self.selected_files.push((file_path, true)); // Default to selected
+                                            && (ext == "parquet" || ext == "root") {
+                                                self.add_selected_file(file_path, true);
                                             }
                                     }
                                 }
                             } else if let Some(ext) = path.extension() {
                                 // If it's a file, check if it's a valid type
-                                if (ext == "parquet" || ext == "root") && !self.selected_files.iter().any(|(f, _)| f == &path) {
-                                    self.selected_files.push((path, true)); // Default to selected
+                                if ext == "parquet" || ext == "root" {
+                                    self.add_selected_file(path, true);
                                 }
                             }
                         }
-                        // Sort the selected files by name
-                        self.selected_files.sort_by(|a, b| a.0.cmp(&b.0));
+                        self.sort_selected_files();
                     }
 
                     ui.separator();
@@ -757,6 +806,60 @@ def get_2d_histograms(file_name):
             });
     }
 
+    fn add_selected_file(&mut self, path: PathBuf, checked: bool) {
+        if !self.selected_files.iter().any(|(file, _)| file == &path) {
+            self.selected_files.push((path, checked));
+        }
+    }
+
+    fn refresh_selected_files_from_directory(&mut self, directory: &std::path::Path) {
+        let previous_selection = self
+            .selected_files
+            .iter()
+            .map(|(path, checked)| (path.clone(), *checked))
+            .collect::<std::collections::HashMap<_, _>>();
+
+        let mut refreshed_files = Vec::new();
+
+        if let Ok(entries) = std::fs::read_dir(directory) {
+            for entry in entries.flatten() {
+                let file_path = entry.path();
+                if let Some(ext) = file_path.extension()
+                    && (ext == "parquet" || ext == "root")
+                {
+                    let checked = previous_selection.get(&file_path).copied().unwrap_or(true);
+                    refreshed_files.push((file_path, checked));
+                }
+            }
+        }
+
+        self.selected_files = refreshed_files;
+        self.sort_selected_files();
+    }
+
+    fn sort_selected_files(&mut self) {
+        let sort_state = self.file_sort;
+        self.selected_files.sort_by(|a, b| {
+            let ordering = match sort_state.key {
+                FileSortKey::Name => natural_path_cmp(&a.0, &b.0),
+                FileSortKey::Size => compare_file_size(&a.0, &b.0),
+                FileSortKey::Modified => compare_file_modified(&a.0, &b.0),
+            };
+
+            let ordering = if ordering == CmpOrdering::Equal {
+                natural_path_cmp(&a.0, &b.0)
+            } else {
+                ordering
+            };
+
+            if sort_state.ascending {
+                ordering
+            } else {
+                ordering.reverse()
+            }
+        });
+    }
+
     pub fn selected_files_ui(&mut self, ui: &mut egui::Ui) {
         if !self.selected_files.is_empty() {
             ui.label("Selected files:");
@@ -769,6 +872,32 @@ def get_2d_histograms(file_name):
                 }
                 if ui.button("Clear").clicked() {
                     self.selected_files.clear();
+                }
+
+                egui::ComboBox::from_id_salt("selected_files_sort_key")
+                    .selected_text(format!("Sort: {}", self.file_sort.key.short_label()))
+                    .show_ui(ui, |ui| {
+                        for key in [FileSortKey::Name, FileSortKey::Size, FileSortKey::Modified] {
+                            if ui
+                                .selectable_value(&mut self.file_sort.key, key, key.label())
+                                .changed()
+                            {
+                                self.sort_selected_files();
+                            }
+                        }
+                    });
+
+                if ui
+                    .button(if self.file_sort.ascending {
+                        "Ascending"
+                    } else {
+                        "Descending"
+                    })
+                    .on_hover_text("Toggle file sort direction")
+                    .clicked()
+                {
+                    self.file_sort.ascending = !self.file_sort.ascending;
+                    self.sort_selected_files();
                 }
             });
         }
@@ -793,21 +922,7 @@ def get_2d_histograms(file_name):
 
                         // add a refresh button to update the files in the directory
                         if ui.button("⟳").clicked() {
-                            self.selected_files.clear();
-                            if let Ok(entries) = std::fs::read_dir(common_dir) {
-                                for entry in entries.flatten() {
-                                    let file_path = entry.path();
-                                    if let Some(ext) = file_path.extension()
-                                        && (ext == "parquet" || ext == "root")
-                                        && !self.selected_files.iter().any(|(f, _)| f == &file_path)
-                                    {
-                                        self.selected_files.push((file_path, false));
-                                        // Default to selected
-                                    }
-                                }
-                            }
-                            // sort the selected files by name
-                            self.selected_files.sort_by(|a, b| a.0.cmp(&b.0));
+                            self.refresh_selected_files_from_directory(common_dir);
                         }
                     });
                 }
@@ -1005,4 +1120,104 @@ def get_2d_histograms(file_name):
 
         self.file_dialog.update(ctx);
     }
+}
+
+fn compare_file_size(path_a: &std::path::Path, path_b: &std::path::Path) -> CmpOrdering {
+    let value_a = std::fs::metadata(path_a)
+        .ok()
+        .map(|metadata| metadata.len());
+    let value_b = std::fs::metadata(path_b)
+        .ok()
+        .map(|metadata| metadata.len());
+    value_a.cmp(&value_b)
+}
+
+fn compare_file_modified(path_a: &std::path::Path, path_b: &std::path::Path) -> CmpOrdering {
+    let value_a = std::fs::metadata(path_a)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok());
+    let value_b = std::fs::metadata(path_b)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok());
+
+    match (value_a.as_ref(), value_b.as_ref()) {
+        (Some(a), Some(b)) => a.cmp(b),
+        (None, Some(_)) => CmpOrdering::Less,
+        (Some(_), None) => CmpOrdering::Greater,
+        (None, None) => CmpOrdering::Equal,
+    }
+}
+
+fn natural_path_cmp(path_a: &std::path::Path, path_b: &std::path::Path) -> CmpOrdering {
+    let name_a = path_a
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let name_b = path_b
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+
+    natural_str_cmp(name_a, name_b).then_with(|| path_a.cmp(path_b))
+}
+
+fn natural_str_cmp(a: &str, b: &str) -> CmpOrdering {
+    let mut a_chars = a.chars().peekable();
+    let mut b_chars = b.chars().peekable();
+
+    loop {
+        match (a_chars.peek(), b_chars.peek()) {
+            (Some(a_char), Some(b_char)) if a_char.is_ascii_digit() && b_char.is_ascii_digit() => {
+                let a_number = take_numeric_chunk(&mut a_chars);
+                let b_number = take_numeric_chunk(&mut b_chars);
+
+                let ordering = compare_numeric_chunks(&a_number, &b_number);
+                if ordering != CmpOrdering::Equal {
+                    return ordering;
+                }
+            }
+            (Some(_), Some(_)) => {
+                let ordering = a_chars
+                    .next()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .cmp(&b_chars.next().unwrap_or_default().to_ascii_lowercase());
+
+                if ordering != CmpOrdering::Equal {
+                    return ordering;
+                }
+            }
+            (Some(_), None) => return CmpOrdering::Greater,
+            (None, Some(_)) => return CmpOrdering::Less,
+            (None, None) => return CmpOrdering::Equal,
+        }
+    }
+}
+
+fn take_numeric_chunk(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
+    let mut chunk = String::new();
+
+    while let Some(ch) = chars.peek() {
+        if ch.is_ascii_digit() {
+            chunk.push(*ch);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    chunk
+}
+
+fn compare_numeric_chunks(a: &str, b: &str) -> CmpOrdering {
+    let trimmed_a = a.trim_start_matches('0');
+    let trimmed_b = b.trim_start_matches('0');
+    let normalized_a = if trimmed_a.is_empty() { "0" } else { trimmed_a };
+    let normalized_b = if trimmed_b.is_empty() { "0" } else { trimmed_b };
+
+    normalized_a
+        .len()
+        .cmp(&normalized_b.len())
+        .then_with(|| normalized_a.cmp(normalized_b))
+        .then_with(|| a.len().cmp(&b.len()))
 }
