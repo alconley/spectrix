@@ -37,6 +37,8 @@ impl Default for CustomConfigs {
 
 impl CustomConfigs {
     pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&Cuts>) {
+        let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts);
+
         ui.horizontal(|ui| {
             ui.label("Custom Configs: ");
             ui.checkbox(&mut self.sps.active, "SPS");
@@ -59,7 +61,7 @@ impl CustomConfigs {
 
         ui.separator();
 
-        if !self.cuts.is_empty() {
+        if !merged_cuts.is_empty() {
             ui.horizontal(|ui| {
                 ui.label("Options: ");
                 ui.checkbox(
@@ -114,12 +116,13 @@ impl CustomConfigs {
         }
     }
 
-    pub fn merge_active_configs(&mut self) -> Configs {
+    pub fn merge_active_configs(&mut self, active_cuts: Option<&Cuts>) -> Configs {
         let mut configs = Configs::default();
+        let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts);
 
         if self.sps.active {
-            if self.options.calculate_cut_histograms && !self.cuts.is_empty() {
-                let cuts = self.cuts.clone();
+            if self.options.calculate_cut_histograms && !merged_cuts.is_empty() {
+                let cuts = merged_cuts.clone();
                 let sps_configs = self.sps.sps_configs(&Some(cuts));
                 configs.merge(sps_configs.clone()); // Ensure `merge` handles in-place modifications
             }
@@ -135,8 +138,8 @@ impl CustomConfigs {
                 if det.active {
                     let sps_config = self.sps.clone();
 
-                    if self.options.calculate_cut_histograms && !self.cuts.is_empty() {
-                        let cuts = self.cuts.clone();
+                    if self.options.calculate_cut_histograms && !merged_cuts.is_empty() {
+                        let cuts = merged_cuts.clone();
                         let cebr3_configs =
                             det.cebr3_configs(&sps_config.clone(), &Some(cuts.clone()));
                         configs.merge(cebr3_configs.clone()); // Ensure `merge` handles in-place modifications
@@ -154,8 +157,8 @@ impl CustomConfigs {
             let sps_config = self.sps.clone();
             let cebr_config = self.cebra.clone();
 
-            if self.options.calculate_cut_histograms && !self.cuts.is_empty() {
-                let cuts = self.cuts.clone();
+            if self.options.calculate_cut_histograms && !merged_cuts.is_empty() {
+                let cuts = merged_cuts.clone();
                 let icespice_configs =
                     self.icespice
                         .icespice_configs(&cebr_config, &sps_config, &Some(cuts));

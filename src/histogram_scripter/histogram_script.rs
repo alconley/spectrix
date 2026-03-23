@@ -89,9 +89,14 @@ impl HistogramScript {
         estimated_memory: f64,
         prefix: Option<String>,
     ) {
-        let active_custom_configs = self.custom_scripts.merge_active_configs();
+        let active_cuts = h.retrieve_active_2d_cuts();
+        let active_custom_configs = self.custom_scripts.merge_active_configs(Some(&active_cuts));
 
         let mut cloned_configs = self.configs.clone();
+        let merged_general_cuts = cloned_configs
+            .cuts
+            .merged_with_active_cuts(Some(&active_cuts));
+        cloned_configs.sync_histogram_cuts(&merged_general_cuts);
         cloned_configs.merge(active_custom_configs);
         let mut merged_configs = cloned_configs;
 

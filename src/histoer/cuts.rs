@@ -65,21 +65,14 @@ pub struct Cuts {
 }
 
 impl Cuts {
-    fn active_cut_rows(
-        ui: &mut egui::Ui,
-        active_cuts: &Cuts,
-        target_cuts: &mut Vec<Cut>,
-        id_suffix: &str,
-    ) {
+    fn active_cut_rows(ui: &mut egui::Ui, active_cuts: &Cuts, id_suffix: &str) {
         if active_cuts.cuts.is_empty() {
             return;
         }
 
-        ui.label("Active Histogram Cuts");
+        ui.label("Active 2D Histogram Cuts");
         TableBuilder::new(ui)
             .id_salt(format!("active_histogram_cuts_{id_suffix}"))
-            .column(Column::auto())
-            .column(Column::auto())
             .column(Column::auto())
             .column(Column::remainder())
             .striped(true)
@@ -88,48 +81,38 @@ impl Cuts {
                 header.col(|ui| {
                     ui.label("Name");
                 });
-                header.col(|ui| {
-                    ui.label("Type");
-                });
-                header.col(|ui| {
-                    ui.label("Active");
-                });
-                header.col(|ui| {
-                    ui.label("Link");
-                });
             })
             .body(|mut body| {
                 for cut in &active_cuts.cuts {
-                    let linked = target_cuts
-                        .iter()
-                        .any(|existing| existing.name() == cut.name());
                     body.row(18.0, |mut row| {
                         row.col(|ui| {
                             ui.label(cut.name());
-                        });
-                        row.col(|ui| match cut {
-                            Cut::Cut1D(_) => {
-                                ui.label("1D");
-                            }
-                            Cut::Cut2D(_) => {
-                                ui.label("2D");
-                            }
-                        });
-                        row.col(|ui| {
-                            ui.label("Yes");
-                        });
-                        row.col(|ui| {
-                            if linked {
-                                ui.label("Linked");
-                            } else if ui.button("Link").clicked() {
-                                target_cuts.push(cut.clone());
-                            }
                         });
                     });
                 }
             });
 
         ui.separator();
+    }
+
+    pub fn merged_with_active_cuts(&self, active_cuts: Option<&Cuts>) -> Self {
+        let mut merged = self.clone();
+
+        if let Some(active_cuts) = active_cuts {
+            for active_cut in &active_cuts.cuts {
+                if let Some(existing_cut) = merged
+                    .cuts
+                    .iter_mut()
+                    .find(|existing_cut| existing_cut.name() == active_cut.name())
+                {
+                    *existing_cut = active_cut.clone();
+                } else {
+                    merged.cuts.push(active_cut.clone());
+                }
+            }
+        }
+
+        merged
     }
 
     pub fn new(cuts: Vec<Cut>) -> Self {
@@ -296,7 +279,7 @@ impl Cuts {
         }
 
         if let Some(active_cuts) = active_cuts {
-            Self::active_cut_rows(ui, active_cuts, &mut self.cuts, id_suffix);
+            Self::active_cut_rows(ui, active_cuts, id_suffix);
         }
 
         if !self.cuts.is_empty() {
