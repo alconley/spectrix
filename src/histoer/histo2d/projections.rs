@@ -337,6 +337,31 @@ impl Projections {
         }
     }
 
+    fn drag_step(axis_settings: ProjectionAxisSettings) -> f64 {
+        let axis_span = (axis_settings.axis_range.1 - axis_settings.axis_range.0).abs();
+        let fallback_step = if axis_span > 0.0 {
+            axis_span / 100.0
+        } else {
+            0.1
+        };
+
+        let step = if axis_settings.bin_width > 0.0 {
+            axis_settings.bin_width.min(fallback_step)
+        } else {
+            fallback_step
+        };
+
+        step.max(0.0001)
+    }
+
+    fn drag_decimals(step: f64) -> usize {
+        if step >= 1.0 {
+            0
+        } else {
+            (-step.log10()).ceil().clamp(0.0, 6.0) as usize
+        }
+    }
+
     fn show_y_projection(&mut self, ui: &egui::Ui) {
         if self.add_y_projection && self.y_projection.is_some() {
             let name = if let Some(histogram) = &self.y_projection {
@@ -534,6 +559,8 @@ impl Projections {
         let mut next_width = width;
         let mut width_bins = Self::projection_bins(width, axis_settings.bin_width);
         let mut changed = false;
+        let drag_step = Self::drag_step(axis_settings);
+        let drag_decimals = Self::drag_decimals(drag_step);
 
         ui.vertical(|ui| {
             ui.label(label);
@@ -557,7 +584,9 @@ impl Projections {
                                 0.0..=((axis_settings.axis_range.1 - axis_settings.axis_range.0)
                                     .abs()),
                             )
-                            .speed(axis_settings.bin_width.max(0.1))
+                            .speed(drag_step)
+                            .min_decimals(drag_decimals)
+                            .max_decimals(drag_decimals)
                             .prefix("range: "),
                     )
                     .changed();
@@ -585,6 +614,10 @@ impl Projections {
         y_axis_settings: ProjectionAxisSettings,
     ) {
         ui.heading("Projections");
+        let x_drag_step = Self::drag_step(x_axis_settings);
+        let x_drag_decimals = Self::drag_decimals(x_drag_step);
+        let y_drag_step = Self::drag_step(y_axis_settings);
+        let y_drag_decimals = Self::drag_decimals(y_drag_step);
 
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.add_y_projection, "Add Y Projection").on_hover_text("Keybinds:\nY = Add Y Projection\nLeft click and drag the line at the center of the plot (cirlce)");
@@ -593,7 +626,9 @@ impl Projections {
                 self.add_y_projection,
                 egui::DragValue::new(&mut self.y_projection_line_1.x_value)
                     .range(x_axis_settings.axis_range.0..=x_axis_settings.axis_range.1)
-                    .speed(1.0)
+                    .speed(x_drag_step)
+                    .min_decimals(x_drag_decimals)
+                    .max_decimals(x_drag_decimals)
                     .prefix("X1: "),
             ).changed() {
                 self.dragging = true;
@@ -602,7 +637,9 @@ impl Projections {
             if ui.add_enabled(
                 self.add_y_projection,
                 egui::DragValue::new(&mut self.y_projection_line_2.x_value)
-                    .speed(1.0)
+                    .speed(x_drag_step)
+                    .min_decimals(x_drag_decimals)
+                    .max_decimals(x_drag_decimals)
                     .range(x_axis_settings.axis_range.0..=x_axis_settings.axis_range.1)
                     .prefix("X2: "),
             ).changed() {
@@ -628,7 +665,9 @@ impl Projections {
             if ui.add_enabled(
                 self.add_x_projection,
                 egui::DragValue::new(&mut self.x_projection_line_1.y_value)
-                    .speed(1.0)
+                    .speed(y_drag_step)
+                    .min_decimals(y_drag_decimals)
+                    .max_decimals(y_drag_decimals)
                     .range(y_axis_settings.axis_range.0..=y_axis_settings.axis_range.1)
                     .prefix("Y1: "),
             ).changed() {
@@ -637,7 +676,9 @@ impl Projections {
             if ui.add_enabled(
                 self.add_x_projection,
                 egui::DragValue::new(&mut self.x_projection_line_2.y_value)
-                    .speed(1.0)
+                    .speed(y_drag_step)
+                    .min_decimals(y_drag_decimals)
+                    .max_decimals(y_drag_decimals)
                     .range(y_axis_settings.axis_range.0..=y_axis_settings.axis_range.1)
                     .prefix("Y2: "),
             ).changed() {
