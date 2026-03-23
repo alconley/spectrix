@@ -46,57 +46,25 @@ impl Histogram2D {
         if self.plot_settings.projections.add_y_projection {
             let x1 = self.plot_settings.projections.y_projection_line_1.x_value;
             let x2 = self.plot_settings.projections.y_projection_line_2.x_value;
-            let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) }; // sort the x values
+            let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
 
-            if self.plot_settings.projections.y_projection.is_some() {
-                if self.plot_settings.projections.dragging {
-                    let bins = self.y_projection(min_x, max_x);
+            if self.plot_settings.projections.dragging {
+                let bins = self.y_projection(min_x, max_x);
 
-                    self.plot_settings
-                        .projections
-                        .y_projection
-                        .as_mut()
-                        .expect("Y Projection should be set")
-                        .plot_settings
-                        .rebin_factor = 1;
-
-                    self.plot_settings
-                        .projections
-                        .y_projection
-                        .as_mut()
-                        .expect("Y Projection should be set")
-                        .rebin();
-
-                    self.plot_settings
-                        .projections
-                        .y_projection
-                        .as_mut()
-                        .expect("Y Projection should be set")
-                        .bins = bins.clone();
-
-                    self.plot_settings
-                        .projections
-                        .y_projection
-                        .as_mut()
-                        .expect("Y Projection should be set")
-                        .original_bins = bins;
-
-                    self.plot_settings
-                        .projections
-                        .y_projection
-                        .as_mut()
-                        .expect("Y Projection should be set")
-                        .plot_settings
-                        .egui_settings
-                        .reset_axis = true;
+                if let Some(y_projection) = self.plot_settings.projections.y_projection.as_mut() {
+                    y_projection.plot_settings.rebin_factor = 1;
+                    y_projection.rebin();
+                    y_projection.bins = bins.clone();
+                    y_projection.original_bins = bins;
+                    y_projection.plot_settings.egui_settings.reset_axis = true;
                 }
-            } else {
-                // create a new histogram and set the bins
+            } else if self.plot_settings.projections.y_projection.is_none() {
                 let mut y_histogram = Histogram::new(
                     &format!("Y-Projection of {}", self.name),
                     self.bins.y,
                     (self.range.y.min, self.range.y.max),
                 );
+
                 let bins = self.y_projection(min_x, max_x);
                 y_histogram.bins = bins.clone();
                 y_histogram.original_bins = bins;
@@ -106,24 +74,17 @@ impl Histogram2D {
 
                 self.plot_settings.projections.y_projection = Some(y_histogram);
 
-                // set the projection range to be the min/max values of the histogram
                 self.plot_settings.projections.y_projection_line_1.x_value = self.range.x.min;
                 self.plot_settings.projections.y_projection_line_2.x_value = self.range.x.max;
 
-                self.plot_settings
-                    .projections
-                    .y_projection
-                    .as_mut()
-                    .expect("Y Projection should be set")
-                    .plot_settings
-                    .egui_settings
-                    .reset_axis = true;
+                if let Some(y_projection) = self.plot_settings.projections.y_projection.as_mut() {
+                    y_projection.plot_settings.egui_settings.reset_axis = true;
+                }
             }
 
-            // Update fill_y_line with top-left and top-right points only
             self.plot_settings.projections.fill_y_line.points = vec![
-                (min_x, self.range.y.max).into(), // Top-left
-                (max_x, self.range.y.max).into(), // Top-right
+                (min_x, self.range.y.max).into(),
+                (max_x, self.range.y.max).into(),
             ];
 
             self.plot_settings.projections.fill_y_line.fill = self.range.y.min as f32;
@@ -132,56 +93,25 @@ impl Histogram2D {
         if self.plot_settings.projections.add_x_projection {
             let y1 = self.plot_settings.projections.x_projection_line_1.y_value;
             let y2 = self.plot_settings.projections.x_projection_line_2.y_value;
-            let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) }; // sort the y values
+            let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
 
-            if self.plot_settings.projections.x_projection.is_some() {
-                if self.plot_settings.projections.dragging {
-                    let bins = self.x_projection(min_y, max_y);
+            if self.plot_settings.projections.dragging {
+                let bins = self.x_projection(min_y, max_y);
 
-                    self.plot_settings
-                        .projections
-                        .x_projection
-                        .as_mut()
-                        .expect("X Projection should be set")
-                        .plot_settings
-                        .rebin_factor = 1;
-
-                    self.plot_settings
-                        .projections
-                        .x_projection
-                        .as_mut()
-                        .expect("X Projection should be set")
-                        .rebin();
-
-                    self.plot_settings
-                        .projections
-                        .x_projection
-                        .as_mut()
-                        .expect("X Projection should be set")
-                        .bins = bins.clone();
-
-                    self.plot_settings
-                        .projections
-                        .x_projection
-                        .as_mut()
-                        .expect("X Projection should be set")
-                        .original_bins = bins;
-
-                    self.plot_settings
-                        .projections
-                        .x_projection
-                        .as_mut()
-                        .expect("X Projection should be set")
-                        .plot_settings
-                        .egui_settings
-                        .reset_axis = true;
+                if let Some(x_projection) = self.plot_settings.projections.x_projection.as_mut() {
+                    x_projection.plot_settings.rebin_factor = 1;
+                    x_projection.rebin();
+                    x_projection.bins = bins.clone();
+                    x_projection.original_bins = bins;
+                    x_projection.plot_settings.egui_settings.reset_axis = true;
                 }
-            } else {
+            } else if self.plot_settings.projections.x_projection.is_none() {
                 let mut x_histogram = Histogram::new(
                     &format!("X-Projection of {}", self.name),
                     self.bins.x,
                     (self.range.x.min, self.range.x.max),
                 );
+
                 let bins = self.x_projection(min_y, max_y);
                 x_histogram.plot_settings.rebin_factor = 1;
                 x_histogram.rebin();
@@ -191,27 +121,19 @@ impl Histogram2D {
 
                 self.plot_settings.projections.x_projection = Some(x_histogram);
 
-                // set the projection range to be the min/max values of the histogram
                 self.plot_settings.projections.x_projection_line_1.y_value = self.range.y.min;
                 self.plot_settings.projections.x_projection_line_2.y_value = self.range.y.max;
 
-                self.plot_settings
-                    .projections
-                    .x_projection
-                    .as_mut()
-                    .expect("X Projection should be set")
-                    .plot_settings
-                    .egui_settings
-                    .reset_axis = true;
+                if let Some(x_projection) = self.plot_settings.projections.x_projection.as_mut() {
+                    x_projection.plot_settings.egui_settings.reset_axis = true;
+                }
             }
 
-            // Update fill_x_line with top-left and top-right points only
             self.plot_settings.projections.fill_x_line.points = vec![
-                (self.range.x.min, max_y).into(), // Top-left
-                (self.range.x.max, max_y).into(), // Top-right
+                (self.range.x.min, max_y).into(),
+                (self.range.x.max, max_y).into(),
             ];
 
-            // Set the reference fill to the minimum X value
             self.plot_settings.projections.fill_x_line.fill = min_y as f32;
         }
     }

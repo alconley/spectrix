@@ -100,8 +100,8 @@ impl EguiPoints {
                 points = points.stems(stem);
             }
 
-            if self.shape.is_some() {
-                points = points.shape(self.shape.expect("Shape should be set"));
+            if let Some(shape) = self.shape {
+                points = points.shape(shape);
             }
 
             // Uncertainty bars (vertical).

@@ -126,8 +126,8 @@ impl EguiLine {
                 line = line.fill_alpha(self.fill_alpha);
             }
 
-            if self.style.is_some() {
-                line = line.style(self.style.expect("Style should be set"));
+            if let Some(style) = self.style {
+                line = line.style(style);
             }
 
             plot_ui.line(line);
