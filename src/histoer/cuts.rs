@@ -83,6 +83,7 @@ impl Cuts {
             .column(Column::auto())
             .column(Column::auto())
             .column(Column::auto())
+            .column(Column::auto())
             .striped(true)
             .vscroll(false)
             .header(20.0, |mut header| {
@@ -91,6 +92,9 @@ impl Cuts {
                 });
                 header.col(|ui| {
                     ui.label("Name");
+                });
+                header.col(|ui| {
+                    ui.label("Save");
                 });
                 header.col(|ui| {
                     ui.label("Info");
@@ -109,12 +113,13 @@ impl Cuts {
                             );
                         });
                         row.col(|ui| {
-                            ui.small_button("?").on_hover_text(format!(
-                                "Histogram: {}\nX Column: {}\nY Column: {}",
-                                active_cut.histogram_name,
-                                active_cut.cut.x_column,
-                                active_cut.cut.y_column
-                            ));
+                            active_cut.cut.save_button(ui);
+                        });
+                        row.col(|ui| {
+                            active_cut.cut.info_button(
+                                ui,
+                                Some(format!("Histogram: {}", active_cut.histogram_name)),
+                            );
                         });
                     });
                 }
@@ -369,6 +374,8 @@ impl Cuts {
                     .id_salt("cuts_2d_table")
                     .column(Column::auto()) // Name
                     .column(Column::auto()) // Active
+                    .column(Column::auto()) // Save
+                    .column(Column::auto()) // Info
                     .column(Column::remainder()) // Actions
                     .striped(true)
                     .vscroll(false)
@@ -378,6 +385,12 @@ impl Cuts {
                         });
                         header.col(|ui| {
                             ui.label("Active");
+                        });
+                        header.col(|ui| {
+                            ui.label("Save");
+                        });
+                        header.col(|ui| {
+                            ui.label("Info");
                         });
                     })
                     .body(|mut body| {
@@ -601,6 +614,35 @@ impl Cut2D {
         row.col(|ui| {
             ui.add(egui::Checkbox::new(&mut self.active, ""));
         });
+        row.col(|ui| {
+            self.save_button(ui);
+        });
+        row.col(|ui| {
+            self.info_button(ui, None);
+        });
+    }
+
+    fn info_hover_text(&self, histogram_description: Option<String>) -> String {
+        let mut details = Vec::new();
+        if let Some(histogram_description) = histogram_description {
+            details.push(histogram_description);
+        }
+        details.push(format!("X Column: {}", self.x_column));
+        details.push(format!("Y Column: {}", self.y_column));
+        details.join("\n")
+    }
+
+    pub fn info_button(&self, ui: &mut egui::Ui, histogram_description: Option<String>) {
+        ui.small_button("?")
+            .on_hover_text(self.info_hover_text(histogram_description));
+    }
+
+    pub fn save_button(&self, ui: &mut egui::Ui) {
+        if ui.button("Save").clicked()
+            && let Err(e) = self.save_cut_to_json()
+        {
+            log::error!("Error saving cut: {e:?}");
+        }
     }
 
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
