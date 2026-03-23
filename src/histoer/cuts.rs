@@ -374,7 +374,6 @@ impl Cuts {
                     .id_salt("cuts_2d_table")
                     .column(Column::auto()) // Name
                     .column(Column::auto()) // Active
-                    .column(Column::auto()) // Save
                     .column(Column::auto()) // Info
                     .column(Column::remainder()) // Actions
                     .striped(true)
@@ -385,9 +384,6 @@ impl Cuts {
                         });
                         header.col(|ui| {
                             ui.label("Active");
-                        });
-                        header.col(|ui| {
-                            ui.label("Save");
                         });
                         header.col(|ui| {
                             ui.label("Info");
@@ -613,9 +609,6 @@ impl Cut2D {
         });
         row.col(|ui| {
             ui.add(egui::Checkbox::new(&mut self.active, ""));
-        });
-        row.col(|ui| {
-            self.save_button(ui);
         });
         row.col(|ui| {
             self.info_button(ui, None);
