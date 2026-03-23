@@ -12,7 +12,7 @@ impl Default for Spectrix {
     fn default() -> Self {
         Self {
             sessions: vec![Processor::new()],
-            session_names: vec!["Session 1".to_owned()], // 👈 NEW
+            session_names: vec!["Session 1".to_owned()],
             current_session: 0,
         }
     }
@@ -20,19 +20,16 @@ impl Default for Spectrix {
 
 impl Spectrix {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // This is also where you can customize the look and feel of egui using
+        // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
+
+        // Load previous app state (if any).
+        // Note that you must enable the `persistence` feature for this to work.
         if let Some(storage) = cc.storage {
-            let mut app: Self = eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
-
-            // Make sure session_names is in sync with sessions
-            if app.session_names.len() != app.sessions.len() {
-                app.session_names = (0..app.sessions.len())
-                    .map(|i| format!("Session {}", i + 1))
-                    .collect();
-            }
-
-            return app;
+            eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
+        } else {
+            Default::default()
         }
-        Default::default()
     }
 
     pub fn reset_to_default(&mut self) {
@@ -56,6 +53,14 @@ impl eframe::App for Spectrix {
                             // --- Left side: logo / tabs / new session ---
                             egui::global_theme_preference_switch(ui);
                             ui.heading("Spectrix");
+                            ui.separator();
+
+                            ui.label("Current Section:");
+
+                            if let Some(name) = self.session_names.get_mut(self.current_session) {
+                                ui.text_edit_singleline(name);
+                            }
+
                             ui.separator();
 
                             ui.label("Sessions:");
@@ -83,17 +88,9 @@ impl eframe::App for Spectrix {
                                 self.current_session = self.sessions.len() - 1;
                             }
 
-                            ui.add_space(50.0);
-
                             ui.separator();
 
                             ui.add_space(50.0);
-
-                            // --- Right side: name + remove/reset ---
-                            if let Some(name) = self.session_names.get_mut(self.current_session) {
-                                ui.label("Session name:");
-                                ui.text_edit_singleline(name);
-                            }
 
                             if self.sessions.len() > 1 {
                                 if ui.button("Remove Session").clicked() {

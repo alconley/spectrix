@@ -77,6 +77,8 @@ impl Cuts {
             return;
         }
 
+        ui.separator();
+
         ui.label("Active 2D Histogram Cuts");
         TableBuilder::new(ui)
             .id_salt(format!("active_histogram_cuts_{id_suffix}"))
@@ -124,8 +126,6 @@ impl Cuts {
                     });
                 }
             });
-
-        ui.separator();
     }
 
     pub fn merged_with_active_cuts(&self, active_cuts: Option<&[ActiveCut2D]>) -> Self {
@@ -316,10 +316,6 @@ impl Cuts {
             ui.separator();
         }
 
-        if let Some(active_cuts) = active_cuts {
-            Self::active_cut_rows(ui, active_cuts, id_suffix);
-        }
-
         if !self.cuts.is_empty() {
             let mut indices_to_remove_cut = Vec::new();
 
@@ -406,6 +402,10 @@ impl Cuts {
             for &index in indices_to_remove_cut.iter().rev() {
                 self.cuts.remove(index);
             }
+        }
+
+        if let Some(active_cuts) = active_cuts {
+            Self::active_cut_rows(ui, active_cuts, id_suffix);
         }
     }
 

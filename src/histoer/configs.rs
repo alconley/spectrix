@@ -547,7 +547,7 @@ impl Configs {
         let available_cut_names: Vec<String> = available_cuts
             .cuts
             .iter()
-            .map(|cut| cut.name().to_string())
+            .map(|cut| cut.name().to_owned())
             .collect();
 
         for hist_config in &mut self.configs {
@@ -595,14 +595,14 @@ impl Configs {
         self.sync_histogram_cuts(&merged_cuts);
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, mut active_cuts: Option<&mut [ActiveCut2D]>) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&mut [ActiveCut2D]>) {
         let mut merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
 
         self.column_ui(ui);
 
         ui.separator();
 
-        self.cut_ui(ui, active_cuts.as_deref_mut());
+        self.cut_ui(ui, active_cuts);
 
         ui.separator();
 

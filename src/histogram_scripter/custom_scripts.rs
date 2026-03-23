@@ -37,7 +37,7 @@ impl Default for CustomConfigs {
 }
 
 impl CustomConfigs {
-    pub fn ui(&mut self, ui: &mut egui::Ui, mut active_cuts: Option<&mut [ActiveCut2D]>) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&mut [ActiveCut2D]>) {
         let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
 
         ui.horizontal(|ui| {
@@ -58,7 +58,7 @@ impl CustomConfigs {
 
         ui.separator();
 
-        self.cuts.ui(ui, active_cuts.as_deref_mut(), "custom");
+        self.cuts.ui(ui, active_cuts, "custom");
 
         ui.separator();
 
