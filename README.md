@@ -9,7 +9,7 @@ Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting 
 
 ---
 
-## 🧩 Features
+## Features
 
 - Read and analyze `.parquet` and `.root` files  
 - Interactive histogramming (1D & 2D)  
@@ -20,7 +20,19 @@ Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting 
 
 ---
 
-## 🚀 Running Spectrix
+## Running Spectrix
+
+### Quick Start
+
+If you want the simplest launch path, use:
+
+```bash
+./spectrix.sh
+```
+
+This script creates/activates `.venv`, installs Python dependencies, sets the required PyO3 environment variables, and runs `cargo run --release`.
+
+---
 
 ### Tested Platforms
 
@@ -28,7 +40,7 @@ Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting 
 - **Ubuntu 22.04.5 LTS**  
 - **Windows 10**
 
-> ⚠️ Both use Python 3.13.  
+> ⚠️ Tested with Python 3.13.  
 > On Windows, ensure that Python is downloaded from [python.org](https://www.python.org/downloads/).
 
 ---
@@ -47,11 +59,15 @@ If you don’t have Rust installed, visit the [Rust website](https://www.rust-la
 
 ### System Dependencies
 
-**For Linux/macOS:**
+**Linux (Ubuntu/Debian):**
 
 ```bash
 sudo apt-get install libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libgtk-3-dev
 ```
+
+**macOS:**
+
+Install equivalent libraries using Homebrew as needed for your local toolchain. If build/linking issues appear, run through `./spectrix.sh` first to ensure the Python/PyO3 environment is configured correctly.
 
 ---
 
@@ -75,14 +91,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-**(Optional, but often required on macOS (see ./spectrix.sh script))
-Set the Python environment for Rust (PyO3)**
+**(Optional, but often required on macOS; see `./spectrix.sh`) Set the Python environment for Rust (PyO3)**
 ```bash
 export PYO3_PYTHON=$(pwd)/.venv/bin/python
 export PYTHONPATH=$(pwd)/.venv/lib/python3.*/site-packages
 ```
 
-Run the Rust project in release mode**
+**Run the Rust project in release mode**
 ```bash
 cargo run --release
 ```
@@ -111,30 +126,37 @@ For now, ROOT trees can easily be converted to `.parquet` format using [HEP-Conv
 
 ## Getting Files
 
-Use the **`Get Files`** button and select either a folder or a file.  
-If a folder is selected, Spectrix will automatically load any `.parquet` or `.root` files it finds.
+Use the **Get Files** button to select either a single file or a directory.
+
+- If you select a directory, Spectrix scans it and loads supported files (`.parquet`, `.root`).
+- If you select a single file, only that file is loaded.
 
 ### Root Files
 
-If a `.root` file is selected, Spectrix will attempt to load all 1D and 2D histograms from the file.  
-ROOT histogram paths such as `/name1/name2/histogram_name` will be used to organize histograms into container hierarchies.
+If a `.root` file is selected, Spectrix attempts to load all 1D and 2D histograms found in that file.
+
+Histogram paths such as `/name1/name2/histogram_name` are preserved and used to organize views into nested container hierarchies.
 
 ### Parquet Files
 
-This is the **preferred format**, as Spectrix can calculate histograms directly from the raw data using its internal histogram script system.
+Parquet is the **preferred format** for analysis, since Spectrix can build histograms directly from raw columns using the Histogram Script system.
 
-If you’re unsure of all available column names, open the collapsible **“Selected File Settings”** section and click **“Get Column Names.”**  
-Spectrix will display all columns from the selected `.parquet` files.
+If you are unsure of available columns, open **Selected File Settings** and click **Get Column Names**.
 
-In this same section, you can:
+Spectrix will list columns from the selected parquet files.
+
+In the same section, you can:
 - Save filtered versions of your `.parquet` files.
 - Combine multiple files into one.
 
-When saving filtered files, Spectrix will apply any **active 1D or 2D cuts** and save the output as `filename_{prefix}.parquet`.
+You can also load 2D cuts in this area; those cuts are then available as active cuts and are used when filtering saved `.parquet` outputs.
+
+When saving filtered files, Spectrix applies all enabled **active 1D/2D cuts** and writes output using `filename_{suffix}.parquet` naming.
 
 > ⚠️ **Warning:**  
-> Combining files loads all data into memory. If the datasets are large, this may crash your system.  
-> It’s best to apply a filtering cut first (reducing the data size) before combining.
+> Combining files loads all selected data into memory. Very large datasets may exhaust RAM and crash the session.
+>
+> Recommended approach: apply cuts first to reduce data volume, then combine reduced files.
 
 ---
 
@@ -143,18 +165,25 @@ When saving filtered files, Spectrix will apply any **active 1D or 2D cuts** and
 The **Histogram Script** panel can be opened or closed using the **“Histograms”** button under the **“Get Files”** button.
 
 This tool allows you to:
-- Define new columns within `.parquet` data.
-- Define relevant **1D and 2D cuts**.
-- Define **1D and 2D histograms** (name, data columns, binning, range, and applied cuts).
+- Define new analysis columns from existing parquet columns.
+- Define and manage **1D and 2D cuts**.
+- Define **1D and 2D histograms** (name, columns, bins, range, and applied cuts).
+- Save/load complete histogram-script setups as `.json` configuration files.
 
-If you create histogram scripts in the UI, they can be **saved or loaded** as `.json` configuration files.
+### Typical Workflow
+
+1. Load one or more parquet files and inspect available column names.
+2. Create any derived columns you need (for example timing differences or calibrated values).
+3. Define cuts (1D expressions and/or 2D graphical cuts).
+4. Create histogram definitions and attach active cuts.
+5. Save the configuration to JSON so the same analysis can be reused.
 
 ---
 
 ### Example
 
 Below are example images of Spectrix using the sample file located at  
-`./examples/run_83_reduced.parquet`.
+`./example/run_83_reduced.parquet`.
 
 This dataset comes from a one-hour measurement of the **52Cr(d,pγ)53Cr** reaction.  
 The file is pre-filtered to include only proton data (the full dataset was too large for GitHub).  
@@ -172,8 +201,9 @@ The following subsections assume you are in the **“General”** section of the
 
 ### Column Creation
 
-You can create new columns, such as time differences or averages of existing columns.  
-Examples of both are shown in the images above.
+You can create derived columns such as time differences, sums, averages, or calibrated variants of existing columns.
+
+Derived columns can then be used exactly like native columns in cuts and histogram definitions.
 
 > ⚠️ **Tip:**  
 > Define column aliases (names) without spaces.  
@@ -181,20 +211,50 @@ Examples of both are shown in the images above.
 
 ### Cuts
 
-Users can define 1D cuts by specifying a name and an expression.  
-Use column names and logical operators such as `&` to combine conditions.  
+You can define:
 
-Cuts must be selected in the corresponding UI checkboxes for both 1D and 2D histograms in order to be applied.
+- **1D cuts** by providing a cut name and a logical expression.
+- **2D cuts** as graphical polygons in the 2D histogram view (these appear as active 2D histogram cuts and can be toggled on/off).
+
+For 2D cuts, you can:
+
+- Load a cut JSON individually.
+- Add a cut folder to load multiple cut files.
+- Use active 2D histogram cuts created interactively in the plot, even before saving them to disk.
+
+For expression-based 1D cuts, use valid column names and logical operators such as `&` to combine conditions.
+
+Common operators in 1D cut expressions include:
+
+- `&` for AND
+- `|` for OR
+- `==`, `!=`, `>`, `>=`, `<`, `<=` for comparisons
+
+Example:
+
+- `(Column1Energy > 400) & (Column1Energy < 1200) & (Column2Time != -1e6)`
+
+Only cuts enabled in the corresponding UI checkboxes are applied during histogram generation and parquet filtering.
 
 ### Histogram Definitions
 
-Type in the desired histogram name.  
-Using slashes (`/`) will automatically group histograms into nested containers.
+Enter the histogram name and select the input column(s), bin count, and axis range.
+
+Using slashes (`/`) in histogram names automatically groups plots into nested containers.
 
 The **“Column(s)”** field must exactly match a column name from the `.parquet` file or a previously created alias.  
-Then, specify the range, number of bins, and any active cuts to apply.
+Then specify range, binning, and which active cuts should be applied.
 
-Make sure that all cuts you wish to apply are active in the UI.
+If a cut is defined but not enabled, it will not affect that histogram.
+
+### Save and Reload Configurations
+
+Histogram Script definitions can be saved to JSON and loaded later.
+
+This is useful for:
+- Reproducing the same analysis between runs.
+- Sharing analysis setups with collaborators.
+- Building experiment-specific templates that can also be used by Custom Scripts.
 
 ---
 
@@ -206,111 +266,143 @@ These scripts act as a front-end to the **Histogram Script**, allowing users to 
 In other words, the Custom Scripts system automatically generates a full histogram configuration through the interface — simplifying setup for frequent or experiment-specific analyses.
 
 Currently, the included custom scripts are tailored for work relevant to **Florida State University (FSU)** experiments and setups.  
-These include example configurations for detector systems such as SE-SPS, ICESPICE, and CeBrA, as well as general analysis tools and fitting utilities.
+These include example configurations for detector systems such as SE-SPS, [ICESPICE](https://doi.org/10.1016/j.nima.2026.171389), and [CeBrA](https://doi.org/10.1016/j.nima.2023.168827).
 
 Each custom script automatically populates the **Histogram Script** panel with:
 - Commonly used **columns** (e.g., timing differences)  
 - Predefined **cuts** for data selection  
 - Standard **1D and 2D histograms** for quick visualization and analysis  
 
-The Custom Scripts system was designed to be easily adaptable for adding new configurations — feel free to ask ChatGPT if you need help creating one.  
+The Custom Scripts system was designed to be easily adaptable for adding new configurations. If you want help creating one, open an issue and include your experiment-specific requirements.  
 
 For those at FSU, the **SE-SPS** custom configuration is currently the most complete and ready for use.  
 The other scripts are still under development as part of the ongoing experimental setup.
 
 ## 1D Histograms
 
-The goal of the 1D histogram interface in **Spectrix** is to make peak fitting **fun, intuitive, and user-friendly** — unlike traditional tools such as ROOT.  
+The 1D histogram interface in **Spectrix** is designed for fast, interactive peak fitting and inspection, with a workflow centered on markers, region selection, and stored fit results.
 
-### Features
+### What You Can Do
 
-- Highly interactive and responsive UI  
-- Customizable display elements  
-- Support for **multiple Gaussian fits**  
-- Multiple **background models** (linear, quadratic, power law, exponential)  
-- **Rebinning** functionality  
-- **Peak finding** tools  
-- **Keyboard shortcuts** for a fast workflow  
+- Interactively place and move peak, background, and region markers.
+- Fit one or many Gaussian peaks in a selected region.
+- Choose and tune background models: linear, quadratic, power law, exponential.
+- Rebin and restyle plots from the context menu.
+- Store fit results and review them in a dedicated side panel.
+- Use keyboard-driven controls for quick analysis loops.
 
----
+### Fitting Engine
 
-### Fitting
+Spectrix uses Python [lmfit](https://lmfit.github.io/lmfit-py/builtin_models.html) for nonlinear fitting, called from Rust via [PyO3](https://docs.rs/pyo3/latest/pyo3/).
 
-Spectrix uses Python’s [lmfit](https://lmfit.github.io/lmfit-py/builtin_models.html) library for curve fitting.  
-Originally, fitting was handled with the excellent Rust crate [varpro](https://github.com/geo-ant/varpro), but I found myself reimplementing much of what `lmfit` already does — so I switched.  
-
-Through [PyO3](https://docs.rs/pyo3/latest/pyo3/), Spectrix directly calls Python fitting functions.  
-While this adds a bit of overhead and dependency complexity, it’s absolutely worth it — `lmfit` is powerful, easy to extend, and makes it straightforward to maintain or add new fitting capabilities in the future.
-
-I’ve included a short GIF below demonstrating the fitting and interaction workflow — but you should really **try it out yourself!**
+Fitting was originally implemented with [varpro](https://github.com/geo-ant/varpro), but `lmfit` now powers the current pipeline because it provides flexible model composition, robust parameter constraints, and detailed fit reporting with less custom maintenance.
 
 ![Fitting demonstration](./example/fitting_example.gif)
 
----
+### Energy Calibration, UUIDs, and Exported lmfit Results
 
-### Keybinds (cursor must be in the plot)
+Each fitted Gaussian peak carries two pieces of analysis metadata:
 
-- **P** – Add marker at cursor position  
-- **B** – Add background marker at cursor position  
-- **R** – Add region markers at cursor position  
-  - Markers can be moved by holding the **middle mouse button** on the central dot and dragging.  
-  - Line and marker settings are available in the **context menu** (right-click → *Markers*).  
-- **-** – Remove marker closest to cursor  
-- **Delete** – Remove all markers and temporary fits  
-- **G** – Fit background  
-  - Background model can be changed in the *Fits* menu (right-click on plot).  
-  - Models: *Linear*, *Quadratic*, *Power Law*, *Exponential*.  
-  - Initial guesses, minimums, and maximums can be adjusted as needed.  
-  - Data is evaluated at bin centers based on the background markers.  
-- **F** – Fit Gaussians  
-  - Settings and results appear in the *Fits* context menu.  
-  - Requires **two region markers** — data is evaluated between them.  
-  - Multiple Gaussians can be fitted simultaneously when multiple peak markers are within the region.  
-  - By default, all peaks share the same standard deviation (this can be changed).  
-  - Peaks can be locked, and standard deviations can be constrained.  
-  - If no peak markers exist, Spectrix assumes one peak near the data’s maximum.  
-  - If no background fit exists, the selected background model will be fitted automatically (may produce slower or less accurate fits).  
-  - Fit reports, statistics, and curves are available in the *Fits* menu.  
-- **S** – Store fit  
-  - Saves the current fit results.  
-- **Tab** – Toggle Fit Panel / View Fits  
-  - Opens a side panel to view and manage stored fits.  
-- **I** – Toggle statistics display (mean, counts, sigma)  
-- **L** – Toggle logarithmic Y-axis  
+- **UUID**: an integer identifier used to track the same physical state across fits and downstream analysis steps. If the UUID is not `0`, its number is drawn on the plot near `y = 0`.
+- **Assigned energy**: reference energy (and uncertainty) used to build a channel-to-energy calibration.
 
-> Additional features such as **rebinning** and **display options** are accessible by **right-clicking on the plot**.
+If a peak has no assigned energy, Spectrix stores **`-1`** as the invalid sentinel value (with zero uncertainty). Peaks with energy `-1` are ignored when calibration points are collected.
+
+Calibration is built from stored fits using peak centroids (`mean`) versus assigned energies:
+
+- **Linear** calibration requires at least 2 valid points.
+- **Quadratic** calibration requires at least 3 valid points.
+
+After solving for calibration coefficients, Spectrix propagates uncertainties and attaches calibrated quantities to fit parameters.
+
+This metadata is also written into the underlying lmfit `ModelResult` payload:
+
+- peak UUID (`g{i}_uuid`)
+- assigned energy and uncertainty (`g{i}_energy`, `g{i}_energy_uncertainty`)
+- calibrated Gaussian parameters, including `g{i}_center_calibrated`, `g{i}_sigma_calibrated`, `g{i}_fwhm_calibrated`, plus calibrated copies for area/amplitude/height
+- calibration constants and uncertainties, including `calibration_a`, `calibration_b`, `calibration_c`, and `calibration_a_uncertainty`, `calibration_b_uncertainty`, `calibration_c_uncertainty`
+
+Because of that, exported lmfit `.sav` files include both fit parameters and calibration/UUID context, so they can be loaded and further analyzed directly in Python (for example with `lmfit.model.load_modelresult`).
+
+### Keybind Reference
+
+Cursor must be inside the plot for keybinds to be active.
+
+| Key | Action | Notes |
+|---|---|---|
+| **P** | Add peak marker | Places a Gaussian peak marker at cursor position. |
+| **B** | Add background marker | Used for background-only sampling points. |
+| **R** | Add region markers | Define fit interval; drag marker center with middle mouse button. |
+| **-** | Remove nearest marker | Deletes marker closest to cursor. |
+| **Delete** | Clear temporary markers/fits | Removes active markers and temporary fit curves. |
+| **G** | Fit background | Uses selected background model and current background markers. |
+| **F** | Fit Gaussians | Fits peaks in region; auto-fits background first if needed. |
+| **S** | Store fit | Saves current fit result for later comparison/export. |
+| **Tab** | Toggle Fit Panel | Opens/closes side panel for stored fits. |
+| **I** | Toggle statistics | Shows/hides stats such as mean, counts, and sigma. |
+| **L** | Toggle log Y-axis | Switches between linear and logarithmic Y scaling. |
+
+### Fit Behavior Notes
+
+- The default background model is **Linear**.
+- If no background markers are present, Spectrix will still fit Gaussians on top of a fitted background model.
+- Background markers and an explicit background fit help the solver converge faster and let you control which region is used to determine the background.
+- Multiple Gaussian peaks can be fit simultaneously when multiple peak markers exist in the active region.
+- By default, peaks share a common standard deviation; this can be changed in fit settings.
+- Peak positions and widths can be constrained or locked from the *Fits* menu.
+- Fit reports, curves, and parameter values are available from the plot context menu.
+
+> Additional controls such as rebinning, marker styling, and display options are available by right-clicking on the 1D plot.
 
 ---
 
 ## 2D Histograms
 
-### Features
+The 2D histogram interface in **Spectrix** is optimized for fast visual exploration, gated selection, and axis projection workflows.
 
-- Interactive UI for fast visualization and navigation  
-- **X and Y projections**  
-- Multiple **colormaps** (reversible, log-normalized, adjustable Z range)  
-- **Graphical cut/gate drawing**  
-- **Rebinning** support  
+### What You Can Do
 
----
+- Navigate and inspect dense 2D distributions interactively.
+- Create X and Y projections directly from selected regions.
+- Draw and edit polygon gates for event selection.
+- Switch colormaps, reverse palettes, and toggle log/linear normalization.
+- Rebin data and tune Z-scale display ranges.
+- Save and reuse graphical cuts from the plot context menu.
 
-### Keybinds (cursor must be in the plot)
+### Keybind Reference
 
-- **X** – Create an X-axis projection  
-  - Markers can be adjusted by dragging the middle circle of the line or using the right-click context menu.  
-- **Y** – Create a Y-axis projection  
-  - Same controls as X projection.  
-- **I** – Toggle statistics (mean, counts, sigma)  
-- **M** – Change colormap  
-- **Z** – Toggle between **log** and **linear** color normalization (default: log)  
-- **R** – Reverse the colormap  
-- **C** – Create a new graphical cut  
-  - Click to create vertices, drag to adjust, double-click to complete the polygon.  
-  - Column names are auto-populated (verify correctness).  
-  - Assign a unique cut name, then **save** it for reuse.  
-  - Cuts can be loaded or modified via the **right-click menu**, which also includes options to change color, re-enable vertex editing, and more.  
+Cursor must be inside the plot for keybinds to be active.
 
-> **Right-click** on the plot for additional options, including **rebinning**, **colormap adjustments**, and **cut management**.
+| Key | Action | Notes |
+|---|---|---|
+| **X** | Create X projection | Creates an X projection region initialized slightly smaller than the current axis span. |
+| **Y** | Create Y projection | Creates a Y projection region initialized slightly smaller than the current axis span. |
+| **I** | Toggle statistics | Shows/hides summary stats such as mean, counts, and sigma. |
+| **M** | Change colormap | Cycles through available colormap presets. |
+| **Z** | Toggle normalization | Switches between logarithmic and linear color scaling (default is log). |
+| **R** | Reverse colormap | Flips the active colormap direction. |
+| **C** | Create graphical cut | Click to add vertices, drag to edit, double-click to finish polygon. |
+
+### Projection Notes
+
+- Pressing **X** or **Y** creates a projection region that starts slightly smaller than the visible axis limits.
+- Projection boundary lines can be adjusted by clicking and dragging the center dot on a boundary line.
+- Clicking and dragging between the two projection lines translates the whole projection window while keeping the same width.
+- You can also right-click the 2D plot and open **Projections** in the context menu to adjust projection values directly.
+
+### Cut Notes
+
+- Press **C** (or add a cut from the right-click menu) to start a new interactive polygon cut.
+- **Click** to add each vertex.
+- **Double-click** to finish the polygon.
+- After creation, **click and drag a vertex** to reposition it.
+- The cut auto-populates the X/Y column names from the current 2D histogram axes; verify these before saving.
+- A default cut name is generated automatically in the form `Y v X Cut N` (for example `E2 v E1 Cut 1`), and you can rename it before saving.
+- Use **Save** to write the cut to JSON for reuse.
+- Even if a cut is not saved to disk yet, it can still appear in the Histogram Script as an **Active 2D Histogram Cut** and be toggled on/off for histogram generation.
+- Saved cuts can be reloaded, recolored, and reopened for vertex editing.
+
+> Right-click on the 2D plot for additional controls, including rebinning, colormap/color-scale tuning, projection options, and cut management.
 
 ---
 
@@ -328,7 +420,7 @@ By combining the fitting data with experimental parameters — such as **reactio
 Each state is tracked and referenced using a **UUID (Universally Unique Identifier)**, which ensures that every fitted peak and corresponding physical quantity can be uniquely identified and associated across multiple analysis steps.  
 This makes it straightforward to compare results between datasets or refine fits without losing the connection to the original event or energy level.
 
-While the SE-SPS analysis is currently the only implemented module, the system is designed to be **modular and easily expandable** 
+While the SE-SPS analysis is currently the only implemented module, the system is designed to be **modular and easily expandable**.
 
 > ⚠️ **Note:**  
 > The SE-SPS cross-section analysis is still experimental and under active development
