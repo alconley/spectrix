@@ -112,6 +112,30 @@ impl Histogram {
     }
 
     pub fn fit_gaussians(&mut self) {
+        let previous_peak_assignments = self
+            .fits
+            .temp_fit
+            .as_ref()
+            .and_then(|temp_fit| match &temp_fit.fit_result {
+                Some(FitResult::Gaussian(g)) => Some(
+                    g.fit_result
+                        .iter()
+                        .filter_map(|p| {
+                            p.mean.value.map(|m| {
+                                (
+                                    m,
+                                    p.uuid,
+                                    p.energy.value.unwrap_or(-1.0),
+                                    p.energy.uncertainty.unwrap_or(0.0),
+                                )
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+
         let region_markers = self.plot_settings.markers.get_region_marker_positions();
         let peak_positions = self.plot_settings.markers.get_peak_marker_positions();
         let background_markers = self.plot_settings.markers.get_background_marker_positions();
@@ -171,6 +195,34 @@ impl Histogram {
 
         fitter.set_name(self.name.clone());
         self.fits.temp_fit = Some(fitter);
+
+        // Preserve UUID and energy assignments across modify -> refit workflows.
+        if !previous_peak_assignments.is_empty()
+            && let Some(temp_fit) = &mut self.fits.temp_fit
+            && let Some(FitResult::Gaussian(g)) = &mut temp_fit.fit_result
+        {
+            let mut prev_sorted = previous_peak_assignments.clone();
+            prev_sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+            let mut new_sorted: Vec<(usize, f64)> = g
+                .fit_result
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, p)| p.mean.value.map(|m| (idx, m)))
+                .collect();
+            new_sorted.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+            for ((new_idx, _), (_, uuid, energy, energy_unc)) in
+                new_sorted.into_iter().zip(prev_sorted.into_iter())
+            {
+                if let Err(e) = g.update_uuid_for_peak(new_idx, uuid) {
+                    log::warn!("Failed to preserve UUID for peak {new_idx}: {e}");
+                }
+                if let Err(e) = g.update_energy_for_peak(new_idx, energy, energy_unc) {
+                    log::warn!("Failed to preserve energy for peak {new_idx}: {e}");
+                }
+            }
+        }
 
         // calibrate temp fit if calibration is enabled
         if self.fits.settings.calibrated
