@@ -474,25 +474,6 @@ def _code_to_bg_type(code: float) -> str:
 
 def _inject_spectrix_metadata(result, region_markers, peak_markers, background_markers, bg_type, equal_sigma, free_position):
     params = result.params
-    params.add('spectrix_meta_version', value=1, vary=False)
-
-    params.add('spectrix_meta_region_count', value=len(region_markers), vary=False)
-    for i, val in enumerate(region_markers):
-        params.add(f'spectrix_meta_region_{i}', value=float(val), vary=False)
-
-    params.add('spectrix_meta_peak_count', value=len(peak_markers), vary=False)
-    for i, val in enumerate(peak_markers):
-        params.add(f'spectrix_meta_peak_{i}', value=float(val), vary=False)
-
-    params.add('spectrix_meta_bg_pair_count', value=len(background_markers), vary=False)
-    for i, (start, end) in enumerate(background_markers):
-        params.add(f'spectrix_meta_bg_start_{i}', value=float(start), vary=False)
-        params.add(f'spectrix_meta_bg_end_{i}', value=float(end), vary=False)
-
-    params.add('spectrix_meta_bg_type', value=float(_bg_type_to_code(bg_type)), vary=False)
-    params.add('spectrix_meta_equal_sigma', value=1.0 if equal_sigma else 0.0, vary=False)
-    params.add('spectrix_meta_free_position', value=1.0 if free_position else 0.0, vary=False)
-
     # Python-friendly marker parameter names for external tools/scripts
     params.add('region_marker_count', value=len(region_markers), vary=False)
     for i, val in enumerate(region_markers):
