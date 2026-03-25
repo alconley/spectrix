@@ -9,7 +9,7 @@ impl Histogram {
             return;
         };
 
-        let Some((metadata, metadata_found, fallback_background_model)) =
+        let Some((metadata, metadata_found, fallback_background_model, mut moved_fit)) =
             self.fits.stored_fits.get(fit_idx).and_then(|stored_fit| {
                 if let Some(FitResult::Gaussian(gaussian)) = &stored_fit.fit_result {
                     let (metadata, metadata_found) = gaussian.fit_metadata_with_fallback();
@@ -17,6 +17,7 @@ impl Histogram {
                         metadata,
                         metadata_found,
                         stored_fit.background_model.clone(),
+                        stored_fit.clone(),
                     ))
                 } else {
                     None
@@ -43,20 +44,31 @@ impl Histogram {
         for marker in metadata.peak_markers {
             self.plot_settings.markers.add_peak_marker(marker);
         }
-        self.plot_settings
-            .markers
-            .set_background_marker_positions(&metadata.background_markers);
-        self.update_background_pair_lines();
 
         self.fits.settings.background_model = match metadata.background_model.as_str() {
             "linear" => BackgroundModel::Linear(Default::default()),
             "quadratic" => BackgroundModel::Quadratic(Default::default()),
             "exponential" => BackgroundModel::Exponential(Default::default()),
             "powerlaw" => BackgroundModel::PowerLaw(Default::default()),
+            "None" => BackgroundModel::None,
             _ => fallback_background_model,
         };
 
-        self.fits.temp_fit = None;
+        if matches!(self.fits.settings.background_model, BackgroundModel::None) {
+            self.plot_settings.markers.clear_background_markers();
+        } else {
+            self.plot_settings
+                .markers
+                .set_background_marker_positions(&metadata.background_markers);
+            self.update_background_pair_lines();
+        }
+
+        if fit_idx < self.fits.stored_fits.len() {
+            self.fits.stored_fits.remove(fit_idx);
+        }
+
+        moved_fit.name = format!("{} (Temp)", moved_fit.name);
+        self.fits.temp_fit = Some(moved_fit);
     }
 
     pub fn fit_background(&mut self) {

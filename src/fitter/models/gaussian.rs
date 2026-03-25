@@ -649,24 +649,25 @@ def GaussianFit(counts: list, centers: list,
         raise ValueError('Unsupported background model')
     
     # Fit the background model to the data of the background markers before fitting the peaks
-    if len(background_markers) == 0:
+    if bg_type != 'None' and len(background_markers) == 0:
         # put marker at the start and end of the region
         background_markers = [(region_markers[0]-bin_width, region_markers[0]), (region_markers[1], region_markers[1]+bin_width)]
 
-    bg_x = []
-    bg_y = []
-    for bg_start, bg_end in background_markers:
-        # sort the background markers
-        bg_start, bg_end = sorted([bg_start, bg_end])
+    bg_result = None
+    if bg_type != 'None':
+        bg_x = []
+        bg_y = []
+        for bg_start, bg_end in background_markers:
+            # sort the background markers
+            bg_start, bg_end = sorted([bg_start, bg_end])
 
-        bg_mask = (centers >= bg_start) & (centers <= bg_end)
-        bg_x.extend(centers[bg_mask])
-        bg_y.extend(counts[bg_mask])
+            bg_mask = (centers >= bg_start) & (centers <= bg_end)
+            bg_x.extend(centers[bg_mask])
+            bg_y.extend(counts[bg_mask])
 
-    bg_x = np.array(bg_x)
-    bg_y = np.array(bg_y)
-    
-    bg_result = bg_model.fit(bg_y, params, x=bg_x)
+        bg_x = np.array(bg_x)
+        bg_y = np.array(bg_y)
+        bg_result = bg_model.fit(bg_y, params, x=bg_x)
 
     # print intial parameter guesses
     print('Initial Background Parameter Guesses:')
@@ -674,11 +675,15 @@ def GaussianFit(counts: list, centers: list,
 
     # print fit report
     print('Background Fit Report:')
-    print(bg_result.fit_report())
+    if bg_result is not None:
+        print(bg_result.fit_report())
+    else:
+        print('Background model set to None; skipping background fit.')
 
     # **Adjust background parameters based on their errors**
-    for param in bg_result.params:
-        params[param].set(value=bg_result.params[param].value, vary=False)
+    if bg_result is not None:
+        for param in bg_result.params:
+            params[param].set(value=bg_result.params[param].value, vary=False)
 
     # Add background model to overall model
     model = bg_model
@@ -886,7 +891,7 @@ def GaussianFit(counts: list, centers: list,
     fit_metadata = (
         list(region_markers),
         list(peak_markers),
-        list(background_markers),
+        [] if bg_type == 'None' else list(background_markers),
         bg_type,
         equal_sigma,
         free_position,
@@ -991,10 +996,7 @@ def load_result(filename: str):
         else:
             fallback_region = [float(x_min), float(x_max)]
         fallback_peak_markers = fitted_means if fitted_means else [float(p) for p in peak_markers]
-        fallback_background = [
-            (fallback_region[0] - bin_width, fallback_region[0]),
-            (fallback_region[1], fallback_region[1] + bin_width),
-        ]
+        fallback_background = []
         fit_metadata = (
             fallback_region,
             fallback_peak_markers,
