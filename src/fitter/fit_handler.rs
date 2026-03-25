@@ -47,6 +47,8 @@ pub struct Fits {
     pub sort_state: SortState,
     #[serde(skip)]
     pub pending_modify_fit: Option<usize>,
+    #[serde(skip)]
+    pub pending_refit_all: bool,
 }
 
 impl Default for Fits {
@@ -67,11 +69,16 @@ impl Fits {
                 asc: true,
             },
             pending_modify_fit: None,
+            pending_refit_all: false,
         }
     }
 
     pub fn take_pending_modify_fit(&mut self) -> Option<usize> {
         self.pending_modify_fit.take()
+    }
+
+    pub fn take_pending_refit_all(&mut self) -> bool {
+        std::mem::take(&mut self.pending_refit_all)
     }
 
     pub fn store_temp_fit(&mut self) {
@@ -875,6 +882,15 @@ impl Fits {
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.heading("Fit Panel");
+                        if ui
+                            .button("Refit")
+                            .on_hover_text(
+                                "Re-run each stored fit on current data by loading it into temp, fitting, then storing it again.",
+                            )
+                            .clicked()
+                        {
+                            self.pending_refit_all = true;
+                        }
                         self.save_and_load_ui(ui);
 
                         self.settings.ui(ui);

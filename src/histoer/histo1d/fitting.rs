@@ -4,6 +4,20 @@ use crate::fitter::common::Data;
 use crate::fitter::main_fitter::{BackgroundModel, FitModel, FitResult, Fitter};
 
 impl Histogram {
+    pub fn apply_refit_all_request(&mut self) {
+        if !self.fits.take_pending_refit_all() {
+            return;
+        }
+
+        let fit_count = self.fits.stored_fits.len();
+        for _ in 0..fit_count {
+            self.fits.pending_modify_fit = Some(0);
+            self.apply_modify_fit_request();
+            self.fit_gaussians();
+            self.fits.store_temp_fit();
+        }
+    }
+
     pub fn apply_modify_fit_request(&mut self) {
         let Some(fit_idx) = self.fits.take_pending_modify_fit() else {
             return;
