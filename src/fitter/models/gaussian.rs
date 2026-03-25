@@ -1346,25 +1346,24 @@ def load_result(filename: str):
                 metadata_found,
             )) = fit_metadata
             {
+                let fitted_peak_markers = self.peak_markers.clone();
                 self.region_markers = region_markers.clone();
-                self.peak_markers = if peak_markers.is_empty() {
-                    self.fit_result
-                        .iter()
-                        .filter_map(|p| p.mean.value)
-                        .collect::<Vec<_>>()
-                } else {
-                    peak_markers.clone()
-                };
                 self.background_markers = background_markers.clone();
                 self.fit_settings.equal_stdev = equal_stdev;
                 self.fit_settings.free_position = free_position;
 
                 self.fit_metadata = Some(GaussianFitMetadata {
                     region_markers,
-                    peak_markers: self.peak_markers.clone(),
+                    peak_markers: if peak_markers.is_empty() {
+                        fitted_peak_markers.clone()
+                    } else {
+                        peak_markers
+                    },
                     background_markers,
                     background_model,
                 });
+
+                self.peak_markers = fitted_peak_markers;
 
                 if !metadata_found {
                     log::warn!(
