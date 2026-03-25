@@ -493,8 +493,67 @@ def _inject_spectrix_metadata(result, region_markers, peak_markers, background_m
     params.add('spectrix_meta_equal_sigma', value=1.0 if equal_sigma else 0.0, vary=False)
     params.add('spectrix_meta_free_position', value=1.0 if free_position else 0.0, vary=False)
 
+    # Python-friendly marker parameter names for external tools/scripts
+    params.add('region_marker_count', value=len(region_markers), vary=False)
+    for i, val in enumerate(region_markers):
+        params.add(f'region_marker_{i}', value=float(val), vary=False)
+
+    params.add('peak_marker_count', value=len(peak_markers), vary=False)
+    for i, val in enumerate(peak_markers):
+        params.add(f'peak_marker_{i}', value=float(val), vary=False)
+
+    params.add('bg_marker_count', value=len(background_markers), vary=False)
+    for i, (start, end) in enumerate(background_markers):
+        params.add(f'bg_marker_start_{i}', value=float(start), vary=False)
+        params.add(f'bg_marker_end_{i}', value=float(end), vary=False)
+
+    params.add('bg_model_type', value=float(_bg_type_to_code(bg_type)), vary=False)
+    params.add('fit_equal_sigma', value=1.0 if equal_sigma else 0.0, vary=False)
+    params.add('fit_free_position', value=1.0 if free_position else 0.0, vary=False)
+
 def _extract_spectrix_metadata(result):
     params = result.params
+    # Preferred: python-friendly marker parameter names
+    if 'region_marker_count' in params or 'peak_marker_count' in params or 'bg_marker_count' in params:
+        region_count = int(params['region_marker_count'].value) if 'region_marker_count' in params else 0
+        peak_count = int(params['peak_marker_count'].value) if 'peak_marker_count' in params else 0
+        bg_pair_count = int(params['bg_marker_count'].value) if 'bg_marker_count' in params else 0
+
+        region_markers = [
+            float(params[f'region_marker_{i}'].value)
+            for i in range(region_count)
+            if f'region_marker_{i}' in params
+        ]
+        peak_markers = [
+            float(params[f'peak_marker_{i}'].value)
+            for i in range(peak_count)
+            if f'peak_marker_{i}' in params
+        ]
+
+        background_markers = []
+        for i in range(bg_pair_count):
+            start_key = f'bg_marker_start_{i}'
+            end_key = f'bg_marker_end_{i}'
+            if start_key in params and end_key in params:
+                start = float(params[start_key].value)
+                end = float(params[end_key].value)
+                background_markers.append((start, end))
+
+        bg_type_code = float(params['bg_model_type'].value) if 'bg_model_type' in params else 0.0
+        equal_sigma = (float(params['fit_equal_sigma'].value) > 0.5) if 'fit_equal_sigma' in params else True
+        free_position = (float(params['fit_free_position'].value) > 0.5) if 'fit_free_position' in params else True
+
+        return (
+            region_markers,
+            peak_markers,
+            background_markers,
+            _code_to_bg_type(bg_type_code),
+            equal_sigma,
+            free_position,
+            True,
+        )
+
+    # Legacy SpectriX names
     if 'spectrix_meta_version' not in params:
         return None
 
