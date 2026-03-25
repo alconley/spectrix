@@ -9,14 +9,15 @@ impl Histogram {
             return;
         };
 
-        let Some((metadata, metadata_found, fallback_background_model)) = self
-            .fits
-            .stored_fits
-            .get(fit_idx)
-            .and_then(|stored_fit| {
+        let Some((metadata, metadata_found, fallback_background_model)) =
+            self.fits.stored_fits.get(fit_idx).and_then(|stored_fit| {
                 if let Some(FitResult::Gaussian(gaussian)) = &stored_fit.fit_result {
                     let (metadata, metadata_found) = gaussian.fit_metadata_with_fallback();
-                    Some((metadata, metadata_found, stored_fit.background_model.clone()))
+                    Some((
+                        metadata,
+                        metadata_found,
+                        stored_fit.background_model.clone(),
+                    ))
                 } else {
                     None
                 }

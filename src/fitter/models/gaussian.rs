@@ -525,6 +525,58 @@ def _extract_spectrix_metadata(result):
         True,
     )
 
+def _append_spectrix_marker_block(fit_report, region_markers, peak_markers, background_markers):
+    lines = [
+        '',
+        '--- SPECTRIX_MARKERS_START ---',
+        'region_markers=' + ','.join(str(float(x)) for x in region_markers),
+        'peak_markers=' + ','.join(str(float(x)) for x in peak_markers),
+        'background_markers=' + ';'.join(f'{float(s)}:{float(e)}' for s, e in background_markers),
+        '--- SPECTRIX_MARKERS_END ---',
+    ]
+    return fit_report + '\\n' + '\\n'.join(lines)
+
+def _extract_spectrix_marker_block(fit_report):
+    start_tag = '--- SPECTRIX_MARKERS_START ---'
+    end_tag = '--- SPECTRIX_MARKERS_END ---'
+    if start_tag not in fit_report or end_tag not in fit_report:
+        return None
+
+    start_idx = fit_report.index(start_tag) + len(start_tag)
+    end_idx = fit_report.index(end_tag, start_idx)
+    block = fit_report[start_idx:end_idx]
+
+    values = {}
+    for raw_line in block.splitlines():
+        line = raw_line.strip()
+        if not line or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        values[key.strip()] = value.strip()
+
+    def _parse_float_list(text):
+        if not text:
+            return []
+        return [float(x) for x in text.split(',') if x.strip()]
+
+    def _parse_bg_pairs(text):
+        if not text:
+            return []
+        out = []
+        for entry in text.split(';'):
+            entry = entry.strip()
+            if not entry or ':' not in entry:
+                continue
+            s, e = entry.split(':', 1)
+            out.append((float(s), float(e)))
+        return out
+
+    return (
+        _parse_float_list(values.get('region_markers', '')),
+        _parse_float_list(values.get('peak_markers', '')),
+        _parse_bg_pairs(values.get('background_markers', '')),
+    )
+
 def GaussianFit(counts: list, centers: list,
                 region_markers: list, peak_markers: list = [], background_markers: list = [],
                 equal_sigma: bool = True, free_position: bool = True,                 
@@ -798,6 +850,7 @@ def GaussianFit(counts: list, centers: list,
     print('Fit Report:')
 
     fit_report = result.fit_report()
+    fit_report = _append_spectrix_marker_block(fit_report, region_markers, peak_markers, background_markers)
     print(fit_report)
 
     # Extract Gaussian and background parameters
@@ -940,12 +993,31 @@ def load_result(filename: str):
 
     fit_metadata = _extract_spectrix_metadata(result)
     if fit_metadata is None:
+        marker_block = _extract_spectrix_marker_block(fit_report)
+        if marker_block is not None:
+            region_m, peak_m, background_m = marker_block
+            fit_metadata = (
+                region_m,
+                peak_m,
+                background_m,
+                'None',
+                True,
+                True,
+                False,
+            )
+
+    if fit_metadata is None:
         if len(centers := result.userkws['x']) > 1:
             bin_width = float(centers[1] - centers[0])
         else:
             bin_width = 1.0
-        fallback_region = [float(x_min), float(x_max)]
-        fallback_peak_markers = [float(p) for p in peak_markers]
+
+        fitted_means = [float(g[2]) for g in gaussian_params]
+        if len(fitted_means) >= 2:
+            fallback_region = [min(fitted_means), max(fitted_means)]
+        else:
+            fallback_region = [float(x_min), float(x_max)]
+        fallback_peak_markers = fitted_means if fitted_means else [float(p) for p in peak_markers]
         fallback_background = [
             (fallback_region[0] - bin_width, fallback_region[0]),
             (fallback_region[1], fallback_region[1] + bin_width),
