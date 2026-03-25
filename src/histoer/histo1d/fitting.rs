@@ -1,9 +1,56 @@
 use super::histogram1d::Histogram;
 
 use crate::fitter::common::Data;
-use crate::fitter::main_fitter::{FitModel, Fitter};
+use crate::fitter::main_fitter::{BackgroundModel, FitModel, FitResult, Fitter};
 
 impl Histogram {
+    pub fn apply_modify_fit_request(&mut self) {
+        let Some(fit_idx) = self.fits.take_pending_modify_fit() else {
+            return;
+        };
+
+        let Some(stored_fit) = self.fits.stored_fits.get(fit_idx) else {
+            return;
+        };
+
+        let Some(FitResult::Gaussian(gaussian)) = &stored_fit.fit_result else {
+            log::warn!("Modify fit requested for non-Gaussian fit.");
+            return;
+        };
+
+        let (metadata, metadata_found) = gaussian.fit_metadata_with_fallback();
+        if !metadata_found {
+            log::warn!(
+                "Fit metadata was not found; using fallback marker data derived from Gaussian parameters."
+            );
+        }
+
+        self.plot_settings.markers.clear_background_markers();
+        self.plot_settings.markers.clear_peak_markers();
+        self.plot_settings.markers.clear_region_markers();
+
+        for marker in metadata.region_markers {
+            self.plot_settings.markers.add_region_marker(marker);
+        }
+        for marker in metadata.peak_markers {
+            self.plot_settings.markers.add_peak_marker(marker);
+        }
+        self.plot_settings
+            .markers
+            .set_background_marker_positions(&metadata.background_markers);
+        self.update_background_pair_lines();
+
+        self.fits.settings.background_model = match metadata.background_model.as_str() {
+            "linear" => BackgroundModel::Linear(Default::default()),
+            "quadratic" => BackgroundModel::Quadratic(Default::default()),
+            "exponential" => BackgroundModel::Exponential(Default::default()),
+            "powerlaw" => BackgroundModel::PowerLaw(Default::default()),
+            _ => stored_fit.background_model.clone(),
+        };
+
+        self.fits.temp_fit = None;
+    }
+
     pub fn fit_background(&mut self) {
         log::info!("Fitting background for histogram: {}", self.name);
         self.fits.temp_fit = None;

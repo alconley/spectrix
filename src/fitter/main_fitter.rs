@@ -63,6 +63,19 @@ impl BackgroundResult {
     }
 }
 
+impl BackgroundModel {
+    pub fn type_name(&self) -> String {
+        match self {
+            Self::Linear(_) => "linear",
+            Self::Quadratic(_) => "quadratic",
+            Self::PowerLaw(_) => "powerlaw",
+            Self::Exponential(_) => "exponential",
+            Self::None => "None",
+        }
+        .to_owned()
+    }
+}
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Fitter {
     pub name: String,

@@ -150,6 +150,7 @@ impl Histogram {
                 if show_stats {
                     row.col(|ui| {
                         self.fits.ui(ui, true);
+                        self.apply_modify_fit_request();
                         width -= ui.available_width(); // assign the difference back to `width`
                     });
                 }

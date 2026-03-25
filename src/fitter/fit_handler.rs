@@ -45,6 +45,8 @@ pub struct Fits {
     pub settings: FitSettings,
     pub calibration: Calibration,
     pub sort_state: SortState,
+    #[serde(skip)]
+    pub pending_modify_fit: Option<usize>,
 }
 
 impl Default for Fits {
@@ -64,7 +66,12 @@ impl Fits {
                 col: SortCol::Fit,
                 asc: true,
             },
+            pending_modify_fit: None,
         }
+    }
+
+    pub fn take_pending_modify_fit(&mut self) -> Option<usize> {
+        self.pending_modify_fit.take()
     }
 
     pub fn store_temp_fit(&mut self) {
@@ -548,6 +555,7 @@ impl Fits {
 
         // NEW: stash a pending deletion
         let mut to_remove: Option<usize> = None;
+        let mut to_modify: Option<usize> = None;
 
         // NEW: sorting key helper
         let key = |r: &Row, col: SortCol| -> f64 {
@@ -708,6 +716,9 @@ impl Fits {
                                         log::info!("Saved lmfit result to {path:?}");
                                     }
                                 }
+                                if ui.button("Modify").clicked() {
+                                    to_modify = Some(i);
+                                }
                                 ui.menu_button("Fit Report", |ui| {
                                     egui::ScrollArea::vertical().show(ui, |ui| {
                                         ui.horizontal_wrapped(|ui| {
@@ -815,6 +826,8 @@ impl Fits {
         {
             self.stored_fits.remove(i);
         }
+
+        self.pending_modify_fit = to_modify;
     }
 
     pub fn fit_stats_ui(&mut self, ui: &mut egui::Ui) {
