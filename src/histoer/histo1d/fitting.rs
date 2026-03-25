@@ -9,16 +9,23 @@ impl Histogram {
             return;
         };
 
-        let Some(stored_fit) = self.fits.stored_fits.get(fit_idx) else {
-            return;
-        };
-
-        let Some(FitResult::Gaussian(gaussian)) = &stored_fit.fit_result else {
+        let Some((metadata, metadata_found, fallback_background_model)) = self
+            .fits
+            .stored_fits
+            .get(fit_idx)
+            .and_then(|stored_fit| {
+                if let Some(FitResult::Gaussian(gaussian)) = &stored_fit.fit_result {
+                    let (metadata, metadata_found) = gaussian.fit_metadata_with_fallback();
+                    Some((metadata, metadata_found, stored_fit.background_model.clone()))
+                } else {
+                    None
+                }
+            })
+        else {
             log::warn!("Modify fit requested for non-Gaussian fit.");
             return;
         };
 
-        let (metadata, metadata_found) = gaussian.fit_metadata_with_fallback();
         if !metadata_found {
             log::warn!(
                 "Fit metadata was not found; using fallback marker data derived from Gaussian parameters."
@@ -45,7 +52,7 @@ impl Histogram {
             "quadratic" => BackgroundModel::Quadratic(Default::default()),
             "exponential" => BackgroundModel::Exponential(Default::default()),
             "powerlaw" => BackgroundModel::PowerLaw(Default::default()),
-            _ => stored_fit.background_model.clone(),
+            _ => fallback_background_model,
         };
 
         self.fits.temp_fit = None;
