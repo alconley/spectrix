@@ -848,6 +848,7 @@ def GaussianFit(counts: list, centers: list,
 
     # Fit the model to the data
     result = model.fit(y_data, params, x=x_data)
+    _inject_spectrix_metadata(result, region_markers, peak_markers, background_markers, bg_type, equal_sigma, free_position)
 
     # Print initial parameter guesses
     print('Initial Parameter Guesses:')
@@ -910,7 +911,6 @@ def GaussianFit(counts: list, centers: list,
         free_position,
         True,
     )
-    _inject_spectrix_metadata(result, region_markers, peak_markers, background_markers, bg_type, equal_sigma, free_position)
 
     # save the fit result to a temp file
     save_modelresult(result, 'temp_fit.sav')
