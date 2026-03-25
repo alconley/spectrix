@@ -402,11 +402,15 @@ impl Fits {
             None
         };
 
+        let calibrated = self.settings.calibrated;
         if let Some(temp_fit) = &self.temp_fit {
             temp_fit.draw(plot_ui, calibration);
+
+            if let Some(FitResult::Gaussian(gauss)) = &temp_fit.fit_result {
+                gauss.draw_uuid(plot_ui, calibrated);
+            }
         }
 
-        let calibrated = self.settings.calibrated;
         for fit in &mut self.stored_fits.iter() {
             fit.draw(plot_ui, calibration);
 

@@ -188,7 +188,14 @@ impl Histogram {
         fitter.fit();
 
         self.plot_settings.markers.clear_peak_markers();
-        let updated_markers = fitter.get_peak_markers();
+        let updated_markers = if let Some(FitResult::Gaussian(g)) = &fitter.fit_result {
+            g.fit_result
+                .iter()
+                .filter_map(|p| p.mean.value)
+                .collect::<Vec<_>>()
+        } else {
+            fitter.get_peak_markers()
+        };
         for marker in updated_markers {
             self.plot_settings.markers.add_peak_marker(marker);
         }
