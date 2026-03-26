@@ -296,6 +296,14 @@ pub struct GaussianFitSettings {
 }
 
 #[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct GaussianFitMetadata {
+    pub region_markers: Vec<f64>,
+    pub peak_markers: Vec<f64>,
+    pub background_markers: Vec<(f64, f64)>,
+    pub background_model: String,
+}
+
+#[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct GaussianFitter {
     pub data: Data,
     pub region_markers: Vec<f64>,
@@ -309,6 +317,7 @@ pub struct GaussianFitter {
     pub fit_report: String,
     pub lmfit_result: Option<String>,
     pub sigma_bounds: Option<(Vec<f64>, Vec<f64>)>, // (mins_x, maxs_x)
+    pub fit_metadata: Option<GaussianFitMetadata>,
 }
 
 impl GaussianFitter {
@@ -340,7 +349,44 @@ impl GaussianFitter {
             fit_report: String::new(),
             lmfit_result: None,
             sigma_bounds: None,
+            fit_metadata: None,
         }
+    }
+
+    pub fn fit_metadata_with_fallback(&self) -> (GaussianFitMetadata, bool) {
+        if let Some(metadata) = &self.fit_metadata {
+            return (metadata.clone(), true);
+        }
+
+        let region_markers = if self.region_markers.len() >= 2 {
+            self.region_markers.clone()
+        } else if let (Some(min), Some(max)) = (
+            self.data.x.iter().copied().reduce(f64::max),
+            self.data.x.iter().copied().reduce(f64::min),
+        ) {
+            vec![min, max]
+        } else {
+            Vec::new()
+        };
+
+        let peak_markers = if !self.peak_markers.is_empty() {
+            self.peak_markers.clone()
+        } else {
+            self.fit_result
+                .iter()
+                .filter_map(|p| p.mean.value)
+                .collect::<Vec<_>>()
+        };
+
+        (
+            GaussianFitMetadata {
+                region_markers,
+                peak_markers,
+                background_markers: self.background_markers.clone(),
+                background_model: self.background_model.type_name(),
+            },
+            false,
+        )
     }
 
     pub fn get_calibration_data(&self) -> Vec<(f64, f64, f64, f64)> {
@@ -417,6 +463,107 @@ impl GaussianFitter {
 import numpy as np
 import lmfit
 from lmfit.model import load_modelresult, save_modelresult
+
+def _bg_type_to_code(bg_type: str) -> int:
+    mapping = {'None': 0, 'linear': 1, 'quadratic': 2, 'exponential': 3, 'powerlaw': 4}
+    return mapping.get(bg_type, 0)
+
+def _code_to_bg_type(code: float) -> str:
+    mapping = {0: 'None', 1: 'linear', 2: 'quadratic', 3: 'exponential', 4: 'powerlaw'}
+    return mapping.get(int(code), 'None')
+
+def _inject_spectrix_metadata(result, region_markers, peak_markers, background_markers, bg_type, equal_sigma, free_position):
+    params = result.params
+    # Python-friendly marker parameter names for external tools/scripts
+    params.add('region_marker_count', value=len(region_markers), vary=False)
+    for i, val in enumerate(region_markers):
+        params.add(f'region_marker_{i}', value=float(val), vary=False)
+
+    params.add('peak_marker_count', value=len(peak_markers), vary=False)
+    for i, val in enumerate(peak_markers):
+        params.add(f'peak_marker_{i}', value=float(val), vary=False)
+
+    params.add('bg_marker_count', value=len(background_markers), vary=False)
+    for i, (start, end) in enumerate(background_markers):
+        params.add(f'bg_marker_start_{i}', value=float(start), vary=False)
+        params.add(f'bg_marker_end_{i}', value=float(end), vary=False)
+
+    params.add('bg_model_type', value=float(_bg_type_to_code(bg_type)), vary=False)
+    params.add('fit_equal_sigma', value=1.0 if equal_sigma else 0.0, vary=False)
+    params.add('fit_free_position', value=1.0 if free_position else 0.0, vary=False)
+
+def _extract_spectrix_metadata(result):
+    params = result.params
+    # Preferred: python-friendly marker parameter names
+    if 'region_marker_count' in params or 'peak_marker_count' in params or 'bg_marker_count' in params:
+        region_count = int(params['region_marker_count'].value) if 'region_marker_count' in params else 0
+        peak_count = int(params['peak_marker_count'].value) if 'peak_marker_count' in params else 0
+        bg_pair_count = int(params['bg_marker_count'].value) if 'bg_marker_count' in params else 0
+
+        region_markers = [
+            float(params[f'region_marker_{i}'].value)
+            for i in range(region_count)
+            if f'region_marker_{i}' in params
+        ]
+        peak_markers = [
+            float(params[f'peak_marker_{i}'].value)
+            for i in range(peak_count)
+            if f'peak_marker_{i}' in params
+        ]
+
+        background_markers = []
+        for i in range(bg_pair_count):
+            start_key = f'bg_marker_start_{i}'
+            end_key = f'bg_marker_end_{i}'
+            if start_key in params and end_key in params:
+                start = float(params[start_key].value)
+                end = float(params[end_key].value)
+                background_markers.append((start, end))
+
+        bg_type_code = float(params['bg_model_type'].value) if 'bg_model_type' in params else 0.0
+        equal_sigma = (float(params['fit_equal_sigma'].value) > 0.5) if 'fit_equal_sigma' in params else True
+        free_position = (float(params['fit_free_position'].value) > 0.5) if 'fit_free_position' in params else True
+
+        return (
+            region_markers,
+            peak_markers,
+            background_markers,
+            _code_to_bg_type(bg_type_code),
+            equal_sigma,
+            free_position,
+            True,
+        )
+
+    # Legacy SpectriX names
+    if 'spectrix_meta_version' not in params:
+        return None
+
+    region_count = int(params['spectrix_meta_region_count'].value) if 'spectrix_meta_region_count' in params else 0
+    peak_count = int(params['spectrix_meta_peak_count'].value) if 'spectrix_meta_peak_count' in params else 0
+    bg_pair_count = int(params['spectrix_meta_bg_pair_count'].value) if 'spectrix_meta_bg_pair_count' in params else 0
+
+    region_markers = [float(params[f'spectrix_meta_region_{i}'].value) for i in range(region_count)]
+    peak_markers = [float(params[f'spectrix_meta_peak_{i}'].value) for i in range(peak_count)]
+
+    background_markers = []
+    for i in range(bg_pair_count):
+        start = float(params[f'spectrix_meta_bg_start_{i}'].value)
+        end = float(params[f'spectrix_meta_bg_end_{i}'].value)
+        background_markers.append((start, end))
+
+    bg_type_code = float(params['spectrix_meta_bg_type'].value) if 'spectrix_meta_bg_type' in params else 0.0
+    equal_sigma = (float(params['spectrix_meta_equal_sigma'].value) > 0.5) if 'spectrix_meta_equal_sigma' in params else True
+    free_position = (float(params['spectrix_meta_free_position'].value) > 0.5) if 'spectrix_meta_free_position' in params else True
+
+    return (
+        region_markers,
+        peak_markers,
+        background_markers,
+        _code_to_bg_type(bg_type_code),
+        equal_sigma,
+        free_position,
+        True,
+    )
 
 def GaussianFit(counts: list, centers: list,
                 region_markers: list, peak_markers: list = [], background_markers: list = [],
@@ -502,24 +649,25 @@ def GaussianFit(counts: list, centers: list,
         raise ValueError('Unsupported background model')
     
     # Fit the background model to the data of the background markers before fitting the peaks
-    if len(background_markers) == 0:
+    if bg_type != 'None' and len(background_markers) == 0:
         # put marker at the start and end of the region
         background_markers = [(region_markers[0]-bin_width, region_markers[0]), (region_markers[1], region_markers[1]+bin_width)]
 
-    bg_x = []
-    bg_y = []
-    for bg_start, bg_end in background_markers:
-        # sort the background markers
-        bg_start, bg_end = sorted([bg_start, bg_end])
+    bg_result = None
+    if bg_type != 'None':
+        bg_x = []
+        bg_y = []
+        for bg_start, bg_end in background_markers:
+            # sort the background markers
+            bg_start, bg_end = sorted([bg_start, bg_end])
 
-        bg_mask = (centers >= bg_start) & (centers <= bg_end)
-        bg_x.extend(centers[bg_mask])
-        bg_y.extend(counts[bg_mask])
+            bg_mask = (centers >= bg_start) & (centers <= bg_end)
+            bg_x.extend(centers[bg_mask])
+            bg_y.extend(counts[bg_mask])
 
-    bg_x = np.array(bg_x)
-    bg_y = np.array(bg_y)
-    
-    bg_result = bg_model.fit(bg_y, params, x=bg_x)
+        bg_x = np.array(bg_x)
+        bg_y = np.array(bg_y)
+        bg_result = bg_model.fit(bg_y, params, x=bg_x)
 
     # print intial parameter guesses
     print('Initial Background Parameter Guesses:')
@@ -527,11 +675,15 @@ def GaussianFit(counts: list, centers: list,
 
     # print fit report
     print('Background Fit Report:')
-    print(bg_result.fit_report())
+    if bg_result is not None:
+        print(bg_result.fit_report())
+    else:
+        print('Background model set to None; skipping background fit.')
 
     # **Adjust background parameters based on their errors**
-    for param in bg_result.params:
-        params[param].set(value=bg_result.params[param].value, vary=False)
+    if bg_result is not None:
+        for param in bg_result.params:
+            params[param].set(value=bg_result.params[param].value, vary=False)
 
     # Add background model to overall model
     model = bg_model
@@ -682,6 +834,7 @@ def GaussianFit(counts: list, centers: list,
 
     # Fit the model to the data
     result = model.fit(y_data, params, x=x_data)
+    _inject_spectrix_metadata(result, region_markers, peak_markers, background_markers, bg_type, equal_sigma, free_position)
 
     # Print initial parameter guesses
     print('Initial Parameter Guesses:')
@@ -735,10 +888,20 @@ def GaussianFit(counts: list, centers: list,
         x_data_line = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
         y_data_line = result.eval(x=x_data_line)
 
+    fit_metadata = (
+        list(region_markers),
+        list(peak_markers),
+        [] if bg_type == 'None' else list(background_markers),
+        bg_type,
+        equal_sigma,
+        free_position,
+        True,
+    )
+
     # save the fit result to a temp file
     save_modelresult(result, 'temp_fit.sav')
 
-    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params, result
+    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params, fit_metadata, result
 
 def load_result(filename: str):
     result = load_modelresult(filename)
@@ -820,10 +983,34 @@ def load_result(filename: str):
         x_data_line = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
         y_data_line = result.eval(x=x_data_line)
 
+    fit_metadata = _extract_spectrix_metadata(result)
+    if fit_metadata is None:
+        if len(centers := result.userkws['x']) > 1:
+            bin_width = float(centers[1] - centers[0])
+        else:
+            bin_width = 1.0
+
+        fitted_means = [float(g[2]) for g in gaussian_params]
+        if len(fitted_means) >= 2:
+            fallback_region = [min(fitted_means), max(fitted_means)]
+        else:
+            fallback_region = [float(x_min), float(x_max)]
+        fallback_peak_markers = fitted_means if fitted_means else [float(p) for p in peak_markers]
+        fallback_background = []
+        fit_metadata = (
+            fallback_region,
+            fallback_peak_markers,
+            fallback_background,
+            'None',
+            True,
+            True,
+            False,
+        )
+
     # save the fit result to a temp file
     save_modelresult(result, 'temp_fit.sav')
 
-    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params
+    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params, fit_metadata
 
 ");
 
@@ -1127,6 +1314,18 @@ def load_result(filename: str):
             let y_composition = result.get_item(3)?.extract::<Vec<f64>>()?;
             let fit_report = result.get_item(4)?.extract::<String>()?;
             let additional_params = result.get_item(5)?.extract::<Vec<(f64, f64)>>()?;
+            let fit_metadata = result.get_item(6).ok().and_then(|item| {
+                item.extract::<(
+                    Vec<f64>,
+                    Vec<f64>,
+                    Vec<(f64, f64)>,
+                    String,
+                    bool,
+                    bool,
+                    bool,
+                )>()
+                .ok()
+            });
 
             // get the temp fit result, store the text in the struct
             let fit_text = std::fs::read_to_string("temp_fit.sav")
@@ -1182,6 +1381,48 @@ def load_result(filename: str):
                 gaussian_param.generate_fit_points(100);
 
                 self.fit_result.push(gaussian_param);
+            }
+
+            if let Some((
+                region_markers,
+                peak_markers,
+                background_markers,
+                background_model,
+                equal_stdev,
+                free_position,
+                metadata_found,
+            )) = fit_metadata
+            {
+                let fitted_peak_markers = self.peak_markers.clone();
+                self.region_markers = region_markers.clone();
+                self.background_markers = background_markers.clone();
+                self.fit_settings.equal_stdev = equal_stdev;
+                self.fit_settings.free_position = free_position;
+
+                self.fit_metadata = Some(GaussianFitMetadata {
+                    region_markers,
+                    peak_markers: if peak_markers.is_empty() {
+                        fitted_peak_markers.clone()
+                    } else {
+                        peak_markers
+                    },
+                    background_markers,
+                    background_model,
+                });
+
+                self.peak_markers = fitted_peak_markers;
+
+                if !metadata_found {
+                    log::warn!(
+                        "No SpectriX fit metadata found in lmfit result; generated fallback metadata from existing Gaussian parameters."
+                    );
+                }
+            } else {
+                let (metadata, _) = self.fit_metadata_with_fallback();
+                self.fit_metadata = Some(metadata);
+                log::warn!(
+                    "Unable to read fit metadata from lmfit result; generated fallback metadata from Gaussian fit."
+                );
             }
 
             if self.background_result.is_none() && !background_params.is_empty() {

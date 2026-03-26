@@ -1,9 +1,90 @@
 use super::histogram1d::Histogram;
 
 use crate::fitter::common::Data;
-use crate::fitter::main_fitter::{FitModel, Fitter};
+use crate::fitter::main_fitter::{BackgroundModel, FitModel, FitResult, Fitter};
 
 impl Histogram {
+    pub fn apply_refit_all_request(&mut self) {
+        if !self.fits.take_pending_refit_all() {
+            return;
+        }
+
+        let fit_count = self.fits.stored_fits.len();
+        for _ in 0..fit_count {
+            self.fits.pending_modify_fit = Some(0);
+            self.apply_modify_fit_request();
+            self.fit_gaussians();
+            self.fits.store_temp_fit();
+        }
+    }
+
+    pub fn apply_modify_fit_request(&mut self) {
+        let Some(fit_idx) = self.fits.take_pending_modify_fit() else {
+            return;
+        };
+
+        let Some((metadata, metadata_found, fallback_background_model, mut moved_fit)) =
+            self.fits.stored_fits.get(fit_idx).and_then(|stored_fit| {
+                if let Some(FitResult::Gaussian(gaussian)) = &stored_fit.fit_result {
+                    let (metadata, metadata_found) = gaussian.fit_metadata_with_fallback();
+                    Some((
+                        metadata,
+                        metadata_found,
+                        stored_fit.background_model.clone(),
+                        stored_fit.clone(),
+                    ))
+                } else {
+                    None
+                }
+            })
+        else {
+            log::warn!("Modify fit requested for non-Gaussian fit.");
+            return;
+        };
+
+        if !metadata_found {
+            log::warn!(
+                "Fit metadata was not found; using fallback marker data derived from Gaussian parameters."
+            );
+        }
+
+        self.plot_settings.markers.clear_background_markers();
+        self.plot_settings.markers.clear_peak_markers();
+        self.plot_settings.markers.clear_region_markers();
+
+        for marker in metadata.region_markers {
+            self.plot_settings.markers.add_region_marker(marker);
+        }
+        for marker in metadata.peak_markers {
+            self.plot_settings.markers.add_peak_marker(marker);
+        }
+
+        self.fits.settings.background_model = match metadata.background_model.as_str() {
+            "linear" => BackgroundModel::Linear(Default::default()),
+            "quadratic" => BackgroundModel::Quadratic(Default::default()),
+            "exponential" => BackgroundModel::Exponential(Default::default()),
+            "powerlaw" => BackgroundModel::PowerLaw(Default::default()),
+            "None" => BackgroundModel::None,
+            _ => fallback_background_model,
+        };
+
+        if matches!(self.fits.settings.background_model, BackgroundModel::None) {
+            self.plot_settings.markers.clear_background_markers();
+        } else {
+            self.plot_settings
+                .markers
+                .set_background_marker_positions(&metadata.background_markers);
+            self.update_background_pair_lines();
+        }
+
+        if fit_idx < self.fits.stored_fits.len() {
+            self.fits.stored_fits.remove(fit_idx);
+        }
+
+        moved_fit.name = format!("{} (Temp)", moved_fit.name);
+        self.fits.temp_fit = Some(moved_fit);
+    }
+
     pub fn fit_background(&mut self) {
         log::info!("Fitting background for histogram: {}", self.name);
         self.fits.temp_fit = None;
@@ -45,6 +126,30 @@ impl Histogram {
     }
 
     pub fn fit_gaussians(&mut self) {
+        let previous_peak_assignments = self
+            .fits
+            .temp_fit
+            .as_ref()
+            .and_then(|temp_fit| match &temp_fit.fit_result {
+                Some(FitResult::Gaussian(g)) => Some(
+                    g.fit_result
+                        .iter()
+                        .filter_map(|p| {
+                            p.mean.value.map(|m| {
+                                (
+                                    m,
+                                    p.uuid,
+                                    p.energy.value.unwrap_or(-1.0),
+                                    p.energy.uncertainty.unwrap_or(0.0),
+                                )
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+
         let region_markers = self.plot_settings.markers.get_region_marker_positions();
         let peak_positions = self.plot_settings.markers.get_peak_marker_positions();
         let background_markers = self.plot_settings.markers.get_background_marker_positions();
@@ -97,13 +202,48 @@ impl Histogram {
         fitter.fit();
 
         self.plot_settings.markers.clear_peak_markers();
-        let updated_markers = fitter.get_peak_markers();
+        let updated_markers = if let Some(FitResult::Gaussian(g)) = &fitter.fit_result {
+            g.fit_result
+                .iter()
+                .filter_map(|p| p.mean.value)
+                .collect::<Vec<_>>()
+        } else {
+            fitter.get_peak_markers()
+        };
         for marker in updated_markers {
             self.plot_settings.markers.add_peak_marker(marker);
         }
 
         fitter.set_name(self.name.clone());
         self.fits.temp_fit = Some(fitter);
+
+        // Preserve UUID and energy assignments across modify -> refit workflows.
+        if !previous_peak_assignments.is_empty()
+            && let Some(temp_fit) = &mut self.fits.temp_fit
+            && let Some(FitResult::Gaussian(g)) = &mut temp_fit.fit_result
+        {
+            let mut prev_sorted = previous_peak_assignments.clone();
+            prev_sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+            let mut new_sorted: Vec<(usize, f64)> = g
+                .fit_result
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, p)| p.mean.value.map(|m| (idx, m)))
+                .collect();
+            new_sorted.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+            for ((new_idx, _), (_, uuid, energy, energy_unc)) in
+                new_sorted.into_iter().zip(prev_sorted.into_iter())
+            {
+                if let Err(e) = g.update_uuid_for_peak(new_idx, uuid) {
+                    log::warn!("Failed to preserve UUID for peak {new_idx}: {e}");
+                }
+                if let Err(e) = g.update_energy_for_peak(new_idx, energy, energy_unc) {
+                    log::warn!("Failed to preserve energy for peak {new_idx}: {e}");
+                }
+            }
+        }
 
         // calibrate temp fit if calibration is enabled
         if self.fits.settings.calibrated

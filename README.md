@@ -289,6 +289,8 @@ The 1D histogram interface in **Spectrix** is designed for fast, interactive pea
 - Choose and tune background models: linear, quadratic, power law, exponential.
 - Rebin and restyle plots from the context menu.
 - Store fit results and review them in a dedicated side panel.
+- Click **Modify** on a stored fit to move it back into the temp fit editor with its saved markers/settings.
+- Click **Refit** in the Fit Panel header to re-run all stored fits on the latest incoming data.
 - Use keyboard-driven controls for quick analysis loops.
 
 ### Fitting Engine
@@ -321,6 +323,18 @@ This metadata is also written into the underlying lmfit `ModelResult` payload:
 - assigned energy and uncertainty (`g{i}_energy`, `g{i}_energy_uncertainty`)
 - calibrated Gaussian parameters, including `g{i}_center_calibrated`, `g{i}_sigma_calibrated`, `g{i}_fwhm_calibrated`, plus calibrated copies for area/amplitude/height
 - calibration constants and uncertainties, including `calibration_a`, `calibration_b`, `calibration_c`, and `calibration_a_uncertainty`, `calibration_b_uncertainty`, `calibration_c_uncertainty`
+ - fit marker metadata for Python interoperability:
+  - `region_marker_count`, `region_marker_0`, `region_marker_1`, ...
+  - `peak_marker_count`, `peak_marker_0`, `peak_marker_1`, ...
+  - `bg_marker_count`, `bg_marker_start_0`, `bg_marker_end_0`, ...
+  - fit/background flags: `bg_model_type`, `fit_equal_sigma`, `fit_free_position`
+
+Stored-fit modify/refit behavior:
+
+- **Modify** removes the selected fit from the stored list, restores its marker/background settings, and moves it into the temp-fit slot for editing.
+- On refit, Spectrix preserves existing UUID and assigned-energy values by remapping prior assignments onto the new fitted peak means.
+- If background model is `None`, no background markers are restored/generated.
+
 
 Because of that, exported lmfit `.sav` files include both fit parameters and calibration/UUID context, so they can be loaded and further analyzed directly in Python (for example with `lmfit.model.load_modelresult`).
 

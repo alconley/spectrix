@@ -222,6 +222,23 @@ impl FitMarkers {
         self.background_markers.clear();
     }
 
+    pub fn set_background_marker_positions(&mut self, markers: &[(f64, f64)]) {
+        self.background_markers.clear();
+
+        for (idx, &(start, end)) in markers.iter().enumerate() {
+            let mut marker_start = EguiVerticalLine::new(start, egui::Color32::from_rgb(0, 200, 0));
+            let mut marker_end = EguiVerticalLine::new(end, egui::Color32::from_rgb(0, 200, 0));
+
+            marker_start.width = 0.5;
+            marker_end.width = 0.5;
+            marker_start.name = format!("Background Pair {idx} Start");
+            marker_end.name = format!("Background Pair {idx} End");
+
+            self.background_markers
+                .push(BackgroundPair::new(marker_start, marker_end));
+        }
+    }
+
     fn delete_marker(markers: &mut Vec<EguiVerticalLine>, marker_to_delete: f64) {
         if let Some(index) = markers.iter().position(|x| x.x_value == marker_to_delete) {
             markers.remove(index);

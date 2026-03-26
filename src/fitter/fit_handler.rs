@@ -45,6 +45,10 @@ pub struct Fits {
     pub settings: FitSettings,
     pub calibration: Calibration,
     pub sort_state: SortState,
+    #[serde(skip)]
+    pub pending_modify_fit: Option<usize>,
+    #[serde(skip)]
+    pub pending_refit_all: bool,
 }
 
 impl Default for Fits {
@@ -64,7 +68,17 @@ impl Fits {
                 col: SortCol::Fit,
                 asc: true,
             },
+            pending_modify_fit: None,
+            pending_refit_all: false,
         }
+    }
+
+    pub fn take_pending_modify_fit(&mut self) -> Option<usize> {
+        self.pending_modify_fit.take()
+    }
+
+    pub fn take_pending_refit_all(&mut self) -> bool {
+        std::mem::take(&mut self.pending_refit_all)
     }
 
     pub fn store_temp_fit(&mut self) {
@@ -395,11 +409,15 @@ impl Fits {
             None
         };
 
+        let calibrated = self.settings.calibrated;
         if let Some(temp_fit) = &self.temp_fit {
             temp_fit.draw(plot_ui, calibration);
+
+            if let Some(FitResult::Gaussian(gauss)) = &temp_fit.fit_result {
+                gauss.draw_uuid(plot_ui, calibrated);
+            }
         }
 
-        let calibrated = self.settings.calibrated;
         for fit in &mut self.stored_fits.iter() {
             fit.draw(plot_ui, calibration);
 
@@ -548,6 +566,7 @@ impl Fits {
 
         // NEW: stash a pending deletion
         let mut to_remove: Option<usize> = None;
+        let mut to_modify: Option<usize> = None;
 
         // NEW: sorting key helper
         let key = |r: &Row, col: SortCol| -> f64 {
@@ -708,6 +727,9 @@ impl Fits {
                                         log::info!("Saved lmfit result to {path:?}");
                                     }
                                 }
+                                if ui.button("Modify").clicked() {
+                                    to_modify = Some(i);
+                                }
                                 ui.menu_button("Fit Report", |ui| {
                                     egui::ScrollArea::vertical().show(ui, |ui| {
                                         ui.horizontal_wrapped(|ui| {
@@ -815,6 +837,8 @@ impl Fits {
         {
             self.stored_fits.remove(i);
         }
+
+        self.pending_modify_fit = to_modify;
     }
 
     pub fn fit_stats_ui(&mut self, ui: &mut egui::Ui) {
@@ -857,7 +881,19 @@ impl Fits {
                 .id_salt("Context menu fit stats grid")
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
-                        ui.heading("Fit Panel");
+                        ui.horizontal(|ui| {
+                            ui.heading("Fit Panel");
+                            if !self.stored_fits.is_empty()
+                                && ui
+                                    .button("Refit")
+                                    .on_hover_text(
+                                        "Re-run each stored fit on current data by loading it into temp, fitting, then storing it again.",
+                                    )
+                                    .clicked()
+                            {
+                                self.pending_refit_all = true;
+                            }
+                        });
                         self.save_and_load_ui(ui);
 
                         self.settings.ui(ui);
