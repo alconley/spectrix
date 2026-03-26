@@ -7,9 +7,9 @@ use pyo3::ffi::c_str;
 use pyo3::{prelude::*, types::PyModule};
 
 use egui_file_dialog::FileDialog;
-use polars::prelude::PlPath;
+// use polars::prelude::PlPath;
 use polars::prelude::*;
-use polars_arrow::buffer::Buffer;
+// use polars_arrow::buffer::Buffer;
 
 use std::cmp::Ordering as CmpOrdering;
 use std::path::PathBuf;
@@ -314,29 +314,34 @@ def get_2d_histograms(file_name):
     }
 
     fn create_lazyframe(&mut self, checked_files: &[PathBuf]) {
-        // Get all the checked parquet files
         let parquet_files: Vec<PathBuf> = checked_files
             .iter()
             .filter(|file| file.extension().is_some_and(|ext| ext == "parquet"))
             .cloned()
             .collect();
 
-        // Warn if no checked parquet files are selected
         if parquet_files.is_empty() {
             log::warn!("No selected Parquet files to process.");
             return;
         }
 
-        let files_arc: Arc<[PlPath]> = Arc::from(
-            parquet_files
-                .into_iter()
-                .map(|p: PathBuf| PlPath::Local(Arc::from(p.into_boxed_path())))
-                .collect::<Vec<_>>(),
-        );
+        log::info!("Processing Parquet files: {parquet_files:?}");
         let args = ScanArgsParquet::default();
-        log::info!("Processing Parquet files: {files_arc:?}");
 
-        let paths: Buffer<PlPath> = files_arc.iter().cloned().collect();
+        let paths: Result<polars_buffer::Buffer<PlRefPath>, PolarsError> = parquet_files
+            .into_iter()
+            .map(PlRefPath::try_from_pathbuf)
+            .collect();
+
+        let paths = match paths {
+            Ok(paths) => paths,
+            Err(e) => {
+                self.lazyframe = None;
+                log::error!("Failed to convert parquet paths: {e}");
+                return;
+            }
+        };
+
         match LazyFrame::scan_parquet_files(paths, args) {
             Ok(lf) => {
                 log::info!("Successfully loaded selected Parquet files.");
@@ -346,7 +351,7 @@ def get_2d_histograms(file_name):
                 self.settings.column_names = column_names;
             }
             Err(e) => {
-                self.lazyframe = None; // Indicates that loading failed
+                self.lazyframe = None;
                 log::error!("Failed to load selected Parquet files: {e}");
             }
         }
@@ -414,32 +419,34 @@ def get_2d_histograms(file_name):
                 log::info!("Saving filtered file as: {new_file_path:?}");
 
                 // Load and collect one file at a time
-                match LazyFrame::scan_parquet(
-                    PlPath::Local(Arc::from(file.clone().into_boxed_path())),
-                    Default::default(),
-                ) {
-                    Ok(lf) => match lf.collect() {
-                        Ok(df) => {
-                            if let Err(e) = cut.filter_df_and_save(
-                                &df,
-                                new_file_path
-                                    .to_str()
-                                    .expect("Failed to convert path to str"),
-                            ) {
-                                log::error!("Failed to save filtered DataFrame for {file:?}: {e}");
-                            } else {
-                                log::info!(
-                                    "Successfully saved filtered DataFrame: {new_file_path:?}"
+                match PlRefPath::try_from_pathbuf(file.clone()) {
+                    Ok(path) => match LazyFrame::scan_parquet(path, Default::default()) {
+                        Ok(lf) => match lf.collect() {
+                            Ok(df) => {
+                                if let Err(e) = cut.filter_df_and_save(
+                                    &df,
+                                    new_file_path
+                                        .to_str()
+                                        .expect("Failed to convert path to str"),
+                                ) {
+                                    log::error!(
+                                        "Failed to save filtered DataFrame for {file:?}: {e}"
+                                    );
+                                } else {
+                                    log::info!(
+                                        "Successfully saved filtered DataFrame: {new_file_path:?}"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                log::error!(
+                                    "Failed to collect DataFrame from LazyFrame: {e} ({file:?})"
                                 );
                             }
-                        }
-                        Err(e) => {
-                            log::error!(
-                                "Failed to collect DataFrame from LazyFrame: {e} ({file:?})"
-                            );
-                        }
+                        },
+                        Err(e) => log::error!("Failed to read Parquet file {file:?}: {e}"),
                     },
-                    Err(e) => log::error!("Failed to read Parquet file {file:?}: {e}"),
+                    Err(e) => log::error!("Failed to convert Parquet path {file:?}: {e}"),
                 }
 
                 // Update progress after each file
@@ -508,12 +515,19 @@ def get_2d_histograms(file_name):
                 let mut lazyframes = Vec::with_capacity(total_files);
                 for (i, file) in parquet_files.iter().enumerate() {
                     log::info!("Reading file: {file:?}");
-                    match LazyFrame::scan_parquet(
-                        PlPath::Local(Arc::from(file.clone().into_boxed_path())),
-                        Default::default(),
-                    ) {
-                        Ok(lf) => lazyframes.push(lf),
-                        Err(e) => log::error!("Failed to read Parquet file {file:?}: {e}"),
+                    // match LazyFrame::scan_parquet(
+                    //     PlPath::Local(Arc::from(file.clone().into_boxed_path())),
+                    //     Default::default(),
+                    // ) {
+                    //     Ok(lf) => lazyframes.push(lf),
+                    //     Err(e) => log::error!("Failed to read Parquet file {file:?}: {e}"),
+                    // }
+                    match PlRefPath::try_from_pathbuf(file.clone()) {
+                        Ok(path) => match LazyFrame::scan_parquet(path, Default::default()) {
+                            Ok(lf) => lazyframes.push(lf),
+                            Err(e) => log::error!("Failed to read Parquet file {file:?}: {e}"),
+                        },
+                        Err(e) => log::error!("Failed to convert Parquet path {file:?}: {e}"),
                     }
 
                     // Update progress through the read step
