@@ -881,16 +881,19 @@ impl Fits {
                 .id_salt("Context menu fit stats grid")
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
-                        ui.heading("Fit Panel");
-                        if ui
-                            .button("Refit")
-                            .on_hover_text(
-                                "Re-run each stored fit on current data by loading it into temp, fitting, then storing it again.",
-                            )
-                            .clicked()
-                        {
-                            self.pending_refit_all = true;
-                        }
+                        ui.horizontal(|ui| {
+                            ui.heading("Fit Panel");
+                            if !self.stored_fits.is_empty()
+                                && ui
+                                    .button("Refit")
+                                    .on_hover_text(
+                                        "Re-run each stored fit on current data by loading it into temp, fitting, then storing it again.",
+                                    )
+                                    .clicked()
+                            {
+                                self.pending_refit_all = true;
+                            }
+                        });
                         self.save_and_load_ui(ui);
 
                         self.settings.ui(ui);
