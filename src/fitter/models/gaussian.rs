@@ -361,8 +361,8 @@ impl GaussianFitter {
         let region_markers = if self.region_markers.len() >= 2 {
             self.region_markers.clone()
         } else if let (Some(min), Some(max)) = (
-            self.data.x.iter().cloned().reduce(f64::min),
-            self.data.x.iter().cloned().reduce(f64::max),
+            self.data.x.iter().copied().reduce(f64::max),
+            self.data.x.iter().copied().reduce(f64::min),
         ) {
             vec![min, max]
         } else {
