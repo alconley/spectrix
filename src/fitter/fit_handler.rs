@@ -77,10 +77,38 @@ impl Fits {
     }
 
     fn sanitize_filename_component(name: &str) -> String {
-        name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
+        let mut out = String::with_capacity(name.len());
+        let mut prev_was_underscore = false;
+
+        for ch in name.chars() {
+            let mapped = if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+                || ch.is_whitespace()
+            {
+                '_'
+            } else {
+                ch
+            };
+
+            if mapped == '_' {
+                if !prev_was_underscore {
+                    out.push('_');
+                }
+                prev_was_underscore = true;
+            } else {
+                out.push(mapped);
+                prev_was_underscore = false;
+            }
+        }
+
+        let out = out.trim_matches('_').to_owned();
+        if out.is_empty() {
+            "fit".to_owned()
+        } else {
+            out
+        }
     }
 
-    fn save_lmfit_result_with_dialog(&self, text: &str, suggested_file_name: &str) {
+    fn save_lmfit_result_with_dialog(text: &str, suggested_file_name: &str) {
         if let Some(path) = FileDialog::new()
             .add_filter("SAV", &["sav"])
             .set_file_name(suggested_file_name)
@@ -378,6 +406,21 @@ impl Fits {
 
     pub fn save_and_load_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
+
+            if !self.stored_fits.is_empty() {
+                if ui
+                        .button("Refit")
+                        .on_hover_text(
+                            "Re-run each stored fit on current data by loading it into temp, fitting, then storing it again.",
+                        )
+                        .clicked()
+                {
+                    self.pending_refit_all = true;
+                }
+
+                ui.separator();
+            }
+
             if ui
                 .button("Save Fits")
                 .on_hover_text(
@@ -402,6 +445,8 @@ impl Fits {
                 self.load_from_file();
             }
         });
+
+        ui.separator();
 
         ui.horizontal_wrapped(|ui| {
             if ui
@@ -799,7 +844,7 @@ impl Fits {
                                             &self.stored_fits[i].name
                                         )
                                     );
-                                    self.save_lmfit_result_with_dialog(text, &suggested_name);
+                                    Self::save_lmfit_result_with_dialog(text, &suggested_name);
                                 }
                                 if ui.button("Modify").clicked() {
                                     to_modify = Some(i);
@@ -827,7 +872,7 @@ impl Fits {
                                     if let Some(ref text) = g.lmfit_result
                                         && ui.button("Export").clicked()
                                     {
-                                        self.save_lmfit_result_with_dialog(
+                                        Self::save_lmfit_result_with_dialog(
                                             text,
                                             "temp_fit_lmfit_result.sav",
                                         );
@@ -951,19 +996,8 @@ impl Fits {
                 .id_salt("Context menu fit stats grid")
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.heading("Fit Panel");
-                            if !self.stored_fits.is_empty()
-                                && ui
-                                    .button("Refit")
-                                    .on_hover_text(
-                                        "Re-run each stored fit on current data by loading it into temp, fitting, then storing it again.",
-                                    )
-                                    .clicked()
-                            {
-                                self.pending_refit_all = true;
-                            }
-                        });
+                        ui.heading("Fit Panel");
+
                         self.save_and_load_ui(ui);
 
                         self.settings.ui(ui);

@@ -542,22 +542,26 @@ impl Cut2D {
             trimmed_name.to_owned()
         };
 
-        let sanitized: String = base_name
-            .chars()
-            .map(|character| {
-                if character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | ' ') {
-                    character
-                } else {
-                    '_'
-                }
-            })
-            .collect();
+        let mut collapsed = String::with_capacity(base_name.len());
+        let mut previous_was_underscore = false;
 
-        let collapsed = sanitized
-            .split_whitespace()
-            .filter(|segment| !segment.is_empty())
-            .collect::<Vec<_>>()
-            .join("_");
+        for character in base_name.chars() {
+            let mapped = if character.is_ascii_alphanumeric() || character == '-' {
+                character
+            } else {
+                '_'
+            };
+
+            if mapped == '_' {
+                if !previous_was_underscore {
+                    collapsed.push('_');
+                }
+                previous_was_underscore = true;
+            } else {
+                collapsed.push(mapped);
+                previous_was_underscore = false;
+            }
+        }
 
         let trimmed = collapsed.trim_matches('_');
         if trimmed.is_empty() {
