@@ -24,6 +24,7 @@ use std::sync::atomic::AtomicBool;
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct ProcessorSettings {
+    pub name: String,
     pub left_panel_open: bool,
     pub histogram_script_open: bool,
     pub column_names: Vec<String>,
@@ -44,6 +45,7 @@ pub struct ProcessorSettings {
 impl Default for ProcessorSettings {
     fn default() -> Self {
         Self {
+            name: String::new(),
             left_panel_open: true,
             histogram_script_open: true,
             column_names: Vec::new(),
@@ -59,7 +61,7 @@ impl Default for ProcessorSettings {
     }
 }
 
-#[derive(Default, serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct Processor {
     #[serde(skip)]
@@ -117,7 +119,12 @@ impl Default for FileSortState {
 }
 
 impl Processor {
-    pub fn new() -> Self {
+    pub fn new(name: impl Into<String>) -> Self {
+        let settings = ProcessorSettings {
+            name: name.into(),
+            ..ProcessorSettings::default()
+        };
+
         Self {
             file_dialog: FileDialog::new()
                 .add_file_filter(
@@ -132,14 +139,15 @@ impl Processor {
             lazyframe: None,
             histogrammer: Histogrammer::default(),
             histogram_script: HistogramScript::new(),
-            settings: ProcessorSettings::default(),
+            settings,
             analysis: AnalysisScripts::default(),
             file_sort: FileSortState::default(),
         }
     }
 
     pub fn reset(&mut self) {
-        *self = Self::new();
+        let name = self.settings.name.clone();
+        *self = Self::new(name);
     }
 
     pub fn get_histograms_from_root_files(&mut self, checked_files: &[PathBuf]) -> PyResult<()> {
@@ -1128,6 +1136,12 @@ def get_2d_histograms(file_name):
             .ui(ctx, &self.selected_files, &mut self.histogrammer);
 
         self.file_dialog.update(ctx);
+    }
+}
+
+impl Default for Processor {
+    fn default() -> Self {
+        Self::new(String::new())
     }
 }
 

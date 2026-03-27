@@ -589,85 +589,97 @@ impl Histogrammer {
         self.tree.ui(&mut self.behavior, ui);
     }
 
-    pub fn menu_ui(&mut self, ui: &mut egui::Ui) {
-        // self.behavior.ui(ui);
+    pub fn menu_contents_ui(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("Histogrammer").strong());
 
-        ui.menu_button("Histogrammer", |ui| {
-            if let Some(root) = self.tree.root() {
-                ui.horizontal(|ui| {
-                    ui.heading("Tree");
-
-                    ui.separator();
-
-                    if ui.button("Reorganize").clicked() {
-                        self.reorganize();
-                    }
-
-                    if ui.button("Single Grid").clicked() {
-                        self.reorganize_to_single_grid();
-                    }
-
-                    ui.separator();
-
-                    if ui.button("Reset").clicked() {
-                        *self = Default::default();
-                    }
-                });
-                ui.separator();
-
-                self.behavior.ui(ui);
-
-                ui.separator();
-
-                tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
-
-                ui.separator();
-
-                if ui.button("Create ROOT File").clicked() {
-                    // Use rfd to open a file save dialog
-                    let file_dialog = rfd::FileDialog::new()
-                        .set_title("Save ROOT File")
-                        .set_file_name("output.root")
-                        .add_filter("ROOT file", &["root"])
-                        .save_file();
-
-                    if let Some(path) = file_dialog {
-                        // Convert path to a string and call the function
-                        if let Some(output_file) = path.to_str() {
-                            match self.histograms_to_root(output_file) {
-                                Ok(_) => println!("ROOT file created at: {output_file}"),
-                                Err(e) => eprintln!("Error creating ROOT file: {e:?}"),
-                            }
-                        } else {
-                            eprintln!("Invalid file path selected.");
-                        }
-                    } else {
-                        println!("File save dialog canceled.");
-                    }
-                }
-
-                if ui.button("Export All lmfit Fits").clicked()
-                    && let Some(dir_path) = rfd::FileDialog::new().pick_folder()
-                {
-                    let dir_path = dir_path.clone();
-
-                    for (_id, tile) in self.tree.tiles.iter() {
-                        if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                            let hist = hist.lock().expect("Failed to lock histogram");
-                            let fits = &hist.fits;
-
-                            fits.export_lmfit(&dir_path);
-                        }
-
-                        log::info!("All lmfit results exported.");
-                    }
-                }
-
-                // ADD directly after the export button block:
-                if ui.button("Import All lmfit Fits to Histograms").clicked() {
-                    self.import_all_lmfit_to_histograms_from_folder();
-                }
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Reorganize").clicked() {
+                self.reorganize();
+                ui.close();
             }
+
+            if ui.button("Single Grid").clicked() {
+                self.reorganize_to_single_grid();
+                ui.close();
+            }
+
+            if ui.button("Reset Histogrammer").clicked() {
+                *self = Default::default();
+                ui.close();
+            }
+        });
+
+        if let Some(root) = self.tree.root() {
+            ui.separator();
+
+            ui.collapsing("Layout Settings", |ui| {
+                self.behavior.settings_ui(ui);
+            });
+
+            ui.collapsing("Tree", |ui| {
+                tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
+            });
+        } else {
+            ui.label(egui::RichText::new("No histogram tree yet.").weak());
+        }
+
+        ui.separator();
+        ui.label(egui::RichText::new("Import / Export").strong());
+
+        if ui.button("Create ROOT File").clicked() {
+            // Use rfd to open a file save dialog
+            let file_dialog = rfd::FileDialog::new()
+                .set_title("Save ROOT File")
+                .set_file_name("output.root")
+                .add_filter("ROOT file", &["root"])
+                .save_file();
+
+            if let Some(path) = file_dialog {
+                // Convert path to a string and call the function
+                if let Some(output_file) = path.to_str() {
+                    match self.histograms_to_root(output_file) {
+                        Ok(_) => println!("ROOT file created at: {output_file}"),
+                        Err(e) => eprintln!("Error creating ROOT file: {e:?}"),
+                    }
+                    ui.close();
+                } else {
+                    eprintln!("Invalid file path selected.");
+                }
+            } else {
+                println!("File save dialog canceled.");
+            }
+        }
+
+        if ui.button("Export All lmfit Fits").clicked()
+            && let Some(dir_path) = rfd::FileDialog::new().pick_folder()
+        {
+            let dir_path = dir_path.clone();
+
+            for (_id, tile) in self.tree.tiles.iter() {
+                if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+                    let hist = hist.lock().expect("Failed to lock histogram");
+                    let fits = &hist.fits;
+
+                    fits.export_lmfit(&dir_path);
+                }
+
+                log::info!("All lmfit results exported.");
+            }
+
+            ui.close();
+        }
+
+        if ui.button("Import All lmfit Fits to Histograms").clicked() {
+            self.import_all_lmfit_to_histograms_from_folder();
+            ui.close();
+        }
+
+        ui.separator();
+    }
+
+    pub fn menu_ui(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("Histogrammer", |ui| {
+            self.menu_contents_ui(ui);
         });
     }
 

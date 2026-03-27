@@ -7,6 +7,12 @@ pub struct TreeBehavior {
     gap_width: f32,
     min_size: f32,
     preview_dragged_panes: bool,
+    prune_empty_tabs: bool,
+    prune_empty_containers: bool,
+    prune_single_child_tabs: bool,
+    prune_single_child_containers: bool,
+    all_panes_must_have_tabs: bool,
+    join_nested_linear_containers: bool,
     pub tile_map: std::collections::HashMap<egui_tiles::TileId, String>,
 }
 
@@ -17,45 +23,74 @@ impl Default for TreeBehavior {
             gap_width: 2.0,
             min_size: 50.0,
             preview_dragged_panes: true,
+            prune_empty_tabs: true,
+            prune_empty_containers: true,
+            prune_single_child_tabs: false,
+            prune_single_child_containers: false,
+            all_panes_must_have_tabs: false,
+            join_nested_linear_containers: false,
             tile_map: std::collections::HashMap::new(),
         }
     }
 }
 
 impl TreeBehavior {
+    pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
+        egui::Grid::new("behavior_ui")
+            .num_columns(2)
+            .show(ui, |ui| {
+                ui.label("Tab bar height:");
+                ui.add(
+                    egui::DragValue::new(&mut self.tab_bar_height)
+                        .range(0.0..=100.0)
+                        .speed(1.0),
+                );
+                ui.end_row();
+
+                ui.label("Gap width:");
+                ui.add(
+                    egui::DragValue::new(&mut self.gap_width)
+                        .range(0.0..=20.0)
+                        .speed(1.0),
+                );
+                ui.end_row();
+
+                ui.label("Min size:");
+                ui.add(
+                    egui::DragValue::new(&mut self.min_size)
+                        .range(0.0..=f32::INFINITY)
+                        .speed(1.0),
+                );
+                ui.end_row();
+
+                ui.label("Preview dragged panes:");
+                ui.checkbox(&mut self.preview_dragged_panes, "");
+                ui.end_row();
+            });
+
+        ui.separator();
+        ui.collapsing("Simplification Options", |ui| {
+            ui.checkbox(&mut self.prune_empty_tabs, "Prune empty tabs");
+            ui.checkbox(&mut self.prune_empty_containers, "Prune empty containers");
+            ui.checkbox(&mut self.prune_single_child_tabs, "Prune single-child tabs");
+            ui.checkbox(
+                &mut self.prune_single_child_containers,
+                "Prune single-child containers",
+            );
+            ui.checkbox(
+                &mut self.all_panes_must_have_tabs,
+                "All panes must have tabs",
+            );
+            ui.checkbox(
+                &mut self.join_nested_linear_containers,
+                "Join nested linear containers",
+            );
+        });
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.collapsing("Behavior", |ui| {
-            egui::Grid::new("behavior_ui")
-                .num_columns(2)
-                .show(ui, |ui| {
-                    ui.label("Tab bar height:");
-                    ui.add(
-                        egui::DragValue::new(&mut self.tab_bar_height)
-                            .range(0.0..=100.0)
-                            .speed(1.0),
-                    );
-                    ui.end_row();
-
-                    ui.label("Gap width:");
-                    ui.add(
-                        egui::DragValue::new(&mut self.gap_width)
-                            .range(0.0..=20.0)
-                            .speed(1.0),
-                    );
-                    ui.end_row();
-
-                    ui.label("Min size:");
-                    ui.add(
-                        egui::DragValue::new(&mut self.min_size)
-                            .range(0.0..=f32::INFINITY)
-                            .speed(1.0),
-                    );
-                    ui.end_row();
-
-                    ui.label("Preview dragged panes:");
-                    ui.checkbox(&mut self.preview_dragged_panes, "");
-                    ui.end_row();
-                });
+            self.settings_ui(ui);
         });
     }
 
@@ -108,12 +143,12 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
         egui_tiles::SimplificationOptions {
-            prune_empty_tabs: false,
-            prune_empty_containers: false,
-            prune_single_child_tabs: false,
-            prune_single_child_containers: false,
-            all_panes_must_have_tabs: false,
-            join_nested_linear_containers: false,
+            prune_empty_tabs: self.prune_empty_tabs,
+            prune_empty_containers: self.prune_empty_containers,
+            prune_single_child_tabs: self.prune_single_child_tabs,
+            prune_single_child_containers: self.prune_single_child_containers,
+            all_panes_must_have_tabs: self.all_panes_must_have_tabs,
+            join_nested_linear_containers: self.join_nested_linear_containers,
         }
     }
 
