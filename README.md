@@ -338,6 +338,12 @@ Stored-fit modify/refit behavior:
 
 Because of that, exported lmfit `.sav` files include both fit parameters and calibration/UUID context, so they can be loaded and further analyzed directly in Python (for example with `lmfit.model.load_modelresult`).
 
+### Which Save Format To Use
+
+- **Save Fits / Load Fits (`.json`)**: best for restoring and continuing your work inside Spectrix.
+- **Export All lmfit Results / Load lmfit `.sav`**: best when you want to continue analysis in Python with `lmfit`.
+- If you are not planning to continue in Python/lmfit, prefer **Save Fits / Load Fits**.
+
 ### Keybind Reference
 
 Cursor must be inside the plot for keybinds to be active.

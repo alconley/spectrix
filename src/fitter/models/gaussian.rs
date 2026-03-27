@@ -48,6 +48,7 @@ fn auto_fmt(value: Option<f64>, unc: Option<f64>, units: Option<&str>) -> String
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct GaussianParameters {
     pub amplitude: Parameter,
     pub mean: Parameter,
@@ -288,6 +289,7 @@ impl GaussianParameters {
 }
 
 #[derive(Default, Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct GaussianFitSettings {
     pub equal_stdev: bool,
     pub free_position: bool,
@@ -296,6 +298,7 @@ pub struct GaussianFitSettings {
 }
 
 #[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct GaussianFitMetadata {
     pub region_markers: Vec<f64>,
     pub peak_markers: Vec<f64>,
@@ -304,6 +307,7 @@ pub struct GaussianFitMetadata {
 }
 
 #[derive(Default, Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct GaussianFitter {
     pub data: Data,
     pub region_markers: Vec<f64>,

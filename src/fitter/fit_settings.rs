@@ -5,6 +5,7 @@ use crate::fitter::models::powerlaw::PowerLawParameters;
 use crate::fitter::models::quadratic::QuadraticParameters;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct FitSettings {
     pub show_decomposition: bool,
     pub show_composition: bool,

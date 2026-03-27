@@ -9,6 +9,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct EguiLine {
     pub draw: bool,
     pub name_in_legend: bool,

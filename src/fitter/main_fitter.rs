@@ -77,6 +77,7 @@ impl BackgroundModel {
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct Fitter {
     pub name: String,
 

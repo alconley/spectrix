@@ -33,12 +33,14 @@ pub enum SortCol {
 }
 
 #[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct SortState {
     pub col: SortCol,
     pub asc: bool,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct Fits {
     pub temp_fit: Option<Fitter>,
     pub stored_fits: Vec<Fitter>,
@@ -57,17 +59,49 @@ impl Default for Fits {
     }
 }
 
+impl Default for SortState {
+    fn default() -> Self {
+        Self {
+            col: SortCol::Fit,
+            asc: true,
+        }
+    }
+}
+
 impl Fits {
+    fn ensure_extension_if_missing(mut path: PathBuf, extension: &str) -> PathBuf {
+        if path.extension().is_none() {
+            path.set_extension(extension);
+        }
+        path
+    }
+
+    fn sanitize_filename_component(name: &str) -> String {
+        name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
+    }
+
+    fn save_lmfit_result_with_dialog(&self, text: &str, suggested_file_name: &str) {
+        if let Some(path) = FileDialog::new()
+            .add_filter("SAV", &["sav"])
+            .set_file_name(suggested_file_name)
+            .save_file()
+        {
+            let path = Self::ensure_extension_if_missing(path, "sav");
+            if let Err(e) = std::fs::write(&path, text) {
+                log::error!("Failed to save lmfit result to {}: {e}", path.display());
+            } else {
+                log::info!("Saved lmfit result to {path:?}");
+            }
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             temp_fit: None,
             stored_fits: Vec::new(),
             settings: FitSettings::default(),
             calibration: Calibration::default(),
-            sort_state: SortState {
-                col: SortCol::Fit,
-                asc: true,
-            },
+            sort_state: SortState::default(),
             pending_modify_fit: None,
             pending_refit_all: false,
         }
@@ -146,7 +180,12 @@ impl Fits {
     }
 
     fn save_to_file(&self) {
-        if let Some(path) = FileDialog::new().add_filter("JSON", &["json"]).save_file() {
+        if let Some(path) = FileDialog::new()
+            .add_filter("JSON", &["json"])
+            .set_file_name("spectrix_fits.json")
+            .save_file()
+        {
+            let path = Self::ensure_extension_if_missing(path, "json");
             let file = File::create(path);
             match file {
                 Ok(mut file) => {
@@ -164,12 +203,15 @@ impl Fits {
     fn load_from_file(&mut self) {
         if let Some(path) = FileDialog::new().add_filter("JSON", &["json"]).pick_file() {
             match std::fs::read_to_string(&path) {
-                Ok(contents) => {
-                    let loaded_fits: Self =
-                        serde_json::from_str(&contents).expect("Failed to deserialize fits");
-                    self.stored_fits.extend(loaded_fits.stored_fits);
-                    self.temp_fit = loaded_fits.temp_fit;
-                }
+                Ok(contents) => match serde_json::from_str::<Self>(&contents) {
+                    Ok(loaded_fits) => {
+                        self.stored_fits.extend(loaded_fits.stored_fits);
+                        self.temp_fit = loaded_fits.temp_fit;
+                    }
+                    Err(e) => {
+                        log::error!("Failed to deserialize fits from {}: {e}", path.display());
+                    }
+                },
                 Err(e) => {
                     log::error!("Error reading file: {e:?}");
                 }
@@ -183,9 +225,11 @@ impl Fits {
                 if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result
                     && let Some(text) = &gauss.lmfit_result
                 {
-                    let mut filename = format!("{}_fit_{}.sav", fit.name, i);
-                    filename =
-                        filename.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_"); // Sanitize filename
+                    let filename = format!(
+                        "{}_fit_{}.sav",
+                        Self::sanitize_filename_component(&fit.name),
+                        i
+                    );
                     let full_path = PathBuf::from(&folder_path).join(filename);
 
                     match File::create(&full_path) {
@@ -212,8 +256,11 @@ impl Fits {
             if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result
                 && let Some(text) = &gauss.lmfit_result
             {
-                let mut filename = format!("{}_fit_{}.sav", fit.name, i);
-                filename = filename.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_"); // Sanitize filename
+                let filename = format!(
+                    "{}_fit_{}.sav",
+                    Self::sanitize_filename_component(&fit.name),
+                    i
+                );
                 let full_path = PathBuf::from(&dir).join(filename);
 
                 match File::create(&full_path) {
@@ -331,25 +378,53 @@ impl Fits {
 
     pub fn save_and_load_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            if ui.button("Save Fits").clicked() {
+            if ui
+                .button("Save Fits")
+                .on_hover_text(
+                    "Save Spectrix fits as .json for restoring and continuing work inside Spectrix.\n\
+                    Best option for normal Spectrix workflows.",
+                )
+                .clicked()
+            {
                 self.save_to_file();
             }
 
             ui.separator();
 
-            if ui.button("Load Fits").clicked() {
+            if ui
+                .button("Load Fits")
+                .on_hover_text(
+                    "Load Spectrix .json fits saved with 'Save Fits'.\n\
+                    Use this to restore fits for continued work in Spectrix.",
+                )
+                .clicked()
+            {
                 self.load_from_file();
             }
+        });
 
-            ui.separator();
-
-            if ui.button("Export All lmfit Results").clicked() {
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .button("Export All lmfit Results")
+                .on_hover_text(
+                    "Export each stored fit as lmfit .sav.\n\
+                    Use this when you want to continue analysis in Python/lmfit.\n\
+                    For Spectrix-only workflows, 'Save Fits' is usually better.",
+                )
+                .clicked()
+            {
                 self.export_all_lmfit_individual_files();
             }
 
             ui.separator();
 
-            if ui.button("Load lmfit .sav").clicked()
+            if ui
+                .button("Load lmfit .sav")
+                .on_hover_text(
+                    "Import lmfit .sav files (for example, generated by Python/lmfit or exported from Spectrix).\n\
+                    Use this to bring external lmfit results into Spectrix.",
+                )
+                .clicked()
                 && let Some(paths) = FileDialog::new().add_filter("SAV", &["sav"]).pick_files()
             {
                 for path in paths {
@@ -717,15 +792,14 @@ impl Fits {
                             {
                                 if let Some(ref text) = g.lmfit_result
                                     && ui.button("Export").clicked()
-                                    && let Some(path) = rfd::FileDialog::new()
-                                        .set_file_name("fit_result.txt")
-                                        .save_file()
                                 {
-                                    if let Err(e) = std::fs::write(&path, text) {
-                                        eprintln!("Failed to save lmfit result: {e}");
-                                    } else {
-                                        log::info!("Saved lmfit result to {path:?}");
-                                    }
+                                    let suggested_name = format!(
+                                        "{}_lmfit_result.sav",
+                                        Self::sanitize_filename_component(
+                                            &self.stored_fits[i].name
+                                        )
+                                    );
+                                    self.save_lmfit_result_with_dialog(text, &suggested_name);
                                 }
                                 if ui.button("Modify").clicked() {
                                     to_modify = Some(i);
@@ -752,15 +826,11 @@ impl Fits {
                                 if r.peak == 0 {
                                     if let Some(ref text) = g.lmfit_result
                                         && ui.button("Export").clicked()
-                                        && let Some(path) = rfd::FileDialog::new()
-                                            .set_file_name("fit_result.txt")
-                                            .save_file()
                                     {
-                                        if let Err(e) = std::fs::write(&path, text) {
-                                            eprintln!("Failed to save lmfit result: {e}");
-                                        } else {
-                                            log::info!("Saved lmfit result to {path:?}");
-                                        }
+                                        self.save_lmfit_result_with_dialog(
+                                            text,
+                                            "temp_fit_lmfit_result.sav",
+                                        );
                                     }
                                     ui.menu_button("Fit Report", |ui| {
                                         egui::ScrollArea::vertical().show(ui, |ui| {

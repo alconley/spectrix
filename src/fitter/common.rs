@@ -1,12 +1,132 @@
+use serde::de::{self, Visitor};
+use std::fmt;
+
 #[derive(PartialEq, Default, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Data {
     pub x: Vec<f64>,
     pub y: Vec<f64>,
 }
 
-#[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
+fn deserialize_f64_with_default<'de, D>(deserializer: D, default: f64) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct F64OrNullVisitor {
+        default: f64,
+    }
+
+    impl<'de> Visitor<'de> for F64OrNullVisitor {
+        type Value = f64;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a float, optional float, or null")
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(value)
+        }
+
+        fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(f64::from(value))
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(value as f64)
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(value as f64)
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(self.default)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(self.default)
+        }
+
+        fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserialize_f64_with_default(deserializer, self.default)
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            let value = value.trim();
+            let lower = value.to_ascii_lowercase();
+            match lower.as_str() {
+                "inf" | "+inf" | "infinity" | "+infinity" => Ok(f64::INFINITY),
+                "-inf" | "-infinity" => Ok(f64::NEG_INFINITY),
+                "nan" => Ok(f64::NAN),
+                _ => value.parse::<f64>().map_err(E::custom),
+            }
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            self.visit_str(&value)
+        }
+    }
+
+    deserializer.deserialize_any(F64OrNullVisitor { default })
+}
+
+fn deserialize_f64_or_default<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_f64_with_default(deserializer, 0.0)
+}
+
+fn deserialize_f64_or_neg_infinity<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_f64_with_default(deserializer, f64::NEG_INFINITY)
+}
+
+fn deserialize_f64_or_pos_infinity<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_f64_with_default(deserializer, f64::INFINITY)
+}
+
+#[derive(PartialEq, Default, Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct Value {
+    #[serde(default, deserialize_with = "deserialize_f64_or_default")]
     pub value: f64,
+    #[serde(
+        default,
+        alias = "uncertainity",
+        deserialize_with = "deserialize_f64_or_default"
+    )]
     pub uncertainty: f64,
 }
 
@@ -28,6 +148,7 @@ impl Value {
 }
 
 #[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct Calibration {
     pub a: Value,
     pub b: Value,
@@ -102,16 +223,74 @@ impl Calibration {
 }
 
 #[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct Parameter {
     pub name: String,
+    #[serde(
+        default = "default_parameter_min",
+        deserialize_with = "deserialize_f64_or_neg_infinity"
+    )]
     pub min: f64,
+    #[serde(
+        default = "default_parameter_max",
+        deserialize_with = "deserialize_f64_or_pos_infinity"
+    )]
     pub max: f64,
+    #[serde(default, deserialize_with = "deserialize_f64_or_default")]
     pub initial_guess: f64,
     pub vary: bool,
     pub value: Option<f64>,
     pub uncertainty: Option<f64>,
     pub calibrated_value: Option<f64>,
     pub calibrated_uncertainty: Option<f64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Parameter, Value};
+
+    #[test]
+    fn parameter_deserializes_null_min_max_as_infinities() {
+        let json = r#"{
+            "name":"slope",
+            "min":null,
+            "max":null,
+            "initial_guess":0.0,
+            "vary":true,
+            "value":null,
+            "uncertainty":null,
+            "calibrated_value":null,
+            "calibrated_uncertainty":null
+        }"#;
+
+        let p: Parameter = serde_json::from_str(json).expect("parameter should deserialize");
+        assert!(p.min.is_infinite() && p.min.is_sign_negative());
+        assert!(p.max.is_infinite() && p.max.is_sign_positive());
+    }
+
+    #[test]
+    fn value_deserializes_legacy_uncertainity_field() {
+        let json = r#"{"value": 42.0, "uncertainity": 0.5}"#;
+        let v: Value = serde_json::from_str(json).expect("value should deserialize");
+        assert_eq!(v.value, 42.0);
+        assert_eq!(v.uncertainty, 0.5);
+    }
+
+    #[test]
+    fn parameter_deserializes_ron_infinite_bounds() {
+        let ron = r#"(name:"slope",min:-inf,max:inf,initial_guess:0.0,vary:true,value:None,uncertainty:None,calibrated_value:None,calibrated_uncertainty:None)"#;
+        let p: Parameter = ron::from_str(ron).expect("parameter should deserialize from ron");
+        assert!(p.min.is_infinite() && p.min.is_sign_negative());
+        assert!(p.max.is_infinite() && p.max.is_sign_positive());
+    }
+}
+
+fn default_parameter_min() -> f64 {
+    f64::NEG_INFINITY
+}
+
+fn default_parameter_max() -> f64 {
+    f64::INFINITY
 }
 
 impl Default for Parameter {
