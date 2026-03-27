@@ -186,22 +186,9 @@ def GaussianFit(counts: list, centers: list,
         min_list = None
         max_list = None
 
-    # **Estimate Amplitude for Each Peak**
-    estimated_amplitude = []
-    for peak in peak_markers:
-        # Find closest bin index
-        closest_idx = np.abs(x_data - peak).argmin()
-        height = y_data[closest_idx]
-
-        if bg_result is not None:
-            # Estimate background contribution at this point if there is an background model
-            bg_at_peak = bg_result.eval(x=peak)
-        else:
-            bg_at_peak = 0
-        
-        # Subtract background to get height
-        adjusted_height = height - bg_at_peak
-        estimated_amplitude.append(adjusted_height * estimated_sigma/ 0.3989423)
+    # Height bounds for amplitude estimation based on the range
+    max_height = float(np.max(y_data))
+    min_height = float(np.min(y_data))
 
     # Add Gaussian peaks
     peak_markers = sorted(peak_markers)
@@ -210,7 +197,13 @@ def GaussianFit(counts: list, centers: list,
         g = lmfit.models.GaussianModel(prefix=f'g{i}_')
         model += g
 
-        params.update(g.make_params(amplitude=estimated_amplitude[i], mean=peak, sigma=estimated_sigma))
+        # Use per-peak sigma for consistent amplitude initialisation
+        sigma_val = per_peak_sigma_est[i] if not equal_sigma else estimated_sigma
+
+        # Initial guess: max bin height in the range, converted to amplitude
+        estimated_amplitude = max_height * sigma_val / 0.3989423
+
+        params.update(g.make_params(amplitude=estimated_amplitude, mean=peak, sigma=sigma_val))
 
         # if equal_sigma and i > 0:
         #     params[f'g{i}_sigma'].set(expr='g0_sigma')
@@ -245,8 +238,13 @@ def GaussianFit(counts: list, centers: list,
 
 
         params.add(f'g{i}_area', expr=f'g{i}_amplitude / {bin_width}')
-        params[f'g{i}_area'].set(min=0)  # Use estimated area
-        params[f'g{i}_amplitude'].set(min=0)  # Use estimated area
+        params[f'g{i}_area'].set(min=0)
+        # Amplitude bounds derived from height range of the fitting region:
+        # height = amplitude * 0.3989423 / sigma  =>  amplitude = height * sigma / 0.3989423
+        params[f'g{i}_amplitude'].set(
+            min=min_height * sigma_val / 0.3989423,
+            max=1.5 * max_height * sigma_val / 0.3989423,
+        )
 
 
         if not free_position:
