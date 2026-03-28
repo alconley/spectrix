@@ -741,7 +741,7 @@ impl Fits {
                 header(ui, "Sigma", SortCol::Sigma);
                 header(ui, "UUID", SortCol::Uuid);
                 header(ui, "Energy", SortCol::Energy);
-                ui.label("lmfit");
+                ui.label("Options");
                 ui.end_row();
 
                 // decide effective sort *after* header clicks
@@ -827,32 +827,38 @@ impl Fits {
                         energy_updates.push((r.fit_idx, r.peak, e_val, e_unc));
                     }
 
-                    // lmfit cell: show buttons only on first peak of a given fit (optional)
+                    // options cell: show actions only on the first peak row of a fit
                     if let Some(i) = r.fit_idx {
-                        // show export/report on the first peak row of that fit
+                        // show actions on the first peak row of that fit
                         let is_first_peak = r.peak == 0;
                         if is_first_peak {
                             if let Some(super::main_fitter::FitResult::Gaussian(g)) =
                                 &self.stored_fits[i].fit_result
                             {
-                                if let Some(ref text) = g.lmfit_result
-                                    && ui.button("Export").clicked()
-                                {
-                                    let suggested_name = format!(
-                                        "{}_lmfit_result.sav",
-                                        Self::sanitize_filename_component(
-                                            &self.stored_fits[i].name
-                                        )
-                                    );
-                                    Self::save_lmfit_result_with_dialog(text, &suggested_name);
-                                }
-                                if ui.button("Modify").clicked() {
-                                    to_modify = Some(i);
-                                }
-                                ui.menu_button("Fit Report", |ui| {
-                                    egui::ScrollArea::vertical().show(ui, |ui| {
-                                        ui.horizontal_wrapped(|ui| {
-                                            ui.label(self.stored_fits[i].get_fit_report());
+                                ui.menu_button("Options", |ui| {
+                                    if let Some(ref text) = g.lmfit_result
+                                        && ui.button("Export lmfit").clicked()
+                                    {
+                                        let suggested_name = format!(
+                                            "{}_lmfit_result.sav",
+                                            Self::sanitize_filename_component(
+                                                &self.stored_fits[i].name
+                                            )
+                                        );
+                                        Self::save_lmfit_result_with_dialog(text, &suggested_name);
+                                        ui.close();
+                                    }
+
+                                    if ui.button("Modify").clicked() {
+                                        to_modify = Some(i);
+                                        ui.close();
+                                    }
+
+                                    ui.menu_button("Fit Report", |ui| {
+                                        egui::ScrollArea::vertical().show(ui, |ui| {
+                                            ui.horizontal_wrapped(|ui| {
+                                                ui.label(self.stored_fits[i].get_fit_report());
+                                            });
                                         });
                                     });
                                 });
@@ -863,24 +869,28 @@ impl Fits {
                             ui.label("—");
                         }
                     } else {
-                        // Temp fit lmfit cell
+                        // Temp fit options cell
                         if let Some(temp) = &self.temp_fit {
                             if let Some(super::main_fitter::FitResult::Gaussian(g)) =
                                 &temp.fit_result
                             {
                                 if r.peak == 0 {
-                                    if let Some(ref text) = g.lmfit_result
-                                        && ui.button("Export").clicked()
-                                    {
-                                        Self::save_lmfit_result_with_dialog(
-                                            text,
-                                            "temp_fit_lmfit_result.sav",
-                                        );
-                                    }
-                                    ui.menu_button("Fit Report", |ui| {
-                                        egui::ScrollArea::vertical().show(ui, |ui| {
-                                            ui.horizontal_wrapped(|ui| {
-                                                ui.label(temp.get_fit_report());
+                                    ui.menu_button("Options", |ui| {
+                                        if let Some(ref text) = g.lmfit_result
+                                            && ui.button("Export lmfit").clicked()
+                                        {
+                                            Self::save_lmfit_result_with_dialog(
+                                                text,
+                                                "temp_fit_lmfit_result.sav",
+                                            );
+                                            ui.close();
+                                        }
+
+                                        ui.menu_button("Fit Report", |ui| {
+                                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                                ui.horizontal_wrapped(|ui| {
+                                                    ui.label(temp.get_fit_report());
+                                                });
                                             });
                                         });
                                     });
@@ -956,12 +966,18 @@ impl Fits {
         self.pending_modify_fit = to_modify;
     }
 
-    pub fn fit_stats_ui(&mut self, ui: &mut egui::Ui) {
-        if self.settings.show_fit_stats {
-            ui.separator();
+    fn fit_panel_contents_ui(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Fit Panel");
 
-            self.fit_stats_grid_ui(ui);
-        }
+        self.save_and_load_ui(ui);
+
+        self.settings.ui(ui);
+
+        self.calubration_ui(ui);
+
+        self.fit_stats_grid_ui(ui);
+
+        ui.add_space(10.0);
     }
 
     pub fn calubration_ui(&mut self, ui: &mut egui::Ui) {
@@ -990,33 +1006,31 @@ impl Fits {
         ui.separator();
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, show: bool) {
-        if show {
-            egui::ScrollArea::both()
-                .id_salt("Context menu fit stats grid")
-                .show(ui, |ui| {
-                    ui.vertical(|ui| {
-                        ui.heading("Fit Panel");
+    pub fn ui(&mut self, ui: &mut egui::Ui, hist_name: &str) {
+        if self.settings.show_fit_stats {
+            let title = format!("Fit Panel: {hist_name}");
+            let scroll_id = format!("fit_panel_scroll_{hist_name}");
+            let mut open = self.settings.show_fit_stats;
 
-                        self.save_and_load_ui(ui);
-
-                        self.settings.ui(ui);
-
-                        self.calubration_ui(ui);
-
-                        self.fit_stats_grid_ui(ui);
-
-                        ui.add_space(10.0);
+            egui::Window::new(title)
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    egui::ScrollArea::both().id_salt(scroll_id).show(ui, |ui| {
+                        self.fit_panel_contents_ui(ui);
                     });
                 });
+
+            self.settings.show_fit_stats = open;
         }
     }
 
     pub fn fit_context_menu_ui(&mut self, ui: &mut egui::Ui) {
-        ui.checkbox(&mut self.settings.show_fit_stats, "Show Fit Panel")
-            .on_hover_text("Show the fit statistics to the left of the histogram");
-
-        self.ui(ui, true);
+        egui::ScrollArea::both()
+            .id_salt(ui.id().with("fit_context_menu_scroll"))
+            .max_height(450.0)
+            .show(ui, |ui| {
+                self.fit_panel_contents_ui(ui);
+            });
     }
 
     pub fn sync_uuid(&mut self, uuid_map: &[FitUUID]) {

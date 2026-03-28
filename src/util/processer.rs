@@ -116,6 +116,14 @@ impl Default for FileSortState {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SelectedFileFormat {
+    None,
+    Parquet,
+    Root,
+    Mixed,
+}
+
 impl Processor {
     pub fn new(name: impl Into<String>) -> Self {
         let settings = ProcessorSettings {
@@ -148,6 +156,97 @@ impl Processor {
     pub fn reset(&mut self) {
         let name = self.settings.name.clone();
         *self = Self::new(name);
+    }
+
+    fn checked_files(&self) -> Vec<PathBuf> {
+        self.selected_files
+            .iter()
+            .filter(|(_, checked)| *checked)
+            .map(|(file, _)| file.clone())
+            .collect()
+    }
+
+    fn checked_file_format(&self) -> SelectedFileFormat {
+        let mut has_parquet = false;
+        let mut has_root = false;
+
+        for (file, checked) in &self.selected_files {
+            if !*checked {
+                continue;
+            }
+
+            match file.extension().and_then(|ext| ext.to_str()) {
+                Some("parquet") => has_parquet = true,
+                Some("root") => has_root = true,
+                _ => {}
+            }
+        }
+
+        match (has_parquet, has_root) {
+            (false, false) => SelectedFileFormat::None,
+            (true, false) => SelectedFileFormat::Parquet,
+            (false, true) => SelectedFileFormat::Root,
+            (true, true) => SelectedFileFormat::Mixed,
+        }
+    }
+
+    fn histogram_action_label(&self) -> &'static str {
+        match (
+            self.checked_file_format(),
+            self.settings.calculate_histograms_seperately,
+        ) {
+            (SelectedFileFormat::Root, true) => "Get Histograms Separately",
+            (SelectedFileFormat::Root, false) => "Get Histograms",
+            (SelectedFileFormat::Parquet | SelectedFileFormat::None, true) => {
+                "Calculate Histograms Separately"
+            }
+            (SelectedFileFormat::Parquet | SelectedFileFormat::None, false) => {
+                "Calculate Histograms"
+            }
+            (SelectedFileFormat::Mixed, true) => "Calculate/Get Histograms Separately",
+            (SelectedFileFormat::Mixed, false) => "Calculate/Get Histograms",
+        }
+    }
+
+    fn histogram_action_disabled_reason(&self) -> &'static str {
+        match self.checked_file_format() {
+            SelectedFileFormat::None => "No files selected.",
+            SelectedFileFormat::Mixed => {
+                "Select only parquet files or only root files before starting."
+            }
+            SelectedFileFormat::Parquet | SelectedFileFormat::Root => "",
+        }
+    }
+
+    pub fn session_processor_menu_ui(&mut self, ui: &mut egui::Ui) {
+        ui.label("Processor");
+
+        ui.horizontal(|ui| {
+            ui.label("Estimated Memory:");
+            ui.add(
+                egui::DragValue::new(&mut self.settings.estimated_memory)
+                    .range(0.1..=f64::INFINITY)
+                    .speed(1)
+                    .suffix(" GB"),
+            )
+            .on_hover_text(
+                "Estimated memory in GB. This is an approximation based off the rows and columns in a lazyframe, so set it lower than the actual memory to avoid crashes.",
+            );
+        });
+
+        ui.checkbox(
+            &mut self.settings.calculate_histograms_seperately,
+            "Calculate histograms separately",
+        );
+
+        ui.separator();
+        ui.label("Analysis");
+        ui.checkbox(&mut self.analysis.open, "Open SE-SPS Analysis");
+        ui.label(
+            egui::RichText::new("Under development for SE-SPS experiments.")
+                .weak()
+                .small(),
+        );
     }
 
     pub fn get_histograms_from_root_files(&mut self, checked_files: &[PathBuf]) -> PyResult<()> {
@@ -651,15 +750,15 @@ def get_2d_histograms(file_name):
     }
 
     pub fn calculate_histograms(&mut self) {
-        let checked_files: Vec<_> = self
-            .selected_files
-            .iter()
-            .filter(|(_, checked)| *checked)
-            .map(|(file, _)| file.clone())
-            .collect();
+        let checked_files = self.checked_files();
 
         if checked_files.is_empty() {
             log::error!("No files selected for histogram calculation.");
+            return;
+        }
+
+        if self.checked_file_format() == SelectedFileFormat::Mixed {
+            log::error!("Select only parquet files or only root files before starting.");
             return;
         }
 
@@ -672,6 +771,11 @@ def get_2d_histograms(file_name):
                 if file.extension().is_some_and(|ext| ext == "parquet") {
                     self.create_lazyframe(std::slice::from_ref(file));
                     self.perform_histogrammer_from_lazyframe(prefix);
+                } else if file.extension().is_some_and(|ext| ext == "root") {
+                    self.get_histograms_from_root_files(std::slice::from_ref(file))
+                        .unwrap_or_else(|e| {
+                            log::error!("Error processing ROOT file {file:?}: {e:?}");
+                        });
                 }
             }
         } else if checked_files
@@ -696,96 +800,73 @@ def get_2d_histograms(file_name):
             ui,
             self.settings.left_panel_open,
             |ui| {
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        if ui.button("Get Files").clicked() {
-                            self.file_dialog.pick_multiple();
-                        }
-                        if ui
-                            .selectable_label(self.settings.histogram_script_open, "Histograms")
-                            .clicked()
-                            {
-                                self.settings.histogram_script_open = !self.settings.histogram_script_open;
-                            }
-                    });
-
-                    if let Some(paths) = self.file_dialog.take_picked_multiple() {
-                        for path in paths {
-                            if path.is_dir() {
-                                self.file_dialog = FileDialog::new().initial_directory(path.clone());
-                                if let Ok(entries) = std::fs::read_dir(&path) {
-                                    for entry in entries.flatten() {
-                                        let file_path = entry.path();
-                                        if let Some(ext) = file_path.extension()
-                                            && (ext == "parquet" || ext == "root") {
-                                                self.add_selected_file(file_path, true);
-                                            }
+                if let Some(paths) = self.file_dialog.take_picked_multiple() {
+                    for path in paths {
+                        if path.is_dir() {
+                            self.file_dialog = FileDialog::new().initial_directory(path.clone());
+                            if let Ok(entries) = std::fs::read_dir(&path) {
+                                for entry in entries.flatten() {
+                                    let file_path = entry.path();
+                                    if let Some(ext) = file_path.extension()
+                                        && (ext == "parquet" || ext == "root")
+                                    {
+                                        self.add_selected_file(file_path, true);
                                     }
                                 }
-                            } else if let Some(ext) = path.extension() {
-                                // If it's a file, check if it's a valid type
-                                if ext == "parquet" || ext == "root" {
-                                    self.add_selected_file(path, true);
-                                }
+                            }
+                        } else if let Some(ext) = path.extension() {
+                            // If it's a file, check if it's a valid type
+                            if ext == "parquet" || ext == "root" {
+                                self.add_selected_file(path, true);
                             }
                         }
-                        self.sort_selected_files();
                     }
+                    self.sort_selected_files();
+                }
 
+                if ui
+                    .add_enabled(
+                        !self.selected_files.is_empty()
+                            && self.checked_file_format() != SelectedFileFormat::Mixed,
+                        egui::Button::new(self.histogram_action_label())
+                            .min_size(egui::vec2(ui.available_width(), 0.0)),
+                    )
+                    .on_disabled_hover_text(self.histogram_action_disabled_reason())
+                    .clicked()
+                {
+                    self.calculate_histograms();
+                }
+
+                if ui
+                    .add(
+                        egui::Button::selectable(
+                            self.settings.histogram_script_open,
+                            "Open Histogram Script",
+                        )
+                        .min_size(egui::vec2(ui.available_width(), 0.0)),
+                    )
+                    .clicked()
+                {
+                    self.settings.histogram_script_open = !self.settings.histogram_script_open;
+                }
+
+                if self.histogrammer.calculating.load(Ordering::Relaxed) {
                     ui.separator();
 
-                    ui.vertical(|ui| {
-
-                        ui.label("Processor");
-
-                        if ui
-                            .add_enabled(
-                                !self.selected_files.is_empty(),
-                                egui::Button::new("Calculate/Get Histograms"),
-                            )
-                            .on_disabled_hover_text("No files selected.")
-                            .clicked()
-                        {
-                            self.calculate_histograms();
-                        }
-
-                        ui.add(
-                            egui::DragValue::new(&mut self.settings.estimated_memory)
-                                .range(0.1..=f64::INFINITY)
-                                .speed(1)
-                                .prefix("Estimated Memory: ")
-                                .suffix(" GB"),
-                        ).on_hover_text("Estimated memory in GB. This is an approximation based off the rows and columns in a lazyframe, so set it lower that the actual memory to avoid crashes.");
-
-                        ui.add(
-                            egui::Checkbox::new(
-                                &mut self.settings.calculate_histograms_seperately,
-                                "Calculate histograms separately",
-                            )
-                        );
-
-                        if self.histogrammer.calculating.load(Ordering::Relaxed) {
-                            // Show spinner while `calculating` is true
-                            ui.horizontal(|ui| {
-                                ui.label("Calculating");
-                                ui.add(egui::widgets::Spinner::default());
-                                ui.separator();
-                                if ui.button("Cancel").clicked() {
-                                    self.histogrammer.abort_flag.store(true, Ordering::Relaxed);
-                                }
-                            });
-                        }
-
+                    // Show spinner while `calculating` is true
+                    ui.horizontal(|ui| {
+                        ui.label("Calculating");
+                        ui.add(egui::widgets::Spinner::default());
                         ui.separator();
-
-                        ui.checkbox(&mut self.analysis.open, "Open Analysis");
+                        if ui.button("Cancel").clicked() {
+                            self.histogrammer.abort_flag.store(true, Ordering::Relaxed);
+                        }
                     });
-                });
+                }
 
                 ui.separator();
 
                 self.selected_files_ui(ui);
-
             },
         );
 
@@ -878,7 +959,18 @@ def get_2d_histograms(file_name):
     }
 
     pub fn selected_files_ui(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .add(
+                egui::Button::new("Get Files/Directory")
+                    .min_size(egui::vec2(ui.available_width(), 0.0)),
+            )
+            .clicked()
+        {
+            self.file_dialog.pick_multiple();
+        }
+
         if !self.selected_files.is_empty() {
+            ui.add_space(4.0);
             ui.label("Selected files:");
             ui.horizontal_wrapped(|ui| {
                 if ui.button("De/Select All").clicked() {

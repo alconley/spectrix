@@ -7,7 +7,7 @@ use pyo3::ffi::c_str;
 use pyo3::{prelude::*, types::PyModule};
 
 // Standard library
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -122,6 +122,66 @@ impl Histogrammer {
         }
     }
 
+    fn ensure_histogram_shape_1d(
+        &mut self,
+        pane_id: TileId,
+        name: &str,
+        bins: usize,
+        range: (f64, f64),
+    ) {
+        if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram(hist)))) =
+            self.tree.tiles.iter_mut().find(|(id, _)| **id == pane_id)
+        {
+            let mut hist = hist.lock().expect("Failed to lock histogram");
+            let shape_changed = hist.original_bins.len() != bins || hist.range != range;
+
+            if shape_changed {
+                log::info!(
+                    "Reconfiguring 1D histogram '{name}' to bins={bins}, range=({:.3}, {:.3})",
+                    range.0,
+                    range.1
+                );
+                **hist = Histogram::new(name, bins, range);
+                hist.plot_settings.egui_settings.reset_axis = true;
+            }
+        }
+    }
+
+    fn ensure_histogram_shape_2d(
+        &mut self,
+        pane_id: TileId,
+        name: &str,
+        bins: (usize, usize),
+        range: ((f64, f64), (f64, f64)),
+    ) {
+        if let Some((_id, egui_tiles::Tile::Pane(Pane::Histogram2D(hist)))) =
+            self.tree.tiles.iter_mut().find(|(id, _)| **id == pane_id)
+        {
+            let mut hist = hist.lock().expect("Failed to lock 2D histogram");
+            let current_bins = (hist.bins.x, hist.bins.y);
+            let current_range = (
+                (hist.range.x.min, hist.range.x.max),
+                (hist.range.y.min, hist.range.y.max),
+            );
+            let shape_changed = current_bins != bins || current_range != range;
+
+            if shape_changed {
+                log::info!(
+                    "Reconfiguring 2D histogram '{name}' to bins=({}, {}), x_range=({:.3}, {:.3}), y_range=({:.3}, {:.3})",
+                    bins.0,
+                    bins.1,
+                    range.0.0,
+                    range.0.1,
+                    range.1.0,
+                    range.1.1
+                );
+                **hist = Histogram2D::new(name, bins, range);
+                hist.plot_settings.recalculate_image = true;
+                hist.plot_settings.egui_settings.reset_axis = true;
+            }
+        }
+    }
+
     fn create_1d_pane(&mut self, name: &str, bins: usize, range: (f64, f64)) -> TileId {
         let hist = Histogram::new(name, bins, range);
         let pane = Pane::Histogram(Arc::new(Mutex::new(Box::new(hist))));
@@ -167,8 +227,7 @@ impl Histogrammer {
         log::debug!("Creating or updating 1D histogram '{name}'");
 
         if let Some(pane_id) = self.find_existing_histogram(name) {
-            log::debug!("Resetting existing 1D histogram '{name}'");
-            self.reset_histogram(pane_id);
+            self.ensure_histogram_shape_1d(pane_id, name, bins, range);
         } else {
             log::debug!("No existing histogram found; creating new 1D histogram '{name}'");
             self.create_1d_pane(name, bins, range);
@@ -184,11 +243,27 @@ impl Histogrammer {
         log::debug!("Creating or updating 2D histogram '{name}'");
 
         if let Some(pane_id) = self.find_existing_histogram(name) {
-            log::debug!("Resetting existing 2D histogram '{name}'");
-            self.reset_histogram(pane_id);
+            self.ensure_histogram_shape_2d(pane_id, name, bins, range);
         } else {
             log::debug!("No existing histogram found; creating new 2D histogram '{name}'");
             self.create_2d_pane(name, bins, range);
+        }
+    }
+
+    fn reset_target_histograms(&mut self, configs: &Configs) {
+        let mut seen = HashSet::new();
+
+        for config in &configs.configs {
+            let name = match config {
+                Config::Hist1D(hist1d) => &hist1d.name,
+                Config::Hist2D(hist2d) => &hist2d.name,
+            };
+
+            if seen.insert(name.clone())
+                && let Some(pane_id) = self.find_existing_histogram(name)
+            {
+                self.reset_histogram(pane_id);
+            }
         }
     }
 
@@ -211,6 +286,7 @@ impl Histogrammer {
         // Validate configurations and prepare histograms
         let valid_configs = configs.valid_configs(&mut lf);
         valid_configs.check_and_add_panes(self);
+        self.reset_target_histograms(&valid_configs);
 
         // if valid configs is empty, return early
         if valid_configs.is_empty() {

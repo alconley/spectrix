@@ -37,6 +37,18 @@ impl HistogramScript {
         }
     }
 
+    pub fn save_general_configs_dialog(&self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("JSON Config", &["json"])
+            .set_title("Save General Histogram Config")
+            .save_file()
+            && let Ok(serialized) = serde_json::to_string_pretty(&self.configs)
+            && let Ok(mut file) = File::create(path)
+        {
+            let _file = file.write_all(serialized.as_bytes());
+        }
+    }
+
     pub fn load_configs_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("JSON Config", &["json"])
@@ -47,6 +59,20 @@ impl HistogramScript {
             let reader = BufReader::new(file);
             if let Ok(loaded) = serde_json::from_reader(reader) {
                 *self = loaded;
+            }
+        }
+    }
+
+    pub fn load_general_configs_dialog(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("JSON Config", &["json"])
+            .set_title("Load General Histogram Config")
+            .pick_file()
+            && let Ok(file) = File::open(path)
+        {
+            let reader = BufReader::new(file);
+            if let Ok(loaded) = serde_json::from_reader(reader) {
+                self.configs = loaded;
             }
         }
     }
@@ -97,6 +123,16 @@ impl HistogramScript {
             egui::CollapsingHeader::new("General")
                 .default_open(false)
                 .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("Save General").clicked() {
+                            self.save_general_configs_dialog();
+                        }
+                        if ui.button("Load General").clicked() {
+                            self.load_general_configs_dialog();
+                        }
+                    });
+
+                    ui.separator();
                     self.configs.ui(ui, Some(active_cuts.as_mut_slice()));
                 });
 

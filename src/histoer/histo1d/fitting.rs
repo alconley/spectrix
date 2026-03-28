@@ -216,6 +216,15 @@ impl Histogram {
 
         fitter.set_name(self.name.clone());
         self.fits.temp_fit = Some(fitter);
+        if matches!(
+            self.fits
+                .temp_fit
+                .as_ref()
+                .and_then(|temp_fit| temp_fit.fit_result.as_ref()),
+            Some(FitResult::Gaussian(_))
+        ) {
+            self.fits.settings.show_fit_stats = true;
+        }
 
         // Preserve UUID and energy assignments across modify -> refit workflows.
         if !previous_peak_assignments.is_empty()

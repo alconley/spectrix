@@ -72,10 +72,6 @@ impl Histogram {
             // if ui.input(|i| i.key_pressed(egui::Key::O)) {
             //     self.find_peaks();
             // }
-
-            if ui.input(|i| i.key_pressed(egui::Key::Tab)) {
-                self.fits.settings.show_fit_stats = !self.fits.settings.show_fit_stats;
-            }
         }
     }
 

@@ -213,6 +213,10 @@ impl eframe::App for Spectrix {
 
                                         ui.separator();
 
+                                        session.session_processor_menu_ui(ui);
+
+                                        ui.separator();
+
                                         ui.menu_button("Histogrammer", |ui| {
                                             session.histogrammer.menu_contents_ui(ui);
                                         });

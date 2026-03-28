@@ -288,7 +288,7 @@ The 1D histogram interface in **Spectrix** is designed for fast, interactive pea
 - Fit one or many Gaussian peaks in a selected region.
 - Choose and tune background models: linear, quadratic, power law, exponential.
 - Rebin and restyle plots from the context menu.
-- Store fit results and review them in a dedicated side panel.
+- Store fit results and review them in a dedicated popup window or from the right-click Fits menu.
 - Click **Modify** on a stored fit to move it back into the temp fit editor with its saved markers/settings.
 - Click **Refit** in the Fit Panel header to re-run all stored fits on the latest incoming data.
 - Use keyboard-driven controls for quick analysis loops.
@@ -358,7 +358,6 @@ Cursor must be inside the plot for keybinds to be active.
 | **G** | Fit background | Uses selected background model and current background markers. |
 | **F** | Fit Gaussians | Fits peaks in region; auto-fits background first if needed. |
 | **S** | Store fit | Saves current fit result for later comparison/export. |
-| **Tab** | Toggle Fit Panel | Opens/closes side panel for stored fits. |
 | **I** | Toggle statistics | Shows/hides stats such as mean, counts, and sigma. |
 | **L** | Toggle log Y-axis | Switches between linear and logarithmic Y scaling. |
 

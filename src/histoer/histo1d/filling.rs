@@ -25,8 +25,6 @@ impl Histogram {
     ) -> PolarsResult<()> {
         let start = Instant::now();
 
-        self.reset();
-
         let (min_val, max_val) = self.range;
         let bin_width = self.bin_width;
 
