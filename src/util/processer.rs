@@ -6,10 +6,8 @@ use crate::histogram_scripter::histogram_script::HistogramScript;
 use pyo3::ffi::c_str;
 use pyo3::{prelude::*, types::PyModule};
 
-use egui_file_dialog::FileDialog;
-// use polars::prelude::PlPath;
+use egui_file_dialog::{FileDialog, Filter};
 use polars::prelude::*;
-// use polars_arrow::buffer::Buffer;
 
 use std::cmp::Ordering as CmpOrdering;
 use std::path::PathBuf;
@@ -129,11 +127,13 @@ impl Processor {
             file_dialog: FileDialog::new()
                 .add_file_filter(
                     "Root files",
-                    Arc::new(|p| p.extension().unwrap_or_default() == "root"),
+                    Filter::new(|p: &std::path::Path| p.extension().unwrap_or_default() == "root"),
                 )
                 .add_file_filter(
                     "Parquet files",
-                    Arc::new(|p| p.extension().unwrap_or_default() == "parquet"),
+                    Filter::new(|p: &std::path::Path| {
+                        p.extension().unwrap_or_default() == "parquet"
+                    }),
                 ),
             selected_files: Vec::new(),
             lazyframe: None,
@@ -691,9 +691,9 @@ def get_2d_histograms(file_name):
         }
     }
 
-    pub fn left_side_panels_ui(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("spectrix_processor_left_panel").show_animated(
-            ctx,
+    pub fn left_side_panels_ui(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::left("spectrix_processor_left_panel").show_animated_inside(
+            ui,
             self.settings.left_panel_open,
             |ui| {
                 ui.horizontal(|ui| {
@@ -789,24 +789,24 @@ def get_2d_histograms(file_name):
             },
         );
 
-        egui::SidePanel::left("spectrix_histogram_panel").show_animated(
-            ctx,
+        egui::Panel::left("spectrix_histogram_panel").show_animated_inside(
+            ui,
             self.settings.histogram_script_open && self.settings.left_panel_open,
             |ui| {
                 self.histogram_script.ui(ui, &self.histogrammer);
             },
         );
 
-        self.panel_toggle_button(ctx);
+        self.panel_toggle_button(ui);
     }
 
-    pub fn panel_toggle_button(&mut self, ctx: &egui::Context) {
+    pub fn panel_toggle_button(&mut self, ui: &mut egui::Ui) {
         // Secondary left panel for the toggle button
-        egui::SidePanel::left("spectrix_toggle_left_panel")
+        egui::Panel::left("spectrix_toggle_left_panel")
             .resizable(false)
             .show_separator_line(false)
-            .min_width(1.0)
-            .show(ctx, |ui| {
+            .min_size(1.0)
+            .show_inside(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.add_space(ui.available_height() / 2.0 - 10.0); // Center the button vertically
                     if ui
@@ -1069,12 +1069,12 @@ def get_2d_histograms(file_name):
         });
     }
 
-    pub fn bottom_panel(&mut self, ctx: &egui::Context) {
+    pub fn bottom_panel(&mut self, ui: &mut egui::Ui) {
         if self.histogrammer.calculating.load(Ordering::Relaxed)
             || self.settings.saving_in_progress.load(Ordering::Relaxed)
             || self.settings.combining_in_progress.load(Ordering::Relaxed)
         {
-            egui::TopBottomPanel::bottom("spectrix_bottom_panel").show(ctx, |ui| {
+            egui::Panel::bottom("spectrix_bottom_panel").show_inside(ui, |ui| {
                 // existing histogrammer progress bar...
                 if self.histogrammer.calculating.load(Ordering::Relaxed) {
                     ui.add(
@@ -1121,21 +1121,21 @@ def get_2d_histograms(file_name):
         }
     }
 
-    fn central_panel_ui(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    fn central_panel_ui(&mut self, ui: &mut egui::Ui) {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             self.histogrammer.ui(ui);
         });
     }
 
-    pub fn ui(&mut self, ctx: &egui::Context) {
-        self.left_side_panels_ui(ctx);
-        self.bottom_panel(ctx);
-        self.central_panel_ui(ctx);
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        self.left_side_panels_ui(ui);
+        self.bottom_panel(ui);
+        self.central_panel_ui(ui);
 
         self.analysis
-            .ui(ctx, &self.selected_files, &mut self.histogrammer);
+            .ui(ui, &self.selected_files, &mut self.histogrammer);
 
-        self.file_dialog.update(ctx);
+        self.file_dialog.update(ui);
     }
 }
 

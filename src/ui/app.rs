@@ -161,8 +161,8 @@ impl eframe::App for Spectrix {
         eframe::set_value(storage, eframe::APP_KEY, self);
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("spectrix_top_panel").show(ctx, |ui| {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::Panel::top("spectrix_top_panel").show_inside(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 egui::ScrollArea::horizontal()
                     .id_salt("spectrix_top_scroll")
@@ -241,7 +241,7 @@ impl eframe::App for Spectrix {
 
                                 if let Some(dragged_index) = response.dnd_release_payload::<usize>() {
                                     let insert_index =
-                                        ui.ctx().pointer_interact_pos().map_or(i, |pos| {
+                                        ui.pointer_interact_pos().map_or(i, |pos| {
                                             if pos.x >= tab_rect.center().x {
                                                 i + 1
                                             } else {
@@ -276,7 +276,7 @@ impl eframe::App for Spectrix {
 
         // Draw the UI for the current session
         if let Some(current) = self.sessions.get_mut(self.current_session) {
-            current.ui(ctx);
+            current.ui(ui);
         }
     }
 }

@@ -16,7 +16,7 @@ impl AnalysisScripts {
     /// Call this every frame from your app. Set `self.open = true` to (re)open the window.
     pub fn ui(
         &mut self,
-        ctx: &egui::Context,
+        ui: &mut egui::Ui,
         files: &[(PathBuf, bool)],
         histogrammer: &mut histogrammer::Histogrammer,
     ) {
@@ -34,12 +34,12 @@ impl AnalysisScripts {
             .with_app_id("Analysis Window");
 
         let mut requested_close = false;
-        ctx.show_viewport_immediate(id, builder, |ctx, _class: ViewportClass| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        ui.show_viewport_immediate(id, builder, |ui, _class: ViewportClass| {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
                 self.se_sps.ui(ui, files, histogrammer);
             });
 
-            if ctx.input(|i| i.viewport().close_requested()) {
+            if ui.input(|i| i.viewport().close_requested()) {
                 requested_close = true;
             }
         });
