@@ -61,6 +61,15 @@ impl BackgroundResult {
             Self::Exponential(fit) => fit.fit_points.clone(),
         }
     }
+
+    pub fn evaluate(&self, x: f64) -> f64 {
+        match self {
+            Self::Linear(fit) => fit.evaluate(x),
+            Self::Quadratic(fit) => fit.evaluate(x),
+            Self::PowerLaw(fit) => fit.evaluate(x),
+            Self::Exponential(fit) => fit.evaluate(x),
+        }
+    }
 }
 
 impl BackgroundModel {

@@ -2,96 +2,93 @@ use find_peaks::Peak;
 use find_peaks::PeakFinder;
 
 use super::histogram1d::Histogram;
+use crate::fitter::main_fitter::BackgroundResult;
 
 impl Histogram {
-    // // Add a function to find peaks
-    // pub fn find_peaks(&mut self) {
-    //     // Clear the peak markers
-    //     self.plot_settings.markers.clear_peak_markers();
+    fn active_background_result(&self) -> Option<BackgroundResult> {
+        self.fits
+            .temp_fit
+            .as_ref()
+            .and_then(|fit| fit.background_result.clone())
+            .or_else(|| {
+                self.fits
+                    .stored_fits
+                    .iter()
+                    .rev()
+                    .find_map(|fit| fit.background_result.clone())
+            })
+    }
 
-    //     let region_marker_positions = self.plot_settings.markers.get_region_marker_positions();
-    //     let mut background_marker_positions =
-    //         self.plot_settings.markers.get_background_marker_positions();
+    pub fn find_peaks(&mut self) {
+        let region_marker_positions = self.plot_settings.markers.get_region_marker_positions();
+        let (x_data, mut y_data) = if region_marker_positions.len() == 2 {
+            let start_x = region_marker_positions[0];
+            let end_x = region_marker_positions[1];
 
-    //     // Sort background markers
-    //     background_marker_positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            (
+                self.get_bin_centers_between(start_x, end_x),
+                self.get_bin_counts_between(start_x, end_x),
+            )
+        } else {
+            (
+                self.get_bin_centers(),
+                self.bins.iter().map(|&count| count as f64).collect(),
+            )
+        };
 
-    //     let mut peaks_found_with_background = false;
-    //     let mut peaks_found_with_region = false;
+        if let Some(background_result) = self.active_background_result() {
+            for (x, y) in x_data.iter().zip(&mut y_data) {
+                let background = background_result.evaluate(*x);
+                if background.is_finite() {
+                    *y -= background;
+                }
+            }
+        }
 
-    //     // Determine x_data and y_data before borrowing temp_fit as mutable
-    //     let (x_data, y_data) = if background_marker_positions.len() >= 2 {
-    //         self.fit_background();
+        self.plot_settings.markers.clear_peak_markers();
 
-    //         // if there are region markers, use the data between them
-    //         let (start_x, end_x) = if region_marker_positions.len() == 2 {
-    //             peaks_found_with_region = true;
-    //             (region_marker_positions[0], region_marker_positions[1])
-    //         } else {
-    //             peaks_found_with_background = true;
-    //             (
-    //                 background_marker_positions[0],
-    //                 background_marker_positions[background_marker_positions.len() - 1],
-    //             )
-    //         };
+        for peak in self.plot_settings.find_peaks_settings.find_peaks(&y_data) {
+            if let Some(x) = x_data.get(peak.middle_position()) {
+                self.plot_settings.markers.add_peak_marker(*x);
+            }
+        }
+    }
+}
 
-    //         // Retrieve x_data and y_data without holding a mutable reference
-    //         let x_data = self.get_bin_centers_between(start_x, end_x);
-    //         let y_data = self.get_bin_counts_between(start_x, end_x);
-    //         (Some(x_data), Some(y_data))
-    //     } else if region_marker_positions.len() == 2 {
-    //         let (start_x, end_x) = (region_marker_positions[0], region_marker_positions[1]);
-    //         peaks_found_with_region = true;
-    //         let counts = self.get_bin_counts_between(start_x, end_x);
-    //         (None, Some(counts))
-    //     } else {
-    //         (
-    //             None,
-    //             Some(self.bins.iter().map(|&count| count as f64).collect()),
-    //         )
-    //     };
+fn float_setting_row(
+    ui: &mut egui::Ui,
+    enabled: &mut bool,
+    value: &mut f64,
+    label: &str,
+    hover_text: &str,
+) {
+    ui.horizontal(|ui| {
+        ui.checkbox(enabled, label).on_hover_text(hover_text);
+        if *enabled {
+            ui.add(
+                egui::DragValue::new(value)
+                    .speed(1.0)
+                    .range(0.0..=f64::INFINITY),
+            )
+            .on_hover_text(hover_text);
+        }
+    });
+}
 
-    //     // If x_data and y_data were retrieved, perform background subtraction
-    //     let y_data = if let (Some(x_data), Some(y_data)) = (&x_data, &y_data) {
-    //         if let Some(temp_fit) = &mut self.fits.temp_fit {
-    //             temp_fit.subtract_background(x_data.clone(), y_data.clone())
-    //         } else {
-    //             log::error!("Failed to fit background");
-    //             return;
-    //         }
-    //     } else {
-    //         y_data.clone() // Clone to avoid moving y_data
-    //     };
-
-    //     if let Some(y_data) = y_data {
-    //         let peaks = self.plot_settings.find_peaks_settings.find_peaks(y_data);
-    //         // Add peak markers at detected peaks
-    //         for peak in &peaks {
-    //             let peak_position = peak.middle_position();
-    //             log::info!("Peak at position: {}", peak_position);
-    //             // Adjust peak position relative to the first background marker
-    //             if peaks_found_with_background {
-    //                 let adjusted_peak_position =
-    //                     self.bin_width * peak_position as f64 + background_marker_positions[0];
-    //                 self.plot_settings
-    //                     .markers
-    //                     .add_peak_marker(adjusted_peak_position);
-    //             } else if peaks_found_with_region {
-    //                 let adjusted_peak_position =
-    //                     self.bin_width * peak_position as f64 + region_marker_positions[0];
-    //                 self.plot_settings
-    //                     .markers
-    //                     .add_peak_marker(adjusted_peak_position);
-    //             } else {
-    //                 let adjusted_peak_position =
-    //                     self.bin_width * peak_position as f64 + self.range.0;
-    //                 self.plot_settings
-    //                     .markers
-    //                     .add_peak_marker(adjusted_peak_position);
-    //             }
-    //         }
-    //     }
-    // }
+fn usize_setting_row(
+    ui: &mut egui::Ui,
+    enabled: &mut bool,
+    value: &mut usize,
+    label: &str,
+    hover_text: &str,
+) {
+    ui.horizontal(|ui| {
+        ui.checkbox(enabled, label).on_hover_text(hover_text);
+        if *enabled {
+            ui.add(egui::DragValue::new(value).speed(1.0).range(0..=usize::MAX))
+                .on_hover_text(hover_text);
+        }
+    });
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -122,22 +119,22 @@ pub struct PeakFindingSettings {
 impl Default for PeakFindingSettings {
     fn default() -> Self {
         Self {
-            min_height: 20.0,
+            min_height: 10.0,
             max_height: 0.0,
-            min_prominence: 1.0,
+            min_prominence: 8.0,
             max_prominence: 0.0,
-            min_difference: 1.0,
-            max_difference: 1.0,
+            min_difference: 2.0,
+            max_difference: 0.0,
             min_plateau_size: 1,
             max_plateau_size: 1,
-            min_distance: 5,
-            max_distance: 1,
+            min_distance: 4,
+            max_distance: 0,
 
-            enable_min_height: true,
+            enable_min_height: false,
             enable_max_height: false,
             enable_min_prominence: true,
             enable_max_prominence: false,
-            enable_min_difference: false,
+            enable_min_difference: true,
             enable_max_difference: false,
             enable_min_plateau_size: false,
             enable_max_plateau_size: false,
@@ -158,115 +155,85 @@ impl PeakFindingSettings {
         ui.separator();
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.enable_min_height, "Enable Min Height");
-                if self.enable_min_height {
-                    ui.add(
-                        egui::DragValue::new(&mut self.min_height)
-                            .speed(1.0)
-                            .range(0.0..=f32::INFINITY),
-                    );
-                }
-            });
+            float_setting_row(
+                ui,
+                &mut self.enable_min_height,
+                &mut self.min_height,
+                "Min Height",
+                "Minimum peak height after optional background subtraction. Raise this to ignore smaller peaks.",
+            );
 
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.enable_max_height, "Enable Max Height");
-                if self.enable_max_height {
-                    ui.add(
-                        egui::DragValue::new(&mut self.max_height)
-                            .speed(1.0)
-                            .range(0.0..=f32::INFINITY),
-                    );
-                }
-            });
+            float_setting_row(
+                ui,
+                &mut self.enable_max_height,
+                &mut self.max_height,
+                "Max Height",
+                "Maximum peak height after optional background subtraction. Useful for excluding very tall or saturated peaks.",
+            );
 
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.enable_min_prominence, "Enable Min Prominence");
-                if self.enable_min_prominence {
-                    ui.add(
-                        egui::DragValue::new(&mut self.min_prominence)
-                            .speed(1.0)
-                            .range(0.0..=f32::INFINITY),
-                    );
-                }
-            });
+            float_setting_row(
+                ui,
+                &mut self.enable_min_prominence,
+                &mut self.min_prominence,
+                "Min Prominence",
+                "Minimum prominence. Higher values keep only peaks that stand out clearly above nearby valleys.",
+            );
 
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.enable_max_prominence, "Enable Max Prominence");
-                if self.enable_max_prominence {
-                    ui.add(
-                        egui::DragValue::new(&mut self.max_prominence)
-                            .speed(1.0)
-                            .range(0.0..=f32::INFINITY),
-                    );
-                }
-            });
+            float_setting_row(
+                ui,
+                &mut self.enable_max_prominence,
+                &mut self.max_prominence,
+                "Max Prominence",
+                "Maximum prominence. Useful if you want to ignore very dominant peaks.",
+            );
 
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.enable_min_difference, "Enable Min Difference");
-                if self.enable_min_difference {
-                    ui.add(
-                        egui::DragValue::new(&mut self.min_difference)
-                            .speed(1.0)
-                            .range(0.0..=f32::INFINITY),
-                    );
-                }
-            });
+            float_setting_row(
+                ui,
+                &mut self.enable_min_difference,
+                &mut self.min_difference,
+                "Min Difference",
+                "Minimum absolute drop to the nearest neighboring bins on each side. Helps reject tiny wiggles and noise.",
+            );
 
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.enable_max_difference, "Enable Max Difference");
-                if self.enable_max_difference {
-                    ui.add(
-                        egui::DragValue::new(&mut self.max_difference)
-                            .speed(1.0)
-                            .range(0.0..=f32::INFINITY),
-                    );
-                }
-            });
+            float_setting_row(
+                ui,
+                &mut self.enable_max_difference,
+                &mut self.max_difference,
+                "Max Difference",
+                "Maximum absolute drop to the nearest neighboring bins on each side.",
+            );
 
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.enable_min_plateau_size, "Enable Min Plateau Size");
-                if self.enable_min_plateau_size {
-                    ui.add(
-                        egui::DragValue::new(&mut self.min_plateau_size)
-                            .speed(1.0)
-                            .range(0.0..=f32::INFINITY),
-                    );
-                }
-            });
+            usize_setting_row(
+                ui,
+                &mut self.enable_min_plateau_size,
+                &mut self.min_plateau_size,
+                "Min Plateau Size",
+                "Minimum number of bins allowed in a flat-topped peak.",
+            );
 
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.enable_max_plateau_size, "Enable Max Plateau Size");
-                if self.enable_max_plateau_size {
-                    ui.add(
-                        egui::DragValue::new(&mut self.max_plateau_size)
-                            .speed(1.0)
-                            .range(0.0..=f32::INFINITY),
-                    );
-                }
-            });
+            usize_setting_row(
+                ui,
+                &mut self.enable_max_plateau_size,
+                &mut self.max_plateau_size,
+                "Max Plateau Size",
+                "Maximum number of bins allowed in a flat-topped peak.",
+            );
 
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.enable_min_distance, "Enable Min Distance");
-                if self.enable_min_distance {
-                    ui.add(
-                        egui::DragValue::new(&mut self.min_distance)
-                            .speed(1.0)
-                            .range(0.0..=f32::INFINITY),
-                    );
-                }
-            });
+            usize_setting_row(
+                ui,
+                &mut self.enable_min_distance,
+                &mut self.min_distance,
+                "Min Distance",
+                "Minimum separation in bins between accepted peaks. If peaks are too close, the taller one wins.",
+            );
 
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.enable_max_distance, "Enable Max Distance");
-                if self.enable_max_distance {
-                    ui.add(
-                        egui::DragValue::new(&mut self.max_distance)
-                            .speed(1.0)
-                            .range(0.0..=f32::INFINITY),
-                    );
-                }
-            });
+            usize_setting_row(
+                ui,
+                &mut self.enable_max_distance,
+                &mut self.max_distance,
+                "Max Distance",
+                "Maximum separation in bins between accepted peaks.",
+            );
         });
     }
 

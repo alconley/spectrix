@@ -287,6 +287,7 @@ The 1D histogram interface in **Spectrix** is designed for fast, interactive pea
 - Interactively place and move peak, background, and region markers.
 - Fit one or many Gaussian peaks in a selected region.
 - Choose and tune background models: linear, quadratic, power law, exponential.
+- Detect peaks with `find_peaks`, with optional region-limited searching and background subtraction.
 - Rebin and restyle plots from the context menu.
 - Store fit results and review them in a dedicated popup window or from the right-click Fits menu.
 - Click **Modify** on a stored fit to move it back into the temp fit editor with its saved markers/settings.
@@ -357,6 +358,7 @@ Cursor must be inside the plot for keybinds to be active.
 | **Delete** | Clear temporary markers/fits | Removes active markers and temporary fit curves. |
 | **G** | Fit background | Uses selected background model and current background markers. |
 | **F** | Fit Gaussians | Fits peaks in region; auto-fits background first if needed. |
+| **O** | Detect peaks | Runs the peak finder and places peak markers at the detected locations. |
 | **S** | Store fit | Saves current fit result for later comparison/export. |
 | **I** | Toggle statistics | Shows/hides stats such as mean, counts, and sigma. |
 | **L** | Toggle log Y-axis | Switches between linear and logarithmic Y scaling. |
@@ -367,11 +369,15 @@ Cursor must be inside the plot for keybinds to be active.
 - If no background markers are present, Spectrix will still fit Gaussians on top of a fitted background model.
 - Background markers and an explicit background fit help the solver converge faster and let you control which region is used to determine the background.
 - Multiple Gaussian peaks can be fit simultaneously when multiple peak markers exist in the active region.
+- Peak finding settings are available from the right-click **Peak Finder** submenu, including min/max height, prominence, difference, plateau size, and distance controls with hover help.
+- If exactly two region markers are active, peak finding only searches the data between them.
+- If a background fit is active, Spectrix subtracts that background before peak finding.
+- Detected peaks are written back into the plot as peak markers so they can be fitted immediately.
 - By default, peaks share a common standard deviation; this can be changed in fit settings.
 - Peak positions and widths can be constrained or locked from the *Fits* menu.
 - Fit reports, curves, and parameter values are available from the plot context menu.
 
-> Additional controls such as rebinning, marker styling, and display options are available by right-clicking on the 1D plot.
+> Additional controls such as peak finding, rebinning, marker styling, and display options are available by right-clicking on the 1D plot.
 
 ---
 

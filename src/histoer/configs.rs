@@ -507,10 +507,10 @@ impl Configs {
 
                         match &mut self.configs[index] {
                             Config::Hist1D(config) => {
-                                config.table_row(&mut row, available_cuts, hist1d_lock)
+                                config.table_row(&mut row, available_cuts, hist1d_lock);
                             }
                             Config::Hist2D(config) => {
-                                config.table_row(&mut row, available_cuts, hist2d_lock)
+                                config.table_row(&mut row, available_cuts, hist2d_lock);
                             }
                         }
 

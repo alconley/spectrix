@@ -32,16 +32,25 @@ impl Histogram {
                 self.fits.fit_context_menu_ui(ui);
             });
 
-        // SubMenuButton::new("Peak Finder")
-        //     .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
-        //     .ui(ui, |ui| {
-        //         ui.heading("Peak Finder");
-        //         if ui.button("Detect Peaks")
-        //             .on_hover_text("Takes the settings (adjust below) and finds peaks in the spectrum\nIf there are background markers, it will fit a background before it finds the peaks in between the min and max values. Likewise for region markers.\nKeybind: o").clicked() {
-        //             self.find_peaks();
-        //         }
-        //         self.plot_settings.find_peaks_settings.menu_button(ui);
-        //     });
+        SubMenuButton::new("Peak Finder")
+            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
+            .ui(ui, |ui| {
+                ui.heading("Peak Finder");
+                if ui
+                    .button("Detect Peaks")
+                    .on_hover_text(
+                        "Find peaks with `find_peaks` using the settings below.\n\
+                         If region markers are set, only the data between them is searched.\n\
+                         If an active background fit exists, it is subtracted before searching.\n\
+                         Keybind: O",
+                    )
+                    .clicked()
+                {
+                    self.find_peaks();
+                }
+                ui.separator();
+                self.plot_settings.find_peaks_settings.menu_button(ui);
+            });
 
         SubMenuButton::new("Rebin")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))

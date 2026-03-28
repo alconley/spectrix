@@ -69,9 +69,9 @@ impl Histogram {
                 self.plot_settings.egui_settings.reset_axis = true;
             }
 
-            // if ui.input(|i| i.key_pressed(egui::Key::O)) {
-            //     self.find_peaks();
-            // }
+            if ui.input(|i| i.key_pressed(egui::Key::O)) {
+                self.find_peaks();
+            }
         }
     }
 
@@ -96,12 +96,12 @@ impl Histogram {
             ui.label("F: Fit Gaussians").on_hover_text("Fit gaussians at the peak markers give some region with a linear background");
             ui.label("S: Store Fit").on_hover_text("Store the current fit as a permanent fit which can be saved and loaded later");
             ui.separator();
+            ui.label("Peak Finder");
+            ui.label("O: Detect Peaks").on_hover_text("Detect peaks with the peak finder settings. Uses the region markers as limits and subtracts the active background fit before searching.");
+            ui.separator();
             ui.label("Plot");
             ui.label("I: Toggle Stats");
             ui.label("L: Toggle Log Y");
-            // ui.separator();
-            // ui.label("Peak Finder");
-            // ui.label("O: Detect Peaks").on_hover_text("Detect peaks in the spectrum using the peak finding parameters");
 
         });
     }
