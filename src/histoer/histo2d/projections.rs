@@ -81,6 +81,7 @@ impl Histogram2D {
                 y_histogram.bins = bins.clone();
                 y_histogram.original_bins = bins;
                 y_histogram.plot_settings.rebin_factor = 1;
+                y_histogram.plot_settings.column_name = self.plot_settings.y_column.clone();
                 y_histogram.rebin();
                 y_histogram.line.color = egui::Color32::from_rgb(255, 0, 0);
 
@@ -129,6 +130,7 @@ impl Histogram2D {
 
                 let bins = self.x_projection(min_y, max_y);
                 x_histogram.plot_settings.rebin_factor = 1;
+                x_histogram.plot_settings.column_name = self.plot_settings.x_column.clone();
                 x_histogram.rebin();
                 x_histogram.bins = bins.clone();
                 x_histogram.original_bins = bins;

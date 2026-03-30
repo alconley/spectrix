@@ -25,6 +25,10 @@ impl Histogram {
                     .add_background_pair(cursor_x_raw, self.bin_width);
             }
 
+            if ui.input(|i| i.key_pressed(egui::Key::C)) {
+                self.new_cut();
+            }
+
             if ui.input(|i| i.key_pressed(egui::Key::R)) {
                 if self.plot_settings.markers.region_markers.len() >= 2 {
                     self.plot_settings.markers.clear_region_markers();
@@ -90,6 +94,11 @@ impl Histogram {
             ui.label("-: Remove Marker Closest to Cursor");
             ui.label("Delete: Remove All Markers & Temp Fits");
             ui.label("Left click/Drag to Move Marker").on_hover_text("Markers can be dragged to new positions with the left clicking and dragingong when hovered over center point");
+            ui.separator();
+            ui.label("Cuts");
+            ui.label("C: Add 1D Cut");
+            ui.label("Left click/Drag cut lines or the region between them")
+                .on_hover_text("The cut span can be moved by dragging between the vertical lines while keeping the width fixed.");
             ui.separator();
             ui.label("Fitting");
             ui.label("G: Fit Background").on_hover_text("Fit a linear background using the background markers");

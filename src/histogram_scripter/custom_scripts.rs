@@ -1,12 +1,13 @@
 use crate::histoer::{
     configs::Configs,
-    cuts::{ActiveCut2D, Cuts},
+    cuts::{ActiveHistogramCut, Cuts},
 };
 
 use super::fsu_custom_script::cebra::CeBrAConfig;
-use super::fsu_custom_script::general::Calibration;
+// use super::fsu_custom_script::general::Calibration;
 use super::fsu_custom_script::icespice::ICESPICEConfig;
-use super::fsu_custom_script::se_sps::{SPSConfig, SPSOptions};
+// use super::fsu_custom_script::se_sps::{SPSConfig, SPSOptions};
+use super::fsu_custom_script::se_sps::SPSConfig;
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Options {
@@ -37,7 +38,7 @@ impl Default for CustomConfigs {
 }
 
 impl CustomConfigs {
-    pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&mut [ActiveCut2D]>) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&mut [ActiveHistogramCut]>) {
         let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
 
         ui.horizontal(|ui| {
@@ -49,14 +50,14 @@ impl CustomConfigs {
 
         ui.separator();
 
-        ui.horizontal(|ui| {
-            ui.label("Previous Experiments: ");
-            if ui.button("52Cr(d,p)53Cr").clicked() {
-                self.cr52dp_experiment();
-            }
-        });
+        // ui.horizontal(|ui| {
+        //     ui.label("Previous Experiments: ");
+        //     if ui.button("52Cr(d,p)53Cr").clicked() {
+        //         self.cr52dp_experiment();
+        //     }
+        // });
 
-        ui.separator();
+        // ui.separator();
 
         self.cuts.ui(ui, active_cuts, "custom");
 
@@ -112,7 +113,7 @@ impl CustomConfigs {
         }
     }
 
-    pub fn merge_active_configs(&mut self, active_cuts: Option<&[ActiveCut2D]>) -> Configs {
+    pub fn merge_active_configs(&mut self, active_cuts: Option<&[ActiveHistogramCut]>) -> Configs {
         let mut configs = Configs::default();
         let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts);
         let should_calculate_cut_histograms = !merged_cuts.is_empty();
@@ -173,21 +174,21 @@ impl CustomConfigs {
         configs
     }
 
-    pub fn cr52dp_experiment(&mut self) {
-        self.sps = SPSConfig {
-            active: true,
-            xavg: Calibration {
-                a: -0.0023904378617156377,
-                b: -18.49776562220117,
-                c: 1357.4874219091237,
-                bins: 500,
-                range: (-100.0, 5500.0),
-                active: true,
-            },
-            options: SPSOptions::default(),
-        };
+    // pub fn cr52dp_experiment(&mut self) {
+    //     self.sps = SPSConfig {
+    //         active: true,
+    //         xavg: Calibration {
+    //             a: -0.0023904378617156377,
+    //             b: -18.49776562220117,
+    //             c: 1357.4874219091237,
+    //             bins: 500,
+    //             range: (-100.0, 5500.0),
+    //             active: true,
+    //         },
+    //         options: SPSOptions::default(),
+    //     };
 
-        self.cebra.active = true;
-        self.cebra.cr52dp_experiment();
-    }
+    //     self.cebra.active = true;
+    //     self.cebra.cr52dp_experiment();
+    // }
 }

@@ -59,6 +59,26 @@ impl Histogram {
             .collect();
     }
 
+    fn current_raw_x_bounds(
+        plot_ui: &egui_plot::PlotUi<'_>,
+        calibration: Option<&crate::fitter::common::Calibration>,
+    ) -> (f64, f64) {
+        let plot_bounds = plot_ui.plot_bounds();
+        let mut x_min = plot_bounds.min()[0];
+        let mut x_max = plot_bounds.max()[0];
+
+        if let Some(calibration) = calibration {
+            x_min = calibration.invert(x_min).unwrap_or(x_min);
+            x_max = calibration.invert(x_max).unwrap_or(x_max);
+        }
+
+        if x_min <= x_max {
+            (x_min, x_max)
+        } else {
+            (x_max, x_min)
+        }
+    }
+
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         // update the histogram and fit lines with the log setting and draw
         let log_y = self.plot_settings.egui_settings.log_y;
@@ -66,18 +86,17 @@ impl Histogram {
 
         self.line.log_y = log_y;
         self.line.log_x = log_x;
-        // Extract calibration before any mutable borrow of `self.fits`
-        let calibration = {
-            if self.fits.settings.calibrated {
-                Some(&self.fits.calibration)
-            } else {
-                None
-            }
+        let calibration = if self.fits.settings.calibrated {
+            Some(self.fits.calibration.clone())
+        } else {
+            None
         };
-        self.line.draw(plot_ui, calibration);
+        let calibration_ref = calibration.as_ref();
+
+        self.line.draw(plot_ui, calibration_ref);
         self.plot_settings
             .markers
-            .draw_all_markers(plot_ui, calibration);
+            .draw_all_markers(plot_ui, calibration_ref);
 
         self.fits.set_log(log_y, log_x);
         self.fits.draw(plot_ui);
@@ -89,20 +108,16 @@ impl Histogram {
             bg_pair.histogram_line.log_y = log_y;
         }
 
-        // Check if markers are being dragged
-        if self.plot_settings.markers.is_dragging() {
-            // Disable dragging if a marker is being dragged
-            self.plot_settings.egui_settings.allow_drag = false;
-        } else {
-            self.plot_settings.egui_settings.allow_drag = true;
-        }
-
         if plot_ui.response().hovered() {
             self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
             self.plot_settings.egui_settings.limit_scrolling = true;
         } else {
             self.plot_settings.cursor_position = None;
         }
+
+        self.plot_settings.current_plot_bounds =
+            Some(Self::current_raw_x_bounds(plot_ui, calibration_ref));
+        self.plot_settings.draw(plot_ui, calibration_ref);
 
         self.custom_plot_manipulation_update(plot_ui);
 

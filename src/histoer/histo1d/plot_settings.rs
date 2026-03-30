@@ -1,3 +1,4 @@
+use super::interactive_cuts::InteractiveCut1D;
 use super::markers::FitMarkers;
 use super::peak_finder::PeakFindingSettings;
 use crate::egui_plot_stuff::egui_plot_settings::EguiPlotSettings;
@@ -7,10 +8,15 @@ use egui::PopupCloseBehavior;
 use egui::containers::menu::{MenuConfig, SubMenuButton};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct PlotSettings {
     #[serde(skip)]
     pub cursor_position: Option<egui_plot::PlotPoint>,
+    #[serde(skip)]
+    pub current_plot_bounds: Option<(f64, f64)>,
     pub egui_settings: EguiPlotSettings,
+    pub column_name: String,
+    pub cuts: Vec<InteractiveCut1D>,
     pub stats_info: bool,
     pub markers: FitMarkers,
     pub rebin_factor: usize,
@@ -23,7 +29,10 @@ impl Default for PlotSettings {
     fn default() -> Self {
         Self {
             cursor_position: None,
+            current_plot_bounds: None,
             egui_settings: EguiPlotSettings::default(),
+            column_name: String::new(),
+            cuts: vec![],
             stats_info: false,
             markers: FitMarkers::new(),
             rebin_factor: 1,
@@ -55,5 +64,20 @@ impl PlotSettings {
         calibration: Option<&Calibration>,
     ) {
         self.markers.interactive_dragging(response, calibration);
+
+        let mut cuts_dragging = false;
+        for cut in &mut self.cuts {
+            cut.interactive_dragging(response, calibration, self.current_plot_bounds);
+            cuts_dragging |= cut.is_dragging();
+        }
+
+        self.egui_settings.allow_drag = !self.markers.is_dragging() && !cuts_dragging;
+        self.egui_settings.allow_double_click_reset = !cuts_dragging;
+    }
+
+    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>, calibration: Option<&Calibration>) {
+        for cut in &mut self.cuts {
+            cut.draw(plot_ui, calibration);
+        }
     }
 }

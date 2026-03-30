@@ -117,8 +117,8 @@ impl SPSConfig {
             Some(Cuts::new(vec![valid_sps_timing.clone()]))
         };
 
-        let fp_range = (-450.0, 450.0);
-        let fp_bins = 900;
+        let fp_range = (-300.0, 300.0);
+        let fp_bins = 600;
 
         let range = (0.0, 4096.0);
         let bins = 512;

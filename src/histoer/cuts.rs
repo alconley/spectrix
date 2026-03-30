@@ -3,7 +3,7 @@ use regex::Regex;
 use std::fs::File;
 use std::io::{BufReader, Write as _};
 use std::ops::BitAnd as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use polars::prelude::*;
 
@@ -17,10 +17,10 @@ pub enum Cut {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct ActiveCut2D {
+pub struct ActiveHistogramCut {
     pub histogram_name: String,
     pub enabled: bool,
-    pub cut: Cut2D,
+    pub cut: Cut,
 }
 
 impl Default for Cut {
@@ -63,6 +63,20 @@ impl Cut {
     pub fn new_1d(name: &str, expression: &str) -> Self {
         Self::Cut1D(Cut1D::new(name, expression))
     }
+
+    pub fn save_button(&mut self, ui: &mut egui::Ui) {
+        match self {
+            Self::Cut1D(cut1d) => cut1d.save_button(ui),
+            Self::Cut2D(cut2d) => cut2d.save_button(ui),
+        }
+    }
+
+    pub fn info_button(&self, ui: &mut egui::Ui, histogram_description: Option<String>) {
+        match self {
+            Self::Cut1D(cut1d) => cut1d.info_button(ui, histogram_description),
+            Self::Cut2D(cut2d) => cut2d.info_button(ui, histogram_description),
+        }
+    }
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default)]
@@ -72,14 +86,14 @@ pub struct Cuts {
 }
 
 impl Cuts {
-    fn active_cut_rows(ui: &mut egui::Ui, active_cuts: &mut [ActiveCut2D], id_suffix: &str) {
+    fn active_cut_rows(ui: &mut egui::Ui, active_cuts: &mut [ActiveHistogramCut], id_suffix: &str) {
         if active_cuts.is_empty() {
             return;
         }
 
         ui.separator();
 
-        ui.label("Active 2D Histogram Cuts");
+        ui.label("Active Histogram Cuts");
         TableBuilder::new(ui)
             .id_salt(format!("active_histogram_cuts_{id_suffix}"))
             .column(Column::auto())
@@ -110,7 +124,7 @@ impl Cuts {
                         });
                         row.col(|ui| {
                             ui.add(
-                                egui::Label::new(&active_cut.cut.polygon.name)
+                                egui::Label::new(active_cut.cut.name())
                                     .wrap_mode(egui::TextWrapMode::Extend),
                             );
                         });
@@ -128,7 +142,7 @@ impl Cuts {
             });
     }
 
-    pub fn merged_with_active_cuts(&self, active_cuts: Option<&[ActiveCut2D]>) -> Self {
+    pub fn merged_with_active_cuts(&self, active_cuts: Option<&[ActiveHistogramCut]>) -> Self {
         let mut merged = self.clone();
 
         if let Some(active_cuts) = active_cuts {
@@ -136,11 +150,11 @@ impl Cuts {
                 if let Some(existing_cut) = merged
                     .cuts
                     .iter_mut()
-                    .find(|existing_cut| existing_cut.name() == active_cut.cut.polygon.name)
+                    .find(|existing_cut| existing_cut.name() == active_cut.cut.name())
                 {
-                    *existing_cut = Cut::Cut2D(active_cut.cut.clone());
+                    *existing_cut = active_cut.cut.clone();
                 } else {
-                    merged.cuts.push(Cut::Cut2D(active_cut.cut.clone()));
+                    merged.cuts.push(active_cut.cut.clone());
                 }
             }
         }
@@ -189,6 +203,8 @@ impl Cuts {
                     let cut1d: Result<Cut1D, _> = serde_json::from_str(&content);
                     if let Ok(mut cut) = cut1d {
                         cut.active = false; // Set active to false by default
+                        cut.parse_conditions();
+                        cut.saved_path = Some(path.clone());
                         cuts.push(Cut::Cut1D(cut));
                         continue;
                     }
@@ -196,6 +212,7 @@ impl Cuts {
                     let cut2d: Result<Cut2D, _> = serde_json::from_str(&content);
                     if let Ok(mut cut) = cut2d {
                         cut.active = false; // Set active to false by default
+                        cut.saved_path = Some(path.clone());
                         cuts.push(Cut::Cut2D(cut));
                         continue;
                     }
@@ -245,14 +262,23 @@ impl Cuts {
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
-        active_cuts: Option<&mut [ActiveCut2D]>,
+        active_cuts: Option<&mut [ActiveHistogramCut]>,
         id_suffix: &str,
     ) {
         ui.horizontal_wrapped(|ui| {
             ui.label("Cuts");
 
-            if ui.button("+1D").clicked() {
+            if ui.button("+1D Manual").clicked() {
                 self.cuts.push(Cut::Cut1D(Cut1D::new("", "")));
+            }
+
+            if ui.button("+1D Load").clicked() {
+                let mut new_cut1d = Cut1D::default();
+                if new_cut1d.load_cut_from_json().is_ok() {
+                    self.cuts.push(Cut::Cut1D(new_cut1d));
+                } else {
+                    log::error!("Failed to load 1D cut from file.");
+                }
             }
 
             if ui.button("+2D").clicked() {
@@ -336,9 +362,10 @@ impl Cuts {
                 TableBuilder::new(ui)
                     .id_salt("cuts_1d_table")
                     .column(Column::auto()) // Name
-                    .column(Column::auto()) // Expression
+                    .column(Column::remainder()) // Expression
                     .column(Column::auto()) // Active
-                    .column(Column::remainder()) // Actions
+                    .column(Column::auto()) // Info
+                    .column(Column::auto()) // Actions
                     .striped(true)
                     .vscroll(false)
                     .header(20.0, |mut header| {
@@ -346,7 +373,16 @@ impl Cuts {
                             ui.label("Name");
                         });
                         header.col(|ui| {
-                            ui.label("Operation(s)");
+                            ui.label("Expression");
+                        });
+                        header.col(|ui| {
+                            ui.label("Active");
+                        });
+                        header.col(|ui| {
+                            ui.label("Info");
+                        });
+                        header.col(|ui| {
+                            ui.label("");
                         });
                     })
                     .body(|mut body| {
@@ -510,12 +546,36 @@ impl Cuts {
         Ok(concatenated)
     }
 }
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Cut2D {
     pub polygon: EguiPolygon,
     pub x_column: String,
     pub y_column: String,
     pub active: bool,
+    #[serde(skip)]
+    pub saved_path: Option<PathBuf>,
+}
+
+impl PartialEq for Cut2D {
+    fn eq(&self, other: &Self) -> bool {
+        self.polygon.draw == other.polygon.draw
+            && self.polygon.name_in_legend == other.polygon.name_in_legend
+            && self.polygon.name == other.polygon.name
+            && self.polygon.highlighted == other.polygon.highlighted
+            && self.polygon.stroke == other.polygon.stroke
+            && self.polygon.width == other.polygon.width
+            && self.polygon.fill_color == other.polygon.fill_color
+            && self.polygon.style == other.polygon.style
+            && self.polygon.style_length == other.polygon.style_length
+            && self.polygon.vertices == other.polygon.vertices
+            && self.polygon.color_rgb == other.polygon.color_rgb
+            && self.polygon.stroke_rgb == other.polygon.stroke_rgb
+            && self.polygon.interactive_clicking == other.polygon.interactive_clicking
+            && self.polygon.interactive_dragging == other.polygon.interactive_dragging
+            && self.x_column == other.x_column
+            && self.y_column == other.y_column
+            && self.active == other.active
+    }
 }
 
 impl Default for Cut2D {
@@ -525,6 +585,7 @@ impl Default for Cut2D {
             x_column: String::new(),
             y_column: String::new(),
             active: true,
+            saved_path: None,
         }
     }
 }
@@ -571,7 +632,38 @@ impl Cut2D {
         }
     }
 
+    fn save_to_path(&self, file_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        let serialized = serde_json::to_string(self)?;
+        let mut file = File::create(file_path)?;
+        file.write_all(serialized.as_bytes())?;
+        Ok(())
+    }
+
+    pub(crate) fn autosave_to_saved_path(&self) {
+        if let Some(path) = &self.saved_path
+            && let Err(error) = self.save_to_path(path)
+        {
+            log::error!("Error autosaving 2D cut '{}': {error:?}", self.polygon.name);
+        }
+    }
+
+    fn changed_for_autosave(&self, previous: &Self) -> bool {
+        self.polygon.name != previous.polygon.name
+            || self.x_column != previous.x_column
+            || self.y_column != previous.y_column
+            || self.polygon.vertices != previous.polygon.vertices
+    }
+
+    fn saved_path_display(&self) -> String {
+        self.saved_path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "Not saved".to_owned())
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        let previous = self.clone();
+
         if ui.button("Load").clicked()
             && let Err(e) = self.load_cut_from_json()
         {
@@ -584,9 +676,14 @@ impl Cut2D {
             log::error!("Error saving cut: {e:?}");
         }
         self.polygon.menu_button(ui);
+
+        if self.changed_for_autosave(&previous) {
+            self.autosave_to_saved_path();
+        }
     }
 
     pub fn single_ui(&mut self, ui: &mut egui::Ui) {
+        let previous_name = self.polygon.name.clone();
         ui.horizontal(|ui| {
             ui.label("2D Cut");
             if ui.button("Load").clicked()
@@ -601,9 +698,14 @@ impl Cut2D {
                     .clip_text(false),
             );
         });
+
+        if self.polygon.name != previous_name {
+            self.autosave_to_saved_path();
+        }
     }
 
     pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>) {
+        let previous_name = self.polygon.name.clone();
         row.col(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.polygon.name)
@@ -617,24 +719,31 @@ impl Cut2D {
         row.col(|ui| {
             self.info_button(ui, None);
         });
+
+        if self.polygon.name != previous_name {
+            self.autosave_to_saved_path();
+        }
     }
 
-    fn info_hover_text(&self, histogram_description: Option<String>) -> String {
-        let mut details = Vec::new();
+    fn info_ui(&self, ui: &mut egui::Ui, histogram_description: Option<String>) {
         if let Some(histogram_description) = histogram_description {
-            details.push(histogram_description);
+            ui.label(histogram_description);
+            ui.separator();
         }
-        details.push(format!("X Column: {}", self.x_column));
-        details.push(format!("Y Column: {}", self.y_column));
-        details.join("\n")
+        ui.label(format!("X Column: {}", self.x_column));
+        ui.label(format!("Y Column: {}", self.y_column));
+        ui.label(format!("Vertices: {}", self.polygon.vertices.len()));
+        ui.label("Saved Path:");
+        ui.monospace(self.saved_path_display());
     }
 
     pub fn info_button(&self, ui: &mut egui::Ui, histogram_description: Option<String>) {
-        ui.small_button("?")
-            .on_hover_text(self.info_hover_text(histogram_description));
+        ui.menu_button("?", |ui| {
+            self.info_ui(ui, histogram_description);
+        });
     }
 
-    pub fn save_button(&self, ui: &mut egui::Ui) {
+    pub fn save_button(&mut self, ui: &mut egui::Ui) {
         if ui.button("Save").clicked()
             && let Err(e) = self.save_cut_to_json()
         {
@@ -643,6 +752,8 @@ impl Cut2D {
     }
 
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
+        let previous = self.clone();
+
         if ui.button("Load").clicked()
             && let Err(e) = self.load_cut_from_json()
         {
@@ -656,6 +767,10 @@ impl Cut2D {
         }
 
         self.polygon.menu_button(ui);
+
+        if self.changed_for_autosave(&previous) {
+            self.autosave_to_saved_path();
+        }
     }
 
     pub fn valid(&self, df: &DataFrame, row_idx: usize) -> bool {
@@ -694,15 +809,14 @@ impl Cut2D {
         Ok(mask)
     }
 
-    pub fn save_cut_to_json(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn save_cut_to_json(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(file_path) = rfd::FileDialog::new()
             .set_file_name(format!("{}.json", self.sanitized_file_name()))
             .add_filter("JSON Files", &["json"]) // Add a filter for json files
             .save_file()
         {
-            let serialized = serde_json::to_string(self)?;
-            let mut file = File::create(file_path)?;
-            file.write_all(serialized.as_bytes())?;
+            self.save_to_path(&file_path)?;
+            self.saved_path = Some(file_path);
         }
         Ok(())
     }
@@ -713,9 +827,10 @@ impl Cut2D {
             .add_filter("JSON Files", &["json"]) // Filter for json files
             .pick_file()
         {
-            let file = File::open(file_path)?;
+            let file = File::open(&file_path)?;
             let reader = BufReader::new(file);
-            let cut: Self = serde_json::from_reader(reader)?;
+            let mut cut: Self = serde_json::from_reader(reader)?;
+            cut.saved_path = Some(file_path);
             *self = cut;
         }
         Ok(())
@@ -743,7 +858,11 @@ impl Cut2D {
     }
 
     pub fn interactions(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
+        let previous = self.clone();
         self.polygon.handle_interactions(plot_response);
+        if self.changed_for_autosave(&previous) {
+            self.autosave_to_saved_path();
+        }
     }
 
     pub fn is_dragging(&self) -> bool {
@@ -781,13 +900,23 @@ pub struct ParsedCondition {
     pub literal_value: f64,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct Cut1D {
     pub name: String,
     pub expression: String, // Logical expression to evaluate, e.g., "X1 != -1e6 & X2 == -1e6"
     pub active: bool,
     #[serde(skip)] // Skip during serialization
     pub parsed_conditions: Option<Vec<ParsedCondition>>, // Cache parsed conditions
+    #[serde(skip)]
+    pub saved_path: Option<PathBuf>,
+}
+
+impl PartialEq for Cut1D {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.expression == other.expression
+            && self.active == other.active
+    }
 }
 
 impl Cut1D {
@@ -797,10 +926,84 @@ impl Cut1D {
             expression: expression.to_owned(),
             active: true,
             parsed_conditions: None,
+            saved_path: None,
         }
     }
 
+    fn format_value(value: f64) -> String {
+        if value.is_nan() {
+            return "nan".to_owned();
+        }
+
+        if value.is_infinite() {
+            return if value.is_sign_positive() {
+                "inf".to_owned()
+            } else {
+                "-inf".to_owned()
+            };
+        }
+
+        let mut formatted = format!("{value:.15}");
+        if formatted.contains('.') {
+            formatted = formatted
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_owned();
+        }
+
+        if formatted == "-0" {
+            "0".to_owned()
+        } else {
+            formatted
+        }
+    }
+
+    fn range_editor_fields(&self) -> (String, String, String) {
+        let Some(conditions) = &self.parsed_conditions else {
+            return (String::new(), String::new(), String::new());
+        };
+
+        let Some(first_condition) = conditions.first() else {
+            return (String::new(), String::new(), String::new());
+        };
+
+        let column_name = first_condition.column_name.clone();
+        if !conditions
+            .iter()
+            .all(|condition| condition.column_name == column_name)
+        {
+            return (String::new(), String::new(), String::new());
+        }
+
+        let mut lower_bound: Option<f64> = None;
+        let mut upper_bound: Option<f64> = None;
+
+        for condition in conditions {
+            match condition.operator.as_str() {
+                ">" | ">=" => {
+                    lower_bound = Some(lower_bound.map_or(condition.literal_value, |current| {
+                        current.max(condition.literal_value)
+                    }));
+                }
+                "<" | "<=" => {
+                    upper_bound = Some(upper_bound.map_or(condition.literal_value, |current| {
+                        current.min(condition.literal_value)
+                    }));
+                }
+                _ => {}
+            }
+        }
+
+        (
+            column_name,
+            lower_bound.map(Self::format_value).unwrap_or_default(),
+            upper_bound.map(Self::format_value).unwrap_or_default(),
+        )
+    }
+
     pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>) {
+        let previous = self.clone();
+
         row.col(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.name)
@@ -809,29 +1012,187 @@ impl Cut1D {
             );
         });
         row.col(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.expression)
-                    .hint_text("Expression")
-                    .clip_text(false),
-            );
+            if ui
+                .add(
+                    egui::TextEdit::singleline(&mut self.expression)
+                        .hint_text("Expression")
+                        .clip_text(false),
+                )
+                .changed()
+            {
+                self.parse_conditions();
+            }
         });
         row.col(|ui| {
             ui.add(egui::Checkbox::new(&mut self.active, ""));
         });
+        row.col(|ui| {
+            self.info_button(ui, None);
+        });
+
+        if self.name != previous.name || self.expression != previous.expression {
+            self.autosave_to_saved_path();
+        }
     }
 
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
+        let previous = self.clone();
         ui.add(
             egui::TextEdit::singleline(&mut self.name)
                 .hint_text("Name")
                 .clip_text(false),
         );
 
-        ui.add(
-            egui::TextEdit::singleline(&mut self.expression)
-                .hint_text("Expression")
-                .clip_text(false),
-        );
+        if ui
+            .add(
+                egui::TextEdit::singleline(&mut self.expression)
+                    .hint_text("Expression")
+                    .clip_text(false),
+            )
+            .changed()
+        {
+            self.parse_conditions();
+        }
+
+        if self.name != previous.name || self.expression != previous.expression {
+            self.autosave_to_saved_path();
+        }
+    }
+
+    pub fn sanitized_file_name(&self) -> String {
+        let trimmed_name = self.name.trim();
+        let base_name = if trimmed_name.is_empty() {
+            "1d_cut".to_owned()
+        } else {
+            trimmed_name.to_owned()
+        };
+
+        let mut collapsed = String::with_capacity(base_name.len());
+        let mut previous_was_underscore = false;
+
+        for character in base_name.chars() {
+            let mapped = if character.is_ascii_alphanumeric() || character == '-' {
+                character
+            } else {
+                '_'
+            };
+
+            if mapped == '_' {
+                if !previous_was_underscore {
+                    collapsed.push('_');
+                }
+                previous_was_underscore = true;
+            } else {
+                collapsed.push(mapped);
+                previous_was_underscore = false;
+            }
+        }
+
+        let trimmed = collapsed.trim_matches('_');
+        if trimmed.is_empty() {
+            "1d_cut".to_owned()
+        } else {
+            trimmed.to_owned()
+        }
+    }
+
+    fn save_to_path(&self, file_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        let serialized = serde_json::to_string(self)?;
+        let mut file = File::create(file_path)?;
+        file.write_all(serialized.as_bytes())?;
+        Ok(())
+    }
+
+    pub(crate) fn autosave_to_saved_path(&self) {
+        if let Some(path) = &self.saved_path
+            && let Err(error) = self.save_to_path(path)
+        {
+            log::error!("Error autosaving 1D cut '{}': {error:?}", self.name);
+        }
+    }
+
+    fn saved_path_display(&self) -> String {
+        self.saved_path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "Not saved".to_owned())
+    }
+
+    pub fn save_cut_to_json(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(file_path) = rfd::FileDialog::new()
+            .set_file_name(format!("{}.json", self.sanitized_file_name()))
+            .add_filter("JSON Files", &["json"])
+            .save_file()
+        {
+            self.save_to_path(&file_path)?;
+            self.saved_path = Some(file_path);
+        }
+        Ok(())
+    }
+
+    pub fn load_cut_from_json(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(file_path) = rfd::FileDialog::new()
+            .set_file_name("cut.json")
+            .add_filter("JSON Files", &["json"])
+            .pick_file()
+        {
+            let file = File::open(&file_path)?;
+            let reader = BufReader::new(file);
+            let mut cut: Self = serde_json::from_reader(reader)?;
+            cut.parse_conditions();
+            cut.saved_path = Some(file_path);
+            *self = cut;
+        }
+        Ok(())
+    }
+
+    fn info_ui(&self, ui: &mut egui::Ui, histogram_description: Option<String>) {
+        if let Some(histogram_description) = histogram_description {
+            ui.label(histogram_description);
+            ui.separator();
+        }
+
+        let (column_name, lower_bound, upper_bound) = self.range_editor_fields();
+        if !column_name.is_empty() {
+            ui.label(format!("Column: {column_name}"));
+            ui.label(format!(
+                ">= {}",
+                if lower_bound.is_empty() {
+                    "N/A"
+                } else {
+                    &lower_bound
+                }
+            ));
+            ui.label(format!(
+                "<= {}",
+                if upper_bound.is_empty() {
+                    "N/A"
+                } else {
+                    &upper_bound
+                }
+            ));
+            ui.separator();
+        }
+
+        ui.label("Expression:");
+        ui.monospace(&self.expression);
+        ui.separator();
+        ui.label("Saved Path:");
+        ui.monospace(self.saved_path_display());
+    }
+
+    pub fn info_button(&self, ui: &mut egui::Ui, histogram_description: Option<String>) {
+        ui.menu_button("?", |ui| {
+            self.info_ui(ui, histogram_description);
+        });
+    }
+
+    pub fn save_button(&mut self, ui: &mut egui::Ui) {
+        if ui.button("Save").clicked()
+            && let Err(error) = self.save_cut_to_json()
+        {
+            log::error!("Error saving 1D cut: {error:?}");
+        }
     }
 
     pub fn required_columns(&self) -> Vec<String> {
@@ -854,13 +1215,15 @@ impl Cut1D {
         }
 
         let condition_re = Regex::new(
-            r"(?P<column>\w+)\s*(?P<op>>=|<=|!=|==|>|<)\s*(?P<value>-?\d+(?:\.\d+)?(?:e-?\d+)?|nan|inf)"
-        ).expect("Failed to create regex");
+            r"(?P<column>\w+)\s*(?P<op>>=|<=|!=|==|>|<)\s*(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|[+-]?inf|nan)"
+        )
+        .expect("Failed to create regex");
 
         let mut conditions = Vec::new();
 
         // Split on '&' to allow multiple conditions in one expression
         for expr in self.expression.split('&') {
+            let expr = expr.replace(['(', ')'], " ");
             let expr = expr.trim();
             if let Some(caps) = condition_re.captures(expr) {
                 let column_name = caps["column"].to_string();

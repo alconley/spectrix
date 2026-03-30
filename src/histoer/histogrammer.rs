@@ -15,7 +15,7 @@ use std::sync::{
 
 // Project modules
 use super::configs::{Config, Configs};
-use super::cuts::{ActiveCut2D, Cuts};
+use super::cuts::{ActiveHistogramCut, Cut, Cuts};
 use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
@@ -1086,21 +1086,42 @@ impl Histogrammer {
         log::info!("All histograms moved to a single grid container.");
     }
 
-    pub fn retrieve_active_2d_cuts(&self) -> Vec<ActiveCut2D> {
+    pub fn retrieve_active_histogram_cuts(&self) -> Vec<ActiveHistogramCut> {
         let mut active_cuts = Vec::new();
         for (_id, tile) in self.tree.tiles.iter() {
+            if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
+                let hist = hist.lock().expect("Failed to lock histogram");
+                for cut in &hist.plot_settings.cuts {
+                    let is_active = cut.cut.active;
+                    let cut = Cut::Cut1D(cut.cut.clone());
+                    if is_active
+                        && !active_cuts
+                            .iter()
+                            .any(|existing: &ActiveHistogramCut| existing.cut.name() == cut.name())
+                    {
+                        active_cuts.push(ActiveHistogramCut {
+                            histogram_name: hist.name.clone(),
+                            enabled: true,
+                            cut,
+                        });
+                    }
+                }
+            }
+
             if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
                 let hist = hist.lock().expect("Failed to lock 2D histogram");
                 for cut in &hist.plot_settings.cuts {
-                    if cut.active
-                        && !active_cuts.iter().any(|existing: &ActiveCut2D| {
-                            existing.cut.polygon.name == cut.polygon.name
-                        })
+                    let is_active = cut.active;
+                    let cut = Cut::Cut2D(cut.clone());
+                    if is_active
+                        && !active_cuts
+                            .iter()
+                            .any(|existing: &ActiveHistogramCut| existing.cut.name() == cut.name())
                     {
-                        active_cuts.push(ActiveCut2D {
+                        active_cuts.push(ActiveHistogramCut {
                             histogram_name: hist.name.clone(),
                             enabled: true,
-                            cut: cut.clone(),
+                            cut,
                         });
                     }
                 }

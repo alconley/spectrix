@@ -13,6 +13,7 @@ Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting 
 
 - Read and analyze `.parquet` and `.root` files  
 - Interactive histogramming (1D & 2D)  
+- Interactive histogram-created cuts for 1D and 2D views  
 - Gaussian fitting with Python’s lmfit  
 - UI-based histogram and cut definition  
 - Custom histogram scripting  
@@ -153,6 +154,8 @@ You can also load 2D cuts in this area; those cuts are then available as active 
 
 When saving filtered files, Spectrix applies all enabled **active 1D/2D cuts** and writes output using `filename_{suffix}.parquet` naming.
 
+Interactive cuts created directly on 1D and 2D histograms also appear in the same active-cuts area, so they can be enabled/disabled for histogram generation and parquet filtering before being added manually to the script.
+
 > ⚠️ **Warning:**  
 > Combining files loads all selected data into memory. Very large datasets may exhaust RAM and crash the session.
 >
@@ -213,14 +216,16 @@ Derived columns can then be used exactly like native columns in cuts and histogr
 
 You can define:
 
-- **1D cuts** by providing a cut name and a logical expression.
-- **2D cuts** as graphical polygons in the 2D histogram view (these appear as active 2D histogram cuts and can be toggled on/off).
+- **1D cuts** by providing a cut name and a logical expression, or by loading saved 1D cut JSON files with **`+1D Load`**.
+- **2D cuts** as graphical polygons in the 2D histogram view.
 
-For 2D cuts, you can:
+For cut management in the Histogram Script UI, you can:
 
-- Load a cut JSON individually.
+- Add a blank 1D cut with **`+1D Manual`**.
+- Load a saved 1D cut with **`+1D Load`**.
+- Load a cut JSON individually for 2D cuts with **`+2D`**.
 - Add a cut folder to load multiple cut files.
-- Use active 2D histogram cuts created interactively in the plot, even before saving them to disk.
+- Use **Active Histogram Cuts** created interactively in 1D or 2D plots, even before saving them to disk.
 
 For expression-based 1D cuts, use valid column names and logical operators such as `&` to combine conditions.
 
@@ -233,6 +238,10 @@ Common operators in 1D cut expressions include:
 Example:
 
 - `(Column1Energy > 400) & (Column1Energy < 1200) & (Column2Time != -1e6)`
+
+If a 1D cut parses as a simple range, its **Info** menu shows the extracted column name and the `>=` / `<=` bounds.
+
+Cuts that were loaded from disk or explicitly saved to disk remember their save path. If you later edit the cut name or cut values inside Spectrix, the cut is automatically re-saved back to that same file.
 
 Only cuts enabled in the corresponding UI checkboxes are applied during histogram generation and parquet filtering.
 
@@ -290,6 +299,7 @@ The 1D histogram interface in **Spectrix** is designed for fast, interactive pea
 - Detect peaks with `find_peaks`, with optional region-limited searching and background subtraction.
 - Optionally draw an uncertainty band around the total Gaussian fit from the Fit Panel.
 - Rebin and restyle plots from the context menu.
+- Create interactive 1D cut regions directly on the histogram and reuse them as active cuts.
 - Store fit results and review them in a dedicated popup window or from the right-click Fits menu.
 - Click **Modify** on a stored fit to move it back into the temp fit editor with its saved markers/settings.
 - Click **Refit** in the Fit Panel header to re-run all stored fits on the latest incoming data.
@@ -354,6 +364,7 @@ Cursor must be inside the plot for keybinds to be active.
 |---|---|---|
 | **P** | Add peak marker | Places a Gaussian peak marker at cursor position. |
 | **B** | Add background marker | Used for background-only sampling points. |
+| **C** | Create 1D cut | Creates a draggable 1D cut region using the histogram’s current source column. |
 | **R** | Add region markers | Define fit interval; drag marker center with middle mouse button. |
 | **-** | Remove nearest marker | Deletes marker closest to cursor. |
 | **Delete** | Clear temporary markers/fits | Removes active markers and temporary fit curves. |
@@ -382,6 +393,19 @@ Cursor must be inside the plot for keybinds to be active.
 
 > Additional controls such as peak finding, rebinning, marker styling, and display options are available by right-clicking on the 1D plot.
 
+### 1D Cut Notes
+
+- Press **C** (or use the right-click **Cuts** menu) to create a new interactive 1D cut.
+- The cut starts as two vertical lines spanning slightly inside the current visible X range.
+- You can drag either boundary line directly.
+- You can also click and drag between the two lines to move the entire cut window while keeping the same width.
+- A default cut name is generated automatically in the form `Histogram Name 1D Cut N`.
+- The cut expression is generated as `(ColumnName >= (x1)) & (ColumnName <= x2)`.
+- 1D cuts created interactively in the plot appear in the **Active Histogram Cuts** area of the Histogram Script.
+- The cut **Info** menu shows the parsed column name, lower bound, upper bound, full expression, and saved path.
+- If a 1D cut was loaded from disk or previously saved to disk, changing the cut name or moving the cut region will automatically re-save it to the same path.
+- 1D cuts created on 2D projection windows inherit the projection axis column name automatically.
+
 ---
 
 ## 2D Histograms
@@ -396,6 +420,7 @@ The 2D histogram interface in **Spectrix** is optimized for fast visual explorat
 - Switch colormaps, reverse palettes, and toggle log/linear normalization.
 - Rebin data and tune Z-scale display ranges.
 - Save and reuse graphical cuts from the plot context menu.
+- Reuse histogram-created cuts through the shared active-cuts area in the Histogram Script.
 
 ### Keybind Reference
 
@@ -427,8 +452,10 @@ Cursor must be inside the plot for keybinds to be active.
 - The cut auto-populates the X/Y column names from the current 2D histogram axes; verify these before saving.
 - A default cut name is generated automatically in the form `Y v X Cut N` (for example `E2 v E1 Cut 1`), and you can rename it before saving.
 - Use **Save** to write the cut to JSON for reuse.
-- Even if a cut is not saved to disk yet, it can still appear in the Histogram Script as an **Active 2D Histogram Cut** and be toggled on/off for histogram generation.
+- Even if a cut is not saved to disk yet, it can still appear in the Histogram Script as an **Active Histogram Cut** and be toggled on/off for histogram generation.
+- The cut **Info** menu shows the X/Y columns and saved path.
 - Saved cuts can be reloaded, recolored, and reopened for vertex editing.
+- If a 2D cut was loaded from disk or previously saved to disk, changing the cut name or moving vertices will automatically re-save it to the same path.
 
 > Right-click on the 2D plot for additional controls, including rebinning, colormap/color-scale tuning, projection options, and cut management.
 
