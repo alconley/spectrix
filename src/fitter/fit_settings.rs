@@ -10,6 +10,7 @@ pub struct FitSettings {
     pub show_decomposition: bool,
     pub show_composition: bool,
     pub show_background: bool,
+    pub show_fit_lines_area: bool,
     pub show_fit_stats: bool,
     pub equal_stddev: bool,
     pub free_position: bool,
@@ -30,6 +31,7 @@ impl Default for FitSettings {
             show_decomposition: true,
             show_composition: true,
             show_background: true,
+            show_fit_lines_area: true,
             show_fit_stats: false,
             equal_stddev: true,
             free_position: true,
@@ -136,6 +138,10 @@ impl FitSettings {
                 .on_hover_text("Show the composition line");
             ui.checkbox(&mut self.show_background, "Background")
                 .on_hover_text("Show the background line");
+            ui.checkbox(&mut self.show_fit_lines_area, "1σ Uncertainty")
+                .on_hover_text(
+                    "Draw the total-fit 1σ uncertainty band from lmfit `eval_uncertainty`.",
+                );
         });
 
         ui.separator();

@@ -20,7 +20,6 @@ use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
 use super::tree::TreeBehavior;
-use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::main_fitter::{FitResult, Fitter};
 use crate::fitter::models::gaussian::GaussianFitter;
 use crate::histoer::configs::Hist1DConfig;
@@ -1397,21 +1396,11 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
                     let mut new_fitter = Fitter::default();
                     new_fitter.set_name(base.clone());
 
-                    // Composition (total fit curve)
-                    new_fitter.composition_line.points = gaussian_fitter.fit_points.clone();
-
-                    // Decomposition (components)
-                    for (i, fit) in gaussian_fitter.fit_result.iter().enumerate() {
-                        let mut line = EguiLine::new(egui::Color32::from_rgb(150, 0, 255));
-                        line.points = fit.fit_points.clone();
-                        line.name = format!("{base} Decomposition {i}");
-                        new_fitter.decomposition_lines.push(line);
-                    }
+                    new_fitter.apply_gaussian_fit_visuals(&gaussian_fitter);
 
                     // Background
                     if let Some(background_result) = &gaussian_fitter.background_result {
                         new_fitter.background_result = Some(background_result.clone());
-                        new_fitter.background_line.points = background_result.get_fit_points();
                     }
 
                     new_fitter.fit_result = Some(FitResult::Gaussian(gaussian_fitter.clone()));

@@ -1,3 +1,4 @@
+use crate::egui_plot_stuff::egui_filled_area::EguiFilledArea;
 use crate::fitter::common::{Data, Parameter};
 use crate::fitter::main_fitter::{BackgroundModel, BackgroundResult};
 use crate::fitter::models::exponential::ExponentialFitter;
@@ -147,20 +148,49 @@ impl GaussianParameters {
     /// Function to generate fit points 5 sigma out from the mean.
     /// Fit points are generated in the range [mean - 5 * sigma, mean + 5 * sigma].
     pub fn generate_fit_points(&mut self, num_points: usize) {
-        if let (Some(mean), Some(sigma)) = (self.mean.value, self.sigma.value) {
-            let range_min = mean - 5.0 * sigma;
-            let range_max = mean + 5.0 * sigma;
-            let step_size = (range_max - range_min) / (num_points as f64);
-
+        let Some(xs) = self.sample_curve_xs(num_points) else {
             self.fit_points.clear();
-            for i in 0..=num_points {
-                let x = range_min + i as f64 * step_size;
-                let y = self.amplitude.value.unwrap_or(1.0) / sigma
-                    * (1.0 / (2.0 * std::f64::consts::PI).sqrt())
-                    * (-((x - mean).powi(2)) / (2.0 * sigma.powi(2))).exp();
-                self.fit_points.push([x, y]);
-            }
+            return;
+        };
+
+        self.fit_points = xs
+            .iter()
+            .filter_map(|&x| self.evaluate(x).map(|y| [x, y]))
+            .collect();
+    }
+
+    fn sample_curve_xs(&self, num_points: usize) -> Option<Vec<f64>> {
+        let mean = self.mean.value?;
+        let sigma = self.sigma.value?;
+
+        if !mean.is_finite() || !sigma.is_finite() || sigma <= 0.0 {
+            return None;
         }
+
+        let range_min = mean - 5.0 * sigma;
+        let range_max = mean + 5.0 * sigma;
+        let step_size = (range_max - range_min) / (num_points as f64);
+
+        Some(
+            (0..=num_points)
+                .map(|i| range_min + i as f64 * step_size)
+                .collect(),
+        )
+    }
+
+    fn evaluate(&self, x: f64) -> Option<f64> {
+        let amplitude = self.amplitude.value?;
+        let mean = self.mean.value?;
+        let sigma = self.sigma.value?;
+
+        if !amplitude.is_finite() || !mean.is_finite() || !sigma.is_finite() || sigma <= 0.0 {
+            return None;
+        }
+
+        let gaussian_norm = (1.0 / (2.0 * std::f64::consts::PI).sqrt()) / sigma;
+        let exponent = -((x - mean).powi(2)) / (2.0 * sigma.powi(2));
+
+        Some(amplitude * gaussian_norm * exponent.exp())
     }
 
     pub fn params_ui(&mut self, ui: &mut egui::Ui, calibrate: bool) {
@@ -318,6 +348,7 @@ pub struct GaussianFitter {
     pub background_result: Option<BackgroundResult>,
     pub fit_result: Vec<GaussianParameters>,
     pub fit_points: Vec<[f64; 2]>,
+    pub uncertainty_band: EguiFilledArea,
     pub fit_report: String,
     pub lmfit_result: Option<String>,
     pub sigma_bounds: Option<(Vec<f64>, Vec<f64>)>, // (mins_x, maxs_x)
@@ -350,6 +381,7 @@ impl GaussianFitter {
             },
             fit_result: Vec::new(),
             fit_points: Vec::new(),
+            uncertainty_band: EguiFilledArea::default(),
             fit_report: String::new(),
             lmfit_result: None,
             sigma_bounds: None,
@@ -391,6 +423,43 @@ impl GaussianFitter {
             },
             false,
         )
+    }
+
+    fn build_uncertainty_band(
+        xs: &[f64],
+        ys: &[f64],
+        uncertainties: &[f64],
+    ) -> Option<EguiFilledArea> {
+        if xs.len() != ys.len() || ys.len() != uncertainties.len() {
+            return None;
+        }
+
+        let lower = ys
+            .iter()
+            .zip(uncertainties)
+            .map(|(&y, &uncertainty)| {
+                let uncertainty = if uncertainty.is_finite() && uncertainty > 0.0 {
+                    uncertainty
+                } else {
+                    0.0
+                };
+                (y - uncertainty).max(0.0)
+            })
+            .collect();
+        let upper = ys
+            .iter()
+            .zip(uncertainties)
+            .map(|(&y, &uncertainty)| {
+                let uncertainty = if uncertainty.is_finite() && uncertainty > 0.0 {
+                    uncertainty
+                } else {
+                    0.0
+                };
+                y + uncertainty
+            })
+            .collect();
+
+        Some(EguiFilledArea::new(xs.to_vec(), lower, upper))
     }
 
     pub fn get_calibration_data(&self) -> Vec<(f64, f64, f64, f64)> {
@@ -653,25 +722,24 @@ def GaussianFit(counts: list, centers: list,
         raise ValueError('Unsupported background model')
     
     # Fit the background model to the data of the background markers before fitting the peaks
-    if bg_type != 'None' and len(background_markers) == 0:
+    if len(background_markers) == 0:
         # put marker at the start and end of the region
         background_markers = [(region_markers[0]-bin_width, region_markers[0]), (region_markers[1], region_markers[1]+bin_width)]
 
-    bg_result = None
-    if bg_type != 'None':
-        bg_x = []
-        bg_y = []
-        for bg_start, bg_end in background_markers:
-            # sort the background markers
-            bg_start, bg_end = sorted([bg_start, bg_end])
+    bg_x = []
+    bg_y = []
+    for bg_start, bg_end in background_markers:
+        # sort the background markers
+        bg_start, bg_end = sorted([bg_start, bg_end])
 
-            bg_mask = (centers >= bg_start) & (centers <= bg_end)
-            bg_x.extend(centers[bg_mask])
-            bg_y.extend(counts[bg_mask])
+        bg_mask = (centers >= bg_start) & (centers <= bg_end)
+        bg_x.extend(centers[bg_mask])
+        bg_y.extend(counts[bg_mask])
 
-        bg_x = np.array(bg_x)
-        bg_y = np.array(bg_y)
-        bg_result = bg_model.fit(bg_y, params, x=bg_x)
+    bg_x = np.array(bg_x)
+    bg_y = np.array(bg_y)
+    
+    bg_result = bg_model.fit(bg_y, params, x=bg_x)
 
     # print intial parameter guesses
     print('Initial Background Parameter Guesses:')
@@ -679,15 +747,11 @@ def GaussianFit(counts: list, centers: list,
 
     # print fit report
     print('Background Fit Report:')
-    if bg_result is not None:
-        print(bg_result.fit_report())
-    else:
-        print('Background model set to None; skipping background fit.')
+    print(bg_result.fit_report())
 
     # **Adjust background parameters based on their errors**
-    if bg_result is not None:
-        for param in bg_result.params:
-            params[param].set(value=bg_result.params[param].value, vary=False)
+    for param in bg_result.params:
+        params[param].set(value=bg_result.params[param].value, vary=False)
 
     # Add background model to overall model
     model = bg_model
@@ -838,7 +902,23 @@ def GaussianFit(counts: list, centers: list,
 
     # Fit the model to the data
     result = model.fit(y_data, params, x=x_data)
-    _inject_spectrix_metadata(result, region_markers, peak_markers, background_markers, bg_type, equal_sigma, free_position)
+
+    x_data_line = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
+    y_data_line = result.eval(x=x_data_line)
+    try:
+        y_data_uncertainty = result.eval_uncertainty(x=x_data_line, sigma=1)
+    except Exception:
+        y_data_uncertainty = np.zeros_like(y_data_line)
+
+    _inject_spectrix_metadata(
+        result,
+        region_markers,
+        peak_markers,
+        [] if bg_type == 'None' else background_markers,
+        bg_type,
+        equal_sigma,
+        free_position,
+    )
 
     # Print initial parameter guesses
     print('Initial Parameter Guesses:')
@@ -888,10 +968,6 @@ def GaussianFit(counts: list, centers: list,
                     uncertainty = result.params[key].stderr or 0.0
                     background_params.append((key, value, uncertainty))
 
-        # Create smooth fit line
-        x_data_line = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
-        y_data_line = result.eval(x=x_data_line)
-
     fit_metadata = (
         list(region_markers),
         list(peak_markers),
@@ -905,7 +981,7 @@ def GaussianFit(counts: list, centers: list,
     # save the fit result to a temp file
     save_modelresult(result, 'temp_fit.sav')
 
-    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params, fit_metadata, result
+    return gaussian_params, background_params, x_data_line, y_data_line, y_data_uncertainty, fit_report, additional_params, fit_metadata, result
 
 def load_result(filename: str):
     result = load_modelresult(filename)
@@ -986,6 +1062,10 @@ def load_result(filename: str):
         # Create smooth fit line
         x_data_line = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
         y_data_line = result.eval(x=x_data_line)
+        try:
+            y_data_uncertainty = result.eval_uncertainty(x=x_data_line, sigma=1)
+        except Exception:
+            y_data_uncertainty = np.zeros_like(y_data_line)
 
     fit_metadata = _extract_spectrix_metadata(result)
     if fit_metadata is None:
@@ -1014,7 +1094,7 @@ def load_result(filename: str):
     # save the fit result to a temp file
     save_modelresult(result, 'temp_fit.sav')
 
-    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params, fit_metadata
+    return gaussian_params, background_params, x_data_line, y_data_line, y_data_uncertainty, fit_report, additional_params, fit_metadata
 
 ");
 
@@ -1316,9 +1396,10 @@ def load_result(filename: str):
             let background_params = result.get_item(1)?.extract::<Vec<(String, f64, f64)>>()?;
             let x_composition = result.get_item(2)?.extract::<Vec<f64>>()?;
             let y_composition = result.get_item(3)?.extract::<Vec<f64>>()?;
-            let fit_report = result.get_item(4)?.extract::<String>()?;
-            let additional_params = result.get_item(5)?.extract::<Vec<(f64, f64)>>()?;
-            let fit_metadata = result.get_item(6).ok().and_then(|item| {
+            let y_composition_uncertainty = result.get_item(4)?.extract::<Vec<f64>>()?;
+            let fit_report = result.get_item(5)?.extract::<String>()?;
+            let additional_params = result.get_item(6)?.extract::<Vec<(f64, f64)>>()?;
+            let fit_metadata = result.get_item(7).ok().and_then(|item| {
                 item.extract::<(
                     Vec<f64>,
                     Vec<f64>,
@@ -1343,6 +1424,8 @@ def load_result(filename: str):
             });
 
             self.peak_markers.clear();
+            self.fit_result.clear();
+            self.uncertainty_band.clear();
 
             for (
                 (
@@ -1446,21 +1529,17 @@ def load_result(filename: str):
                         let slope = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_slope")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
 
                         let intercept = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_intercept")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
 
-                        let linear = LinearFitter::new_from_parameters(
-                            (slope, 0.0),
-                            (intercept, 0.0),
-                            min_x,
-                            max_x,
-                        );
+                        let linear =
+                            LinearFitter::new_from_parameters(slope, intercept, min_x, max_x);
                         self.background_result = Some(BackgroundResult::Linear(linear));
                     }
 
@@ -1470,26 +1549,20 @@ def load_result(filename: str):
                         let a = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_a")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
                         let b = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_b")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
                         let c = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_c")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
 
-                        let quad = QuadraticFitter::new_from_parameters(
-                            (a, 0.0),
-                            (b, 0.0),
-                            (c, 0.0),
-                            min_x,
-                            max_x,
-                        );
+                        let quad = QuadraticFitter::new_from_parameters(a, b, c, min_x, max_x);
                         self.background_result = Some(BackgroundResult::Quadratic(quad));
                     }
 
@@ -1503,20 +1576,16 @@ def load_result(filename: str):
                         let amplitude = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_amplitude")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
                         let decay = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_decay")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
 
-                        let expo = ExponentialFitter::new_from_parameters(
-                            (amplitude, 0.0),
-                            (decay, 0.0),
-                            min_x,
-                            max_x,
-                        );
+                        let expo =
+                            ExponentialFitter::new_from_parameters(amplitude, decay, min_x, max_x);
                         self.background_result = Some(BackgroundResult::Exponential(expo));
                     }
 
@@ -1530,20 +1599,16 @@ def load_result(filename: str):
                         let amplitude = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_amplitude")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
                         let exponent = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_exponent")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
 
-                        let powerlaw = PowerLawFitter::new_from_parameters(
-                            (amplitude, 0.0),
-                            (exponent, 0.0),
-                            min_x,
-                            max_x,
-                        );
+                        let powerlaw =
+                            PowerLawFitter::new_from_parameters(amplitude, exponent, min_x, max_x);
                         self.background_result = Some(BackgroundResult::PowerLaw(powerlaw));
                     }
 
@@ -1553,6 +1618,13 @@ def load_result(filename: str):
                     }
                 }
             }
+
+            self.uncertainty_band = Self::build_uncertainty_band(
+                &x_composition,
+                &y_composition,
+                &y_composition_uncertainty,
+            )
+            .unwrap_or_default();
 
             // Create the composition line
             let fit_points = x_composition

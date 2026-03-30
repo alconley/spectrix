@@ -12,7 +12,6 @@ use super::models::gaussian::GaussianFitter;
 use super::common::Calibration;
 
 use crate::custom_analysis::se_sps_analysis::uuid_map::FitUUID;
-use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::common::Data;
 use crate::fitter::models::linear::LinearFitter;
 use crate::fitter::models::quadratic;
@@ -484,19 +483,10 @@ impl Fits {
                                     .unwrap_or("lmfit_result")
                                     .to_owned(),
                             );
-                            new_fitter.composition_line.points = gaussian_fitter.fit_points.clone();
-
-                            for (i, fit) in gaussian_fitter.fit_result.iter().enumerate() {
-                                let mut line = EguiLine::new(egui::Color32::from_rgb(150, 0, 255));
-                                line.points = fit.fit_points.clone();
-                                line.name = format!("{} Decomposition {}", new_fitter.name, i);
-                                new_fitter.decomposition_lines.push(line);
-                            }
+                            new_fitter.apply_gaussian_fit_visuals(&gaussian_fitter);
 
                             if let Some(background_result) = &gaussian_fitter.background_result {
                                 new_fitter.background_result = Some(background_result.clone());
-                                new_fitter.background_line.points =
-                                    background_result.get_fit_points();
                             }
                             new_fitter.fit_result =
                                 Some(FitResult::Gaussian(gaussian_fitter.clone()));
@@ -531,7 +521,7 @@ impl Fits {
 
         let calibrated = self.settings.calibrated;
         if let Some(temp_fit) = &self.temp_fit {
-            temp_fit.draw(plot_ui, calibration);
+            temp_fit.draw(plot_ui, calibration, self.settings.show_fit_lines_area);
 
             if let Some(FitResult::Gaussian(gauss)) = &temp_fit.fit_result {
                 gauss.draw_uuid(plot_ui, calibrated);
@@ -539,7 +529,7 @@ impl Fits {
         }
 
         for fit in &mut self.stored_fits.iter() {
-            fit.draw(plot_ui, calibration);
+            fit.draw(plot_ui, calibration, self.settings.show_fit_lines_area);
 
             // put the uuid above each peak if it is not 0
             if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result {

@@ -288,6 +288,7 @@ The 1D histogram interface in **Spectrix** is designed for fast, interactive pea
 - Fit one or many Gaussian peaks in a selected region.
 - Choose and tune background models: linear, quadratic, power law, exponential.
 - Detect peaks with `find_peaks`, with optional region-limited searching and background subtraction.
+- Optionally draw an uncertainty band around the total Gaussian fit from the Fit Panel.
 - Rebin and restyle plots from the context menu.
 - Store fit results and review them in a dedicated popup window or from the right-click Fits menu.
 - Click **Modify** on a stored fit to move it back into the temp fit editor with its saved markers/settings.
@@ -373,6 +374,8 @@ Cursor must be inside the plot for keybinds to be active.
 - If exactly two region markers are active, peak finding only searches the data between them.
 - If a background fit is active, Spectrix subtracts that background before peak finding.
 - Detected peaks are written back into the plot as peak markers so they can be fitted immediately.
+- The **1σ Uncertainty** checkbox under **Show Fit Lines** toggles the total Gaussian uncertainty band.
+- That total-fit uncertainty band uses lmfit `eval_uncertainty` at `1σ`.
 - By default, peaks share a common standard deviation; this can be changed in fit settings.
 - Peak positions and widths can be constrained or locked from the *Fits* menu.
 - Fit reports, curves, and parameter values are available from the plot context menu.
