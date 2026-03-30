@@ -131,19 +131,25 @@ pub struct Value {
 }
 
 impl Value {
-    pub fn ui(&mut self, ui: &mut egui::Ui, name: Option<&str>) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, name: Option<&str>) -> bool {
+        let mut changed = false;
         ui.horizontal(|ui| {
             if let Some(name) = name {
                 ui.label(name);
             }
-            ui.add(egui::DragValue::new(&mut self.value).speed(0.1))
-                .on_hover_text("Value of the parameter");
+            changed |= ui
+                .add(egui::DragValue::new(&mut self.value).speed(0.1))
+                .on_hover_text("Value of the parameter")
+                .changed();
 
             ui.label("±");
 
-            ui.add(egui::DragValue::new(&mut self.uncertainty).speed(0.1))
-                .on_hover_text("Uncertainty of the parameter");
+            changed |= ui
+                .add(egui::DragValue::new(&mut self.uncertainty).speed(0.1))
+                .on_hover_text("Uncertainty of the parameter")
+                .changed();
         });
+        changed
     }
 }
 
@@ -177,18 +183,43 @@ impl Default for Calibration {
 }
 
 impl Calibration {
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut changed = false;
         ui.horizontal(|ui| {
-            self.a.ui(ui, Some("a:"));
+            changed |= self.a.ui(ui, Some("a:"));
             ui.separator();
-            self.b.ui(ui, Some("b:"));
+            changed |= self.b.ui(ui, Some("b:"));
             ui.separator();
-            self.c.ui(ui, Some("c:"));
+            changed |= self.c.ui(ui, Some("c:"));
         });
+        changed
     }
 
     pub fn calibrate(&self, x: f64) -> f64 {
         self.a.value * x * x + self.b.value * x + self.c.value
+    }
+
+    pub fn derivative(&self, x: f64) -> f64 {
+        2.0 * self.a.value * x + self.b.value
+    }
+
+    pub fn curve_uncertainty(&self, x: f64) -> f64 {
+        let j0 = x.powi(2);
+        let j1 = x;
+        let j2 = 1.0;
+
+        let variance = if let Some(cov) = &self.cov {
+            let t0 = j0 * (cov[0][0] * j0 + cov[0][1] * j1 + cov[0][2] * j2);
+            let t1 = j1 * (cov[1][0] * j0 + cov[1][1] * j1 + cov[1][2] * j2);
+            let t2 = j2 * (cov[2][0] * j0 + cov[2][1] * j1 + cov[2][2] * j2);
+            t0 + t1 + t2
+        } else {
+            (j0 * self.a.uncertainty).powi(2)
+                + (j1 * self.b.uncertainty).powi(2)
+                + (j2 * self.c.uncertainty).powi(2)
+        };
+
+        variance.max(0.0).sqrt()
     }
 
     pub fn invert(&self, energy: f64) -> Option<f64> {
@@ -314,40 +345,12 @@ impl Parameter {
         if let Some(x) = self.value {
             let dx = self.uncertainty.unwrap_or(0.0);
 
-            let a = calibration.a.value;
-            let b = calibration.b.value;
-            let c = calibration.c.value;
+            let energy = calibration.calibrate(x);
 
-            let da = calibration.a.uncertainty;
-            let db = calibration.b.uncertainty;
-            let dc = calibration.c.uncertainty;
-
-            let energy = a * x * x + b * x + c;
-
-            // let da_term = a * x * x * ((da / a).powi(2) + 2.0 * (dx / x).powi(2)).sqrt();
-            // let db_term = b * x * (db / b).hypot(dx / x);
-            // let dc_term = dc;
-
-            // let de = (da_term.powi(2) + db_term.powi(2) + dc_term.powi(2)).sqrt();
-
-            let j0 = x.powi(2);
-            let j1 = x;
-            let j2 = 1.0;
-
-            let sigma_params_sq = if let Some(cov) = &calibration.cov {
-                println!("Using full covariance matrix for uncertainty propagation");
-                // J Σ J^T
-                let t0 = j0 * (cov[0][0] * j0 + cov[0][1] * j1 + cov[0][2] * j2);
-                let t1 = j1 * (cov[1][0] * j0 + cov[1][1] * j1 + cov[1][2] * j2);
-                let t2 = j2 * (cov[2][0] * j0 + cov[2][1] * j1 + cov[2][2] * j2);
-                t0 + t1 + t2
-            } else {
-                // Fallback: assume independence (no covariances)
-                (j0 * da).powi(2) + (j1 * db).powi(2) + (j2 * dc).powi(2)
-            };
+            let sigma_params_sq = calibration.curve_uncertainty(x).powi(2);
 
             // x uncertainty (assumed independent of {a,b,c})
-            let dy_dx = 2.0 * a * x + b;
+            let dy_dx = calibration.derivative(x);
             let sigma_x_sq = (dy_dx * dx).powi(2);
 
             let de = (sigma_params_sq + sigma_x_sq).sqrt();

@@ -1,5 +1,8 @@
 use rfd::FileDialog;
 
+use egui::{Align2, Color32};
+use egui_plot::{FilledArea, Line, MarkerShape, Plot, PlotUi, Points, Text};
+
 use std::fs::File;
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -17,6 +20,142 @@ use crate::fitter::models::linear::LinearFitter;
 use crate::fitter::models::quadratic;
 
 use std::collections::HashMap;
+
+#[derive(Debug, Clone)]
+struct CalibrationPlotPoint {
+    mean: f64,
+    mean_uncertainty: f64,
+    energy: f64,
+    energy_uncertainty: f64,
+    uuid: usize,
+    fit_name: String,
+    peak_index: usize,
+}
+
+fn padded_range(mut min: f64, mut max: f64) -> (f64, f64) {
+    if !min.is_finite() || !max.is_finite() {
+        return (0.0, 1.0);
+    }
+
+    if min > max {
+        std::mem::swap(&mut min, &mut max);
+    }
+
+    let span = max - min;
+    if span.abs() < f64::EPSILON {
+        let pad = min.abs().max(1.0) * 0.1;
+        (min - pad, max + pad)
+    } else {
+        let pad = span * 0.05;
+        (min - pad, max + pad)
+    }
+}
+
+fn draw_plot_segment(
+    plot_ui: &mut PlotUi<'_>,
+    id_source: impl std::hash::Hash,
+    points: Vec<[f64; 2]>,
+    color: Color32,
+    width: f32,
+) {
+    plot_ui.line(
+        Line::new("", points)
+            .allow_hover(false)
+            .color(color)
+            .width(width)
+            .id(egui::Id::new(id_source)),
+    );
+}
+
+fn draw_cross_error_bars(
+    plot_ui: &mut PlotUi<'_>,
+    id_prefix: &str,
+    index: usize,
+    x: f64,
+    y: f64,
+    x_uncertainty: f64,
+    y_uncertainty: f64,
+    x_cap_half_width: f64,
+    y_cap_half_height: f64,
+    color: Color32,
+) {
+    let x_uncertainty = x_uncertainty.max(0.0);
+    let y_uncertainty = y_uncertainty.max(0.0);
+
+    if x_uncertainty.is_finite() && x_uncertainty > 0.0 {
+        draw_plot_segment(
+            plot_ui,
+            (id_prefix, index, "x_bar"),
+            vec![[x - x_uncertainty, y], [x + x_uncertainty, y]],
+            color,
+            1.0,
+        );
+
+        if y_cap_half_height > 0.0 {
+            draw_plot_segment(
+                plot_ui,
+                (id_prefix, index, "x_cap_left"),
+                vec![
+                    [x - x_uncertainty, y - y_cap_half_height],
+                    [x - x_uncertainty, y + y_cap_half_height],
+                ],
+                color,
+                1.0,
+            );
+            draw_plot_segment(
+                plot_ui,
+                (id_prefix, index, "x_cap_right"),
+                vec![
+                    [x + x_uncertainty, y - y_cap_half_height],
+                    [x + x_uncertainty, y + y_cap_half_height],
+                ],
+                color,
+                1.0,
+            );
+        }
+    }
+
+    if y_uncertainty.is_finite() && y_uncertainty > 0.0 {
+        draw_plot_segment(
+            plot_ui,
+            (id_prefix, index, "y_bar"),
+            vec![[x, y - y_uncertainty], [x, y + y_uncertainty]],
+            color,
+            1.0,
+        );
+
+        if x_cap_half_width > 0.0 {
+            draw_plot_segment(
+                plot_ui,
+                (id_prefix, index, "y_cap_bottom"),
+                vec![
+                    [x - x_cap_half_width, y - y_uncertainty],
+                    [x + x_cap_half_width, y - y_uncertainty],
+                ],
+                color,
+                1.0,
+            );
+            draw_plot_segment(
+                plot_ui,
+                (id_prefix, index, "y_cap_top"),
+                vec![
+                    [x - x_cap_half_width, y + y_uncertainty],
+                    [x + x_cap_half_width, y + y_uncertainty],
+                ],
+                color,
+                1.0,
+            );
+        }
+    }
+}
+
+fn fmt_value_uncertainty(value: f64, uncertainty: f64, precision: usize) -> String {
+    if uncertainty.is_finite() && uncertainty > 0.0 {
+        format!("{value:.precision$} ± {uncertainty:.precision$}")
+    } else {
+        format!("{value:.precision$}")
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum SortCol {
@@ -352,6 +491,7 @@ impl Fits {
                         value: fitter.paramaters.intercept.value.unwrap_or(0.0),
                         uncertainty: fitter.paramaters.intercept.uncertainty.unwrap_or(0.0),
                     };
+                    self.calibration.cov = None;
                 }
                 Err(e) => {
                     log::error!("Calibration fit failed: {e:?}");
@@ -401,6 +541,334 @@ impl Fits {
         if let Some(temp_fit) = &mut self.temp_fit {
             temp_fit.calibrate(&self.calibration);
         }
+    }
+
+    fn calibration_plot_points(&self) -> Vec<CalibrationPlotPoint> {
+        let mut points = Vec::new();
+
+        for fit in &self.stored_fits {
+            if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result {
+                points.extend(gauss.fit_result.iter().enumerate().filter_map(
+                    |(peak_index, params)| {
+                        let (
+                            Some(energy),
+                            Some(energy_uncertainty),
+                            Some(mean),
+                            Some(mean_uncertainty),
+                        ) = (
+                            params.energy.value,
+                            params.energy.uncertainty,
+                            params.mean.value,
+                            params.mean.uncertainty,
+                        )
+                        else {
+                            return None;
+                        };
+
+                        (energy != -1.0).then(|| CalibrationPlotPoint {
+                            mean,
+                            mean_uncertainty,
+                            energy,
+                            energy_uncertainty,
+                            uuid: params.uuid,
+                            fit_name: fit.name.clone(),
+                            peak_index,
+                        })
+                    },
+                ));
+            }
+        }
+
+        points.sort_by(|a, b| a.mean.total_cmp(&b.mean));
+        points
+    }
+
+    fn calibration_curve_bounds(
+        &self,
+        points: &[CalibrationPlotPoint],
+    ) -> ((f64, f64), (f64, f64)) {
+        let x_min = points
+            .iter()
+            .map(|point| point.mean - point.mean_uncertainty.max(0.0))
+            .fold(f64::INFINITY, f64::min);
+        let x_max = points
+            .iter()
+            .map(|point| point.mean + point.mean_uncertainty.max(0.0))
+            .fold(f64::NEG_INFINITY, f64::max);
+
+        let y_min = points
+            .iter()
+            .map(|point| point.energy - point.energy_uncertainty.max(0.0))
+            .fold(f64::INFINITY, f64::min);
+        let y_max = points
+            .iter()
+            .map(|point| point.energy + point.energy_uncertainty.max(0.0))
+            .fold(f64::NEG_INFINITY, f64::max);
+
+        (padded_range(x_min, x_max), padded_range(y_min, y_max))
+    }
+
+    fn calibration_fit_series(
+        &self,
+        x_bounds: (f64, f64),
+        samples: usize,
+    ) -> (Vec<[f64; 2]>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let sample_count = samples.max(2);
+        let step = (x_bounds.1 - x_bounds.0) / (sample_count.saturating_sub(1) as f64);
+
+        let mut line_points = Vec::with_capacity(sample_count);
+        let mut band_x = Vec::with_capacity(sample_count);
+        let mut band_lower = Vec::with_capacity(sample_count);
+        let mut band_upper = Vec::with_capacity(sample_count);
+
+        for idx in 0..sample_count {
+            let x = if idx + 1 == sample_count {
+                x_bounds.1
+            } else {
+                x_bounds.0 + step * idx as f64
+            };
+            let y = self.calibration.calibrate(x);
+            let uncertainty = self.calibration.curve_uncertainty(x);
+
+            line_points.push([x, y]);
+            band_x.push(x);
+            band_lower.push(y - uncertainty);
+            band_upper.push(y + uncertainty);
+        }
+
+        (line_points, band_x, band_lower, band_upper)
+    }
+
+    fn energy_calibration_plots_ui(&self, ui: &mut egui::Ui) {
+        let points = self.calibration_plot_points();
+        if points.is_empty() {
+            return;
+        }
+
+        let plot_width = ui.available_width().max(1.0);
+        let point_color = Color32::from_rgb(210, 90, 90);
+        let fit_color = Color32::from_rgb(70, 140, 235);
+        let calibration_plot_id = ui.id().with("energy_calibration_plot");
+        let calibration_band_id = ui.id().with("energy_calibration_fit_band");
+        let calibration_line_id = ui.id().with("energy_calibration_fit_line");
+        let residual_plot_id = ui.id().with("energy_calibration_residuals_plot");
+
+        let (x_bounds, y_bounds) = self.calibration_curve_bounds(&points);
+        let (fit_line, band_x, band_lower, band_upper) = self.calibration_fit_series(x_bounds, 256);
+
+        let x_span = (x_bounds.1 - x_bounds.0).abs().max(1.0);
+        let y_span = (y_bounds.1 - y_bounds.0).abs().max(1.0);
+        let x_cap_half_width = x_span * 0.01;
+        let y_cap_half_height = y_span * 0.015;
+        let uuid_label_offset = y_span * 0.02;
+
+        ui.label("Energy Calibration");
+
+        Plot::new(calibration_plot_id)
+            .width(plot_width)
+            .height(240.0)
+            .show_x(true)
+            .show_y(true)
+            .allow_zoom(false)
+            .allow_scroll(false)
+            .allow_drag(false)
+            .allow_boxed_zoom(false)
+            .x_axis_label("Fit Mean")
+            .y_axis_label("Energy")
+            .label_formatter(|name, value| {
+                if name.is_empty() {
+                    format!("x: {:.3}\ny: {:.3}", value.x, value.y)
+                } else {
+                    name.to_owned()
+                }
+            })
+            .show(ui, |plot_ui| {
+                plot_ui.add(
+                    FilledArea::new("Calibration Fit Band", &band_x, &band_lower, &band_upper)
+                        .allow_hover(false)
+                        .fill_color(fit_color.linear_multiply(0.18))
+                        .id(calibration_band_id),
+                );
+
+                plot_ui.line(
+                    Line::new("Calibration Fit", fit_line.clone())
+                        .allow_hover(false)
+                        .color(fit_color)
+                        .width(2.0)
+                        .id(calibration_line_id),
+                );
+
+                for point in &points {
+                    let uuid_line = if point.uuid != 0 {
+                        format!("UUID: {}", point.uuid)
+                    } else {
+                        "UUID: —".to_owned()
+                    };
+                    let hover_label = format!(
+                        "{}\nPeak: {}\n{}\nMean: {}\nEnergy: {}",
+                        point.fit_name,
+                        point.peak_index,
+                        uuid_line,
+                        fmt_value_uncertainty(point.mean, point.mean_uncertainty, 3),
+                        fmt_value_uncertainty(point.energy, point.energy_uncertainty, 3),
+                    );
+
+                    plot_ui.points(
+                        Points::new(hover_label, vec![[point.mean, point.energy]])
+                            .shape(MarkerShape::Circle)
+                            .color(point_color)
+                            .filled(true)
+                            .radius(4.0),
+                    );
+                }
+
+                for (index, point) in points.iter().enumerate() {
+                    draw_cross_error_bars(
+                        plot_ui,
+                        "energy_calibration",
+                        index,
+                        point.mean,
+                        point.energy,
+                        point.mean_uncertainty,
+                        point.energy_uncertainty,
+                        x_cap_half_width,
+                        y_cap_half_height,
+                        point_color,
+                    );
+                }
+
+                for (index, point) in points.iter().enumerate() {
+                    if point.uuid == 0 {
+                        continue;
+                    }
+
+                    plot_ui.text(
+                        Text::new(
+                            format!("energy_calibration_uuid_{index}"),
+                            [
+                                point.mean,
+                                point.energy
+                                    + point.energy_uncertainty.max(0.0)
+                                    + uuid_label_offset,
+                            ]
+                            .into(),
+                            point.uuid.to_string(),
+                        )
+                        .anchor(Align2::CENTER_BOTTOM)
+                        .color(point_color)
+                        .allow_hover(false),
+                    );
+                }
+            });
+
+        ui.add_space(8.0);
+
+        let residual_data: Vec<([f64; 2], f64, f64)> = points
+            .iter()
+            .map(|point| {
+                let fit_value = self.calibration.calibrate(point.mean);
+                let residual = point.energy - fit_value;
+                let residual_uncertainty = point
+                    .energy_uncertainty
+                    .hypot(self.calibration.derivative(point.mean) * point.mean_uncertainty);
+                (
+                    [point.mean, residual],
+                    point.mean_uncertainty,
+                    residual_uncertainty,
+                )
+            })
+            .collect();
+
+        let residual_y_min = residual_data
+            .iter()
+            .map(|(point, _, residual_uncertainty)| point[1] - residual_uncertainty.max(0.0))
+            .fold(f64::INFINITY, f64::min);
+        let residual_y_max = residual_data
+            .iter()
+            .map(|(point, _, residual_uncertainty)| point[1] + residual_uncertainty.max(0.0))
+            .fold(f64::NEG_INFINITY, f64::max);
+        let residual_y_bounds = padded_range(residual_y_min, residual_y_max);
+        let residual_y_span = (residual_y_bounds.1 - residual_y_bounds.0).abs().max(1.0);
+        let residual_y_cap_half_height = residual_y_span * 0.015;
+
+        Plot::new(residual_plot_id)
+            .width(plot_width)
+            .height(150.0)
+            .show_x(true)
+            .show_y(true)
+            .allow_zoom(false)
+            .allow_scroll(false)
+            .allow_drag(false)
+            .allow_boxed_zoom(false)
+            .x_axis_label("Fit Mean")
+            .y_axis_label("Residual")
+            .label_formatter(|name, value| {
+                if name.is_empty() {
+                    format!("x: {:.3}\ny: {:.3}", value.x, value.y)
+                } else {
+                    name.to_owned()
+                }
+            })
+            .show(ui, |plot_ui| {
+                draw_plot_segment(
+                    plot_ui,
+                    ("energy_calibration_residuals", "zero_line"),
+                    vec![[x_bounds.0, 0.0], [x_bounds.1, 0.0]],
+                    Color32::GRAY,
+                    1.0,
+                );
+
+                for (source_point, (point, _, residual_uncertainty)) in
+                    points.iter().zip(residual_data.iter())
+                {
+                    let uuid_line = if source_point.uuid != 0 {
+                        format!("UUID: {}", source_point.uuid)
+                    } else {
+                        "UUID: —".to_owned()
+                    };
+                    let hover_label = format!(
+                        "{}\nPeak: {}\n{}\nMean: {}\nResidual: {}\nEnergy: {}\nFit Energy: {:.3}",
+                        source_point.fit_name,
+                        source_point.peak_index,
+                        uuid_line,
+                        fmt_value_uncertainty(source_point.mean, source_point.mean_uncertainty, 3),
+                        fmt_value_uncertainty(point[1], *residual_uncertainty, 3),
+                        fmt_value_uncertainty(
+                            source_point.energy,
+                            source_point.energy_uncertainty,
+                            3
+                        ),
+                        self.calibration.calibrate(source_point.mean),
+                    );
+
+                    plot_ui.points(
+                        Points::new(hover_label, vec![*point])
+                            .shape(MarkerShape::Circle)
+                            .color(point_color)
+                            .filled(true)
+                            .radius(4.0),
+                    );
+                }
+
+                for (index, (point, mean_uncertainty, residual_uncertainty)) in
+                    residual_data.iter().enumerate()
+                {
+                    draw_cross_error_bars(
+                        plot_ui,
+                        "energy_calibration_residuals",
+                        index,
+                        point[0],
+                        point[1],
+                        *mean_uncertainty,
+                        *residual_uncertainty,
+                        x_cap_half_width,
+                        residual_y_cap_half_height,
+                        point_color,
+                    );
+                }
+            });
+
+        ui.separator();
     }
 
     pub fn save_and_load_ui(&mut self, ui: &mut egui::Ui) {
@@ -966,6 +1434,7 @@ impl Fits {
         self.calubration_ui(ui);
 
         self.fit_stats_grid_ui(ui);
+        self.energy_calibration_plots_ui(ui);
 
         ui.add_space(10.0);
     }
@@ -975,7 +1444,9 @@ impl Fits {
             ui.checkbox(&mut self.settings.calibrated, "Calibration");
 
             if self.settings.calibrated {
-                self.calibration.ui(ui);
+                if self.calibration.ui(ui) {
+                    self.calibration.cov = None;
+                }
 
                 ui.separator();
 
