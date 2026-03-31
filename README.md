@@ -154,7 +154,7 @@ In the same section, you can:
 
 You can also load 2D cuts in this area; those cuts are then available as active cuts and are used when filtering saved `.parquet` outputs.
 
-When saving filtered files, Spectrix applies all enabled **active 1D/2D cuts** and writes output using `filename_{suffix}.parquet` naming.
+When saving filtered files, Spectrix applies all enabled **active 1D/2D cuts** from the Histogram Script cut sections and writes output using `filename_{suffix}.parquet` naming.
 
 Interactive cuts created directly on 1D and 2D histograms also appear in the same active-cuts area, so they can be enabled/disabled for histogram generation and parquet filtering before being added manually to the script.
 

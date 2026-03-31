@@ -1,7 +1,7 @@
 use super::custom_scripts::CustomConfigs;
 
 use crate::histoer::configs::Configs;
-use crate::histoer::cuts::ActiveHistogramCut;
+use crate::histoer::cuts::{ActiveHistogramCut, Cut, Cuts};
 use crate::histoer::histogrammer::Histogrammer;
 use polars::prelude::*;
 
@@ -98,6 +98,60 @@ impl HistogramScript {
             self.active_cut_states
                 .insert(active_cut.cut.name().to_owned(), active_cut.enabled);
         }
+    }
+
+    fn upsert_cut(cuts: &mut Vec<Cut>, cut: Cut) {
+        if let Some(existing_cut) = cuts
+            .iter_mut()
+            .find(|existing_cut| existing_cut.name() == cut.name())
+        {
+            *existing_cut = cut;
+        } else {
+            cuts.push(cut);
+        }
+    }
+
+    fn resolved_active_histogram_cuts(
+        &self,
+        histogrammer: &Histogrammer,
+    ) -> Vec<ActiveHistogramCut> {
+        let mut active_cuts = histogrammer.retrieve_active_histogram_cuts();
+
+        for active_cut in &mut active_cuts {
+            active_cut.enabled = self
+                .active_cut_states
+                .get(active_cut.cut.name())
+                .copied()
+                .unwrap_or(true);
+        }
+
+        active_cuts
+    }
+
+    pub fn active_filter_cuts(&self, histogrammer: &Histogrammer) -> Cuts {
+        let mut merged_cuts = Cuts::default();
+
+        for cut in self.configs.cuts.get_active_cuts().cuts {
+            Self::upsert_cut(&mut merged_cuts.cuts, cut);
+        }
+
+        for cut in self.custom_scripts.cuts.get_active_cuts().cuts {
+            Self::upsert_cut(&mut merged_cuts.cuts, cut);
+        }
+
+        for active_cut in self
+            .resolved_active_histogram_cuts(histogrammer)
+            .into_iter()
+            .filter(|active_cut| active_cut.enabled)
+        {
+            Self::upsert_cut(&mut merged_cuts.cuts, active_cut.cut);
+        }
+
+        merged_cuts
+    }
+
+    pub fn active_filter_cut_count(&self, histogrammer: &Histogrammer) -> usize {
+        self.active_filter_cuts(histogrammer).cuts.len()
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, histogrammer: &Histogrammer) {

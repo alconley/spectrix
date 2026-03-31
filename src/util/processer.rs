@@ -1,5 +1,4 @@
 use crate::custom_analysis::analysis::AnalysisScripts;
-use crate::histoer::cuts::Cuts;
 use crate::histoer::histogrammer::Histogrammer;
 
 use crate::histogram_scripter::histogram_script::HistogramScript;
@@ -27,7 +26,6 @@ pub struct ProcessorSettings {
     pub histogram_script_open: bool,
     pub column_names: Vec<String>,
     pub estimated_memory: f64,
-    pub cuts: Cuts,
     pub saved_cut_suffix: String,
     pub calculate_histograms_seperately: bool,
     #[serde(skip)]
@@ -46,7 +44,6 @@ impl Default for ProcessorSettings {
             histogram_script_open: true,
             column_names: Vec::new(),
             estimated_memory: 4.0,
-            cuts: Cuts::default(),
             saved_cut_suffix: String::new(),
             calculate_histograms_seperately: false,
             saving_in_progress: Arc::new(AtomicBool::new(false)),
@@ -192,6 +189,79 @@ impl Processor {
             .into_iter()
             .filter(|file| file.extension().is_some_and(|ext| ext == "parquet"))
             .collect()
+    }
+
+    fn active_filter_cut_count(&self) -> usize {
+        self.histogram_script
+            .active_filter_cut_count(&self.histogrammer)
+    }
+
+    fn save_filtered_files_button_enabled(&self, active_filter_cut_count: usize) -> bool {
+        matches!(self.checked_file_format(), SelectedFileFormat::Parquet)
+            && active_filter_cut_count > 0
+    }
+
+    fn save_filtered_files_hover_text(&self, active_filter_cut_count: usize) -> String {
+        if active_filter_cut_count == 1 {
+            "Apply the 1 active cut from the Histogram Script to each selected parquet file and save the result as filename_{suffix}.parquet. Only active cuts are used here.".to_owned()
+        } else {
+            format!(
+                "Apply the {active_filter_cut_count} active cuts from the Histogram Script to each selected parquet file and save the result as filename_{{suffix}}.parquet. Only active cuts are used here."
+            )
+        }
+    }
+
+    fn save_filtered_files_disabled_reason(
+        &self,
+        saving: bool,
+        active_filter_cut_count: usize,
+    ) -> &'static str {
+        if saving {
+            return "Filtered parquet saving is already in progress.";
+        }
+
+        match self.checked_file_format() {
+            SelectedFileFormat::None => {
+                "Select one or more parquet files to save filtered outputs."
+            }
+            SelectedFileFormat::Mixed | SelectedFileFormat::Root => {
+                "Select only parquet files to save filtered outputs."
+            }
+            SelectedFileFormat::Parquet if active_filter_cut_count == 0 => {
+                "Enable one or more cuts in the Histogram Script to save filtered parquet outputs."
+            }
+            SelectedFileFormat::Parquet => "",
+        }
+    }
+
+    fn combine_selected_files_button_enabled(&self, checked_parquet_file_count: usize) -> bool {
+        matches!(self.checked_file_format(), SelectedFileFormat::Parquet)
+            && checked_parquet_file_count >= 2
+    }
+
+    fn combine_selected_files_hover_text(&self) -> &'static str {
+        "Combine all selected parquet files into a single parquet file. Spectrix scans the inputs lazily and streams the result to the output parquet sink, so it does not collect the full combined dataset into memory first."
+    }
+
+    fn combine_selected_files_disabled_reason(
+        &self,
+        combining: bool,
+        checked_parquet_file_count: usize,
+    ) -> &'static str {
+        if combining {
+            return "Parquet combine is already in progress.";
+        }
+
+        match self.checked_file_format() {
+            SelectedFileFormat::None => "Select at least two parquet files to combine.",
+            SelectedFileFormat::Mixed | SelectedFileFormat::Root => {
+                "Select only parquet files to combine them."
+            }
+            SelectedFileFormat::Parquet if checked_parquet_file_count < 2 => {
+                "Select at least two parquet files to combine."
+            }
+            SelectedFileFormat::Parquet => "",
+        }
     }
 
     fn ensure_parquet_extension(path: PathBuf) -> PathBuf {
@@ -478,31 +548,39 @@ def get_2d_histograms(file_name):
 
     pub fn filter_selected_files_and_save(&self) {
         // Gather checked files
-        let checked_files: Vec<PathBuf> = self
-            .selected_files
-            .iter()
-            .filter(|(_, checked)| *checked)
-            .map(|(file, _)| file.clone())
-            .collect();
+        let checked_files = self.checked_files();
 
         if checked_files.is_empty() {
             log::error!("No files selected for filtering.");
             return;
         }
 
+        if !matches!(self.checked_file_format(), SelectedFileFormat::Parquet) {
+            log::error!("Save Filtered Files only supports selected Parquet inputs.");
+            return;
+        }
+
         // Keep only parquet files
-        let parquet_files: Vec<PathBuf> = checked_files
-            .into_iter()
-            .filter(|file| file.extension().is_some_and(|ext| ext == "parquet"))
-            .collect();
+        let parquet_files = self.checked_parquet_files();
 
         if parquet_files.is_empty() {
             log::warn!("No selected Parquet files to process.");
             return;
         }
 
-        // Clone necessary data for the thread
-        let cut = self.settings.cuts.clone();
+        let cut = self.histogram_script.active_filter_cuts(&self.histogrammer);
+        if cut.is_empty() {
+            log::warn!(
+                "No active cuts are enabled in the Histogram Script. Nothing to apply while saving filtered files."
+            );
+            return;
+        }
+
+        log::info!(
+            "Saving filtered parquet files using {} active cut(s) from the Histogram Script.",
+            cut.cuts.len()
+        );
+
         let saved_cut_suffix = self.settings.saved_cut_suffix.clone();
 
         // Initialize UI state
@@ -1067,10 +1145,15 @@ def get_2d_histograms(file_name):
                 ui.separator();
 
                 ui.collapsing("Selected File Settings", |ui| {
-
                     // button to get the column names from the selected files
-                    if ui.button("Get Column Names").on_hover_text("Get the column names from the selected files").clicked() {
-                        let checked_files: Vec<PathBuf> = self.selected_files.iter()
+                    if ui
+                        .button("Get Column Names")
+                        .on_hover_text("Get the column names from the selected files")
+                        .clicked()
+                    {
+                        let checked_files: Vec<PathBuf> = self
+                            .selected_files
+                            .iter()
                             .filter(|(_, checked)| *checked)
                             .map(|(file, _)| file.clone())
                             .collect();
@@ -1078,30 +1161,36 @@ def get_2d_histograms(file_name):
                     }
 
                     if self.lazyframe.is_some() {
-                        ui.label(format!("Columns: {}", self.settings.column_names.join(", ")));
+                        ui.label(format!(
+                            "Columns: {}",
+                            self.settings.column_names.join(", ")
+                        ));
                     } else {
                         ui.label("Columns: (none loaded)");
                     }
 
                     ui.separator();
 
-                    ui.label("Save Filtered Files:");
-                    self.settings.cuts.ui(ui, None, "save_filtered_files");
-
-                    ui.separator();
-
                     // Save Filtered Files controls + live status
                     ui.horizontal_wrapped(|ui| {
-
                         let saving = self.settings.saving_in_progress.load(Ordering::Relaxed);
+                        let active_filter_cut_count = self.active_filter_cut_count();
+                        let save_enabled = !saving
+                            && self.save_filtered_files_button_enabled(active_filter_cut_count);
+                        let save_hover_text =
+                            self.save_filtered_files_hover_text(active_filter_cut_count);
+                        let save_disabled_reason = self
+                            .save_filtered_files_disabled_reason(saving, active_filter_cut_count);
 
-                        if ui
-                            .add_enabled(!saving, egui::Button::new("Save Filtered Files"))
-                            .on_hover_text(
-                                "Apply active cuts to selected files and save as new Parquet files with the specified suffix (formated as filename_{suffix}.parquet). Existing files will be overwritten.",
-                            )
-                            .clicked()
-                        {
+                        let save_response =
+                            ui.add_enabled(save_enabled, egui::Button::new("Save Filtered Files"));
+                        let save_response = if save_enabled {
+                            save_response.on_hover_text(save_hover_text)
+                        } else {
+                            save_response.on_disabled_hover_text(save_disabled_reason)
+                        };
+
+                        if save_response.clicked() {
                             self.filter_selected_files_and_save();
                         }
 
@@ -1114,29 +1203,47 @@ def get_2d_histograms(file_name):
                                 .lock()
                                 .map(|g| *g)
                                 .unwrap_or(0.0);
-                            ui.add(egui::widgets::ProgressBar::new(p).animate(true).show_percentage().desired_width(100.0));
+                            ui.add(
+                                egui::widgets::ProgressBar::new(p)
+                                    .animate(true)
+                                    .show_percentage()
+                                    .desired_width(100.0),
+                            );
                         }
 
-                        ui.horizontal(
-                            |ui| {
-                                ui.label("Suffix:");
-                                ui.add_enabled(!saving, egui::TextEdit::singleline(&mut self.settings.saved_cut_suffix));
-                            }
-                        );
+                        ui.horizontal(|ui| {
+                            ui.label("Suffix:");
+                            ui.add_enabled(
+                                !saving,
+                                egui::TextEdit::singleline(&mut self.settings.saved_cut_suffix),
+                            );
+                        });
                     });
 
                     // Combine Selected Files controls + live status
                     ui.add_space(10.0);
                     ui.horizontal_wrapped(|ui| {
                         let combining = self.settings.combining_in_progress.load(Ordering::Relaxed);
+                        let checked_parquet_file_count = self.checked_parquet_files().len();
+                        let combine_enabled = !combining
+                            && self
+                                .combine_selected_files_button_enabled(checked_parquet_file_count);
+                        let combine_disabled_reason = self.combine_selected_files_disabled_reason(
+                            combining,
+                            checked_parquet_file_count,
+                        );
 
-                        if ui
-                            .add_enabled(!combining, egui::Button::new("Combine Selected Files"))
-                            .on_hover_text(
-                                "Combine all selected Parquet files into a single Parquet file. Spectrix always scans the inputs lazily and streams the result to the output parquet sink, so it does not collect the full combined dataset into memory first.",
-                            )
-                            .clicked()
-                        {
+                        let combine_response = ui.add_enabled(
+                            combine_enabled,
+                            egui::Button::new("Combine Selected Files"),
+                        );
+                        let combine_response = if combine_enabled {
+                            combine_response.on_hover_text(self.combine_selected_files_hover_text())
+                        } else {
+                            combine_response.on_disabled_hover_text(combine_disabled_reason)
+                        };
+
+                        if combine_response.clicked() {
                             self.combine_and_save_selected_files();
                         }
 
