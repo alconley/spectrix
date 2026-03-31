@@ -59,24 +59,37 @@ impl Histogram {
             .collect();
     }
 
-    fn current_raw_x_bounds(
-        plot_ui: &egui_plot::PlotUi<'_>,
-        calibration: Option<&crate::fitter::common::Calibration>,
-    ) -> (f64, f64) {
-        let plot_bounds = plot_ui.plot_bounds();
-        let mut x_min = plot_bounds.min()[0];
-        let mut x_max = plot_bounds.max()[0];
-
-        if let Some(calibration) = calibration {
-            x_min = calibration.invert(x_min).unwrap_or(x_min);
-            x_max = calibration.invert(x_max).unwrap_or(x_max);
-        }
-
-        if x_min <= x_max {
-            (x_min, x_max)
+    pub(crate) fn display_x_to_raw_x(&self, display_x: f64) -> f64 {
+        let linear_display_x = if self.plot_settings.egui_settings.log_x {
+            10_f64.powf(display_x)
         } else {
-            (x_max, x_min)
+            display_x
+        };
+
+        if self.fits.settings.calibrated {
+            self.fits
+                .calibration
+                .invert(linear_display_x)
+                .unwrap_or(linear_display_x)
+        } else {
+            linear_display_x
         }
+    }
+
+    pub(crate) fn display_x_bounds_to_raw_bounds(&self, x_min: f64, x_max: f64) -> (f64, f64) {
+        let raw_x_min = self.display_x_to_raw_x(x_min);
+        let raw_x_max = self.display_x_to_raw_x(x_max);
+
+        if raw_x_min <= raw_x_max {
+            (raw_x_min, raw_x_max)
+        } else {
+            (raw_x_max, raw_x_min)
+        }
+    }
+
+    fn current_raw_x_bounds(&self, plot_ui: &egui_plot::PlotUi<'_>) -> (f64, f64) {
+        let plot_bounds = plot_ui.plot_bounds();
+        self.display_x_bounds_to_raw_bounds(plot_bounds.min()[0], plot_bounds.max()[0])
     }
 
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
@@ -99,7 +112,8 @@ impl Histogram {
             .draw_all_markers(plot_ui, calibration_ref);
 
         self.fits.set_log(log_y, log_x);
-        self.fits.draw(plot_ui);
+        self.fits
+            .draw(plot_ui, &self.bins, self.range, self.bin_width);
         self.show_stats(plot_ui);
 
         self.update_background_pair_lines();
@@ -115,11 +129,10 @@ impl Histogram {
             self.plot_settings.cursor_position = None;
         }
 
-        self.plot_settings.current_plot_bounds =
-            Some(Self::current_raw_x_bounds(plot_ui, calibration_ref));
         self.plot_settings.draw(plot_ui, calibration_ref);
 
         self.custom_plot_manipulation_update(plot_ui);
+        self.plot_settings.current_plot_bounds = Some(self.current_raw_x_bounds(plot_ui));
 
         // self.plot_settings.egui_settings.y_label = format!("Counts/{:.}", self.bin_width);
     }
@@ -164,7 +177,9 @@ impl Histogram {
         let plot_response = plot.show(ui, |plot_ui| {
             self.draw(plot_ui);
 
-            if self.plot_settings.progress.is_some() {
+            if self.plot_settings.progress.is_some()
+                && !self.plot_settings.auto_fit_y_to_visible_range
+            {
                 let y_max = self.bins.iter().max().copied().unwrap_or(0) as f64;
                 let mut plot_bounds = plot_ui.plot_bounds();
                 plot_bounds.extend_with_y(y_max * 1.1);

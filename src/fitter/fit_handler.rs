@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use super::fit_settings::FitSettings;
 use super::main_fitter::{FitResult, Fitter};
 
-use super::models::gaussian::GaussianFitter;
+use super::models::gaussian::{GaussianFitter, HistogramDrawContext, UuidDrawOptions};
 
 use super::common::Calibration;
 
@@ -67,9 +67,9 @@ fn draw_plot_segment(
     );
 }
 
-fn draw_cross_error_bars(
-    plot_ui: &mut PlotUi<'_>,
-    id_prefix: &str,
+#[derive(Debug, Clone, Copy)]
+struct CrossErrorBars<'a> {
+    id_prefix: &'a str,
     index: usize,
     x: f64,
     y: f64,
@@ -78,38 +78,55 @@ fn draw_cross_error_bars(
     x_cap_half_width: f64,
     y_cap_half_height: f64,
     color: Color32,
-) {
-    let x_uncertainty = x_uncertainty.max(0.0);
-    let y_uncertainty = y_uncertainty.max(0.0);
+}
+
+fn draw_cross_error_bars(plot_ui: &mut PlotUi<'_>, error_bar: CrossErrorBars<'_>) {
+    let x_uncertainty = error_bar.x_uncertainty.max(0.0);
+    let y_uncertainty = error_bar.y_uncertainty.max(0.0);
 
     if x_uncertainty.is_finite() && x_uncertainty > 0.0 {
         draw_plot_segment(
             plot_ui,
-            (id_prefix, index, "x_bar"),
-            vec![[x - x_uncertainty, y], [x + x_uncertainty, y]],
-            color,
+            (error_bar.id_prefix, error_bar.index, "x_bar"),
+            vec![
+                [error_bar.x - x_uncertainty, error_bar.y],
+                [error_bar.x + x_uncertainty, error_bar.y],
+            ],
+            error_bar.color,
             1.0,
         );
 
-        if y_cap_half_height > 0.0 {
+        if error_bar.y_cap_half_height > 0.0 {
             draw_plot_segment(
                 plot_ui,
-                (id_prefix, index, "x_cap_left"),
+                (error_bar.id_prefix, error_bar.index, "x_cap_left"),
                 vec![
-                    [x - x_uncertainty, y - y_cap_half_height],
-                    [x - x_uncertainty, y + y_cap_half_height],
+                    [
+                        error_bar.x - x_uncertainty,
+                        error_bar.y - error_bar.y_cap_half_height,
+                    ],
+                    [
+                        error_bar.x - x_uncertainty,
+                        error_bar.y + error_bar.y_cap_half_height,
+                    ],
                 ],
-                color,
+                error_bar.color,
                 1.0,
             );
             draw_plot_segment(
                 plot_ui,
-                (id_prefix, index, "x_cap_right"),
+                (error_bar.id_prefix, error_bar.index, "x_cap_right"),
                 vec![
-                    [x + x_uncertainty, y - y_cap_half_height],
-                    [x + x_uncertainty, y + y_cap_half_height],
+                    [
+                        error_bar.x + x_uncertainty,
+                        error_bar.y - error_bar.y_cap_half_height,
+                    ],
+                    [
+                        error_bar.x + x_uncertainty,
+                        error_bar.y + error_bar.y_cap_half_height,
+                    ],
                 ],
-                color,
+                error_bar.color,
                 1.0,
             );
         }
@@ -118,31 +135,46 @@ fn draw_cross_error_bars(
     if y_uncertainty.is_finite() && y_uncertainty > 0.0 {
         draw_plot_segment(
             plot_ui,
-            (id_prefix, index, "y_bar"),
-            vec![[x, y - y_uncertainty], [x, y + y_uncertainty]],
-            color,
+            (error_bar.id_prefix, error_bar.index, "y_bar"),
+            vec![
+                [error_bar.x, error_bar.y - y_uncertainty],
+                [error_bar.x, error_bar.y + y_uncertainty],
+            ],
+            error_bar.color,
             1.0,
         );
 
-        if x_cap_half_width > 0.0 {
+        if error_bar.x_cap_half_width > 0.0 {
             draw_plot_segment(
                 plot_ui,
-                (id_prefix, index, "y_cap_bottom"),
+                (error_bar.id_prefix, error_bar.index, "y_cap_bottom"),
                 vec![
-                    [x - x_cap_half_width, y - y_uncertainty],
-                    [x + x_cap_half_width, y - y_uncertainty],
+                    [
+                        error_bar.x - error_bar.x_cap_half_width,
+                        error_bar.y - y_uncertainty,
+                    ],
+                    [
+                        error_bar.x + error_bar.x_cap_half_width,
+                        error_bar.y - y_uncertainty,
+                    ],
                 ],
-                color,
+                error_bar.color,
                 1.0,
             );
             draw_plot_segment(
                 plot_ui,
-                (id_prefix, index, "y_cap_top"),
+                (error_bar.id_prefix, error_bar.index, "y_cap_top"),
                 vec![
-                    [x - x_cap_half_width, y + y_uncertainty],
-                    [x + x_cap_half_width, y + y_uncertainty],
+                    [
+                        error_bar.x - error_bar.x_cap_half_width,
+                        error_bar.y + y_uncertainty,
+                    ],
+                    [
+                        error_bar.x + error_bar.x_cap_half_width,
+                        error_bar.y + y_uncertainty,
+                    ],
                 ],
-                color,
+                error_bar.color,
                 1.0,
             );
         }
@@ -583,10 +615,7 @@ impl Fits {
         points
     }
 
-    fn calibration_curve_bounds(
-        &self,
-        points: &[CalibrationPlotPoint],
-    ) -> ((f64, f64), (f64, f64)) {
+    fn calibration_curve_bounds(points: &[CalibrationPlotPoint]) -> ((f64, f64), (f64, f64)) {
         let x_min = points
             .iter()
             .map(|point| point.mean - point.mean_uncertainty.max(0.0))
@@ -653,7 +682,7 @@ impl Fits {
         let calibration_line_id = ui.id().with("energy_calibration_fit_line");
         let residual_plot_id = ui.id().with("energy_calibration_residuals_plot");
 
-        let (x_bounds, y_bounds) = self.calibration_curve_bounds(&points);
+        let (x_bounds, y_bounds) = Self::calibration_curve_bounds(&points);
         let (fit_line, band_x, band_lower, band_upper) = self.calibration_fit_series(x_bounds, 256);
 
         let x_span = (x_bounds.1 - x_bounds.0).abs().max(1.0);
@@ -725,15 +754,17 @@ impl Fits {
                 for (index, point) in points.iter().enumerate() {
                     draw_cross_error_bars(
                         plot_ui,
-                        "energy_calibration",
-                        index,
-                        point.mean,
-                        point.energy,
-                        point.mean_uncertainty,
-                        point.energy_uncertainty,
-                        x_cap_half_width,
-                        y_cap_half_height,
-                        point_color,
+                        CrossErrorBars {
+                            id_prefix: "energy_calibration",
+                            index,
+                            x: point.mean,
+                            y: point.energy,
+                            x_uncertainty: point.mean_uncertainty,
+                            y_uncertainty: point.energy_uncertainty,
+                            x_cap_half_width,
+                            y_cap_half_height,
+                            color: point_color,
+                        },
                     );
                 }
 
@@ -855,15 +886,17 @@ impl Fits {
                 {
                     draw_cross_error_bars(
                         plot_ui,
-                        "energy_calibration_residuals",
-                        index,
-                        point[0],
-                        point[1],
-                        *mean_uncertainty,
-                        *residual_uncertainty,
-                        x_cap_half_width,
-                        residual_y_cap_half_height,
-                        point_color,
+                        CrossErrorBars {
+                            id_prefix: "energy_calibration_residuals",
+                            index,
+                            x: point[0],
+                            y: point[1],
+                            x_uncertainty: *mean_uncertainty,
+                            y_uncertainty: *residual_uncertainty,
+                            x_cap_half_width,
+                            y_cap_half_height: residual_y_cap_half_height,
+                            color: point_color,
+                        },
                     );
                 }
             });
@@ -978,7 +1011,13 @@ impl Fits {
         self.temp_fit = None;
     }
 
-    pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
+    pub fn draw(
+        &mut self,
+        plot_ui: &mut egui_plot::PlotUi<'_>,
+        histogram_bins: &[u64],
+        histogram_range: (f64, f64),
+        histogram_bin_width: f64,
+    ) {
         self.apply_visibility_settings();
 
         let calibration = if self.settings.calibrated {
@@ -988,11 +1027,32 @@ impl Fits {
         };
 
         let calibrated = self.settings.calibrated;
+        let uuid_draw_options = UuidDrawOptions {
+            calibrate: calibrated,
+            log_x: false,
+            log_y: false,
+            label_size: self.settings.uuid_label_size,
+            label_lift: self.settings.uuid_label_lift,
+            draw_label_guide: self.settings.uuid_label_guides,
+        };
+        let histogram_draw_context = HistogramDrawContext {
+            bins: histogram_bins,
+            range: histogram_range,
+            bin_width: histogram_bin_width,
+        };
         if let Some(temp_fit) = &self.temp_fit {
             temp_fit.draw(plot_ui, calibration, self.settings.show_fit_lines_area);
 
             if let Some(FitResult::Gaussian(gauss)) = &temp_fit.fit_result {
-                gauss.draw_uuid(plot_ui, calibrated);
+                gauss.draw_uuid(
+                    plot_ui,
+                    UuidDrawOptions {
+                        log_x: temp_fit.composition_line.log_x,
+                        log_y: temp_fit.composition_line.log_y,
+                        ..uuid_draw_options
+                    },
+                    histogram_draw_context,
+                );
             }
         }
 
@@ -1001,9 +1061,30 @@ impl Fits {
 
             // put the uuid above each peak if it is not 0
             if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result {
-                gauss.draw_uuid(plot_ui, calibrated);
+                gauss.draw_uuid(
+                    plot_ui,
+                    UuidDrawOptions {
+                        log_x: fit.composition_line.log_x,
+                        log_y: fit.composition_line.log_y,
+                        ..uuid_draw_options
+                    },
+                    histogram_draw_context,
+                );
             }
         }
+    }
+
+    pub fn has_uuid_labels(&self) -> bool {
+        let fit_has_uuid_labels = |fit: &Fitter| {
+            if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result {
+                gauss.fit_result.iter().any(|params| params.uuid != 0)
+            } else {
+                false
+            }
+        };
+
+        self.temp_fit.as_ref().is_some_and(fit_has_uuid_labels)
+            || self.stored_fits.iter().any(fit_has_uuid_labels)
     }
 
     pub fn fit_stats_grid_ui(&mut self, ui: &mut egui::Ui) {
@@ -1425,7 +1506,12 @@ impl Fits {
     }
 
     fn fit_panel_contents_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Fit Panel");
+        ui.horizontal(|ui| {
+            ui.heading("Fit Panel");
+            ui.separator();
+            ui.checkbox(&mut self.settings.fit_panel_popout, "Pop Out")
+                .on_hover_text("Open the fit panel in a separate native window when supported.");
+        });
 
         self.save_and_load_ui(ui);
 
@@ -1473,13 +1559,40 @@ impl Fits {
             let scroll_id = format!("fit_panel_scroll_{hist_name}");
             let mut open = self.settings.show_fit_stats;
 
-            egui::Window::new(title)
-                .open(&mut open)
-                .show(ui.ctx(), |ui| {
-                    egui::ScrollArea::both().id_salt(scroll_id).show(ui, |ui| {
-                        self.fit_panel_contents_ui(ui);
+            if self.settings.fit_panel_popout {
+                let viewport_id =
+                    egui::ViewportId::from_hash_of((ui.id(), hist_name, "fit_panel_viewport"));
+                let viewport_builder = egui::ViewportBuilder::default()
+                    .with_title(title)
+                    .with_inner_size([960.0, 720.0])
+                    .with_min_inner_size([520.0, 360.0]);
+
+                ui.ctx()
+                    .show_viewport_immediate(viewport_id, viewport_builder, |ui, _class| {
+                        if ui.ctx().input(|input| input.viewport().close_requested()) {
+                            open = false;
+                            return;
+                        }
+
+                        egui::CentralPanel::default().show_inside(ui, |ui| {
+                            egui::ScrollArea::both()
+                                .id_salt(scroll_id.as_str())
+                                .show(ui, |ui| {
+                                    self.fit_panel_contents_ui(ui);
+                                });
+                        });
                     });
-                });
+            } else {
+                egui::Window::new(title)
+                    .open(&mut open)
+                    .show(ui.ctx(), |ui| {
+                        egui::ScrollArea::both()
+                            .id_salt(scroll_id.as_str())
+                            .show(ui, |ui| {
+                                self.fit_panel_contents_ui(ui);
+                            });
+                    });
+            }
 
             self.settings.show_fit_stats = open;
         }

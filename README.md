@@ -14,7 +14,9 @@ Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting 
 - Read and analyze `.parquet` and `.root` files  
 - Interactive histogramming (1D & 2D)  
 - Interactive histogram-created cuts for 1D and 2D views  
-- Gaussian fitting with Python’s lmfit  
+- Gaussian fitting with Python’s lmfit, including total-fit uncertainty bands  
+- Visible-range auto-Y scaling for 1D histograms, with log-Y support  
+- UUID peak labels with configurable size/lift and optional guide lines  
 - UI-based histogram and cut definition  
 - Custom histogram scripting  
 - Integration with Polars for high-performance data processing  
@@ -298,11 +300,15 @@ The 1D histogram interface in **Spectrix** is designed for fast, interactive pea
 - Choose and tune background models: linear, quadratic, power law, exponential.
 - Detect peaks with `find_peaks`, with optional region-limited searching and background subtraction.
 - Optionally draw an uncertainty band around the total Gaussian fit from the Fit Panel.
+- Auto-fit the Y axis to the tallest bin in the current visible X range.
 - Rebin and restyle plots from the context menu.
 - Create interactive 1D cut regions directly on the histogram and reuse them as active cuts.
 - Store fit results and review them in a dedicated popup window or from the right-click Fits menu.
+- Open the Fit Panel either inside Spectrix or as a separate native window with **Pop Out** when the backend supports extra viewports.
 - Click **Modify** on a stored fit to move it back into the temp fit editor with its saved markers/settings.
 - Click **Refit** in the Fit Panel header to re-run all stored fits on the latest incoming data.
+- View histogram statistics in both raw-channel and calibrated display modes.
+- Adjust UUID label size/lift and optionally draw a guide back to the composition curve.
 - Use keyboard-driven controls for quick analysis loops.
 
 ### Fitting Engine
@@ -317,7 +323,7 @@ Fitting was originally implemented with [varpro](https://github.com/geo-ant/varp
 
 Each fitted Gaussian peak carries two pieces of analysis metadata:
 
-- **UUID**: an integer identifier used to track the same physical state across fits and downstream analysis steps. If the UUID is not `0`, its number is drawn on the plot near `y = 0`.
+- **UUID**: an integer identifier used to track the same physical state across fits and downstream analysis steps. If the UUID is not `0`, its number is drawn above the fitted composition peak. UUID text follows the light/dark theme, stays out of the legend, and can be resized/lifted with an optional dashed guide line from the Fit Panel.
 - **Assigned energy**: reference energy (and uncertainty) used to build a channel-to-energy calibration.
 
 If a peak has no assigned energy, Spectrix stores **`-1`** as the invalid sentinel value (with zero uncertainty). Peaks with energy `-1` are ignored when calibration points are collected.
@@ -350,6 +356,8 @@ Stored-fit modify/refit behavior:
 
 Because of that, exported lmfit `.sav` files include both fit parameters and calibration/UUID context, so they can be loaded and further analyzed directly in Python (for example with `lmfit.model.load_modelresult`).
 
+When an exported lmfit `.sav` file is loaded back into Spectrix, the total-fit `1σ` uncertainty band is rebuilt immediately. Spectrix first tries lmfit `eval_uncertainty`; if the saved result cannot provide that directly, Spectrix falls back to an approximate band reconstructed from the stored parameter errors.
+
 ### Which Save Format To Use
 
 - **Save Fits / Load Fits (`.json`)**: best for restoring and continuing your work inside Spectrix.
@@ -372,12 +380,14 @@ Cursor must be inside the plot for keybinds to be active.
 | **F** | Fit Gaussians | Fits peaks in region; auto-fits background first if needed. |
 | **O** | Detect peaks | Runs the peak finder and places peak markers at the detected locations. |
 | **S** | Store fit | Saves current fit result for later comparison/export. |
-| **I** | Toggle statistics | Shows/hides stats such as mean, counts, and sigma. |
-| **L** | Toggle log Y-axis | Switches between linear and logarithmic Y scaling. |
+| **I** | Toggle statistics | Shows/hides stats such as mean, counts, and sigma for the current visible range. |
+| **L** | Toggle log Y-axis | Switches between linear and logarithmic Y scaling while keeping the current X range. |
+| **Y** | Toggle auto-fit Y | Fits Y to the tallest visible bin with about 15% headroom. |
 
 ### Fit Behavior Notes
 
 - The default background model is **Linear**.
+- 1D auto-fit Y is enabled by default and uses the maximum bin height in the current visible X range with `1.15x` headroom in both linear and log modes.
 - If no background markers are present, Spectrix will still fit Gaussians on top of a fitted background model.
 - Background markers and an explicit background fit help the solver converge faster and let you control which region is used to determine the background.
 - Multiple Gaussian peaks can be fit simultaneously when multiple peak markers exist in the active region.
@@ -389,6 +399,10 @@ Cursor must be inside the plot for keybinds to be active.
 - That total-fit uncertainty band uses lmfit `eval_uncertainty` at `1σ`.
 - By default, peaks share a common standard deviation; this can be changed in fit settings.
 - Peak positions and widths can be constrained or locked from the *Fits* menu.
+- UUID labels are drawn above the composition curve using the larger of the composition height or the tallest nearby bin, so they stay readable on real peaks.
+- The **UUID Labels** controls in the Fit Panel let you change label **Size**, **Lift**, and an optional dashed **Guide** line back to the composition curve.
+- The Fit Panel can be popped out into its own window with the **Pop Out** toggle next to **Show Fit Panel**; if native child windows are unavailable, egui falls back to an embedded window.
+- Pop-out Fit Panel contents follow the active light/dark theme, including the UUID label colors drawn on fit plots.
 - Fit reports, curves, and parameter values are available from the plot context menu.
 
 > Additional controls such as peak finding, rebinning, marker styling, and display options are available by right-clicking on the 1D plot.

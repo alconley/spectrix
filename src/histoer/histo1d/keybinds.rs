@@ -70,7 +70,11 @@ impl Histogram {
 
             if ui.input(|i| i.key_pressed(egui::Key::L)) {
                 self.plot_settings.egui_settings.log_y = !self.plot_settings.egui_settings.log_y;
-                self.plot_settings.egui_settings.reset_axis = true;
+            }
+
+            if ui.input(|i| i.key_pressed(egui::Key::Y)) {
+                self.plot_settings.auto_fit_y_to_visible_range =
+                    !self.plot_settings.auto_fit_y_to_visible_range;
             }
 
             if ui.input(|i| i.key_pressed(egui::Key::O)) {
@@ -111,6 +115,7 @@ impl Histogram {
             ui.label("Plot");
             ui.label("I: Toggle Stats");
             ui.label("L: Toggle Log Y");
+            ui.label("Y: Toggle Auto Fit Y");
 
         });
     }

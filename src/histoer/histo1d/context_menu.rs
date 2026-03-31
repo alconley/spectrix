@@ -112,8 +112,12 @@ impl Histogram {
                 self.keybinds_ui(ui);
             });
 
-        ui.checkbox(&mut self.fits.settings.show_fit_stats, "Show Fit Panel")
-            .on_hover_text("Open the fit panel in a popup window");
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.fits.settings.show_fit_stats, "Show Fit Panel")
+                .on_hover_text("Open the fit panel.");
+            ui.checkbox(&mut self.fits.settings.fit_panel_popout, "Pop Out")
+                .on_hover_text("Open the fit panel in a separate native window when supported.");
+        });
 
         SubMenuButton::new("Fits")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
