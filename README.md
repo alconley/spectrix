@@ -158,10 +158,9 @@ When saving filtered files, Spectrix applies all enabled **active 1D/2D cuts** a
 
 Interactive cuts created directly on 1D and 2D histograms also appear in the same active-cuts area, so they can be enabled/disabled for histogram generation and parquet filtering before being added manually to the script.
 
-> ⚠️ **Warning:**  
-> Combining files loads all selected data into memory. Very large datasets may exhaust RAM and crash the session.
->
-> Recommended approach: apply cuts first to reduce data volume, then combine reduced files.
+When combining parquet files, Spectrix scans the selected inputs lazily and streams the merged result directly to the output parquet sink. It does **not** collect the full combined dataset into memory first.
+
+Large combines can still take time and produce large output files, so reducing files with cuts first can still be a useful workflow when you only need a subset of the data.
 
 ---
 

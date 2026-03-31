@@ -36,8 +36,6 @@ pub struct ProcessorSettings {
     pub combining_in_progress: Arc<AtomicBool>,
     #[serde(skip)]
     pub save_progress: Arc<Mutex<f32>>,
-    #[serde(skip)]
-    pub combine_progress: Arc<Mutex<f32>>,
 }
 
 impl Default for ProcessorSettings {
@@ -54,7 +52,6 @@ impl Default for ProcessorSettings {
             saving_in_progress: Arc::new(AtomicBool::new(false)),
             combining_in_progress: Arc::new(AtomicBool::new(false)),
             save_progress: Arc::new(Mutex::new(0.0)),
-            combine_progress: Arc::new(Mutex::new(0.0)),
         }
     }
 }
@@ -187,6 +184,21 @@ impl Processor {
             (true, false) => SelectedFileFormat::Parquet,
             (false, true) => SelectedFileFormat::Root,
             (true, true) => SelectedFileFormat::Mixed,
+        }
+    }
+
+    fn checked_parquet_files(&self) -> Vec<PathBuf> {
+        self.checked_files()
+            .into_iter()
+            .filter(|file| file.extension().is_some_and(|ext| ext == "parquet"))
+            .collect()
+    }
+
+    fn ensure_parquet_extension(path: PathBuf) -> PathBuf {
+        if path.extension().is_some_and(|ext| ext == "parquet") {
+            path
+        } else {
+            path.with_extension("parquet")
         }
     }
 
@@ -572,143 +584,127 @@ def get_2d_histograms(file_name):
 
     pub fn combine_and_save_selected_files(&self) {
         // Gather checked files
-        let checked_files: Vec<PathBuf> = self
-            .selected_files
-            .iter()
-            .filter(|(_, checked)| *checked)
-            .map(|(file, _)| file.clone())
-            .collect();
+        let checked_files = self.checked_files();
 
         if checked_files.is_empty() {
             log::error!("No files selected for combination.");
             return;
         }
 
+        if matches!(
+            self.checked_file_format(),
+            SelectedFileFormat::Mixed | SelectedFileFormat::Root
+        ) {
+            log::error!(
+                "Combine Selected Files only supports Parquet inputs. Select only .parquet files before starting."
+            );
+            return;
+        }
+
         // Keep only parquet files
-        let parquet_files: Vec<PathBuf> = checked_files
-            .into_iter()
-            .filter(|file| file.extension().is_some_and(|ext| ext == "parquet"))
-            .collect();
+        let parquet_files = self.checked_parquet_files();
 
         if parquet_files.is_empty() {
             log::warn!("No selected Parquet files to combine.");
             return;
         }
 
+        self.start_combine_and_save_selected_files(parquet_files);
+    }
+
+    fn start_combine_and_save_selected_files(&self, parquet_files: Vec<PathBuf>) {
         // Ask where to save the combined parquet
         if let Some(output_file) = rfd::FileDialog::new()
             .set_title("Save Combined Parquet File")
             .add_filter("Parquet Files", &["parquet"])
             .save_file()
         {
+            let output_file = Self::ensure_parquet_extension(output_file);
+
+            if parquet_files.iter().any(|file| file == &output_file) {
+                log::error!(
+                    "The output file cannot overwrite one of the selected input Parquet files."
+                );
+                return;
+            }
+
             // Initialize UI state
             self.settings
                 .combining_in_progress
                 .store(true, Ordering::Relaxed);
-            if let Ok(mut p) = self.settings.combine_progress.lock() {
-                *p = 0.0;
-            }
 
             // Clone Arcs for thread
             let combining_flag = self.settings.combining_in_progress.clone();
-            let combine_progress = self.settings.combine_progress.clone();
             let output_file_clone = output_file.clone();
 
             // Capture inputs for the worker thread
             let total_files = parquet_files.len().max(1);
 
             std::thread::spawn(move || {
-                // Stage 1: read/scan all files (0% → 70%)
-                let mut lazyframes = Vec::with_capacity(total_files);
-                for (i, file) in parquet_files.iter().enumerate() {
-                    log::info!("Reading file: {file:?}");
-                    // match LazyFrame::scan_parquet(
-                    //     PlPath::Local(Arc::from(file.clone().into_boxed_path())),
-                    //     Default::default(),
-                    // ) {
-                    //     Ok(lf) => lazyframes.push(lf),
-                    //     Err(e) => log::error!("Failed to read Parquet file {file:?}: {e}"),
-                    // }
-                    match PlRefPath::try_from_pathbuf(file.clone()) {
-                        Ok(path) => match LazyFrame::scan_parquet(path, Default::default()) {
-                            Ok(lf) => lazyframes.push(lf),
-                            Err(e) => log::error!("Failed to read Parquet file {file:?}: {e}"),
-                        },
-                        Err(e) => log::error!("Failed to convert Parquet path {file:?}: {e}"),
-                    }
+                let input_paths: Result<polars_buffer::Buffer<PlRefPath>, PolarsError> =
+                    parquet_files
+                        .into_iter()
+                        .map(PlRefPath::try_from_pathbuf)
+                        .collect();
 
-                    // Update progress through the read step
-                    if let Ok(mut p) = combine_progress.lock() {
-                        // Scale to 0.0–0.7 range
-                        *p = ((i + 1) as f32 / total_files as f32) * 0.70;
-                    }
-                }
-
-                if lazyframes.is_empty() {
-                    log::error!("No valid Parquet files loaded. Aborting combine.");
-                    // finalize state
-                    if let Ok(mut p) = combine_progress.lock() {
-                        *p = 1.0;
-                    }
-                    combining_flag.store(false, Ordering::Relaxed);
-                    return;
-                }
-
-                // Stage 2: concat + collect (70% → 90%)
-                let concat_start = 0.70f32;
-                if let Ok(mut p) = combine_progress.lock() {
-                    *p = concat_start;
-                }
-
-                let combined_lazyframe = match concat(lazyframes, UnionArgs::default()) {
-                    Ok(lf) => lf,
+                let input_paths = match input_paths {
+                    Ok(paths) => paths,
                     Err(e) => {
-                        log::error!("Failed to concatenate LazyFrames: {e}");
-                        if let Ok(mut p) = combine_progress.lock() {
-                            *p = 1.0;
-                        }
+                        log::error!("Failed to convert selected Parquet paths: {e}");
                         combining_flag.store(false, Ordering::Relaxed);
                         return;
                     }
                 };
 
-                match combined_lazyframe.collect() {
-                    Ok(mut df) => {
-                        if let Ok(mut p) = combine_progress.lock() {
-                            // bump to ~90% after collect succeeds
-                            *p = 0.90;
-                        }
+                let scan_args = ScanArgsParquet {
+                    low_memory: true,
+                    cache: false,
+                    ..Default::default()
+                };
 
-                        // Stage 3: write to disk (90% → 100%)
-                        match std::fs::File::create(&output_file_clone) {
-                            Ok(mut file_handle) => {
-                                let writer = ParquetWriter::new(&mut file_handle);
-                                if let Err(e) = writer.finish(&mut df) {
-                                    log::error!(
-                                        "Failed to save combined DataFrame to {output_file_clone:?}: {e}"
-                                    );
-                                } else {
-                                    log::info!(
-                                        "Successfully saved combined Parquet file: {output_file_clone:?}"
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                log::error!(
-                                    "Failed to create output file {output_file_clone:?}: {e}"
-                                );
-                            }
-                        }
+                let combined_lazyframe = match LazyFrame::scan_parquet_files(input_paths, scan_args)
+                {
+                    Ok(lf) => lf,
+                    Err(e) => {
+                        log::error!("Failed to scan selected Parquet files for combine: {e}");
+                        combining_flag.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
 
-                        if let Ok(mut p) = combine_progress.lock() {
-                            *p = 1.0;
-                        }
+                let output_path = match PlRefPath::try_from_pathbuf(output_file_clone.clone()) {
+                    Ok(path) => path,
+                    Err(e) => {
+                        log::error!("Failed to convert output path {output_file_clone:?}: {e}");
+                        combining_flag.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+
+                let parquet_write_options = Arc::new(ParquetWriteOptions::default());
+                let sink = match combined_lazyframe.sink(
+                    SinkDestination::File {
+                        target: SinkTarget::Path(output_path),
+                    },
+                    FileWriteFormat::Parquet(parquet_write_options),
+                    UnifiedSinkArgs::default(),
+                ) {
+                    Ok(sink) => sink,
+                    Err(e) => {
+                        log::error!("Failed to prepare streamed Parquet combine: {e}");
+                        combining_flag.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+
+                match sink.collect_with_engine(Engine::Auto) {
+                    Ok(_) => {
+                        log::info!(
+                            "Successfully combined {total_files} Parquet files into {output_file_clone:?} using the streamed writer."
+                        );
                     }
                     Err(e) => {
-                        log::error!("Failed to collect combined LazyFrame: {e}");
-                        if let Ok(mut p) = combine_progress.lock() {
-                            *p = 1.0;
-                        }
+                        log::error!("Failed to stream combined Parquet output: {e}");
                     }
                 }
 
@@ -1137,7 +1133,7 @@ def get_2d_histograms(file_name):
                         if ui
                             .add_enabled(!combining, egui::Button::new("Combine Selected Files"))
                             .on_hover_text(
-                                "Combine all selected Parquet files into a single Parquet file. You will be prompted to choose the save location and filename. Existing files will be overwritten. Use with caution as all files will be loaded into memory, which may cause crashes if memory is exceeded. It is best to first reduce the files with a cut and then combine.",
+                                "Combine all selected Parquet files into a single Parquet file. Spectrix always scans the inputs lazily and streams the result to the output parquet sink, so it does not collect the full combined dataset into memory first.",
                             )
                             .clicked()
                         {
@@ -1147,13 +1143,6 @@ def get_2d_histograms(file_name):
                         if combining {
                             ui.label("Combining…");
                             ui.add(egui::widgets::Spinner::default());
-                            let p = self
-                                .settings
-                                .combine_progress
-                                .lock()
-                                .map(|g| *g)
-                                .unwrap_or(0.0);
-                            ui.add(egui::widgets::ProgressBar::new(p).animate(true).show_percentage().desired_width(100.0));
                         }
                     });
                 });
@@ -1196,18 +1185,10 @@ def get_2d_histograms(file_name):
 
                 // ADD combine progress
                 if self.settings.combining_in_progress.load(Ordering::Relaxed) {
-                    let p = self
-                        .settings
-                        .combine_progress
-                        .lock()
-                        .map(|g| *g)
-                        .unwrap_or(0.0);
-                    ui.label("Combining files…");
-                    ui.add(
-                        egui::widgets::ProgressBar::new(p)
-                            .animate(true)
-                            .show_percentage(),
-                    );
+                    ui.horizontal(|ui| {
+                        ui.label("Combining files…");
+                        ui.add(egui::widgets::Spinner::default());
+                    });
                 }
             });
         }
