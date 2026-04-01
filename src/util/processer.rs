@@ -1125,7 +1125,8 @@ def get_2d_histograms(file_name):
             ui,
             self.settings.histogram_script_open && self.settings.left_panel_open,
             |ui| {
-                self.histogram_script.ui(ui, &self.histogrammer);
+                self.histogram_script
+                    .ui(ui, &self.histogrammer, &self.settings.column_names);
             },
         );
 

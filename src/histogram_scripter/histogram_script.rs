@@ -154,7 +154,7 @@ impl HistogramScript {
         self.active_filter_cuts(histogrammer).cuts.len()
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, histogrammer: &Histogrammer) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, histogrammer: &Histogrammer, column_names: &[String]) {
         let mut active_cuts = histogrammer.retrieve_active_histogram_cuts();
         self.apply_active_cut_states(&mut active_cuts);
 
@@ -195,7 +195,8 @@ impl HistogramScript {
             egui::CollapsingHeader::new("Custom")
                 .default_open(false)
                 .show(ui, |ui| {
-                    self.custom_scripts.ui(ui, Some(active_cuts.as_mut_slice()));
+                    self.custom_scripts
+                        .ui(ui, Some(active_cuts.as_mut_slice()), column_names);
                 });
         });
 

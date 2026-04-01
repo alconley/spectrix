@@ -134,21 +134,29 @@ impl Configs {
     }
 
     pub fn valid_configs(&mut self, lf: &mut LazyFrame) -> Self {
-        // Add new computed columns to the LazyFrame
-        for (expression, alias) in &self.columns {
-            if let Err(e) = add_computed_column(lf, expression, alias) {
-                log::error!("Error adding computed column '{alias}': {e}");
-            }
-        }
-
-        // Get the column names from the LazyFrame
-        let column_names = match get_column_names_from_lazyframe(lf) {
+        let mut column_names = match get_column_names_from_lazyframe(lf) {
             Ok(names) => names,
             Err(e) => {
                 log::error!("Failed to retrieve column names: {e:?}");
-                return Self::default(); // Return default Configs on error
+                return Self::default();
             }
         };
+
+        // Add new computed columns to the LazyFrame
+        for (expression, alias) in &self.columns {
+            if column_names.contains(alias) {
+                log::info!(
+                    "Skipping computed column '{alias}' because it already exists in the LazyFrame"
+                );
+                continue;
+            }
+
+            if let Err(e) = add_computed_column(lf, expression, alias) {
+                log::error!("Error adding computed column '{alias}': {e}");
+            } else {
+                column_names.push(alias.clone());
+            }
+        }
 
         // Ensure 1D cuts have their expressions parsed
         self.cuts.parse_conditions();
