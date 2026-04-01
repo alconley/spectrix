@@ -1758,11 +1758,7 @@ def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
 
             let fit_report: String = module
                 .getattr("Add_UUID_to_Result")?
-                .call1((
-                    temp_path.to_str().expect("Temp path should be valid"),
-                    peak_index,
-                    new_uuid,
-                ))?
+                .call1((temp_path.to_string_lossy().as_ref(), peak_index, new_uuid))?
                 .extract()?;
 
             // Step 3: Reload updated file into lmfit_result
@@ -1920,7 +1916,7 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
             let fit_report: String = module
                 .getattr("Update_EnergyCalibration")?
                 .call1((
-                    temp_path.to_str().expect("Temp path should be valid"),
+                    temp_path.to_string_lossy().as_ref(),
                     a,
                     a_uncertainty,
                     b,
@@ -1998,7 +1994,7 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
             let fit_report: String = module
                 .getattr("Update_Energy")?
                 .call1((
-                    temp_path.to_str().expect("Temp path should be valid"),
+                    temp_path.to_string_lossy().as_ref(),
                     peak_index,
                     new_energy,
                     new_uncertainty,

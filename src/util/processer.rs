@@ -5,12 +5,14 @@ use crate::histogram_scripter::histogram_script::HistogramScript;
 use pyo3::ffi::c_str;
 use pyo3::{prelude::*, types::PyModule};
 
+use egui_extras::{Size, StripBuilder};
 use egui_file_dialog::{FileDialog, Filter};
 use polars::prelude::*;
 
 use std::cmp::Ordering as CmpOrdering;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use std::sync::Arc;
 use std::thread;
@@ -61,6 +63,8 @@ pub struct Processor {
     pub selected_files: Vec<(PathBuf, bool)>, // Vec preserves order
     #[serde(skip)]
     pub lazyframe: Option<LazyFrame>,
+    #[serde(skip)]
+    root_import_result: Arc<Mutex<Option<RootImportResult>>>,
     pub histogrammer: Histogrammer,
     pub histogram_script: HistogramScript,
     pub settings: ProcessorSettings,
@@ -118,6 +122,28 @@ enum SelectedFileFormat {
     Mixed,
 }
 
+type RootImportResult = Result<RootImportBatch, String>;
+
+#[derive(Default)]
+struct RootImportBatch {
+    hist1d: Vec<RootImportHist1D>,
+    hist2d: Vec<RootImportHist2D>,
+}
+
+struct RootImportHist1D {
+    name: String,
+    bins: Vec<u64>,
+    underflow: u64,
+    overflow: u64,
+    range: (f64, f64),
+}
+
+struct RootImportHist2D {
+    name: String,
+    bins: Vec<Vec<u64>>,
+    range: ((f64, f64), (f64, f64)),
+}
+
 impl Processor {
     pub fn new(name: impl Into<String>) -> Self {
         let settings = ProcessorSettings {
@@ -139,6 +165,7 @@ impl Processor {
                 ),
             selected_files: Vec::new(),
             lazyframe: None,
+            root_import_result: Arc::new(Mutex::new(None)),
             histogrammer: Histogrammer::default(),
             histogram_script: HistogramScript::new(),
             settings,
@@ -201,7 +228,7 @@ impl Processor {
             && active_filter_cut_count > 0
     }
 
-    fn save_filtered_files_hover_text(&self, active_filter_cut_count: usize) -> String {
+    fn save_filtered_files_hover_text(active_filter_cut_count: usize) -> String {
         if active_filter_cut_count == 1 {
             "Apply the 1 active cut from the Histogram Script to each selected parquet file and save the result as filename_{suffix}.parquet. Only active cuts are used here.".to_owned()
         } else {
@@ -239,7 +266,7 @@ impl Processor {
             && checked_parquet_file_count >= 2
     }
 
-    fn combine_selected_files_hover_text(&self) -> &'static str {
+    fn combine_selected_files_hover_text() -> &'static str {
         "Combine all selected parquet files into a single parquet file. Spectrix scans the inputs lazily and streams the result to the output parquet sink, so it does not collect the full combined dataset into memory first."
     }
 
@@ -291,12 +318,24 @@ impl Processor {
     }
 
     fn histogram_action_disabled_reason(&self) -> &'static str {
+        if self.histogrammer.calculating.load(Ordering::Relaxed) {
+            return "Histogram loading or calculation is already in progress.";
+        }
+
         match self.checked_file_format() {
             SelectedFileFormat::None => "No files selected.",
             SelectedFileFormat::Mixed => {
                 "Select only parquet files or only root files before starting."
             }
             SelectedFileFormat::Parquet | SelectedFileFormat::Root => "",
+        }
+    }
+
+    fn histogram_progress_label(&self) -> &'static str {
+        if self.checked_file_format() == SelectedFileFormat::Root {
+            "Retrieving Histograms"
+        } else {
+            "Calculating"
         }
     }
 
@@ -318,7 +357,7 @@ impl Processor {
 
         ui.checkbox(
             &mut self.settings.calculate_histograms_seperately,
-            "Calculate histograms separately",
+            "Calculate/Get histograms separately",
         );
 
         ui.separator();
@@ -331,7 +370,11 @@ impl Processor {
         );
     }
 
-    pub fn get_histograms_from_root_files(&mut self, checked_files: &[PathBuf]) -> PyResult<()> {
+    fn read_histograms_from_root_files(
+        jobs: &[(PathBuf, Option<String>)],
+        progress: &Arc<Mutex<f32>>,
+        abort_flag: &Arc<AtomicBool>,
+    ) -> PyResult<RootImportBatch> {
         Python::attach(|py| {
             // Attempt to import Python modules and handle errors
             let sys = py.import("sys").map_err(|e| {
@@ -419,13 +462,20 @@ def get_2d_histograms(file_name):
                 e
             })?;
 
-            let root_files: Vec<_> = checked_files
-                .iter()
-                .filter(|file| file.extension().is_some_and(|ext| ext == "root"))
-                .collect();
+            let total_files = jobs.len().max(1);
+            let mut imported = RootImportBatch::default();
 
-            for file in &root_files {
-                let file_name = file.to_str().expect("Failed to convert path to str");
+            for (index, (file, prefix)) in jobs.iter().enumerate() {
+                if abort_flag.load(Ordering::Relaxed) {
+                    log::info!("ROOT histogram import canceled by user.");
+                    break;
+                }
+
+                if file.extension().is_none_or(|ext| ext != "root") {
+                    continue;
+                }
+
+                let file_name = file.to_string_lossy();
 
                 let result_1d = module
                     .getattr("get_1d_histograms")
@@ -433,7 +483,7 @@ def get_2d_histograms(file_name):
                         eprintln!("Error accessing `get_1d_histograms` function: {e:?}");
                         e
                     })?
-                    .call1((file_name,))
+                    .call1((file_name.as_ref(),))
                     .map_err(|e| {
                         eprintln!("Error calling `get_1d_histograms` with file {file_name}: {e:?}");
                         e
@@ -444,31 +494,53 @@ def get_2d_histograms(file_name):
                 for i in 0..length_1d {
                     let item = result_1d.get_item(i)?;
                     let full_name: String = item.get_item(0)?.extract()?;
+                    let histogram_name = prefix
+                        .as_deref()
+                        .filter(|prefix| !prefix.is_empty())
+                        .map_or_else(
+                            || full_name.clone(),
+                            |prefix| format!("{prefix}/{full_name}"),
+                        );
                     let mut counts: Vec<f64> = item.get_item(1)?.extract()?;
+                    if counts.is_empty() {
+                        log::warn!(
+                            "Skipping ROOT histogram '{}' from {} because counts were empty.",
+                            histogram_name,
+                            file.display()
+                        );
+                        continue;
+                    }
                     let underflow = counts.remove(0);
                     let overflow = counts.pop().unwrap_or(0.0);
                     let bin_edges: Vec<f64> = item.get_item(2)?.extract()?;
+                    if bin_edges.len() < 2 {
+                        log::warn!(
+                            "Skipping ROOT histogram '{}' from {} because bin edges were incomplete.",
+                            histogram_name,
+                            file.display()
+                        );
+                        continue;
+                    }
                     let range = (bin_edges[0], bin_edges[bin_edges.len() - 1]);
 
                     let counts_u64 = counts.iter().map(|&x| x as u64).collect::<Vec<u64>>();
 
-                    self.histogrammer.add_hist1d_with_bin_values(
-                        &full_name,
-                        counts_u64,
-                        underflow as u64,
-                        overflow as u64,
+                    imported.hist1d.push(RootImportHist1D {
+                        name: histogram_name,
+                        bins: counts_u64,
+                        underflow: underflow as u64,
+                        overflow: overflow as u64,
                         range,
-                    );
+                    });
                 }
 
-                // let result_2d = module.getattr("get_2d_histograms")?.call1((file_name,))?;
                 let result_2d = module
                     .getattr("get_2d_histograms")
                     .map_err(|e| {
                         eprintln!("Error accessing `get_2d_histograms` function: {e:?}");
                         e
                     })?
-                    .call1((file_name,))
+                    .call1((file_name.as_ref(),))
                     .map_err(|e| {
                         eprintln!("Error calling `get_2d_histograms` with file {file_name}: {e:?}");
                         e
@@ -480,9 +552,24 @@ def get_2d_histograms(file_name):
                     let item = result_2d.get_item(i)?;
 
                     let full_name: String = item.get_item(0)?.extract()?;
+                    let histogram_name = prefix
+                        .as_deref()
+                        .filter(|prefix| !prefix.is_empty())
+                        .map_or_else(
+                            || full_name.clone(),
+                            |prefix| format!("{prefix}/{full_name}"),
+                        );
                     let counts: Vec<Vec<f64>> = item.get_item(1)?.extract()?;
                     let bin_edges_x: Vec<f64> = item.get_item(2)?.extract()?;
                     let bin_edges_y: Vec<f64> = item.get_item(3)?.extract()?;
+                    if bin_edges_x.len() < 2 || bin_edges_y.len() < 2 {
+                        log::warn!(
+                            "Skipping ROOT histogram '{}' from {} because 2D bin edges were incomplete.",
+                            histogram_name,
+                            file.display()
+                        );
+                        continue;
+                    }
                     let range = (
                         (bin_edges_x[0], bin_edges_x[bin_edges_x.len() - 1]),
                         (bin_edges_y[0], bin_edges_y[bin_edges_y.len() - 1]),
@@ -493,13 +580,90 @@ def get_2d_histograms(file_name):
                         .map(|row| row.iter().map(|&x| x as u64).collect::<Vec<u64>>())
                         .collect::<Vec<Vec<u64>>>();
 
-                    self.histogrammer
-                        .add_hist2d_with_bin_values(&full_name, &counts_u64, range);
+                    imported.hist2d.push(RootImportHist2D {
+                        name: histogram_name,
+                        bins: counts_u64,
+                        range,
+                    });
+                }
+
+                if let Ok(mut current_progress) = progress.lock() {
+                    *current_progress = (index + 1) as f32 / total_files as f32;
                 }
             }
 
-            Ok(())
+            Ok(imported)
         })
+    }
+
+    fn start_get_histograms_from_root_files(&mut self, jobs: Vec<(PathBuf, Option<String>)>) {
+        if jobs.is_empty() {
+            log::warn!("No ROOT files selected for histogram import.");
+            return;
+        }
+
+        self.histogrammer.reset_histograms();
+        self.histogrammer.calculating.store(true, Ordering::Relaxed);
+        self.histogrammer.abort_flag.store(false, Ordering::Relaxed);
+        if let Ok(mut current_progress) = self.histogrammer.progress.lock() {
+            *current_progress = 0.0;
+        }
+        if let Ok(mut slot) = self.root_import_result.lock() {
+            *slot = None;
+        }
+
+        let calculating = Arc::clone(&self.histogrammer.calculating);
+        let abort_flag = Arc::clone(&self.histogrammer.abort_flag);
+        let progress = Arc::clone(&self.histogrammer.progress);
+        let result_slot = Arc::clone(&self.root_import_result);
+
+        thread::spawn(move || {
+            let result = Self::read_histograms_from_root_files(&jobs, &progress, &abort_flag)
+                .map_err(|error| format!("{error:?}"));
+
+            if let Ok(mut slot) = result_slot.lock() {
+                *slot = Some(result);
+            }
+
+            if let Ok(mut current_progress) = progress.lock()
+                && !abort_flag.load(Ordering::Relaxed)
+            {
+                *current_progress = 1.0;
+            }
+
+            calculating.store(false, Ordering::Relaxed);
+        });
+    }
+
+    fn apply_root_import_batch(&mut self, import_batch: RootImportBatch) {
+        for hist in import_batch.hist1d {
+            self.histogrammer.add_hist1d_with_bin_values(
+                &hist.name,
+                &hist.bins,
+                hist.underflow,
+                hist.overflow,
+                hist.range,
+            );
+        }
+
+        for hist in import_batch.hist2d {
+            self.histogrammer
+                .add_hist2d_with_bin_values(&hist.name, &hist.bins, hist.range);
+        }
+    }
+
+    fn flush_root_import_result(&mut self) {
+        let result = self
+            .root_import_result
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take());
+
+        match result {
+            Some(Ok(import_batch)) => self.apply_root_import_batch(import_batch),
+            Some(Err(error)) => log::error!("Error processing ROOT files: {error}"),
+            None => {}
+        }
     }
 
     fn create_lazyframe(&mut self, checked_files: &[PathBuf]) {
@@ -603,8 +767,14 @@ def get_2d_histograms(file_name):
                 eprintln!("Processing file: {file:?}");
                 let file_stem = file
                     .file_stem()
-                    .expect("Failed to get file stem")
-                    .to_string_lossy();
+                    .map(|stem| stem.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| {
+                        log::warn!(
+                            "File {} had no stem; using a fallback output name.",
+                            file.display()
+                        );
+                        "filtered".to_owned()
+                    });
                 let new_file_name = if saved_cut_suffix.is_empty() {
                     format!("{file_stem}_filtered")
                 } else {
@@ -620,12 +790,7 @@ def get_2d_histograms(file_name):
                     Ok(path) => match LazyFrame::scan_parquet(path, Default::default()) {
                         Ok(lf) => match lf.collect() {
                             Ok(df) => {
-                                if let Err(e) = cut.filter_df_and_save(
-                                    &df,
-                                    new_file_path
-                                        .to_str()
-                                        .expect("Failed to convert path to str"),
-                                ) {
+                                if let Err(e) = cut.filter_df_and_save(&df, &new_file_path) {
                                     log::error!(
                                         "Failed to save filtered DataFrame for {file:?}: {e}"
                                     );
@@ -824,6 +989,11 @@ def get_2d_histograms(file_name):
     }
 
     pub fn calculate_histograms(&mut self) {
+        if self.histogrammer.calculating.load(Ordering::Relaxed) {
+            log::warn!("Histogram loading or calculation is already in progress.");
+            return;
+        }
+
         let checked_files = self.checked_files();
 
         if checked_files.is_empty() {
@@ -837,6 +1007,8 @@ def get_2d_histograms(file_name):
         }
 
         if self.settings.calculate_histograms_seperately {
+            let mut root_jobs = Vec::new();
+
             for file in &checked_files {
                 let prefix = file
                     .file_stem()
@@ -846,11 +1018,12 @@ def get_2d_histograms(file_name):
                     self.create_lazyframe(std::slice::from_ref(file));
                     self.perform_histogrammer_from_lazyframe(prefix);
                 } else if file.extension().is_some_and(|ext| ext == "root") {
-                    self.get_histograms_from_root_files(std::slice::from_ref(file))
-                        .unwrap_or_else(|e| {
-                            log::error!("Error processing ROOT file {file:?}: {e:?}");
-                        });
+                    root_jobs.push((file.clone(), prefix));
                 }
+            }
+
+            if !root_jobs.is_empty() {
+                self.start_get_histograms_from_root_files(root_jobs);
             }
         } else if checked_files
             .iter()
@@ -862,10 +1035,13 @@ def get_2d_histograms(file_name):
             .iter()
             .any(|file| file.extension().is_some_and(|ext| ext == "root"))
         {
-            self.get_histograms_from_root_files(&checked_files)
-                .unwrap_or_else(|e| {
-                    log::error!("Error processing ROOT files: {e:?}");
-                });
+            let root_jobs = checked_files
+                .into_iter()
+                .filter(|file| file.extension().is_some_and(|ext| ext == "root"))
+                .map(|file| (file, None))
+                .collect::<Vec<_>>();
+
+            self.start_get_histograms_from_root_files(root_jobs);
         }
     }
 
@@ -901,7 +1077,8 @@ def get_2d_histograms(file_name):
                 if ui
                     .add_enabled(
                         !self.selected_files.is_empty()
-                            && self.checked_file_format() != SelectedFileFormat::Mixed,
+                            && self.checked_file_format() != SelectedFileFormat::Mixed
+                            && !self.histogrammer.calculating.load(Ordering::Relaxed),
                         egui::Button::new(self.histogram_action_label())
                             .min_size(egui::vec2(ui.available_width(), 0.0)),
                     )
@@ -928,8 +1105,8 @@ def get_2d_histograms(file_name):
                     ui.separator();
 
                     // Show spinner while `calculating` is true
-                    ui.horizontal(|ui| {
-                        ui.label("Calculating");
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(self.histogram_progress_label());
                         ui.add(egui::widgets::Spinner::default());
                         ui.separator();
                         if ui.button("Cancel").clicked() {
@@ -1111,28 +1288,60 @@ def get_2d_histograms(file_name):
                 }
                 // Track indices of files to remove
                 let mut to_remove = Vec::new();
+                let row_height = ui.spacing().interact_size.y;
                 // Iterate over files and track index
                 for (index, (file, checked)) in self.selected_files.iter_mut().enumerate() {
-                    ui.horizontal_wrapped(|ui| {
-                        let display_text = if let Some(ref common_dir) = common_path {
-                            if file.parent() == Some(common_dir.as_path()) {
-                                file.file_name().unwrap_or_default().to_string_lossy()
-                            // Show only filename
-                            } else {
-                                file.to_string_lossy() // Show full path for outliers
-                            }
+                    let display_text = if let Some(ref common_dir) = common_path {
+                        if file.parent() == Some(common_dir.as_path()) {
+                            file.file_name().unwrap_or_default().to_string_lossy()
+                        // Show only filename
                         } else {
-                            file.to_string_lossy() // Show full path if no common directory
-                        };
-                        if ui.selectable_label(*checked, display_text).clicked() {
-                            *checked = !*checked; // Toggle selection
+                            file.to_string_lossy() // Show full path for outliers
                         }
+                    } else {
+                        file.to_string_lossy() // Show full path if no common directory
+                    };
 
-                        // "❌" button to mark for removal
-                        if ui.button("❌").clicked() {
-                            to_remove.push(index);
-                        }
-                    });
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), row_height),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            StripBuilder::new(ui)
+                                .clip(true)
+                                .size(Size::remainder())
+                                .size(Size::exact(row_height))
+                                .horizontal(|mut strip| {
+                                    strip.cell(|ui| {
+                                        let selectable = egui::Button::selectable(
+                                            *checked,
+                                            display_text.as_ref(),
+                                        )
+                                        .truncate();
+                                        if ui
+                                            .add_sized(
+                                                [ui.available_width(), row_height],
+                                                selectable,
+                                            )
+                                            .clicked()
+                                        {
+                                            *checked = !*checked; // Toggle selection
+                                        }
+                                    });
+                                    strip.cell(|ui| {
+                                        if ui
+                                            .add_sized(
+                                                [ui.available_width(), row_height],
+                                                egui::Button::new("X")
+                                                    .fill(egui::Color32::LIGHT_RED),
+                                            )
+                                            .clicked()
+                                        {
+                                            to_remove.push(index);
+                                        }
+                                    });
+                                });
+                        },
+                    );
                 }
                 // Remove files after iteration (to avoid borrowing issues)
                 for &index in to_remove.iter().rev() {
@@ -1145,9 +1354,11 @@ def get_2d_histograms(file_name):
                 ui.separator();
 
                 ui.collapsing("Selected File Settings", |ui| {
+                    let full_width = ui.available_width();
+
                     // button to get the column names from the selected files
                     if ui
-                        .button("Get Column Names")
+                        .add_sized([full_width, 0.0], egui::Button::new("Get Column Names"))
                         .on_hover_text("Get the column names from the selected files")
                         .clicked()
                     {
@@ -1172,133 +1383,92 @@ def get_2d_histograms(file_name):
                     ui.separator();
 
                     // Save Filtered Files controls + live status
-                    ui.horizontal_wrapped(|ui| {
-                        let saving = self.settings.saving_in_progress.load(Ordering::Relaxed);
-                        let active_filter_cut_count = self.active_filter_cut_count();
-                        let save_enabled = !saving
-                            && self.save_filtered_files_button_enabled(active_filter_cut_count);
-                        let save_hover_text =
-                            self.save_filtered_files_hover_text(active_filter_cut_count);
-                        let save_disabled_reason = self
-                            .save_filtered_files_disabled_reason(saving, active_filter_cut_count);
+                    let saving = self.settings.saving_in_progress.load(Ordering::Relaxed);
+                    let active_filter_cut_count = self.active_filter_cut_count();
+                    let save_enabled =
+                        !saving && self.save_filtered_files_button_enabled(active_filter_cut_count);
+                    let save_hover_text =
+                        Self::save_filtered_files_hover_text(active_filter_cut_count);
+                    let save_disabled_reason =
+                        self.save_filtered_files_disabled_reason(saving, active_filter_cut_count);
 
-                        let save_response =
-                            ui.add_enabled(save_enabled, egui::Button::new("Save Filtered Files"));
-                        let save_response = if save_enabled {
-                            save_response.on_hover_text(save_hover_text)
-                        } else {
-                            save_response.on_disabled_hover_text(save_disabled_reason)
-                        };
+                    let save_response = ui.add_enabled(
+                        save_enabled,
+                        egui::Button::new("Save Filtered Files")
+                            .min_size(egui::vec2(full_width, 0.0)),
+                    );
+                    let save_response = if save_enabled {
+                        save_response.on_hover_text(save_hover_text)
+                    } else {
+                        save_response.on_disabled_hover_text(save_disabled_reason)
+                    };
 
-                        if save_response.clicked() {
-                            self.filter_selected_files_and_save();
-                        }
+                    if save_response.clicked() {
+                        self.filter_selected_files_and_save();
+                    }
 
-                        if saving {
+                    if saving {
+                        ui.horizontal(|ui| {
                             ui.label("Saving…");
                             ui.add(egui::widgets::Spinner::default());
-                            let p = self
-                                .settings
-                                .save_progress
-                                .lock()
-                                .map(|g| *g)
-                                .unwrap_or(0.0);
-                            ui.add(
-                                egui::widgets::ProgressBar::new(p)
-                                    .animate(true)
-                                    .show_percentage()
-                                    .desired_width(100.0),
-                            );
-                        }
-
-                        ui.horizontal(|ui| {
-                            ui.label("Suffix:");
-                            ui.add_enabled(
-                                !saving,
-                                egui::TextEdit::singleline(&mut self.settings.saved_cut_suffix),
-                            );
                         });
+                        let p = self
+                            .settings
+                            .save_progress
+                            .lock()
+                            .map(|g| *g)
+                            .unwrap_or(0.0);
+                        ui.add(
+                            egui::widgets::ProgressBar::new(p)
+                                .animate(true)
+                                .show_percentage()
+                                .desired_width(full_width),
+                        );
+                    }
+
+                    ui.label("Suffix:");
+                    ui.add_enabled_ui(!saving, |ui| {
+                        ui.add_sized(
+                            [ui.available_width(), 0.0],
+                            egui::TextEdit::singleline(&mut self.settings.saved_cut_suffix),
+                        );
                     });
 
                     // Combine Selected Files controls + live status
                     ui.add_space(10.0);
-                    ui.horizontal_wrapped(|ui| {
-                        let combining = self.settings.combining_in_progress.load(Ordering::Relaxed);
-                        let checked_parquet_file_count = self.checked_parquet_files().len();
-                        let combine_enabled = !combining
-                            && self
-                                .combine_selected_files_button_enabled(checked_parquet_file_count);
-                        let combine_disabled_reason = self.combine_selected_files_disabled_reason(
-                            combining,
-                            checked_parquet_file_count,
-                        );
+                    let combining = self.settings.combining_in_progress.load(Ordering::Relaxed);
+                    let checked_parquet_file_count = self.checked_parquet_files().len();
+                    let combine_enabled = !combining
+                        && self.combine_selected_files_button_enabled(checked_parquet_file_count);
+                    let combine_disabled_reason = self.combine_selected_files_disabled_reason(
+                        combining,
+                        checked_parquet_file_count,
+                    );
 
-                        let combine_response = ui.add_enabled(
-                            combine_enabled,
-                            egui::Button::new("Combine Selected Files"),
-                        );
-                        let combine_response = if combine_enabled {
-                            combine_response.on_hover_text(self.combine_selected_files_hover_text())
-                        } else {
-                            combine_response.on_disabled_hover_text(combine_disabled_reason)
-                        };
+                    let combine_response = ui.add_enabled(
+                        combine_enabled,
+                        egui::Button::new("Combine Selected Files")
+                            .min_size(egui::vec2(full_width, 0.0)),
+                    );
+                    let combine_response = if combine_enabled {
+                        combine_response.on_hover_text(Self::combine_selected_files_hover_text())
+                    } else {
+                        combine_response.on_disabled_hover_text(combine_disabled_reason)
+                    };
 
-                        if combine_response.clicked() {
-                            self.combine_and_save_selected_files();
-                        }
+                    if combine_response.clicked() {
+                        self.combine_and_save_selected_files();
+                    }
 
-                        if combining {
+                    if combining {
+                        ui.horizontal(|ui| {
                             ui.label("Combining…");
                             ui.add(egui::widgets::Spinner::default());
-                        }
-                    });
+                        });
+                    }
                 });
             }
         });
-    }
-
-    pub fn bottom_panel(&mut self, ui: &mut egui::Ui) {
-        if self.histogrammer.calculating.load(Ordering::Relaxed)
-            || self.settings.saving_in_progress.load(Ordering::Relaxed)
-            || self.settings.combining_in_progress.load(Ordering::Relaxed)
-        {
-            egui::Panel::bottom("spectrix_bottom_panel").show_inside(ui, |ui| {
-                // existing histogrammer progress bar...
-                if self.histogrammer.calculating.load(Ordering::Relaxed) {
-                    ui.add(
-                        egui::widgets::ProgressBar::new(
-                            self.histogrammer.progress.lock().map(|x| *x).unwrap_or(0.0),
-                        )
-                        .animate(true)
-                        .show_percentage(),
-                    );
-                }
-
-                // ADD save progress
-                if self.settings.saving_in_progress.load(Ordering::Relaxed) {
-                    let p = self
-                        .settings
-                        .save_progress
-                        .lock()
-                        .map(|g| *g)
-                        .unwrap_or(0.0);
-                    ui.label("Saving filtered files…");
-                    ui.add(
-                        egui::widgets::ProgressBar::new(p)
-                            .animate(true)
-                            .show_percentage(),
-                    );
-                }
-
-                // ADD combine progress
-                if self.settings.combining_in_progress.load(Ordering::Relaxed) {
-                    ui.horizontal(|ui| {
-                        ui.label("Combining files…");
-                        ui.add(egui::widgets::Spinner::default());
-                    });
-                }
-            });
-        }
     }
 
     fn central_panel_ui(&mut self, ui: &mut egui::Ui) {
@@ -1308,14 +1478,25 @@ def get_2d_histograms(file_name):
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        self.flush_root_import_result();
         self.left_side_panels_ui(ui);
-        self.bottom_panel(ui);
         self.central_panel_ui(ui);
 
         self.analysis
             .ui(ui, &self.selected_files, &mut self.histogrammer);
 
         self.file_dialog.update(ui);
+
+        if self.histogrammer.calculating.load(Ordering::Relaxed)
+            || self
+                .histogrammer
+                .root_export_in_progress
+                .load(Ordering::Relaxed)
+            || self.settings.saving_in_progress.load(Ordering::Relaxed)
+            || self.settings.combining_in_progress.load(Ordering::Relaxed)
+        {
+            ui.ctx().request_repaint_after(Duration::from_millis(100));
+        }
     }
 }
 

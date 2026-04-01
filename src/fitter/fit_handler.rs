@@ -386,11 +386,16 @@ impl Fits {
             let path = Self::ensure_extension_if_missing(path, "json");
             let file = File::create(path);
             match file {
-                Ok(mut file) => {
-                    let json = serde_json::to_string(self).expect("Failed to serialize fits");
-                    file.write_all(json.as_bytes())
-                        .expect("Failed to write file");
-                }
+                Ok(mut file) => match serde_json::to_string(self) {
+                    Ok(json) => {
+                        if let Err(e) = file.write_all(json.as_bytes()) {
+                            log::error!("Failed to write fits file: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to serialize fits: {e}");
+                    }
+                },
                 Err(e) => {
                     log::error!("Error creating file: {e:?}");
                 }

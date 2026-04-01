@@ -516,7 +516,7 @@ impl Configs {
 
                         row.col(|ui| {
                             if ui
-                                .button("⿻")
+                                .button("\u{2935}")
                                 .on_hover_text("Clone this histogram config")
                                 .clicked()
                             {

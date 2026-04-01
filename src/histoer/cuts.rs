@@ -195,11 +195,23 @@ impl Cuts {
             && let Ok(entries) = std::fs::read_dir(folder)
         {
             for entry in entries {
-                let path = entry.expect("Failed to read entry").path();
+                let path = match entry {
+                    Ok(entry) => entry.path(),
+                    Err(e) => {
+                        log::error!("Failed to read cut entry in {}: {e}", folder.display());
+                        continue;
+                    }
+                };
                 if let Some(ext) = path.extension()
                     && ext == "json"
                 {
-                    let content = std::fs::read_to_string(&path).unwrap_or_default();
+                    let content = match std::fs::read_to_string(&path) {
+                        Ok(content) => content,
+                        Err(e) => {
+                            log::error!("Failed to read cut file {}: {e}", path.display());
+                            continue;
+                        }
+                    };
                     let cut1d: Result<Cut1D, _> = serde_json::from_str(&content);
                     if let Ok(mut cut) = cut1d {
                         cut.active = false; // Set active to false by default
@@ -488,7 +500,7 @@ impl Cuts {
     pub fn filter_df_and_save(
         &self,
         df: &DataFrame,
-        file_path: &str,
+        file_path: &Path,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // get only valid cuts
         let valid_cuts: Vec<&Cut> = self

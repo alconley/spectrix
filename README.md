@@ -12,6 +12,8 @@ Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting 
 ## Features
 
 - Read and analyze `.parquet` and `.root` files  
+- Background ROOT histogram retrieval/export so long uproot operations do not block the UI  
+- Combine matching ROOT histograms across multiple files, or load them separately with per-file prefixes  
 - Interactive histogramming (1D & 2D)  
 - Interactive histogram-created cuts for 1D and 2D views  
 - Gaussian fitting with Python’s lmfit, including total-fit uncertainty bands  
@@ -19,6 +21,7 @@ Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting 
 - UUID peak labels with configurable size/lift and optional guide lines  
 - UI-based histogram and cut definition  
 - Custom histogram scripting  
+- Built-in screenshot capture from the top bar  
 - Integration with Polars for high-performance data processing  
 
 ---
@@ -136,9 +139,20 @@ Use the **Get Files** button to select either a single file or a directory.
 
 ### Root Files
 
-If a `.root` file is selected, Spectrix attempts to load all 1D and 2D histograms found in that file.
+If one or more `.root` files are selected, Spectrix attempts to load all 1D and 2D histograms found in those files.
 
 Histogram paths such as `/name1/name2/histogram_name` are preserved and used to organize views into nested container hierarchies.
+
+ROOT retrieval runs in the background, so the UI remains responsive while Spectrix reads histograms through `uproot`. A spinner is shown while retrieval is active, and the operation can be canceled between files.
+
+ROOT loading behavior depends on the **Calculate/Get histograms separately** toggle:
+
+- **Off**: histograms with the same full ROOT path/name are merged together across the selected files.
+- **On**: each file gets its own prefix using the file stem, so matching histograms are loaded as separate entries such as `run_001/hEnergy` and `run_002/hEnergy`.
+
+When you start a new ROOT retrieval, Spectrix clears the current histogram contents first so repeated clicks on **Get Histograms** do not double the loaded counts.
+
+After 1D ROOT histograms are loaded, their axes are reset automatically so the plot opens around the imported data instead of staying zoomed near zero.
 
 ### Parquet Files
 
@@ -265,6 +279,13 @@ This is useful for:
 - Reproducing the same analysis between runs.
 - Sharing analysis setups with collaborators.
 - Building experiment-specific templates that can also be used by Custom Scripts.
+
+---
+
+## UI Convenience
+
+- A screenshot button lives in the top bar next to the light/dark theme toggle. Clicking it prompts for a save location and writes the current Spectrix window as a `.png`.
+- In the session context menu, **Reset Histogrammer** is placed directly beside the **Histogrammer** menu button for quicker access during iterative analysis.
 
 ---
 
