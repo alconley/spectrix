@@ -1,3 +1,4 @@
+use crate::egui_plot_stuff::egui_filled_area::EguiFilledArea;
 use crate::fitter::common::{Data, Parameter};
 use crate::fitter::main_fitter::{BackgroundModel, BackgroundResult};
 use crate::fitter::models::exponential::ExponentialFitter;
@@ -45,6 +46,23 @@ fn auto_fmt(value: Option<f64>, unc: Option<f64>, units: Option<&str>) -> String
         }
         None => "—".to_owned(),
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct UuidDrawOptions {
+    pub calibrate: bool,
+    pub log_x: bool,
+    pub log_y: bool,
+    pub label_size: f32,
+    pub label_lift: f32,
+    pub draw_label_guide: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct HistogramDrawContext<'a> {
+    pub bins: &'a [u64],
+    pub range: (f64, f64),
+    pub bin_width: f64,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -147,20 +165,49 @@ impl GaussianParameters {
     /// Function to generate fit points 5 sigma out from the mean.
     /// Fit points are generated in the range [mean - 5 * sigma, mean + 5 * sigma].
     pub fn generate_fit_points(&mut self, num_points: usize) {
-        if let (Some(mean), Some(sigma)) = (self.mean.value, self.sigma.value) {
-            let range_min = mean - 5.0 * sigma;
-            let range_max = mean + 5.0 * sigma;
-            let step_size = (range_max - range_min) / (num_points as f64);
-
+        let Some(xs) = self.sample_curve_xs(num_points) else {
             self.fit_points.clear();
-            for i in 0..=num_points {
-                let x = range_min + i as f64 * step_size;
-                let y = self.amplitude.value.unwrap_or(1.0) / sigma
-                    * (1.0 / (2.0 * std::f64::consts::PI).sqrt())
-                    * (-((x - mean).powi(2)) / (2.0 * sigma.powi(2))).exp();
-                self.fit_points.push([x, y]);
-            }
+            return;
+        };
+
+        self.fit_points = xs
+            .iter()
+            .filter_map(|&x| self.evaluate(x).map(|y| [x, y]))
+            .collect();
+    }
+
+    fn sample_curve_xs(&self, num_points: usize) -> Option<Vec<f64>> {
+        let mean = self.mean.value?;
+        let sigma = self.sigma.value?;
+
+        if !mean.is_finite() || !sigma.is_finite() || sigma <= 0.0 {
+            return None;
         }
+
+        let range_min = mean - 5.0 * sigma;
+        let range_max = mean + 5.0 * sigma;
+        let step_size = (range_max - range_min) / (num_points as f64);
+
+        Some(
+            (0..=num_points)
+                .map(|i| range_min + i as f64 * step_size)
+                .collect(),
+        )
+    }
+
+    fn evaluate(&self, x: f64) -> Option<f64> {
+        let amplitude = self.amplitude.value?;
+        let mean = self.mean.value?;
+        let sigma = self.sigma.value?;
+
+        if !amplitude.is_finite() || !mean.is_finite() || !sigma.is_finite() || sigma <= 0.0 {
+            return None;
+        }
+
+        let gaussian_norm = (1.0 / (2.0 * std::f64::consts::PI).sqrt()) / sigma;
+        let exponent = -((x - mean).powi(2)) / (2.0 * sigma.powi(2));
+
+        Some(amplitude * gaussian_norm * exponent.exp())
     }
 
     pub fn params_ui(&mut self, ui: &mut egui::Ui, calibrate: bool) {
@@ -318,6 +365,7 @@ pub struct GaussianFitter {
     pub background_result: Option<BackgroundResult>,
     pub fit_result: Vec<GaussianParameters>,
     pub fit_points: Vec<[f64; 2]>,
+    pub uncertainty_band: EguiFilledArea,
     pub fit_report: String,
     pub lmfit_result: Option<String>,
     pub sigma_bounds: Option<(Vec<f64>, Vec<f64>)>, // (mins_x, maxs_x)
@@ -350,6 +398,7 @@ impl GaussianFitter {
             },
             fit_result: Vec::new(),
             fit_points: Vec::new(),
+            uncertainty_band: EguiFilledArea::default(),
             fit_report: String::new(),
             lmfit_result: None,
             sigma_bounds: None,
@@ -391,6 +440,43 @@ impl GaussianFitter {
             },
             false,
         )
+    }
+
+    fn build_uncertainty_band(
+        xs: &[f64],
+        ys: &[f64],
+        uncertainties: &[f64],
+    ) -> Option<EguiFilledArea> {
+        if xs.len() != ys.len() || ys.len() != uncertainties.len() {
+            return None;
+        }
+
+        let lower = ys
+            .iter()
+            .zip(uncertainties)
+            .map(|(&y, &uncertainty)| {
+                let uncertainty = if uncertainty.is_finite() && uncertainty > 0.0 {
+                    uncertainty
+                } else {
+                    0.0
+                };
+                (y - uncertainty).max(0.0)
+            })
+            .collect();
+        let upper = ys
+            .iter()
+            .zip(uncertainties)
+            .map(|(&y, &uncertainty)| {
+                let uncertainty = if uncertainty.is_finite() && uncertainty > 0.0 {
+                    uncertainty
+                } else {
+                    0.0
+                };
+                y + uncertainty
+            })
+            .collect();
+
+        Some(EguiFilledArea::new(xs.to_vec(), lower, upper))
     }
 
     pub fn get_calibration_data(&self) -> Vec<(f64, f64, f64, f64)> {
@@ -569,6 +655,71 @@ def _extract_spectrix_metadata(result):
         True,
     )
 
+def _approx_eval_uncertainty(result, x):
+    x = np.asarray(x, dtype=float)
+    try:
+        y_nominal = np.asarray(result.eval(x=x), dtype=float)
+    except Exception:
+        return np.zeros_like(x, dtype=float)
+
+    variance = np.zeros_like(y_nominal, dtype=float)
+
+    for name, par in result.params.items():
+        stderr = getattr(par, 'stderr', None)
+        expr = getattr(par, 'expr', None)
+        value = getattr(par, 'value', None)
+
+        if expr is not None or stderr is None or value is None:
+            continue
+
+        try:
+            stderr = float(stderr)
+            value = float(value)
+        except Exception:
+            continue
+
+        if not np.isfinite(stderr) or stderr <= 0.0 or not np.isfinite(value):
+            continue
+
+        params_plus = result.params.copy()
+        params_minus = result.params.copy()
+
+        try:
+            params_plus[name].set(value=value + stderr)
+            params_minus[name].set(value=value - stderr)
+            y_plus = np.asarray(result.model.eval(params_plus, x=x), dtype=float)
+            y_minus = np.asarray(result.model.eval(params_minus, x=x), dtype=float)
+        except Exception:
+            continue
+
+        if y_plus.shape != y_nominal.shape or y_minus.shape != y_nominal.shape:
+            continue
+
+        deriv = (y_plus - y_minus) / (2.0 * stderr)
+        variance += (deriv * stderr) ** 2
+
+    return np.sqrt(np.maximum(variance, 0.0))
+
+def _compute_uncertainty(result, x):
+    x = np.asarray(x, dtype=float)
+
+    try:
+        uncertainty = np.asarray(result.eval_uncertainty(x=x, sigma=1), dtype=float)
+    except Exception:
+        uncertainty = None
+
+    if (
+        uncertainty is None
+        or uncertainty.shape != x.shape
+        or not np.any(np.isfinite(uncertainty) & (uncertainty > 0.0))
+    ):
+        uncertainty = _approx_eval_uncertainty(result, x)
+
+    if uncertainty.shape != x.shape:
+        return np.zeros_like(x, dtype=float)
+
+    return np.where(np.isfinite(uncertainty) & (uncertainty > 0.0), uncertainty, 0.0)
+
 def GaussianFit(counts: list, centers: list,
                 region_markers: list, peak_markers: list = [], background_markers: list = [],
                 equal_sigma: bool = True, free_position: bool = True,                 
@@ -653,25 +804,24 @@ def GaussianFit(counts: list, centers: list,
         raise ValueError('Unsupported background model')
     
     # Fit the background model to the data of the background markers before fitting the peaks
-    if bg_type != 'None' and len(background_markers) == 0:
+    if len(background_markers) == 0:
         # put marker at the start and end of the region
         background_markers = [(region_markers[0]-bin_width, region_markers[0]), (region_markers[1], region_markers[1]+bin_width)]
 
-    bg_result = None
-    if bg_type != 'None':
-        bg_x = []
-        bg_y = []
-        for bg_start, bg_end in background_markers:
-            # sort the background markers
-            bg_start, bg_end = sorted([bg_start, bg_end])
+    bg_x = []
+    bg_y = []
+    for bg_start, bg_end in background_markers:
+        # sort the background markers
+        bg_start, bg_end = sorted([bg_start, bg_end])
 
-            bg_mask = (centers >= bg_start) & (centers <= bg_end)
-            bg_x.extend(centers[bg_mask])
-            bg_y.extend(counts[bg_mask])
+        bg_mask = (centers >= bg_start) & (centers <= bg_end)
+        bg_x.extend(centers[bg_mask])
+        bg_y.extend(counts[bg_mask])
 
-        bg_x = np.array(bg_x)
-        bg_y = np.array(bg_y)
-        bg_result = bg_model.fit(bg_y, params, x=bg_x)
+    bg_x = np.array(bg_x)
+    bg_y = np.array(bg_y)
+    
+    bg_result = bg_model.fit(bg_y, params, x=bg_x)
 
     # print intial parameter guesses
     print('Initial Background Parameter Guesses:')
@@ -679,15 +829,11 @@ def GaussianFit(counts: list, centers: list,
 
     # print fit report
     print('Background Fit Report:')
-    if bg_result is not None:
-        print(bg_result.fit_report())
-    else:
-        print('Background model set to None; skipping background fit.')
+    print(bg_result.fit_report())
 
     # **Adjust background parameters based on their errors**
-    if bg_result is not None:
-        for param in bg_result.params:
-            params[param].set(value=bg_result.params[param].value, vary=False)
+    for param in bg_result.params:
+        params[param].set(value=bg_result.params[param].value, vary=False)
 
     # Add background model to overall model
     model = bg_model
@@ -838,7 +984,20 @@ def GaussianFit(counts: list, centers: list,
 
     # Fit the model to the data
     result = model.fit(y_data, params, x=x_data)
-    _inject_spectrix_metadata(result, region_markers, peak_markers, background_markers, bg_type, equal_sigma, free_position)
+
+    x_data_line = np.linspace(x_data[0], x_data[-1], 50 * len(x_data))
+    y_data_line = result.eval(x=x_data_line)
+    y_data_uncertainty = _compute_uncertainty(result, x_data_line)
+
+    _inject_spectrix_metadata(
+        result,
+        region_markers,
+        peak_markers,
+        [] if bg_type == 'None' else background_markers,
+        bg_type,
+        equal_sigma,
+        free_position,
+    )
 
     # Print initial parameter guesses
     print('Initial Parameter Guesses:')
@@ -888,10 +1047,6 @@ def GaussianFit(counts: list, centers: list,
                     uncertainty = result.params[key].stderr or 0.0
                     background_params.append((key, value, uncertainty))
 
-        # Create smooth fit line
-        x_data_line = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
-        y_data_line = result.eval(x=x_data_line)
-
     fit_metadata = (
         list(region_markers),
         list(peak_markers),
@@ -905,10 +1060,19 @@ def GaussianFit(counts: list, centers: list,
     # save the fit result to a temp file
     save_modelresult(result, 'temp_fit.sav')
 
-    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params, fit_metadata, result
+    return gaussian_params, background_params, x_data_line, y_data_line, y_data_uncertainty, fit_report, additional_params, fit_metadata, result
 
 def load_result(filename: str):
     result = load_modelresult(filename)
+
+    x_min = result.userkws['x'].min()
+    x_max = result.userkws['x'].max()
+    x_data = np.linspace(x_min, x_max, 1000)
+
+    # Create smooth fit line
+    x_data_line = np.linspace(x_data[0], x_data[-1], 50 * len(x_data))
+    y_data_line = result.eval(x=x_data_line)
+    y_data_uncertainty = _compute_uncertainty(result, x_data_line)
 
     params = result.params
 
@@ -917,9 +1081,7 @@ def load_result(filename: str):
         if 'g' in key and '_center' in key:
             peak_markers.append(params[key].value)
 
-    x_min = result.userkws['x'].min()
-    x_max = result.userkws['x'].max()
-    x_data = np.linspace(x_min, x_max, 1000)
+
 
     # Print initial parameter guesses
     print('Initial Parameter Guesses:')
@@ -934,6 +1096,13 @@ def load_result(filename: str):
     # Extract Gaussian and background parameters
     gaussian_params = []
     additional_params = []
+    background_params = []
+    for key in result.params:
+        if 'bg_' in key:
+            value = float(result.params[key].value)
+            uncertainty = result.params[key].stderr or 0.0
+            background_params.append((key, value, uncertainty))
+
     for i in range(len(peak_markers)):
         keys = [f'g{i}_amplitude', f'g{i}_center', f'g{i}_sigma', f'g{i}_fwhm', f'g{i}_area']
         if not all(k in result.params for k in keys):
@@ -951,7 +1120,7 @@ def load_result(filename: str):
         area = float(result.params[f'g{i}_area'].value)
         area_uncertainty = result.params[f'g{i}_area'].stderr or 0.0
 
-        uuid = result.params.get(f'g{i}_uuid', 0)
+        uuid = float(result.params[f'g{i}_uuid'].value) if f'g{i}_uuid' in result.params else 0.0
 
         # check if energy parameter exists
         if f'g{i}_energy' in result.params:
@@ -974,18 +1143,7 @@ def load_result(filename: str):
             energy, energy_uncertainty,
         ))
 
-        # Extract background parameters
-        background_params = []
-        # if bg_type != 'None':
-        for key in result.params:
-            if 'bg_' in key:
-                value = float(result.params[key].value)
-                uncertainty = result.params[key].stderr or 0.0
-                background_params.append((key, value, uncertainty))
 
-        # Create smooth fit line
-        x_data_line = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
-        y_data_line = result.eval(x=x_data_line)
 
     fit_metadata = _extract_spectrix_metadata(result)
     if fit_metadata is None:
@@ -1014,7 +1172,7 @@ def load_result(filename: str):
     # save the fit result to a temp file
     save_modelresult(result, 'temp_fit.sav')
 
-    return gaussian_params, background_params, x_data_line, y_data_line, fit_report, additional_params, fit_metadata
+    return gaussian_params, background_params, x_data_line, y_data_line, y_data_uncertainty, fit_report, additional_params, fit_metadata
 
 ");
 
@@ -1316,9 +1474,10 @@ def load_result(filename: str):
             let background_params = result.get_item(1)?.extract::<Vec<(String, f64, f64)>>()?;
             let x_composition = result.get_item(2)?.extract::<Vec<f64>>()?;
             let y_composition = result.get_item(3)?.extract::<Vec<f64>>()?;
-            let fit_report = result.get_item(4)?.extract::<String>()?;
-            let additional_params = result.get_item(5)?.extract::<Vec<(f64, f64)>>()?;
-            let fit_metadata = result.get_item(6).ok().and_then(|item| {
+            let y_composition_uncertainty = result.get_item(4)?.extract::<Vec<f64>>()?;
+            let fit_report = result.get_item(5)?.extract::<String>()?;
+            let additional_params = result.get_item(6)?.extract::<Vec<(f64, f64)>>()?;
+            let fit_metadata = result.get_item(7).ok().and_then(|item| {
                 item.extract::<(
                     Vec<f64>,
                     Vec<f64>,
@@ -1343,6 +1502,8 @@ def load_result(filename: str):
             });
 
             self.peak_markers.clear();
+            self.fit_result.clear();
+            self.uncertainty_band.clear();
 
             for (
                 (
@@ -1446,21 +1607,17 @@ def load_result(filename: str):
                         let slope = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_slope")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
 
                         let intercept = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_intercept")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
 
-                        let linear = LinearFitter::new_from_parameters(
-                            (slope, 0.0),
-                            (intercept, 0.0),
-                            min_x,
-                            max_x,
-                        );
+                        let linear =
+                            LinearFitter::new_from_parameters(slope, intercept, min_x, max_x);
                         self.background_result = Some(BackgroundResult::Linear(linear));
                     }
 
@@ -1470,26 +1627,20 @@ def load_result(filename: str):
                         let a = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_a")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
                         let b = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_b")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
                         let c = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_c")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
 
-                        let quad = QuadraticFitter::new_from_parameters(
-                            (a, 0.0),
-                            (b, 0.0),
-                            (c, 0.0),
-                            min_x,
-                            max_x,
-                        );
+                        let quad = QuadraticFitter::new_from_parameters(a, b, c, min_x, max_x);
                         self.background_result = Some(BackgroundResult::Quadratic(quad));
                     }
 
@@ -1503,20 +1654,16 @@ def load_result(filename: str):
                         let amplitude = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_amplitude")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
                         let decay = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_decay")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
 
-                        let expo = ExponentialFitter::new_from_parameters(
-                            (amplitude, 0.0),
-                            (decay, 0.0),
-                            min_x,
-                            max_x,
-                        );
+                        let expo =
+                            ExponentialFitter::new_from_parameters(amplitude, decay, min_x, max_x);
                         self.background_result = Some(BackgroundResult::Exponential(expo));
                     }
 
@@ -1530,20 +1677,16 @@ def load_result(filename: str):
                         let amplitude = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_amplitude")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
                         let exponent = background_params
                             .iter()
                             .find(|(name, _, _)| name == "bg_exponent")
-                            .map(|(_, val, _)| *val)
-                            .unwrap_or(0.0);
+                            .map(|(_, val, unc)| (*val, *unc))
+                            .unwrap_or((0.0, 0.0));
 
-                        let powerlaw = PowerLawFitter::new_from_parameters(
-                            (amplitude, 0.0),
-                            (exponent, 0.0),
-                            min_x,
-                            max_x,
-                        );
+                        let powerlaw =
+                            PowerLawFitter::new_from_parameters(amplitude, exponent, min_x, max_x);
                         self.background_result = Some(BackgroundResult::PowerLaw(powerlaw));
                     }
 
@@ -1553,6 +1696,13 @@ def load_result(filename: str):
                     }
                 }
             }
+
+            self.uncertainty_band = Self::build_uncertainty_band(
+                &x_composition,
+                &y_composition,
+                &y_composition_uncertainty,
+            )
+            .unwrap_or_default();
 
             // Create the composition line
             let fit_points = x_composition
@@ -1608,11 +1758,7 @@ def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
 
             let fit_report: String = module
                 .getattr("Add_UUID_to_Result")?
-                .call1((
-                    temp_path.to_str().expect("Temp path should be valid"),
-                    peak_index,
-                    new_uuid,
-                ))?
+                .call1((temp_path.to_string_lossy().as_ref(), peak_index, new_uuid))?
                 .extract()?;
 
             // Step 3: Reload updated file into lmfit_result
@@ -1770,7 +1916,7 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
             let fit_report: String = module
                 .getattr("Update_EnergyCalibration")?
                 .call1((
-                    temp_path.to_str().expect("Temp path should be valid"),
+                    temp_path.to_string_lossy().as_ref(),
                     a,
                     a_uncertainty,
                     b,
@@ -1848,7 +1994,7 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
             let fit_report: String = module
                 .getattr("Update_Energy")?
                 .call1((
-                    temp_path.to_str().expect("Temp path should be valid"),
+                    temp_path.to_string_lossy().as_ref(),
                     peak_index,
                     new_energy,
                     new_uncertainty,
@@ -1872,29 +2018,169 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
         })
     }
 
-    pub fn draw_uuid(&self, plot_ui: &mut egui_plot::PlotUi<'_>, calibrate: bool) {
+    fn composition_height_at_raw_x(&self, raw_x: f64) -> Option<f64> {
+        self.fit_points
+            .iter()
+            .min_by(|a, b| {
+                let da = (a[0] - raw_x).abs();
+                let db = (b[0] - raw_x).abs();
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|point| point[1])
+    }
+
+    fn nearby_histogram_height_at_raw_x(
+        raw_x: f64,
+        histogram_bins: &[u64],
+        histogram_range: (f64, f64),
+        histogram_bin_width: f64,
+    ) -> Option<f64> {
+        if histogram_bins.is_empty() || histogram_bin_width <= 0.0 {
+            return None;
+        }
+
+        if raw_x < histogram_range.0 || raw_x > histogram_range.1 {
+            return None;
+        }
+
+        let mut bin_index = ((raw_x - histogram_range.0) / histogram_bin_width).floor() as usize;
+        let last_bin = histogram_bins.len().saturating_sub(1);
+        bin_index = bin_index.min(last_bin);
+
+        let start = bin_index.saturating_sub(1);
+        let end = (bin_index + 1).min(last_bin);
+
+        histogram_bins[start..=end]
+            .iter()
+            .copied()
+            .max()
+            .map(|value| value as f64)
+    }
+
+    pub fn draw_uuid(
+        &self,
+        plot_ui: &mut egui_plot::PlotUi<'_>,
+        options: UuidDrawOptions,
+        histogram: HistogramDrawContext<'_>,
+    ) {
         use egui::Align2;
-        use egui_plot::Text;
+        use egui::Color32;
+        use egui::Id;
+        use egui::RichText;
+        use egui_plot::{Line, LineStyle, PlotPoints, Text};
+
+        let plot_bounds = plot_ui.plot_bounds();
+        let y_span = (plot_bounds.max()[1] - plot_bounds.min()[1]).abs();
+        let label_size = f64::from(options.label_size.clamp(8.0, 32.0));
+        let label_lift = f64::from(options.label_lift.clamp(0.0, 3.0));
+        let linear_label_offset =
+            ((y_span * (0.02 + label_size * 0.001)).max(label_size * 0.25)) * label_lift;
+        let log_label_multiplier = 1.0 + label_size * 0.025 * label_lift;
+        let label_color = if plot_ui.ctx().theme() == egui::Theme::Dark {
+            Color32::WHITE
+        } else {
+            Color32::BLACK
+        };
 
         for params in &self.fit_result {
             if params.uuid == 0 {
                 continue; // Skip if UUID is not set
             }
-            if let Some(mean) = params.mean.value {
-                let position = if calibrate {
-                    if let Some(calibrated_mean) = params.mean.calibrated_value {
-                        calibrated_mean
+
+            let Some(raw_mean) = params.mean.value else {
+                continue;
+            };
+
+            let mut x_position = if options.calibrate {
+                params.mean.calibrated_value.unwrap_or(raw_mean)
+            } else {
+                raw_mean
+            };
+
+            let composition_height = self.composition_height_at_raw_x(raw_mean);
+            let histogram_height = Self::nearby_histogram_height_at_raw_x(
+                raw_mean,
+                histogram.bins,
+                histogram.range,
+                histogram.bin_width,
+            );
+            let Some(reference_height) = composition_height
+                .into_iter()
+                .chain(histogram_height.into_iter())
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            else {
+                continue;
+            };
+
+            let guide_y = composition_height.and_then(|height| {
+                if options.log_y {
+                    if height <= 0.0 {
+                        None
                     } else {
-                        mean
+                        Some(height.log10().max(0.0001))
                     }
                 } else {
-                    mean
-                };
-                let label = Text::new("", [position, 0.0].into(), params.uuid.to_string())
-                    .anchor(Align2::CENTER_BOTTOM);
+                    Some(height)
+                }
+            });
 
-                plot_ui.text(label);
+            let y_position = if options.log_y {
+                if reference_height <= 0.0 {
+                    continue;
+                }
+                let lifted_y = reference_height * log_label_multiplier.max(1.0);
+                if lifted_y <= 0.0 {
+                    continue;
+                }
+                lifted_y.log10().max(0.0001)
+            } else {
+                reference_height + linear_label_offset
+            };
+
+            if options.log_x {
+                if x_position <= 0.0 {
+                    continue;
+                }
+                x_position = x_position.log10().max(0.0001);
             }
+
+            let label = Text::new(
+                "",
+                [x_position, y_position].into(),
+                RichText::new(params.uuid.to_string()).size(label_size as f32),
+            )
+            .anchor(Align2::CENTER_BOTTOM)
+            .color(label_color)
+            .allow_hover(false);
+
+            if let Some(guide_y) = guide_y
+                && options.draw_label_guide
+                && (y_position - guide_y).abs() > f64::EPSILON
+            {
+                plot_ui.line(
+                    Line::new(
+                        "",
+                        PlotPoints::Owned(vec![
+                            [x_position, guide_y].into(),
+                            [x_position, y_position].into(),
+                        ]),
+                    )
+                    .allow_hover(false)
+                    .color(label_color)
+                    .width(1.0)
+                    .style(LineStyle::Dashed {
+                        length: (label_size as f32 * 0.45).max(4.0),
+                    })
+                    .id(Id::new((
+                        "uuid_label_guide",
+                        params.uuid,
+                        x_position.to_bits(),
+                        y_position.to_bits(),
+                    ))),
+                );
+            }
+
+            plot_ui.text(label);
         }
     }
 

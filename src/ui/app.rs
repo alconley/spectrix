@@ -1,4 +1,5 @@
 use crate::util::processer::Processor;
+use std::path::{Path, PathBuf};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -17,6 +18,8 @@ impl Default for Spectrix {
 }
 
 impl Spectrix {
+    const SCREENSHOT_FILE_NAME: &str = "spectrix-screenshot.png";
+
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // This is also where you can customize the look and feel of egui using
         // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
@@ -154,6 +157,76 @@ impl Spectrix {
             self.current_session = self.sessions.len() - 1;
         }
     }
+
+    fn ensure_extension_if_missing(path: PathBuf, extension: &str) -> PathBuf {
+        match path.extension().and_then(|ext| ext.to_str()) {
+            Some(ext) if ext.eq_ignore_ascii_case(extension) => path,
+            _ => path.with_extension(extension),
+        }
+    }
+
+    fn save_screenshot_path_dialog() -> Option<PathBuf> {
+        rfd::FileDialog::new()
+            .add_filter("PNG", &["png"])
+            .set_file_name(Self::SCREENSHOT_FILE_NAME)
+            .save_file()
+            .map(|path| Self::ensure_extension_if_missing(path, "png"))
+    }
+
+    fn request_screenshot(ctx: &egui::Context, path: PathBuf) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(path)));
+        ctx.request_repaint();
+    }
+
+    fn save_color_image_png(path: &Path, image: &egui::ColorImage) -> Result<(), String> {
+        let [width, height] = image.size;
+        let rgba: Vec<u8> = image
+            .pixels
+            .iter()
+            .flat_map(|pixel| pixel.to_srgba_unmultiplied())
+            .collect();
+
+        image::save_buffer(
+            path,
+            &rgba,
+            width as u32,
+            height as u32,
+            image::ColorType::Rgba8,
+        )
+        .map_err(|err| err.to_string())
+    }
+
+    fn handle_screenshot_events(ctx: &egui::Context) {
+        let screenshot_events = ctx.input(|input| {
+            input
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    egui::Event::Screenshot {
+                        viewport_id,
+                        user_data,
+                        image,
+                    } if *viewport_id == egui::ViewportId::ROOT => user_data
+                        .data
+                        .as_ref()
+                        .and_then(|data| data.downcast_ref::<PathBuf>())
+                        .map(|path| (path.clone(), image.clone())),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
+
+        for (path, image) in screenshot_events {
+            match Self::save_color_image_png(&path, image.as_ref()) {
+                Ok(()) => {
+                    log::info!("Screenshot saved to {}", path.display());
+                }
+                Err(err) => {
+                    log::error!("Failed to save screenshot to {}: {}", path.display(), err);
+                }
+            }
+        }
+    }
 }
 
 impl eframe::App for Spectrix {
@@ -161,8 +234,10 @@ impl eframe::App for Spectrix {
         eframe::set_value(storage, eframe::APP_KEY, self);
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("spectrix_top_panel").show(ctx, |ui| {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        Self::handle_screenshot_events(ui.ctx());
+
+        egui::Panel::top("spectrix_top_panel").show_inside(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 egui::ScrollArea::horizontal()
                     .id_salt("spectrix_top_scroll")
@@ -171,6 +246,16 @@ impl eframe::App for Spectrix {
                         ui.horizontal(|ui| {
                             egui::global_theme_preference_switch(ui);
                             ui.heading("Spectrix");
+                            ui.separator();
+
+                            if ui
+                                .button("\u{2399}")
+                                .on_hover_text("Capture the current window to a PNG file")
+                                .clicked()
+                                && let Some(path) = Self::save_screenshot_path_dialog()
+                            {
+                                Self::request_screenshot(ui.ctx(), path);
+                            }
                             ui.separator();
 
                             let can_remove_session = self.sessions.len() > 1;
@@ -213,8 +298,19 @@ impl eframe::App for Spectrix {
 
                                         ui.separator();
 
-                                        ui.menu_button("Histogrammer", |ui| {
-                                            session.histogrammer.menu_contents_ui(ui);
+                                        session.session_processor_menu_ui(ui);
+
+                                        ui.separator();
+
+                                        ui.horizontal(|ui| {
+                                            if ui.button("Reset").clicked() {
+                                                session.histogrammer = Default::default();
+                                                ui.close();
+                                            }
+
+                                            ui.menu_button("Histogrammer", |ui| {
+                                                session.histogrammer.menu_contents_ui(ui);
+                                            });
                                         });
 
                                         ui.separator();
@@ -241,7 +337,7 @@ impl eframe::App for Spectrix {
 
                                 if let Some(dragged_index) = response.dnd_release_payload::<usize>() {
                                     let insert_index =
-                                        ui.ctx().pointer_interact_pos().map_or(i, |pos| {
+                                        ui.pointer_interact_pos().map_or(i, |pos| {
                                             if pos.x >= tab_rect.center().x {
                                                 i + 1
                                             } else {
@@ -276,7 +372,7 @@ impl eframe::App for Spectrix {
 
         // Draw the UI for the current session
         if let Some(current) = self.sessions.get_mut(self.current_session) {
-            current.ui(ctx);
+            current.ui(ui);
         }
     }
 }

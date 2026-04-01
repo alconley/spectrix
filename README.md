@@ -12,10 +12,16 @@ Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting 
 ## Features
 
 - Read and analyze `.parquet` and `.root` files  
+- Background ROOT histogram retrieval/export so long uproot operations do not block the UI  
+- Combine matching ROOT histograms across multiple files, or load them separately with per-file prefixes  
 - Interactive histogramming (1D & 2D)  
-- Gaussian fitting with Python’s lmfit  
+- Interactive histogram-created cuts for 1D and 2D views  
+- Gaussian fitting with Python’s lmfit, including total-fit uncertainty bands  
+- Visible-range auto-Y scaling for 1D histograms, with log-Y support  
+- UUID peak labels with configurable size/lift and optional guide lines  
 - UI-based histogram and cut definition  
 - Custom histogram scripting  
+- Built-in screenshot capture from the top bar  
 - Integration with Polars for high-performance data processing  
 
 ---
@@ -133,9 +139,20 @@ Use the **Get Files** button to select either a single file or a directory.
 
 ### Root Files
 
-If a `.root` file is selected, Spectrix attempts to load all 1D and 2D histograms found in that file.
+If one or more `.root` files are selected, Spectrix attempts to load all 1D and 2D histograms found in those files.
 
 Histogram paths such as `/name1/name2/histogram_name` are preserved and used to organize views into nested container hierarchies.
+
+ROOT retrieval runs in the background, so the UI remains responsive while Spectrix reads histograms through `uproot`. A spinner is shown while retrieval is active, and the operation can be canceled between files.
+
+ROOT loading behavior depends on the **Calculate/Get histograms separately** toggle:
+
+- **Off**: histograms with the same full ROOT path/name are merged together across the selected files.
+- **On**: each file gets its own prefix using the file stem, so matching histograms are loaded as separate entries such as `run_001/hEnergy` and `run_002/hEnergy`.
+
+When you start a new ROOT retrieval, Spectrix clears the current histogram contents first so repeated clicks on **Get Histograms** do not double the loaded counts.
+
+After 1D ROOT histograms are loaded, their axes are reset automatically so the plot opens around the imported data instead of staying zoomed near zero.
 
 ### Parquet Files
 
@@ -151,12 +168,13 @@ In the same section, you can:
 
 You can also load 2D cuts in this area; those cuts are then available as active cuts and are used when filtering saved `.parquet` outputs.
 
-When saving filtered files, Spectrix applies all enabled **active 1D/2D cuts** and writes output using `filename_{suffix}.parquet` naming.
+When saving filtered files, Spectrix applies all enabled **active 1D/2D cuts** from the Histogram Script cut sections and writes output using `filename_{suffix}.parquet` naming.
 
-> ⚠️ **Warning:**  
-> Combining files loads all selected data into memory. Very large datasets may exhaust RAM and crash the session.
->
-> Recommended approach: apply cuts first to reduce data volume, then combine reduced files.
+Interactive cuts created directly on 1D and 2D histograms also appear in the same active-cuts area, so they can be enabled/disabled for histogram generation and parquet filtering before being added manually to the script.
+
+When combining parquet files, Spectrix scans the selected inputs lazily and streams the merged result directly to the output parquet sink. It does **not** collect the full combined dataset into memory first.
+
+Large combines can still take time and produce large output files, so reducing files with cuts first can still be a useful workflow when you only need a subset of the data.
 
 ---
 
@@ -213,14 +231,16 @@ Derived columns can then be used exactly like native columns in cuts and histogr
 
 You can define:
 
-- **1D cuts** by providing a cut name and a logical expression.
-- **2D cuts** as graphical polygons in the 2D histogram view (these appear as active 2D histogram cuts and can be toggled on/off).
+- **1D cuts** by providing a cut name and a logical expression, or by loading saved 1D cut JSON files with **`+1D Load`**.
+- **2D cuts** as graphical polygons in the 2D histogram view.
 
-For 2D cuts, you can:
+For cut management in the Histogram Script UI, you can:
 
-- Load a cut JSON individually.
+- Add a blank 1D cut with **`+1D Manual`**.
+- Load a saved 1D cut with **`+1D Load`**.
+- Load a cut JSON individually for 2D cuts with **`+2D`**.
 - Add a cut folder to load multiple cut files.
-- Use active 2D histogram cuts created interactively in the plot, even before saving them to disk.
+- Use **Active Histogram Cuts** created interactively in 1D or 2D plots, even before saving them to disk.
 
 For expression-based 1D cuts, use valid column names and logical operators such as `&` to combine conditions.
 
@@ -233,6 +253,10 @@ Common operators in 1D cut expressions include:
 Example:
 
 - `(Column1Energy > 400) & (Column1Energy < 1200) & (Column2Time != -1e6)`
+
+If a 1D cut parses as a simple range, its **Info** menu shows the extracted column name and the `>=` / `<=` bounds.
+
+Cuts that were loaded from disk or explicitly saved to disk remember their save path. If you later edit the cut name or cut values inside Spectrix, the cut is automatically re-saved back to that same file.
 
 Only cuts enabled in the corresponding UI checkboxes are applied during histogram generation and parquet filtering.
 
@@ -255,6 +279,13 @@ This is useful for:
 - Reproducing the same analysis between runs.
 - Sharing analysis setups with collaborators.
 - Building experiment-specific templates that can also be used by Custom Scripts.
+
+---
+
+## UI Convenience
+
+- A screenshot button lives in the top bar next to the light/dark theme toggle. Clicking it prompts for a save location and writes the current Spectrix window as a `.png`.
+- In the session context menu, **Reset Histogrammer** is placed directly beside the **Histogrammer** menu button for quicker access during iterative analysis.
 
 ---
 
@@ -287,10 +318,17 @@ The 1D histogram interface in **Spectrix** is designed for fast, interactive pea
 - Interactively place and move peak, background, and region markers.
 - Fit one or many Gaussian peaks in a selected region.
 - Choose and tune background models: linear, quadratic, power law, exponential.
+- Detect peaks with `find_peaks`, with optional region-limited searching and background subtraction.
+- Optionally draw an uncertainty band around the total Gaussian fit from the Fit Panel.
+- Auto-fit the Y axis to the tallest bin in the current visible X range.
 - Rebin and restyle plots from the context menu.
-- Store fit results and review them in a dedicated side panel.
+- Create interactive 1D cut regions directly on the histogram and reuse them as active cuts.
+- Store fit results and review them in a dedicated popup window or from the right-click Fits menu.
+- Open the Fit Panel either inside Spectrix or as a separate native window with **Pop Out** when the backend supports extra viewports.
 - Click **Modify** on a stored fit to move it back into the temp fit editor with its saved markers/settings.
 - Click **Refit** in the Fit Panel header to re-run all stored fits on the latest incoming data.
+- View histogram statistics in both raw-channel and calibrated display modes.
+- Adjust UUID label size/lift and optionally draw a guide back to the composition curve.
 - Use keyboard-driven controls for quick analysis loops.
 
 ### Fitting Engine
@@ -305,7 +343,7 @@ Fitting was originally implemented with [varpro](https://github.com/geo-ant/varp
 
 Each fitted Gaussian peak carries two pieces of analysis metadata:
 
-- **UUID**: an integer identifier used to track the same physical state across fits and downstream analysis steps. If the UUID is not `0`, its number is drawn on the plot near `y = 0`.
+- **UUID**: an integer identifier used to track the same physical state across fits and downstream analysis steps. If the UUID is not `0`, its number is drawn above the fitted composition peak. UUID text follows the light/dark theme, stays out of the legend, and can be resized/lifted with an optional dashed guide line from the Fit Panel.
 - **Assigned energy**: reference energy (and uncertainty) used to build a channel-to-energy calibration.
 
 If a peak has no assigned energy, Spectrix stores **`-1`** as the invalid sentinel value (with zero uncertainty). Peaks with energy `-1` are ignored when calibration points are collected.
@@ -338,6 +376,8 @@ Stored-fit modify/refit behavior:
 
 Because of that, exported lmfit `.sav` files include both fit parameters and calibration/UUID context, so they can be loaded and further analyzed directly in Python (for example with `lmfit.model.load_modelresult`).
 
+When an exported lmfit `.sav` file is loaded back into Spectrix, the total-fit `1σ` uncertainty band is rebuilt immediately. Spectrix first tries lmfit `eval_uncertainty`; if the saved result cannot provide that directly, Spectrix falls back to an approximate band reconstructed from the stored parameter errors.
+
 ### Which Save Format To Use
 
 - **Save Fits / Load Fits (`.json`)**: best for restoring and continuing your work inside Spectrix.
@@ -352,27 +392,53 @@ Cursor must be inside the plot for keybinds to be active.
 |---|---|---|
 | **P** | Add peak marker | Places a Gaussian peak marker at cursor position. |
 | **B** | Add background marker | Used for background-only sampling points. |
+| **C** | Create 1D cut | Creates a draggable 1D cut region using the histogram’s current source column. |
 | **R** | Add region markers | Define fit interval; drag marker center with middle mouse button. |
 | **-** | Remove nearest marker | Deletes marker closest to cursor. |
 | **Delete** | Clear temporary markers/fits | Removes active markers and temporary fit curves. |
 | **G** | Fit background | Uses selected background model and current background markers. |
 | **F** | Fit Gaussians | Fits peaks in region; auto-fits background first if needed. |
+| **O** | Detect peaks | Runs the peak finder and places peak markers at the detected locations. |
 | **S** | Store fit | Saves current fit result for later comparison/export. |
-| **Tab** | Toggle Fit Panel | Opens/closes side panel for stored fits. |
-| **I** | Toggle statistics | Shows/hides stats such as mean, counts, and sigma. |
-| **L** | Toggle log Y-axis | Switches between linear and logarithmic Y scaling. |
+| **I** | Toggle statistics | Shows/hides stats such as mean, counts, and sigma for the current visible range. |
+| **L** | Toggle log Y-axis | Switches between linear and logarithmic Y scaling while keeping the current X range. |
+| **Y** | Toggle auto-fit Y | Fits Y to the tallest visible bin with about 15% headroom. |
 
 ### Fit Behavior Notes
 
 - The default background model is **Linear**.
+- 1D auto-fit Y is enabled by default and uses the maximum bin height in the current visible X range with `1.15x` headroom in both linear and log modes.
 - If no background markers are present, Spectrix will still fit Gaussians on top of a fitted background model.
 - Background markers and an explicit background fit help the solver converge faster and let you control which region is used to determine the background.
 - Multiple Gaussian peaks can be fit simultaneously when multiple peak markers exist in the active region.
+- Peak finding settings are available from the right-click **Peak Finder** submenu, including min/max height, prominence, difference, plateau size, and distance controls with hover help.
+- If exactly two region markers are active, peak finding only searches the data between them.
+- If a background fit is active, Spectrix subtracts that background before peak finding.
+- Detected peaks are written back into the plot as peak markers so they can be fitted immediately.
+- The **1σ Uncertainty** checkbox under **Show Fit Lines** toggles the total Gaussian uncertainty band.
+- That total-fit uncertainty band uses lmfit `eval_uncertainty` at `1σ`.
 - By default, peaks share a common standard deviation; this can be changed in fit settings.
 - Peak positions and widths can be constrained or locked from the *Fits* menu.
+- UUID labels are drawn above the composition curve using the larger of the composition height or the tallest nearby bin, so they stay readable on real peaks.
+- The **UUID Labels** controls in the Fit Panel let you change label **Size**, **Lift**, and an optional dashed **Guide** line back to the composition curve.
+- The Fit Panel can be popped out into its own window with the **Pop Out** toggle next to **Show Fit Panel**; if native child windows are unavailable, egui falls back to an embedded window.
+- Pop-out Fit Panel contents follow the active light/dark theme, including the UUID label colors drawn on fit plots.
 - Fit reports, curves, and parameter values are available from the plot context menu.
 
-> Additional controls such as rebinning, marker styling, and display options are available by right-clicking on the 1D plot.
+> Additional controls such as peak finding, rebinning, marker styling, and display options are available by right-clicking on the 1D plot.
+
+### 1D Cut Notes
+
+- Press **C** (or use the right-click **Cuts** menu) to create a new interactive 1D cut.
+- The cut starts as two vertical lines spanning slightly inside the current visible X range.
+- You can drag either boundary line directly.
+- You can also click and drag between the two lines to move the entire cut window while keeping the same width.
+- A default cut name is generated automatically in the form `Histogram Name 1D Cut N`.
+- The cut expression is generated as `(ColumnName >= (x1)) & (ColumnName <= x2)`.
+- 1D cuts created interactively in the plot appear in the **Active Histogram Cuts** area of the Histogram Script.
+- The cut **Info** menu shows the parsed column name, lower bound, upper bound, full expression, and saved path.
+- If a 1D cut was loaded from disk or previously saved to disk, changing the cut name or moving the cut region will automatically re-save it to the same path.
+- 1D cuts created on 2D projection windows inherit the projection axis column name automatically.
 
 ---
 
@@ -388,6 +454,7 @@ The 2D histogram interface in **Spectrix** is optimized for fast visual explorat
 - Switch colormaps, reverse palettes, and toggle log/linear normalization.
 - Rebin data and tune Z-scale display ranges.
 - Save and reuse graphical cuts from the plot context menu.
+- Reuse histogram-created cuts through the shared active-cuts area in the Histogram Script.
 
 ### Keybind Reference
 
@@ -419,8 +486,10 @@ Cursor must be inside the plot for keybinds to be active.
 - The cut auto-populates the X/Y column names from the current 2D histogram axes; verify these before saving.
 - A default cut name is generated automatically in the form `Y v X Cut N` (for example `E2 v E1 Cut 1`), and you can rename it before saving.
 - Use **Save** to write the cut to JSON for reuse.
-- Even if a cut is not saved to disk yet, it can still appear in the Histogram Script as an **Active 2D Histogram Cut** and be toggled on/off for histogram generation.
+- Even if a cut is not saved to disk yet, it can still appear in the Histogram Script as an **Active Histogram Cut** and be toggled on/off for histogram generation.
+- The cut **Info** menu shows the X/Y columns and saved path.
 - Saved cuts can be reloaded, recolored, and reopened for vertex editing.
+- If a 2D cut was loaded from disk or previously saved to disk, changing the cut name or moving vertices will automatically re-save it to the same path.
 
 > Right-click on the 2D plot for additional controls, including rebinning, colormap/color-scale tuning, projection options, and cut management.
 

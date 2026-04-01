@@ -25,6 +25,10 @@ impl Histogram {
                     .add_background_pair(cursor_x_raw, self.bin_width);
             }
 
+            if ui.input(|i| i.key_pressed(egui::Key::C)) {
+                self.new_cut();
+            }
+
             if ui.input(|i| i.key_pressed(egui::Key::R)) {
                 if self.plot_settings.markers.region_markers.len() >= 2 {
                     self.plot_settings.markers.clear_region_markers();
@@ -66,15 +70,15 @@ impl Histogram {
 
             if ui.input(|i| i.key_pressed(egui::Key::L)) {
                 self.plot_settings.egui_settings.log_y = !self.plot_settings.egui_settings.log_y;
-                self.plot_settings.egui_settings.reset_axis = true;
             }
 
-            // if ui.input(|i| i.key_pressed(egui::Key::O)) {
-            //     self.find_peaks();
-            // }
+            if ui.input(|i| i.key_pressed(egui::Key::Y)) {
+                self.plot_settings.auto_fit_y_to_visible_range =
+                    !self.plot_settings.auto_fit_y_to_visible_range;
+            }
 
-            if ui.input(|i| i.key_pressed(egui::Key::Tab)) {
-                self.fits.settings.show_fit_stats = !self.fits.settings.show_fit_stats;
+            if ui.input(|i| i.key_pressed(egui::Key::O)) {
+                self.find_peaks();
             }
         }
     }
@@ -95,17 +99,23 @@ impl Histogram {
             ui.label("Delete: Remove All Markers & Temp Fits");
             ui.label("Left click/Drag to Move Marker").on_hover_text("Markers can be dragged to new positions with the left clicking and dragingong when hovered over center point");
             ui.separator();
+            ui.label("Cuts");
+            ui.label("C: Add 1D Cut");
+            ui.label("Left click/Drag cut lines or the region between them")
+                .on_hover_text("The cut span can be moved by dragging between the vertical lines while keeping the width fixed.");
+            ui.separator();
             ui.label("Fitting");
             ui.label("G: Fit Background").on_hover_text("Fit a linear background using the background markers");
             ui.label("F: Fit Gaussians").on_hover_text("Fit gaussians at the peak markers give some region with a linear background");
             ui.label("S: Store Fit").on_hover_text("Store the current fit as a permanent fit which can be saved and loaded later");
             ui.separator();
+            ui.label("Peak Finder");
+            ui.label("O: Detect Peaks").on_hover_text("Detect peaks with the peak finder settings. Uses the region markers as limits and subtracts the active background fit before searching.");
+            ui.separator();
             ui.label("Plot");
             ui.label("I: Toggle Stats");
             ui.label("L: Toggle Log Y");
-            // ui.separator();
-            // ui.label("Peak Finder");
-            // ui.label("O: Detect Peaks").on_hover_text("Detect peaks in the spectrum using the peak finding parameters");
+            ui.label("Y: Toggle Auto Fit Y");
 
         });
     }

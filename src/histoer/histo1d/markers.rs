@@ -1,6 +1,7 @@
 use crate::egui_plot_stuff::{egui_line::EguiLine, egui_vertical_line::EguiVerticalLine};
 use crate::fitter::common::Calibration;
 use egui_plot::{PlotPoint, PlotUi};
+use std::cmp::Ordering;
 
 use super::histogram1d::Histogram;
 
@@ -172,11 +173,14 @@ impl FitMarkers {
 
         self.region_markers.push(marker);
 
-        self.region_markers.sort_by(|a, b| {
-            a.x_value
-                .partial_cmp(&b.x_value)
-                .expect("Region markers should be sortable")
-        });
+        self.region_markers.sort_by(
+            |a, b| match (a.x_value.is_finite(), b.x_value.is_finite()) {
+                (true, true) => a.x_value.total_cmp(&b.x_value),
+                (true, false) => Ordering::Less,
+                (false, true) => Ordering::Greater,
+                (false, false) => Ordering::Equal,
+            },
+        );
     }
 
     pub fn add_peak_marker(&mut self, x: f64) {
@@ -186,11 +190,14 @@ impl FitMarkers {
         marker.name = format!("Peak Marker (x={x:.2})");
 
         self.peak_markers.push(marker);
-        self.peak_markers.sort_by(|a, b| {
-            a.x_value
-                .partial_cmp(&b.x_value)
-                .expect("Peak markers should be sortable")
-        });
+        self.peak_markers.sort_by(
+            |a, b| match (a.x_value.is_finite(), b.x_value.is_finite()) {
+                (true, true) => a.x_value.total_cmp(&b.x_value),
+                (true, false) => Ordering::Less,
+                (false, true) => Ordering::Greater,
+                (false, false) => Ordering::Equal,
+            },
+        );
     }
 
     pub fn add_background_pair(&mut self, x: f64, bin_width: f64) {
@@ -260,7 +267,7 @@ impl FitMarkers {
             all_markers.iter().min_by(|(x1, _), (x2, _)| {
                 let dist1 = (cursor_x - x1).abs();
                 let dist2 = (cursor_x - x2).abs();
-                dist1.partial_cmp(&dist2).expect("Comparison failed")
+                dist1.total_cmp(&dist2)
             })
         {
             match marker_type {

@@ -18,9 +18,10 @@ impl Histogram {
             return None;
         }
 
-        let bin_index: usize = ((x - self.range.0) / self.bin_width).floor() as usize;
+        let bin_index = ((x - self.range.0) / self.bin_width).floor() as usize;
+        let last_bin = self.bins.len().saturating_sub(1);
 
-        Some(bin_index)
+        Some(bin_index.min(last_bin))
     }
 
     pub fn get_bin_centers_between(&self, start_x: f64, end_x: f64) -> Vec<f64> {

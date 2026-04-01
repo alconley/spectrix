@@ -52,17 +52,17 @@ impl Default for SPSAnalysis {
 impl SPSAnalysis {
     pub fn ui(
         &mut self,
-        ctx: &mut egui::Ui,
+        ui: &mut egui::Ui,
         files: &[(PathBuf, bool)],
         histogrammer: &mut histogrammer::Histogrammer,
     ) {
         self.ensure_runs_for_files(files);
 
         // left panel
-        egui::SidePanel::left("sps_left_panel")
+        egui::Panel::left("sps_left_panel")
             .resizable(true)
-            .default_width(300.0)
-            .show_animated(ctx.ctx(), self.settings.panel_open, |ui| {
+            .default_size(300.0)
+            .show_animated_inside(ui, self.settings.panel_open, |ui| {
                 egui::ScrollArea::both()
                     .id_salt("sps_left_scroll_area")
                     .show(ui, |ui| {
@@ -70,20 +70,20 @@ impl SPSAnalysis {
                     });
             });
 
-        self.panel_toggle_button(ctx.ctx());
+        self.panel_toggle_button(ui);
 
-        egui::CentralPanel::default().show(ctx.ctx(), |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             self.cross_section_ui(ui, histogrammer);
         });
     }
 
-    pub fn panel_toggle_button(&mut self, ctx: &egui::Context) {
+    pub fn panel_toggle_button(&mut self, ui: &mut egui::Ui) {
         // Secondary left panel for the toggle button
-        egui::SidePanel::left("spectrix_toggle_left_panel")
+        egui::Panel::left("spectrix_toggle_left_panel")
             .resizable(false)
             .show_separator_line(false)
-            .min_width(1.0)
-            .show(ctx, |ui| {
+            .min_size(1.0)
+            .show_inside(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.add_space(ui.available_height() / 2.0 - 10.0); // Center the button vertically
                     if ui

@@ -10,8 +10,12 @@ pub struct FitSettings {
     pub show_decomposition: bool,
     pub show_composition: bool,
     pub show_background: bool,
+    pub show_fit_lines_area: bool,
+    pub uuid_label_size: f32,
+    pub uuid_label_lift: f32,
+    pub uuid_label_guides: bool,
     pub show_fit_stats: bool,
-    pub fit_stats_height: f32,
+    pub fit_panel_popout: bool,
     pub equal_stddev: bool,
     pub free_position: bool,
     pub background_model: BackgroundModel,
@@ -31,8 +35,12 @@ impl Default for FitSettings {
             show_decomposition: true,
             show_composition: true,
             show_background: true,
+            show_fit_lines_area: true,
+            uuid_label_size: 14.0,
+            uuid_label_lift: 1.6,
+            uuid_label_guides: false,
             show_fit_stats: false,
-            fit_stats_height: 0.0,
+            fit_panel_popout: false,
             equal_stddev: true,
             free_position: true,
             background_model: BackgroundModel::Linear(LinearParameters::default()),
@@ -138,6 +146,26 @@ impl FitSettings {
                 .on_hover_text("Show the composition line");
             ui.checkbox(&mut self.show_background, "Background")
                 .on_hover_text("Show the background line");
+            ui.checkbox(&mut self.show_fit_lines_area, "1σ Uncertainty")
+                .on_hover_text(
+                    "Draw the total-fit 1σ uncertainty band from lmfit `eval_uncertainty`.",
+                );
+        });
+
+        ui.horizontal_wrapped(|ui| {
+            ui.label("UUID Labels:");
+            ui.add(egui::Slider::new(&mut self.uuid_label_size, 8.0..=32.0).text("Size"))
+                .on_hover_text(
+                    "Adjust the UUID label size drawn above the fitted composition peaks.",
+                );
+            ui.add(egui::Slider::new(&mut self.uuid_label_lift, 0.0..=3.0).text("Lift"))
+                .on_hover_text(
+                    "Move UUID labels closer to or farther above their reference height.",
+                );
+            ui.checkbox(&mut self.uuid_label_guides, "Guide")
+                .on_hover_text(
+                    "Draw a dashed vertical guide from the bottom of the UUID label to its zero-lift reference height.",
+                );
         });
 
         ui.separator();

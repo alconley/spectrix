@@ -4,7 +4,7 @@ use super::models::gaussian::GaussianFitter;
 use super::models::linear::{LinearFitter, LinearParameters};
 use super::models::powerlaw::{PowerLawFitter, PowerLawParameters};
 use super::models::quadratic::{QuadraticFitter, QuadraticParameters};
-use crate::egui_plot_stuff::egui_line::EguiLine;
+use crate::egui_plot_stuff::{egui_filled_area::EguiFilledArea, egui_line::EguiLine};
 use crate::fitter::common::Calibration;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
@@ -59,6 +59,15 @@ impl BackgroundResult {
             Self::Quadratic(fit) => fit.fit_points.clone(),
             Self::PowerLaw(fit) => fit.fit_points.clone(),
             Self::Exponential(fit) => fit.fit_points.clone(),
+        }
+    }
+
+    pub fn evaluate(&self, x: f64) -> f64 {
+        match self {
+            Self::Linear(fit) => fit.evaluate(x),
+            Self::Quadratic(fit) => fit.evaluate(x),
+            Self::PowerLaw(fit) => fit.evaluate(x),
+            Self::Exponential(fit) => fit.evaluate(x),
         }
     }
 }
@@ -233,12 +242,7 @@ impl Fitter {
 
                 match fit.lmfit(None) {
                     Ok(_) => {
-                        self.composition_line.points = fit.fit_points.clone();
-                        for fit in &fit.fit_result {
-                            let mut line = EguiLine::new(egui::Color32::from_rgb(150, 0, 255));
-                            line.points = fit.fit_points.clone();
-                            self.decomposition_lines.push(line);
-                        }
+                        self.apply_gaussian_fit_visuals(&fit);
 
                         if self.background_result.is_none()
                             && let Some(background_result) = &fit.background_result
@@ -405,6 +409,23 @@ impl Fitter {
         self.name = name;
     }
 
+    pub fn apply_gaussian_fit_visuals(&mut self, fit: &GaussianFitter) {
+        self.composition_line.points = fit.fit_points.clone();
+        self.decomposition_lines.clear();
+
+        for gaussian in &fit.fit_result {
+            let mut line = EguiLine::new(egui::Color32::from_rgb(150, 0, 255));
+            line.points = gaussian.fit_points.clone();
+            self.decomposition_lines.push(line);
+        }
+
+        if let Some(background_result) = &fit.background_result {
+            self.background_line.points = background_result.get_fit_points();
+        }
+
+        self.set_name(self.name.clone());
+    }
+
     pub fn fit_result_ui(&mut self, ui: &mut egui::Ui, calibrate: bool) {
         ui.collapsing(self.name.clone(), |ui| {
             egui::ScrollArea::vertical()
@@ -471,7 +492,37 @@ impl Fitter {
         }
     }
 
-    pub fn draw(&self, plot_ui: &mut egui_plot::PlotUi<'_>, calibration: Option<&Calibration>) {
+    fn draw_uncertainty_band(
+        plot_ui: &mut egui_plot::PlotUi<'_>,
+        band: &EguiFilledArea,
+        calibration: Option<&Calibration>,
+        name: &str,
+        line: &EguiLine,
+        fill_alpha: f32,
+    ) {
+        band.draw(plot_ui, calibration, name, line, fill_alpha);
+    }
+
+    pub fn draw(
+        &self,
+        plot_ui: &mut egui_plot::PlotUi<'_>,
+        calibration: Option<&Calibration>,
+        show_fit_lines_area: bool,
+    ) {
+        if show_fit_lines_area
+            && let Some(FitResult::Gaussian(fit)) = &self.fit_result
+            && self.composition_line.draw
+        {
+            Self::draw_uncertainty_band(
+                plot_ui,
+                &fit.uncertainty_band,
+                calibration,
+                &format!("{}-Composition-Area", self.name),
+                &self.composition_line,
+                0.22,
+            );
+        }
+
         for line in &self.decomposition_lines {
             line.draw(plot_ui, calibration);
         }

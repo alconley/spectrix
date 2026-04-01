@@ -124,19 +124,24 @@ impl EguiPolygon {
                             .min_by(|(_, a), (_, b)| {
                                 let dist_a = (a[0] - x_value).powi(2) + (a[1] - y_value).powi(2);
                                 let dist_b = (b[0] - x_value).powi(2) + (b[1] - y_value).powi(2);
-                                dist_a.partial_cmp(&dist_b).expect("Comparison failed")
+                                dist_a.total_cmp(&dist_b)
                             })
                             .map(|(index, _)| index);
 
-                        log::info!(
-                            "Closest index: {:?}, (x,y)={:?}",
-                            closest_index,
-                            self.vertices[closest_index.expect("Closest index should be found")]
-                        );
+                        if let Some(closest_index) = closest_index {
+                            log::info!(
+                                "Closest index: {:?}, (x,y)={:?}",
+                                closest_index,
+                                self.vertices[closest_index]
+                            );
 
-                        if pointer_state.button_pressed(egui::PointerButton::Primary) {
-                            self.is_dragging = true;
-                            self.dragged_vertex_index = closest_index;
+                            if pointer_state.button_pressed(egui::PointerButton::Primary) {
+                                self.is_dragging = true;
+                                self.dragged_vertex_index = Some(closest_index);
+                            }
+                        } else {
+                            self.highlighted = false;
+                            self.dragged_vertex_index = None;
                         }
                     } else {
                         self.highlighted = false;

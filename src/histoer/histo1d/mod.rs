@@ -3,6 +3,7 @@ pub mod custom_plot_manipulation;
 pub mod filling;
 pub mod fitting;
 pub mod histogram1d;
+pub mod interactive_cuts;
 pub mod keybinds;
 pub mod markers;
 pub mod peak_finder;

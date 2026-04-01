@@ -1,7 +1,6 @@
 use super::plot_settings::PlotSettings;
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::fit_handler::Fits;
-use egui_extras::{Column, TableBuilder};
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Histogram {
@@ -60,6 +59,39 @@ impl Histogram {
             .collect();
     }
 
+    pub(crate) fn display_x_to_raw_x(&self, display_x: f64) -> f64 {
+        let linear_display_x = if self.plot_settings.egui_settings.log_x {
+            10_f64.powf(display_x)
+        } else {
+            display_x
+        };
+
+        if self.fits.settings.calibrated {
+            self.fits
+                .calibration
+                .invert(linear_display_x)
+                .unwrap_or(linear_display_x)
+        } else {
+            linear_display_x
+        }
+    }
+
+    pub(crate) fn display_x_bounds_to_raw_bounds(&self, x_min: f64, x_max: f64) -> (f64, f64) {
+        let raw_x_min = self.display_x_to_raw_x(x_min);
+        let raw_x_max = self.display_x_to_raw_x(x_max);
+
+        if raw_x_min <= raw_x_max {
+            (raw_x_min, raw_x_max)
+        } else {
+            (raw_x_max, raw_x_min)
+        }
+    }
+
+    fn current_raw_x_bounds(&self, plot_ui: &egui_plot::PlotUi<'_>) -> (f64, f64) {
+        let plot_bounds = plot_ui.plot_bounds();
+        self.display_x_bounds_to_raw_bounds(plot_bounds.min()[0], plot_bounds.max()[0])
+    }
+
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         // update the histogram and fit lines with the log setting and draw
         let log_y = self.plot_settings.egui_settings.log_y;
@@ -67,35 +99,27 @@ impl Histogram {
 
         self.line.log_y = log_y;
         self.line.log_x = log_x;
-        // Extract calibration before any mutable borrow of `self.fits`
-        let calibration = {
-            if self.fits.settings.calibrated {
-                Some(&self.fits.calibration)
-            } else {
-                None
-            }
+        let calibration = if self.fits.settings.calibrated {
+            Some(self.fits.calibration.clone())
+        } else {
+            None
         };
-        self.line.draw(plot_ui, calibration);
+        let calibration_ref = calibration.as_ref();
+
+        self.line.draw(plot_ui, calibration_ref);
         self.plot_settings
             .markers
-            .draw_all_markers(plot_ui, calibration);
+            .draw_all_markers(plot_ui, calibration_ref);
 
         self.fits.set_log(log_y, log_x);
-        self.fits.draw(plot_ui);
+        self.fits
+            .draw(plot_ui, &self.bins, self.range, self.bin_width);
         self.show_stats(plot_ui);
 
         self.update_background_pair_lines();
         for bg_pair in &mut self.plot_settings.markers.background_markers {
             bg_pair.histogram_line.log_x = log_x;
             bg_pair.histogram_line.log_y = log_y;
-        }
-
-        // Check if markers are being dragged
-        if self.plot_settings.markers.is_dragging() {
-            // Disable dragging if a marker is being dragged
-            self.plot_settings.egui_settings.allow_drag = false;
-        } else {
-            self.plot_settings.egui_settings.allow_drag = true;
         }
 
         if plot_ui.response().hovered() {
@@ -105,7 +129,10 @@ impl Histogram {
             self.plot_settings.cursor_position = None;
         }
 
+        self.plot_settings.draw(plot_ui, calibration_ref);
+
         self.custom_plot_manipulation_update(plot_ui);
+        self.plot_settings.current_plot_bounds = Some(self.current_raw_x_bounds(plot_ui));
 
         // self.plot_settings.egui_settings.y_label = format!("Counts/{:.}", self.bin_width);
     }
@@ -131,86 +158,64 @@ impl Histogram {
         self.update_line_points();
         self.keybinds(ui);
 
-        let height = ui.available_height();
-        let mut width = ui.available_width();
+        self.fits.ui(ui, &self.name);
+        self.apply_refit_all_request();
+        self.apply_modify_fit_request();
 
-        let show_stats = self.fits.settings.show_fit_stats;
+        let width = ui.available_width();
+        let mut plot = egui_plot::Plot::new(self.name.clone()).width(width);
+        plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
-        // Dynamically build table with 1 or 2 columns
-        let mut table = TableBuilder::new(ui);
-
-        if show_stats {
-            table = table.column(Column::auto_with_initial_suggestion(width * 0.5).resizable(true));
-        }
-
-        table = table.column(Column::remainder()).vscroll(false);
-
-        table.body(|mut body| {
-            body.row(height, |mut row| {
-                if show_stats {
-                    row.col(|ui| {
-                        self.fits.ui(ui, true);
-                        self.apply_refit_all_request();
-                        self.apply_modify_fit_request();
-                        width -= ui.available_width(); // assign the difference back to `width`
-                    });
-                }
-
-                row.col(|ui| {
-                    let mut plot = egui_plot::Plot::new(self.name.clone()).width(width);
-                    plot = self.plot_settings.egui_settings.apply_to_plot(plot);
-
-                    let (scroll, _pointer_down, _modifiers) = ui.input(|i| {
-                        let scroll = i.events.iter().find_map(|e| match e {
-                            egui::Event::MouseWheel { delta, .. } => Some(*delta),
-                            _ => None,
-                        });
-                        (scroll, i.pointer.primary_down(), i.modifiers)
-                    });
-
-                    let plot_response = plot.show(ui, |plot_ui| {
-                        self.draw(plot_ui);
-
-                        if self.plot_settings.progress.is_some() {
-                            let y_max = self.bins.iter().max().copied().unwrap_or(0) as f64;
-                            let mut plot_bounds = plot_ui.plot_bounds();
-                            plot_bounds.extend_with_y(y_max * 1.1);
-                            plot_ui.set_plot_bounds(plot_bounds);
-                        }
-
-                        if self.plot_settings.egui_settings.reset_axis {
-                            plot_ui.auto_bounds();
-                            self.plot_settings.egui_settings.reset_axis = false;
-                        }
-
-                        if self.plot_settings.cursor_position.is_some()
-                            && let Some(delta_pos) = scroll
-                        {
-                            let zoom_factor = if delta_pos.y > 0.0 || delta_pos.x > 0.0 {
-                                1.1
-                            } else {
-                                0.9
-                            };
-                            plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(zoom_factor, 1.0));
-                        }
-                    });
-
-                    plot_response.response.context_menu(|ui| {
-                        self.context_menu(ui);
-                    });
-
-                    let calibration = {
-                        if self.fits.settings.calibrated {
-                            Some(&self.fits.calibration)
-                        } else {
-                            None
-                        }
-                    };
-
-                    self.plot_settings
-                        .interactive_response(&plot_response, calibration);
-                });
+        let (scroll, _pointer_down, _modifiers) = ui.input(|i| {
+            let scroll = i.events.iter().find_map(|e| match e {
+                egui::Event::MouseWheel { delta, .. } => Some(*delta),
+                _ => None,
             });
+            (scroll, i.pointer.primary_down(), i.modifiers)
         });
+
+        let plot_response = plot.show(ui, |plot_ui| {
+            self.draw(plot_ui);
+
+            if self.plot_settings.progress.is_some()
+                && !self.plot_settings.auto_fit_y_to_visible_range
+            {
+                let y_max = self.bins.iter().max().copied().unwrap_or(0) as f64;
+                let mut plot_bounds = plot_ui.plot_bounds();
+                plot_bounds.extend_with_y(y_max * 1.1);
+                plot_ui.set_plot_bounds(plot_bounds);
+            }
+
+            if self.plot_settings.egui_settings.reset_axis {
+                plot_ui.auto_bounds();
+                self.plot_settings.egui_settings.reset_axis = false;
+            }
+
+            if self.plot_settings.cursor_position.is_some()
+                && let Some(delta_pos) = scroll
+            {
+                let zoom_factor = if delta_pos.y > 0.0 || delta_pos.x > 0.0 {
+                    1.1
+                } else {
+                    0.9
+                };
+                plot_ui.zoom_bounds_around_hovered(egui::Vec2::new(zoom_factor, 1.0));
+            }
+        });
+
+        plot_response.response.context_menu(|ui| {
+            self.context_menu(ui);
+        });
+
+        let calibration = {
+            if self.fits.settings.calibrated {
+                Some(&self.fits.calibration)
+            } else {
+                None
+            }
+        };
+
+        self.plot_settings
+            .interactive_response(&plot_response, calibration);
     }
 }

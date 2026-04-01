@@ -1,7 +1,7 @@
 use super::custom_scripts::CustomConfigs;
 
 use crate::histoer::configs::Configs;
-use crate::histoer::cuts::ActiveCut2D;
+use crate::histoer::cuts::{ActiveHistogramCut, Cut, Cuts};
 use crate::histoer::histogrammer::Histogrammer;
 use polars::prelude::*;
 
@@ -25,70 +25,150 @@ impl HistogramScript {
         }
     }
 
-    pub fn save_configs_dialog(&self) {
+    // pub fn save_configs_dialog(&self) {
+    //     if let Some(path) = rfd::FileDialog::new()
+    //         .add_filter("JSON Config", &["json"])
+    //         .set_title("Save Configurations")
+    //         .save_file()
+    //         && let Ok(serialized) = serde_json::to_string_pretty(&self)
+    //         && let Ok(mut file) = File::create(path)
+    //     {
+    //         let _file = file.write_all(serialized.as_bytes());
+    //     }
+    // }
+
+    pub fn save_general_configs_dialog(&self) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("JSON Config", &["json"])
-            .set_title("Save Configurations")
+            .set_title("Save General Histogram Config")
             .save_file()
-            && let Ok(serialized) = serde_json::to_string_pretty(&self)
+            && let Ok(serialized) = serde_json::to_string_pretty(&self.configs)
             && let Ok(mut file) = File::create(path)
         {
             let _file = file.write_all(serialized.as_bytes());
         }
     }
 
-    pub fn load_configs_dialog(&mut self) {
+    // pub fn load_configs_dialog(&mut self) {
+    //     if let Some(path) = rfd::FileDialog::new()
+    //         .add_filter("JSON Config", &["json"])
+    //         .set_title("Load Configurations")
+    //         .pick_file()
+    //         && let Ok(file) = File::open(path)
+    //     {
+    //         let reader = BufReader::new(file);
+    //         if let Ok(loaded) = serde_json::from_reader(reader) {
+    //             *self = loaded;
+    //         }
+    //     }
+    // }
+
+    pub fn load_general_configs_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("JSON Config", &["json"])
-            .set_title("Load Configurations")
+            .set_title("Load General Histogram Config")
             .pick_file()
             && let Ok(file) = File::open(path)
         {
             let reader = BufReader::new(file);
             if let Ok(loaded) = serde_json::from_reader(reader) {
-                *self = loaded;
+                self.configs = loaded;
             }
         }
     }
 
-    fn apply_active_cut_states(&mut self, active_cuts: &mut [ActiveCut2D]) {
+    fn apply_active_cut_states(&mut self, active_cuts: &mut [ActiveHistogramCut]) {
         self.active_cut_states.retain(|cut_name, _| {
             active_cuts
                 .iter()
-                .any(|active_cut| &active_cut.cut.polygon.name == cut_name)
+                .any(|active_cut| active_cut.cut.name() == cut_name)
         });
 
         for active_cut in active_cuts {
             let enabled = self
                 .active_cut_states
-                .entry(active_cut.cut.polygon.name.clone())
+                .entry(active_cut.cut.name().to_owned())
                 .or_insert(true);
             active_cut.enabled = *enabled;
         }
     }
 
-    fn store_active_cut_states(&mut self, active_cuts: &[ActiveCut2D]) {
+    fn store_active_cut_states(&mut self, active_cuts: &[ActiveHistogramCut]) {
         for active_cut in active_cuts {
             self.active_cut_states
-                .insert(active_cut.cut.polygon.name.clone(), active_cut.enabled);
+                .insert(active_cut.cut.name().to_owned(), active_cut.enabled);
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, histogrammer: &Histogrammer) {
-        let mut active_cuts = histogrammer.retrieve_active_2d_cuts();
+    fn upsert_cut(cuts: &mut Vec<Cut>, cut: Cut) {
+        if let Some(existing_cut) = cuts
+            .iter_mut()
+            .find(|existing_cut| existing_cut.name() == cut.name())
+        {
+            *existing_cut = cut;
+        } else {
+            cuts.push(cut);
+        }
+    }
+
+    fn resolved_active_histogram_cuts(
+        &self,
+        histogrammer: &Histogrammer,
+    ) -> Vec<ActiveHistogramCut> {
+        let mut active_cuts = histogrammer.retrieve_active_histogram_cuts();
+
+        for active_cut in &mut active_cuts {
+            active_cut.enabled = self
+                .active_cut_states
+                .get(active_cut.cut.name())
+                .copied()
+                .unwrap_or(true);
+        }
+
+        active_cuts
+    }
+
+    pub fn active_filter_cuts(&self, histogrammer: &Histogrammer) -> Cuts {
+        let mut merged_cuts = Cuts::default();
+
+        for cut in self.configs.cuts.get_active_cuts().cuts {
+            Self::upsert_cut(&mut merged_cuts.cuts, cut);
+        }
+
+        for cut in self.custom_scripts.cuts.get_active_cuts().cuts {
+            Self::upsert_cut(&mut merged_cuts.cuts, cut);
+        }
+
+        for active_cut in self
+            .resolved_active_histogram_cuts(histogrammer)
+            .into_iter()
+            .filter(|active_cut| active_cut.enabled)
+        {
+            Self::upsert_cut(&mut merged_cuts.cuts, active_cut.cut);
+        }
+
+        merged_cuts
+    }
+
+    pub fn active_filter_cut_count(&self, histogrammer: &Histogrammer) -> usize {
+        self.active_filter_cuts(histogrammer).cuts.len()
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui, histogrammer: &Histogrammer, column_names: &[String]) {
+        let mut active_cuts = histogrammer.retrieve_active_histogram_cuts();
         self.apply_active_cut_states(&mut active_cuts);
 
         ui.horizontal(|ui| {
             ui.heading("Histogram Script");
 
-            ui.separator();
+            // ui.separator();
 
-            if ui.button("Save Configs").clicked() {
-                self.save_configs_dialog();
-            }
-            if ui.button("Load Configs").clicked() {
-                self.load_configs_dialog();
-            }
+            // if ui.button("Save Configs").clicked() {
+            //     self.save_configs_dialog();
+            // }
+            // if ui.button("Load Configs").clicked() {
+            //     self.load_configs_dialog();
+            // }
         });
 
         ui.separator();
@@ -97,6 +177,16 @@ impl HistogramScript {
             egui::CollapsingHeader::new("General")
                 .default_open(false)
                 .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("Save General").clicked() {
+                            self.save_general_configs_dialog();
+                        }
+                        if ui.button("Load General").clicked() {
+                            self.load_general_configs_dialog();
+                        }
+                    });
+
+                    ui.separator();
                     self.configs.ui(ui, Some(active_cuts.as_mut_slice()));
                 });
 
@@ -105,7 +195,8 @@ impl HistogramScript {
             egui::CollapsingHeader::new("Custom")
                 .default_open(false)
                 .show(ui, |ui| {
-                    self.custom_scripts.ui(ui, Some(active_cuts.as_mut_slice()));
+                    self.custom_scripts
+                        .ui(ui, Some(active_cuts.as_mut_slice()), column_names);
                 });
         });
 
@@ -119,7 +210,7 @@ impl HistogramScript {
         estimated_memory: f64,
         prefix: Option<String>,
     ) {
-        let mut active_cuts = h.retrieve_active_2d_cuts();
+        let mut active_cuts = h.retrieve_active_histogram_cuts();
         self.apply_active_cut_states(&mut active_cuts);
         let active_custom_configs = self
             .custom_scripts

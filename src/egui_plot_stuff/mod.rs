@@ -1,4 +1,5 @@
 pub mod colors;
+pub mod egui_filled_area;
 pub mod egui_horizontal_line;
 pub mod egui_image;
 pub mod egui_line;

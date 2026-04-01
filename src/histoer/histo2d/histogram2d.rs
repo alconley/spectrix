@@ -296,6 +296,7 @@ impl Histogram2D {
                     unit: _,
                     delta,
                     modifiers: _,
+                    phase: _,
                 } => Some(*delta),
                 _ => None,
             });

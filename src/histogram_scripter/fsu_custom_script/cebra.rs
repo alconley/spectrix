@@ -4,28 +4,118 @@ use super::se_sps::SPSConfig;
 use crate::histoer::configs::Configs;
 use crate::histoer::cuts::{Cut, Cuts};
 
+use std::collections::BTreeSet;
 use std::f64::consts::PI;
 
 use egui_extras::{Column, TableBuilder};
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize, Default)]
 pub struct CeBrAConfig {
     pub active: bool,
     pub detectors: Vec<Cebr3>,
 }
 
-impl Default for CeBrAConfig {
-    fn default() -> Self {
-        Self {
-            active: false,
-            // 9 detectors
-            detectors: (0..9).map(Cebr3::new).collect(),
+impl CeBrAConfig {
+    fn common_detector_index(&self) -> Option<usize> {
+        self.detectors
+            .iter()
+            .position(|detector| detector.active)
+            .or_else(|| (!self.detectors.is_empty()).then_some(0))
+    }
+
+    fn add_detectors_from_columns(&mut self, column_names: &[String]) {
+        let detector_numbers: BTreeSet<usize> = column_names
+            .iter()
+            .filter_map(|column_name| {
+                let suffix = column_name.strip_prefix("Cebra")?;
+                let digits: String = suffix
+                    .chars()
+                    .take_while(|character| character.is_ascii_digit())
+                    .collect();
+
+                if digits.is_empty() {
+                    None
+                } else {
+                    digits.parse::<usize>().ok()
+                }
+            })
+            .collect();
+
+        if detector_numbers.is_empty() {
+            log::warn!("No CeBrA detector columns found in the loaded selected-file columns.");
+            return;
+        }
+
+        for detector_number in detector_numbers {
+            if self
+                .detectors
+                .iter()
+                .any(|detector| detector.number == detector_number)
+            {
+                continue;
+            }
+
+            let mut detector = Cebr3::new(detector_number);
+            detector.active = true;
+            self.detectors.push(detector);
+        }
+
+        self.detectors.sort_by_key(|detector| detector.number);
+    }
+
+    fn detector_management_ui(&mut self, ui: &mut egui::Ui, column_names: &[String]) {
+        let mut detector_to_remove = None;
+
+        ui.horizontal(|ui| {
+            ui.label("Detectors");
+
+            let discover_response = ui
+                .add_enabled(!column_names.is_empty(), egui::Button::new("Get Detectors"))
+                .on_hover_text(
+                    "Scan the loaded selected-file column names and add any missing CeBrA detectors inferred from columns like Cebra0Energy or Cebra3Time.",
+                )
+                .on_disabled_hover_text(
+                    "Load the selected file columns first with 'Get Column Names' in Selected File Settings.",
+                );
+
+            if discover_response.clicked() {
+                self.add_detectors_from_columns(column_names);
+            }
+        });
+
+        ui.label("Checked detectors stay visible below. Remove deletes the CeBrA detector configuration.");
+
+        if self.detectors.is_empty() {
+            ui.label("No CeBrA detectors loaded yet.");
+        } else {
+            // ui.horizontal_wrapped(|ui| {
+            for (index, detector) in self.detectors.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut detector.active, format!("Cebra{}", detector.number))
+                        .on_hover_text("Show or hide this detector's settings tables.");
+
+                    let remove_response = ui.small_button("X").on_hover_text(
+                        "Remove this detector and its saved CeBrA-specific settings.",
+                    );
+
+                    if remove_response.clicked() {
+                        detector_to_remove = Some(index);
+                    }
+                });
+            }
+            // });
+        }
+
+        if let Some(index) = detector_to_remove {
+            self.detectors.remove(index);
         }
     }
-}
 
-impl CeBrAConfig {
     pub fn sps_time_cut_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(common_detector_index) = self.common_detector_index() else {
+            return;
+        };
+
         ui.separator();
 
         ui.horizontal(|ui| {
@@ -34,20 +124,34 @@ impl CeBrAConfig {
             ui.separator();
 
             ui.add(
-                egui::DragValue::new(&mut self.detectors[0].sps_timecut.no_cut_range.0)
-                    .speed(1.0)
-                    .prefix("Range: ("),
+                egui::DragValue::new(
+                    &mut self.detectors[common_detector_index]
+                        .sps_timecut
+                        .no_cut_range
+                        .0,
+                )
+                .speed(1.0)
+                .prefix("Range: ("),
             );
             ui.add(
-                egui::DragValue::new(&mut self.detectors[0].sps_timecut.no_cut_range.1)
-                    .speed(1.0)
-                    .suffix(")"),
+                egui::DragValue::new(
+                    &mut self.detectors[common_detector_index]
+                        .sps_timecut
+                        .no_cut_range
+                        .1,
+                )
+                .speed(1.0)
+                .suffix(")"),
             );
 
             ui.add(
-                egui::DragValue::new(&mut self.detectors[0].sps_timecut.no_cut_bins)
-                    .speed(1)
-                    .prefix("Bins: "),
+                egui::DragValue::new(
+                    &mut self.detectors[common_detector_index]
+                        .sps_timecut
+                        .no_cut_bins,
+                )
+                .speed(1)
+                .prefix("Bins: "),
             );
         });
 
@@ -57,31 +161,42 @@ impl CeBrAConfig {
             ui.separator();
 
             ui.add(
-                egui::DragValue::new(&mut self.detectors[0].sps_timecut.range.0)
-                    .speed(1.0)
-                    .prefix("Range: ("),
+                egui::DragValue::new(
+                    &mut self.detectors[common_detector_index].sps_timecut.range.0,
+                )
+                .speed(1.0)
+                .prefix("Range: ("),
             );
             ui.add(
-                egui::DragValue::new(&mut self.detectors[0].sps_timecut.range.1)
-                    .speed(1.0)
-                    .suffix(")"),
+                egui::DragValue::new(
+                    &mut self.detectors[common_detector_index].sps_timecut.range.1,
+                )
+                .speed(1.0)
+                .suffix(")"),
             );
 
             ui.add(
-                egui::DragValue::new(&mut self.detectors[0].sps_timecut.bins)
+                egui::DragValue::new(&mut self.detectors[common_detector_index].sps_timecut.bins)
                     .speed(1)
                     .prefix("Bins: "),
             );
         });
 
         //sync the time cut range and bins for all detectors
-        let sps_timecut_range = self.detectors[0].sps_timecut.range;
-        let sps_timecut_bins = self.detectors[0].sps_timecut.bins;
+        let sps_timecut_range = self.detectors[common_detector_index].sps_timecut.range;
+        let sps_timecut_bins = self.detectors[common_detector_index].sps_timecut.bins;
 
-        let sps_no_timecut_range = self.detectors[0].sps_timecut.no_cut_range;
-        let sps_no_timecut_bins = self.detectors[0].sps_timecut.no_cut_bins;
+        let sps_no_timecut_range = self.detectors[common_detector_index]
+            .sps_timecut
+            .no_cut_range;
+        let sps_no_timecut_bins = self.detectors[common_detector_index]
+            .sps_timecut
+            .no_cut_bins;
 
-        for detector in &mut self.detectors[1..] {
+        for (index, detector) in self.detectors.iter_mut().enumerate() {
+            if index == common_detector_index {
+                continue;
+            }
             detector.sps_timecut.range = sps_timecut_range;
             detector.sps_timecut.bins = sps_timecut_bins;
             detector.sps_timecut.no_cut_range = sps_no_timecut_range;
@@ -117,6 +232,10 @@ impl CeBrAConfig {
             })
             .body(|mut body| {
                 for detector in &mut self.detectors {
+                    if !detector.active {
+                        continue;
+                    }
+
                     body.row(18.0, |mut row| {
                         // Detector Number
                         row.col(|ui| {
@@ -158,37 +277,38 @@ impl CeBrAConfig {
 
     pub fn gain_matching_ui(&mut self, ui: &mut egui::Ui) {
         // Temporarily store the range and bins to avoid conflicting borrows
-        let (common_range, common_bins) = if let Some(first_detector) = self.detectors.get_mut(0) {
-            ui.separator();
-
-            let mut range = first_detector.gainmatch.range;
-            let mut bins = first_detector.gainmatch.bins;
-
-            ui.horizontal(|ui| {
-                ui.label("Gain Matching");
-
+        let (common_range, common_bins) =
+            if let Some(common_detector_index) = self.common_detector_index() {
                 ui.separator();
 
-                ui.add(
-                    egui::DragValue::new(&mut range.0)
-                        .speed(1.0)
-                        .prefix("Range: ("),
-                );
-                ui.add(egui::DragValue::new(&mut range.1).speed(1.0).suffix(")"));
-                ui.add(egui::DragValue::new(&mut bins).speed(1).prefix("Bins: "));
-            });
+                let mut range = self.detectors[common_detector_index].gainmatch.range;
+                let mut bins = self.detectors[common_detector_index].gainmatch.bins;
 
-            // Update the first detector with the new range and bins
-            first_detector.gainmatch.range = range;
-            first_detector.gainmatch.bins = bins;
+                ui.horizontal(|ui| {
+                    ui.label("Gain Matching");
 
-            (range, bins)
-        } else {
-            return; // No detectors to configure
-        };
+                    ui.separator();
+
+                    ui.add(
+                        egui::DragValue::new(&mut range.0)
+                            .speed(1.0)
+                            .prefix("Range: ("),
+                    );
+                    ui.add(egui::DragValue::new(&mut range.1).speed(1.0).suffix(")"));
+                    ui.add(egui::DragValue::new(&mut bins).speed(1).prefix("Bins: "));
+                });
+
+                // Update the reference detector with the new range and bins
+                self.detectors[common_detector_index].gainmatch.range = range;
+                self.detectors[common_detector_index].gainmatch.bins = bins;
+
+                (range, bins)
+            } else {
+                return; // No detectors to configure
+            };
 
         // Update all other detectors with the common range and bins
-        for detector in &mut self.detectors[1..] {
+        for detector in &mut self.detectors {
             detector.gainmatch.range = common_range;
             detector.gainmatch.bins = common_bins;
         }
@@ -221,6 +341,10 @@ impl CeBrAConfig {
             })
             .body(|mut body| {
                 for detector in &mut self.detectors {
+                    if !detector.active {
+                        continue;
+                    }
+
                     body.row(18.0, |mut row| {
                         // Detector Number
                         row.col(|ui| {
@@ -262,39 +386,48 @@ impl CeBrAConfig {
 
     pub fn energy_calibration_ui(&mut self, ui: &mut egui::Ui) {
         // Temporarily store the range and bins to avoid conflicting borrows
-        let (common_range, common_bins) = if let Some(first_detector) = self.detectors.get_mut(0) {
-            ui.separator();
-
-            let mut range = first_detector.energy_calibration.range;
-            let mut bins = first_detector.energy_calibration.bins;
-
-            ui.horizontal(|ui| {
-                ui.label("Energy Calibration");
-
+        let (common_range, common_bins) =
+            if let Some(common_detector_index) = self.common_detector_index() {
                 ui.separator();
 
-                ui.add(
-                    egui::DragValue::new(&mut range.0)
-                        .speed(1.0)
-                        .prefix(" Range: ("),
-                );
-                ui.add(egui::DragValue::new(&mut range.1).speed(1.0).suffix(")"));
-                ui.add(egui::DragValue::new(&mut bins).speed(1).prefix("Bins: "));
+                let mut range = self.detectors[common_detector_index]
+                    .energy_calibration
+                    .range;
+                let mut bins = self.detectors[common_detector_index]
+                    .energy_calibration
+                    .bins;
 
-                ui.label(format!("keV/bin: {:.2}", (range.1 - range.0) / bins as f64));
-            });
+                ui.horizontal(|ui| {
+                    ui.label("Energy Calibration");
 
-            // Update the first detector with the new range and bins
-            first_detector.energy_calibration.range = range;
-            first_detector.energy_calibration.bins = bins;
+                    ui.separator();
 
-            (range, bins)
-        } else {
-            return; // No detectors to configure
-        };
+                    ui.add(
+                        egui::DragValue::new(&mut range.0)
+                            .speed(1.0)
+                            .prefix(" Range: ("),
+                    );
+                    ui.add(egui::DragValue::new(&mut range.1).speed(1.0).suffix(")"));
+                    ui.add(egui::DragValue::new(&mut bins).speed(1).prefix("Bins: "));
+
+                    ui.label(format!("keV/bin: {:.2}", (range.1 - range.0) / bins as f64));
+                });
+
+                // Update the reference detector with the new range and bins
+                self.detectors[common_detector_index]
+                    .energy_calibration
+                    .range = range;
+                self.detectors[common_detector_index]
+                    .energy_calibration
+                    .bins = bins;
+
+                (range, bins)
+            } else {
+                return; // No detectors to configure
+            };
 
         // Update all other detectors with the common range and bins
-        for detector in &mut self.detectors[1..] {
+        for detector in &mut self.detectors {
             detector.energy_calibration.range = common_range;
             detector.energy_calibration.bins = common_bins;
         }
@@ -327,6 +460,10 @@ impl CeBrAConfig {
             })
             .body(|mut body| {
                 for detector in &mut self.detectors {
+                    if !detector.active {
+                        continue;
+                    }
+
                     body.row(18.0, |mut row| {
                         // Detector Number
                         row.col(|ui| {
@@ -369,15 +506,16 @@ impl CeBrAConfig {
             });
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, sps_config: &SPSConfig) {
-        ui.horizontal_wrapped(|ui| {
-            for detector in &mut self.detectors {
-                ui.checkbox(&mut detector.active, format!("Cebra{}", detector.number));
-            }
-        });
+    pub fn ui(&mut self, ui: &mut egui::Ui, sps_config: &SPSConfig, column_names: &[String]) {
+        self.detector_management_ui(ui, column_names);
 
-        // check if there are detectors to configure
         if self.detectors.is_empty() {
+            ui.label("Add a CeBrA detector number to configure it.");
+            return;
+        }
+
+        if !self.detectors.iter().any(|detector| detector.active) {
+            ui.label("Check a detector above to show its settings.");
             return;
         }
 
@@ -527,7 +665,7 @@ impl Cebr3 {
         if self.gainmatch.active {
             configs.columns.push(self.gainmatch.new_column(&format!("Cebra{number}Energy"),&format!("Cebra{number}GainMatched")));
             configs.hist1d(&format!("{base_path}/Cebra{number}/Cebra{number} Gain Matched"), &format!("Cebra{number}GainMatched"), self.gainmatch.range, self.gainmatch.bins, &main_cuts); 
-            // configs.hist1d(&format!("{base_path}/CeBrA/Gain Matched"), &format!("Cebra{number}GainMatched"),  self.gainmatch.range, self.gainmatch.bins, &main_cuts); 
+            configs.hist1d(&format!("{base_path}/CeBrA/Gain Matched"), &format!("Cebra{number}GainMatched"),  self.gainmatch.range, self.gainmatch.bins, &main_cuts); 
         }
 
         if self.energy_calibration.active {
@@ -537,7 +675,7 @@ impl Cebr3 {
                 configs.columns.push(self.energy_calibration.new_column(&format!("Cebra{number}Energy"),&format!("Cebra{number}EnergyCalibrated")));
             }
             configs.hist1d(&format!("{base_path}/Cebra{number}/Cebra{number} Energy Calibrated"), &format!("Cebra{number}EnergyCalibrated"), self.energy_calibration.range, self.energy_calibration.bins, &main_cuts);
-            // configs.hist1d(&format!("{base_path}/CeBrA/Energy Calibrated"), &format!("Cebra{number}EnergyCalibrated"), self.energy_calibration.range, self.energy_calibration.bins, &main_cuts);
+            configs.hist1d(&format!("{base_path}/CeBrA/Energy Calibrated"), &format!("Cebra{number}EnergyCalibrated"), self.energy_calibration.range, self.energy_calibration.bins, &main_cuts);
         }
 
         if sps_config.active {
@@ -551,6 +689,11 @@ impl Cebr3 {
             let sps_tcut_range = self.sps_timecut.range;
             let sps_tcut_bins = self.sps_timecut.bins;
 
+            configs.columns.push((
+                format!("Cebra{number}Time - ScintLeftTime"),
+                format!("Cebra{number}RelTime"),
+            ));
+
             configs.hist1d(&format!("{base_path}/Cebra{number}/Cebra{number}RelTime"), &format!("Cebra{number}RelTime"), sps_no_tcut_range, sps_no_tcut_bins, &main_cuts);
             configs.hist2d(&format!("{base_path}/Cebra{number}/Cebra{number}Energy v Xavg"), &format!("Xavg"), &format!("Cebra{number}Energy"), (-300.0, 300.0), (0.0, 4096.0), (600, 512), &main_cuts);
             configs.hist2d(&format!("{base_path}/Cebra{number}/Cebra{number}RelTime v Xavg"), &format!("Xavg"), &format!("Cebra{number}RelTime"), (-300.0, 300.0), sps_no_tcut_range, (600, sps_no_tcut_bins), &main_cuts);
@@ -560,10 +703,9 @@ impl Cebr3 {
 
                 configs.columns.push((format!("Cebra{number}RelTime - {sps_tcut_mean}"), format!("Cebra{number}RelTimeShifted")));
                 configs.hist1d(&format!("{base_path}/Cebra{number}/Cebra{number}RelTimeShifted"), &format!("Cebra{number}RelTimeShifted"), sps_tcut_range, sps_tcut_bins, &main_cuts);
-                // configs.hist1d(&format!("{base_path}/CeBrA/CeBrARelTimeShifted"), &format!("Cebra{number}RelTimeShifted"), sps_tcut_range, sps_tcut_bins, &main_cuts);
+                configs.hist1d(&format!("{base_path}/CeBrA/CeBrARelTimeShifted"), &format!("Cebra{number}RelTimeShifted"), sps_tcut_range, sps_tcut_bins, &main_cuts);
 
-
-                let cebra_time_cut = Cut::new_1d(&format!("Cebra{number} Time Cut"), &format!("Cebra{number}RelTime >= {sps_tcut_low} && Cebra{number}RelTime <= {sps_tcut_high}"));
+                let cebra_time_cut = Cut::new_1d(&format!("Cebra{number} Time Cut"), &format!("Cebra{number}RelTime >= {sps_tcut_low} & Cebra{number}RelTime <= {sps_tcut_high}"));
                 configs.cuts.add_cut(cebra_time_cut.clone());
 
                 let tcut: Option<Cuts> = if let Some(mut main_cuts) = main_cuts.clone() {
@@ -587,13 +729,13 @@ impl Cebr3 {
                     configs.hist2d(&format!("{base_path}/Cebra{number}/Time Cut/Cebra{number} Gain Matched v Xavg"), &format!("Xavg"), &format!("Cebra{number}GainMatched"), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), &tcut);
                     configs.hist2d(&format!("{base_path}/Cebra{number}/Time Cut/Cebra{number} Gain Matched v X1"), &format!("X1"), &format!("Cebra{number}GainMatched"), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), &tcut);
 
-                    // configs.hist1d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Gain Matched"), &format!("Cebra{number}GainMatched"), self.gainmatch.range, self.gainmatch.bins, &tcut);
-                    // configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Gain Matched v Xavg"), &format!("Xavg"), &format!("Cebra{number}Energy"), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), &tcut);
-                    // configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Gain Matched v X1"), &format!("X1"), &format!("Cebra{number}Energy"), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), &tcut);   
+                    configs.hist1d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Gain Matched"), &format!("Cebra{number}GainMatched"), self.gainmatch.range, self.gainmatch.bins, &tcut);
+                    configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Gain Matched v Xavg"), &format!("Xavg"), &format!("Cebra{number}Energy"), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), &tcut);
+                    configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Gain Matched v X1"), &format!("X1"), &format!("Cebra{number}Energy"), (-300.0, 300.0),  self.gainmatch.range, (600, self.gainmatch.bins), &tcut);   
 
                     if sps_config.xavg.active {
                         configs.hist2d(&format!("{base_path}/Cebra{number}/Time Cut/Cebra{number} v Xavg- Gain Matched"), &format!("XavgEnergyCalibrated"), &format!("Cebra{number}GainMatched"), sps_config.xavg.range, self.gainmatch.range, (sps_config.xavg.bins, self.gainmatch.bins), &tcut);
-                        // configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA v Xavg- Gain Matched"), &format!("XavgEnergyCalibrated"), &format!("Cebra{number}GainMatched"), sps_config.xavg.range, self.gainmatch.range, (sps_config.xavg.bins, self.gainmatch.bins), &tcut);
+                        configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA v Xavg- Gain Matched"), &format!("XavgEnergyCalibrated"), &format!("Cebra{number}GainMatched"), sps_config.xavg.range, self.gainmatch.range, (sps_config.xavg.bins, self.gainmatch.bins), &tcut);
                     }
                 }
                 if self.energy_calibration.active {
@@ -606,9 +748,9 @@ impl Cebr3 {
                         configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA v Xavg- Energy Calibrated"), &format!("XavgEnergyCalibrated"), &format!("Cebra{number}EnergyCalibrated"), sps_config.xavg.range, self.energy_calibration.range, (sps_config.xavg.bins, self.energy_calibration.bins), &tcut);
                     }
 
-                    // configs.hist1d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Energy Calibrated"), &format!("Cebra{number}EnergyCalibrated"), self.energy_calibration.range, self.energy_calibration.bins, &tcut);
-                    // configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Energy Calibrated v Xavg"), &format!("Xavg"), &format!("Cebra{number}EnergyCalibrated"), (-300.0, 300.0), self.energy_calibration.range, (600, self.energy_calibration.bins), &tcut);
-                    // configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Energy Calibrated v X1"), &format!("X1"), &format!("Cebra{number}EnergyCalibrated"), (-300.0, 300.0), self.energy_calibration.range, (600, self.energy_calibration.bins), &tcut);
+                    configs.hist1d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Energy Calibrated"), &format!("Cebra{number}EnergyCalibrated"), self.energy_calibration.range, self.energy_calibration.bins, &tcut);
+                    configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Energy Calibrated v Xavg"), &format!("Xavg"), &format!("Cebra{number}EnergyCalibrated"), (-300.0, 300.0), self.energy_calibration.range, (600, self.energy_calibration.bins), &tcut);
+                    configs.hist2d(&format!("{base_path}/CeBrA/Time Cut/CeBrA Energy Calibrated v X1"), &format!("X1"), &format!("Cebra{number}EnergyCalibrated"), (-300.0, 300.0), self.energy_calibration.range, (600, self.energy_calibration.bins), &tcut);
                 }
             }
         }

@@ -1,4 +1,4 @@
-use super::cuts::{ActiveCut2D, Cut, Cuts};
+use super::cuts::{ActiveHistogramCut, Cut, Cuts};
 use super::histogrammer::Histogrammer;
 
 use egui_extras::{Column, TableBuilder};
@@ -15,6 +15,10 @@ pub struct Configs {
     pub columns: Vec<(String, String)>,
     pub cuts: Cuts,
 }
+
+type Hist1DShapeLock = Option<((f64, f64), usize)>;
+type Hist2DShapeLock = Option<(((f64, f64), (f64, f64)), (usize, usize))>;
+type DuplicateShapeLock = (Hist1DShapeLock, Hist2DShapeLock);
 
 impl Configs {
     pub fn hist1d(
@@ -130,21 +134,29 @@ impl Configs {
     }
 
     pub fn valid_configs(&mut self, lf: &mut LazyFrame) -> Self {
-        // Add new computed columns to the LazyFrame
-        for (expression, alias) in &self.columns {
-            if let Err(e) = add_computed_column(lf, expression, alias) {
-                log::error!("Error adding computed column '{alias}': {e}");
-            }
-        }
-
-        // Get the column names from the LazyFrame
-        let column_names = match get_column_names_from_lazyframe(lf) {
+        let mut column_names = match get_column_names_from_lazyframe(lf) {
             Ok(names) => names,
             Err(e) => {
                 log::error!("Failed to retrieve column names: {e:?}");
-                return Self::default(); // Return default Configs on error
+                return Self::default();
             }
         };
+
+        // Add new computed columns to the LazyFrame
+        for (expression, alias) in &self.columns {
+            if column_names.contains(alias) {
+                log::info!(
+                    "Skipping computed column '{alias}' because it already exists in the LazyFrame"
+                );
+                continue;
+            }
+
+            if let Err(e) = add_computed_column(lf, expression, alias) {
+                log::error!("Error adding computed column '{alias}': {e}");
+            } else {
+                column_names.push(alias.clone());
+            }
+        }
 
         // Ensure 1D cuts have their expressions parsed
         self.cuts.parse_conditions();
@@ -284,34 +296,20 @@ impl Configs {
     }
 
     pub fn check_and_add_panes(&self, h: &mut Histogrammer) {
-        // reset all existings panes
-        // h.reset_histograms();
-
-        // add panes that do not already exist in the histogrammer
         for config in &self.configs {
             match config {
                 Config::Hist1D(hist1d) => {
-                    if let Some(id) = h.find_existing_histogram(&hist1d.name) {
-                        log::info!("Histogram {} already exists", hist1d.name);
-                        h.reset_histogram(id);
-                    } else {
-                        h.add_hist1d(&hist1d.name, hist1d.bins, (hist1d.range.0, hist1d.range.1));
-                    }
+                    h.add_hist1d(&hist1d.name, hist1d.bins, (hist1d.range.0, hist1d.range.1));
                 }
                 Config::Hist2D(hist2d) => {
-                    if let Some(id) = h.find_existing_histogram(&hist2d.name) {
-                        log::info!("Histogram {} already exists", hist2d.name);
-                        h.reset_histogram(id);
-                    } else {
-                        h.add_hist2d(
-                            &hist2d.name,
-                            hist2d.bins,
-                            (
-                                (hist2d.x_range.0, hist2d.x_range.1),
-                                (hist2d.y_range.0, hist2d.y_range.1),
-                            ),
-                        );
-                    }
+                    h.add_hist2d(
+                        &hist2d.name,
+                        hist2d.bins,
+                        (
+                            (hist2d.x_range.0, hist2d.x_range.1),
+                            (hist2d.y_range.0, hist2d.y_range.1),
+                        ),
+                    );
                 }
             }
         }
@@ -410,6 +408,43 @@ impl Configs {
         });
 
         let mut indices_to_remove = Vec::new();
+        let mut pending_clone = None;
+        let mut pending_move = None;
+        let duplicate_shape_locks: Vec<DuplicateShapeLock> = self
+            .configs
+            .iter()
+            .enumerate()
+            .map(|(index, config)| match config {
+                Config::Hist1D(current) => {
+                    let lock = if current.name.trim().is_empty() {
+                        None
+                    } else {
+                        self.configs[..index].iter().find_map(|prior| match prior {
+                            Config::Hist1D(prior_1d) if prior_1d.name == current.name => {
+                                Some((prior_1d.range, prior_1d.bins))
+                            }
+                            _ => None,
+                        })
+                    };
+
+                    (lock, None)
+                }
+                Config::Hist2D(current) => {
+                    let lock = if current.name.trim().is_empty() {
+                        None
+                    } else {
+                        self.configs[..index].iter().find_map(|prior| match prior {
+                            Config::Hist2D(prior_2d) if prior_2d.name == current.name => {
+                                Some(((prior_2d.x_range, prior_2d.y_range), prior_2d.bins))
+                            }
+                            _ => None,
+                        })
+                    };
+
+                    (None, lock)
+                }
+            })
+            .collect();
 
         // Create the table
         TableBuilder::new(ui)
@@ -420,13 +455,14 @@ impl Configs {
             .column(Column::auto()) // Ranges
             .column(Column::auto()) // Bins
             .column(Column::auto()) // cuts
-            .column(Column::auto()) // Actions
+            .column(Column::auto()) // enabled
+            .column(Column::auto()) // clone
             .column(Column::remainder()) // remove
             .striped(true)
             .vscroll(false)
             .header(20.0, |mut header| {
                 header.col(|ui| {
-                    ui.label(" # ");
+                    ui.label(" ↕ ");
                 });
                 header.col(|ui| {
                     ui.label("Name");
@@ -443,20 +479,58 @@ impl Configs {
                 header.col(|ui| {
                     ui.label("Cuts");
                 });
+                header.col(|ui| {
+                    ui.label("On");
+                });
+                header.col(|ui| {
+                    ui.label("Clone");
+                });
             })
             .body(|mut body| {
-                for (index, config) in self.configs.iter_mut().enumerate() {
+                for (index, (hist1d_lock, hist2d_lock)) in
+                    duplicate_shape_locks.iter().copied().enumerate()
+                {
                     body.row(18.0, |mut row| {
-                        row.col(|ui| match config {
-                            Config::Hist2D(_) | Config::Hist1D(_) => {
-                                ui.label(format!("{index}"));
+                        row.col(|ui| {
+                            let response = ui
+                                .add(
+                                    egui::Button::new(format!("↕ {index}"))
+                                        .sense(egui::Sense::click_and_drag()),
+                                )
+                                .on_hover_text("Drag to reorder this histogram config");
+
+                            response.dnd_set_drag_payload(index);
+
+                            if let Some(dragged_index) = response.dnd_release_payload::<usize>() {
+                                let insert_index = ui.pointer_interact_pos().map_or(index, |pos| {
+                                    if pos.y >= response.rect.center().y {
+                                        index + 1
+                                    } else {
+                                        index
+                                    }
+                                });
+                                pending_move = Some((*dragged_index, insert_index));
                             }
                         });
 
-                        match config {
-                            Config::Hist1D(config) => config.table_row(&mut row, available_cuts),
-                            Config::Hist2D(config) => config.table_row(&mut row, available_cuts),
+                        match &mut self.configs[index] {
+                            Config::Hist1D(config) => {
+                                config.table_row(&mut row, available_cuts, hist1d_lock);
+                            }
+                            Config::Hist2D(config) => {
+                                config.table_row(&mut row, available_cuts, hist2d_lock);
+                            }
                         }
+
+                        row.col(|ui| {
+                            if ui
+                                .button("\u{2935}")
+                                .on_hover_text("Clone this histogram config")
+                                .clicked()
+                            {
+                                pending_clone = Some(index);
+                            }
+                        });
 
                         row.col(|ui| {
                             if ui.button("X").clicked() {
@@ -468,8 +542,23 @@ impl Configs {
             });
 
         // Remove indices in reverse order to prevent shifting issues
-        for &index in indices_to_remove.iter().rev() {
-            self.configs.remove(index);
+        if !indices_to_remove.is_empty() {
+            for &index in indices_to_remove.iter().rev() {
+                self.configs.remove(index);
+            }
+        } else if let Some(index) = pending_clone {
+            if let Some(config) = self.configs.get(index).cloned() {
+                self.configs.insert(index + 1, config);
+            }
+        } else if let Some((from, to)) = pending_move {
+            let len = self.configs.len();
+            if from < len && to <= len {
+                let target = if from < to { to - 1 } else { to };
+                if from != target {
+                    let config = self.configs.remove(from);
+                    self.configs.insert(target, config);
+                }
+            }
         }
     }
 
@@ -588,14 +677,18 @@ impl Configs {
         }
     }
 
-    pub fn cut_ui(&mut self, ui: &mut egui::Ui, mut active_cuts: Option<&mut [ActiveCut2D]>) {
+    pub fn cut_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        mut active_cuts: Option<&mut [ActiveHistogramCut]>,
+    ) {
         self.cuts.ui(ui, active_cuts.as_deref_mut(), "general");
         let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
 
         self.sync_histogram_cuts(&merged_cuts);
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&mut [ActiveCut2D]>) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, active_cuts: Option<&mut [ActiveHistogramCut]>) {
         let mut merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
 
         self.column_ui(ui);
@@ -646,7 +739,19 @@ impl Hist1DConfig {
         }
     }
 
-    pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>, cuts: &mut Cuts) {
+    pub fn table_row(
+        &mut self,
+        row: &mut egui_extras::TableRow<'_, '_>,
+        cuts: &mut Cuts,
+        shape_lock: Hist1DShapeLock,
+    ) {
+        if let Some((range, bins)) = shape_lock {
+            self.range = range;
+            self.bins = bins;
+        }
+
+        let shape_editable = self.enabled && shape_lock.is_none();
+
         row.col(|ui| {
             ui.add_enabled(
                 self.enabled,
@@ -668,24 +773,30 @@ impl Hist1DConfig {
         row.col(|ui| {
             ui.horizontal(|ui| {
                 ui.add_enabled(
-                    self.enabled,
+                    shape_editable,
                     egui::DragValue::new(&mut self.range.0)
                         .speed(0.1)
                         .prefix("(")
                         .suffix(","),
-                );
+                )
+                .on_disabled_hover_text("Locked to the first histogram declared with this name.");
                 ui.add_enabled(
-                    self.enabled,
+                    shape_editable,
                     egui::DragValue::new(&mut self.range.1)
                         .speed(0.1)
                         .prefix(" ")
                         .suffix(")"),
-                );
+                )
+                .on_disabled_hover_text("Locked to the first histogram declared with this name.");
             });
         });
 
         row.col(|ui| {
-            ui.add_enabled(self.enabled, egui::DragValue::new(&mut self.bins).speed(1));
+            ui.add_enabled(
+                shape_editable,
+                egui::DragValue::new(&mut self.bins).speed(1),
+            )
+            .on_disabled_hover_text("Locked to the first histogram declared with this name.");
         });
 
         row.col(|ui| {
@@ -842,7 +953,20 @@ impl Hist2DConfig {
         }
     }
 
-    pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>, cuts: &mut Cuts) {
+    pub fn table_row(
+        &mut self,
+        row: &mut egui_extras::TableRow<'_, '_>,
+        cuts: &mut Cuts,
+        shape_lock: Hist2DShapeLock,
+    ) {
+        if let Some(((x_range, y_range), bins)) = shape_lock {
+            self.x_range = x_range;
+            self.y_range = y_range;
+            self.bins = bins;
+        }
+
+        let shape_editable = self.enabled && shape_lock.is_none();
+
         row.col(|ui| {
             ui.add_enabled(
                 self.enabled,
@@ -873,34 +997,46 @@ impl Hist2DConfig {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.add_enabled(
-                        self.enabled,
+                        shape_editable,
                         egui::DragValue::new(&mut self.x_range.0)
                             .speed(0.1)
                             .prefix("(")
                             .suffix(","),
+                    )
+                    .on_disabled_hover_text(
+                        "Locked to the first histogram declared with this name.",
                     );
                     ui.add_enabled(
-                        self.enabled,
+                        shape_editable,
                         egui::DragValue::new(&mut self.x_range.1)
                             .speed(0.1)
                             .prefix(" ")
                             .suffix(")"),
+                    )
+                    .on_disabled_hover_text(
+                        "Locked to the first histogram declared with this name.",
                     );
                 });
                 ui.horizontal(|ui| {
                     ui.add_enabled(
-                        self.enabled,
+                        shape_editable,
                         egui::DragValue::new(&mut self.y_range.0)
                             .speed(0.1)
                             .prefix("(")
                             .suffix(","),
+                    )
+                    .on_disabled_hover_text(
+                        "Locked to the first histogram declared with this name.",
                     );
                     ui.add_enabled(
-                        self.enabled,
+                        shape_editable,
                         egui::DragValue::new(&mut self.y_range.1)
                             .speed(0.1)
                             .prefix(" ")
                             .suffix(")"),
+                    )
+                    .on_disabled_hover_text(
+                        "Locked to the first histogram declared with this name.",
                     );
                 });
             });
@@ -909,13 +1045,15 @@ impl Hist2DConfig {
         row.col(|ui| {
             ui.vertical(|ui| {
                 ui.add_enabled(
-                    self.enabled,
+                    shape_editable,
                     egui::DragValue::new(&mut self.bins.0).speed(1),
-                );
+                )
+                .on_disabled_hover_text("Locked to the first histogram declared with this name.");
                 ui.add_enabled(
-                    self.enabled,
+                    shape_editable,
                     egui::DragValue::new(&mut self.bins.1).speed(1),
-                );
+                )
+                .on_disabled_hover_text("Locked to the first histogram declared with this name.");
             });
         });
 
