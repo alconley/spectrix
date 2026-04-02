@@ -1,8 +1,9 @@
 use egui::{Color32, DragValue, Id, Slider, Stroke, Ui};
-use egui_plot::{LineStyle, PlotResponse, PlotUi, Polygon};
+use egui_plot::{PlotResponse, PlotUi, Polygon};
 use geo::Contains as _;
 
 use crate::egui_plot_stuff::colors::{COLOR_OPTIONS, Rgb};
+use crate::egui_plot_stuff::line_style::SerializableLineStyle;
 
 use egui::color_picker::{Alpha, color_picker_color32};
 use egui::{Atom, Button, RichText};
@@ -19,8 +20,8 @@ pub struct EguiPolygon {
     pub stroke: Stroke,
     pub width: f32,
     pub fill_color: Color32,
-    #[serde(skip)]
-    pub style: Option<LineStyle>,
+    #[serde(default)]
+    pub style: SerializableLineStyle,
     pub style_length: f32,
     pub vertices: Vec<[f64; 2]>,
     // Use Rgb struct for custom RGB values
@@ -48,7 +49,7 @@ impl Default for EguiPolygon {
             stroke: Stroke::new(1.0, Color32::RED),
             width: 2.0,
             fill_color: Color32::TRANSPARENT,
-            style: Some(LineStyle::Solid),
+            style: SerializableLineStyle::Solid,
             style_length: 15.0,
             vertices: vec![],
             color_rgb: Rgb::from_color32(Color32::RED),
@@ -167,10 +168,6 @@ impl EguiPolygon {
         self.vertices.push([x, y]);
     }
 
-    pub fn clear_vertices(&mut self) {
-        self.vertices.clear();
-    }
-
     pub fn draw(&mut self, plot_ui: &mut PlotUi<'_>) {
         if self.draw {
             // draw the temp vertex
@@ -193,9 +190,7 @@ impl EguiPolygon {
                 polygon = polygon.name(self.name.clone());
             }
 
-            if let Some(style) = self.style {
-                polygon = polygon.style(style);
-            }
+            polygon = polygon.style(self.style.to_egui(self.style_length));
 
             plot_ui.polygon(polygon);
 
@@ -247,34 +242,17 @@ impl EguiPolygon {
 
                     ui.horizontal(|ui| {
                         ui.label("Line Style: ");
-                        ui.radio_value(&mut self.style, Some(LineStyle::Solid), "Solid");
-                        ui.radio_value(
-                            &mut self.style,
-                            Some(LineStyle::Dotted {
-                                spacing: self.style_length,
-                            }),
-                            "Dotted",
-                        );
-                        ui.radio_value(
-                            &mut self.style,
-                            Some(LineStyle::Dashed {
-                                length: self.style_length,
-                            }),
-                            "Dashed",
-                        );
+                        ui.radio_value(&mut self.style, SerializableLineStyle::Solid, "Solid");
+                        ui.radio_value(&mut self.style, SerializableLineStyle::Dotted, "Dotted");
+                        ui.radio_value(&mut self.style, SerializableLineStyle::Dashed, "Dashed");
                         ui.add(
                             DragValue::new(&mut self.style_length)
                                 .speed(1.0)
-                                .range(0.0..=f32::INFINITY)
+                                .range(1.0..=f32::INFINITY)
                                 .prefix("Length: "),
                         );
                     });
                 });
-
-                ui.separator();
-                if ui.button("Clear Vertices").clicked() {
-                    self.clear_vertices();
-                }
             });
     }
 

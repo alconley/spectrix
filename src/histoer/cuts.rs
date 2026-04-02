@@ -225,6 +225,7 @@ impl Cuts {
                     if let Ok(mut cut) = cut2d {
                         cut.active = false; // Set active to false by default
                         cut.saved_path = Some(path.clone());
+                        cut.normalize_after_load();
                         cuts.push(Cut::Cut2D(cut));
                         continue;
                     }
@@ -603,6 +604,10 @@ impl Default for Cut2D {
 }
 
 impl Cut2D {
+    fn normalize_after_load(&mut self) {
+        self.polygon.interactive_clicking = false;
+    }
+
     pub fn default_name(x_column: &str, y_column: &str) -> String {
         format!("{y_column} v {x_column} Cut")
     }
@@ -843,6 +848,7 @@ impl Cut2D {
             let reader = BufReader::new(file);
             let mut cut: Self = serde_json::from_reader(reader)?;
             cut.saved_path = Some(file_path);
+            cut.normalize_after_load();
             *self = cut;
         }
         Ok(())
@@ -902,6 +908,21 @@ impl Cut2D {
 
     //     Ok(())
     // }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cut2D;
+
+    #[test]
+    fn loading_cut_disables_interactive_vertex_adding() {
+        let mut cut = Cut2D::default();
+        cut.polygon.interactive_clicking = true;
+
+        cut.normalize_after_load();
+
+        assert!(!cut.polygon.interactive_clicking);
+    }
 }
 
 // Struct to hold each parsed condition

@@ -404,22 +404,22 @@ impl FitMarkers {
             });
         });
 
-        ui.separator();
+        // ui.separator();
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for marker in &mut self.region_markers {
-                marker.menu_button(ui);
-            }
+        // egui::ScrollArea::vertical().show(ui, |ui| {
+        //     for marker in &mut self.region_markers {
+        //         marker.menu_button(ui);
+        //     }
 
-            for marker in &mut self.peak_markers {
-                marker.menu_button(ui);
-            }
+        //     for marker in &mut self.peak_markers {
+        //         marker.menu_button(ui);
+        //     }
 
-            for pair in &mut self.background_markers {
-                pair.start.menu_button(ui);
-                pair.end.menu_button(ui);
-                pair.histogram_line.menu_button(ui);
-            }
-        });
+        //     for pair in &mut self.background_markers {
+        //         pair.start.menu_button(ui);
+        //         pair.end.menu_button(ui);
+        //         pair.histogram_line.menu_button(ui);
+        //     }
+        // });
     }
 }

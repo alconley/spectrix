@@ -7,3 +7,4 @@ pub mod egui_plot_settings;
 pub mod egui_points;
 pub mod egui_polygon;
 pub mod egui_vertical_line;
+pub mod line_style;

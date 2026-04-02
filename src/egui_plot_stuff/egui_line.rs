@@ -1,10 +1,11 @@
 use egui::color_picker::{Alpha, color_picker_color32};
 use egui::containers::menu::SubMenuButton;
 use egui::{Atom, Button, Color32, DragValue, RichText, Slider, Stroke, Ui};
-use egui_plot::{Line, LineStyle, PlotPoint, PlotPoints, PlotUi};
+use egui_plot::{Line, PlotPoint, PlotPoints, PlotUi};
 
 use crate::{
     egui_plot_stuff::colors::{COLOR_OPTIONS, Rgb},
+    egui_plot_stuff::line_style::SerializableLineStyle,
     fitter::common::Calibration,
 };
 
@@ -24,8 +25,8 @@ pub struct EguiLine {
     pub fill: f32,
     pub fill_alpha: f32,
 
-    #[serde(skip)]
-    pub style: Option<LineStyle>,
+    #[serde(default)]
+    pub style: SerializableLineStyle,
 
     pub style_length: f32,
     pub points: Vec<[f64; 2]>,
@@ -49,7 +50,7 @@ impl Default for EguiLine {
             reference_fill: false,
             fill: 0.0,
             fill_alpha: 0.3,
-            style: Some(LineStyle::Solid),
+            style: SerializableLineStyle::Solid,
             style_length: 15.0,
             points: vec![],
             color_rgb: Rgb::from_color32(Color32::LIGHT_BLUE),
@@ -127,9 +128,7 @@ impl EguiLine {
                 line = line.fill_alpha(self.fill_alpha);
             }
 
-            if let Some(style) = self.style {
-                line = line.style(style);
-            }
+            line = line.style(self.style.to_egui(self.style_length));
 
             plot_ui.line(line);
         }
@@ -189,21 +188,9 @@ impl EguiLine {
 
             ui.horizontal(|ui| {
                 ui.label("Line Style: ");
-                ui.radio_value(&mut self.style, Some(LineStyle::Solid), "Solid");
-                ui.radio_value(
-                    &mut self.style,
-                    Some(LineStyle::Dotted {
-                        spacing: self.style_length,
-                    }),
-                    "Dotted",
-                );
-                ui.radio_value(
-                    &mut self.style,
-                    Some(LineStyle::Dashed {
-                        length: self.style_length,
-                    }),
-                    "Dashed",
-                );
+                ui.radio_value(&mut self.style, SerializableLineStyle::Solid, "Solid");
+                ui.radio_value(&mut self.style, SerializableLineStyle::Dotted, "Dotted");
+                ui.radio_value(&mut self.style, SerializableLineStyle::Dashed, "Dashed");
                 ui.add(
                     DragValue::new(&mut self.style_length)
                         .speed(1.0)
