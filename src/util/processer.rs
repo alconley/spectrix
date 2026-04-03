@@ -860,6 +860,7 @@ def get_2d_histograms(file_name):
         if let Some(output_file) = rfd::FileDialog::new()
             .set_title("Save Combined Parquet File")
             .add_filter("Parquet Files", &["parquet"])
+            .set_file_name("combined_files.parquet")
             .save_file()
         {
             let output_file = Self::ensure_parquet_extension(output_file);
