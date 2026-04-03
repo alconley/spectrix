@@ -1,6 +1,6 @@
 use super::custom_scripts::CustomConfigs;
 
-use crate::histoer::configs::Configs;
+use crate::histoer::configs::{Configs, get_column_names_from_lazyframe};
 use crate::histoer::cuts::{ActiveHistogramCut, Cut, Cuts};
 use crate::histoer::histogrammer::Histogrammer;
 use polars::prelude::*;
@@ -212,9 +212,13 @@ impl HistogramScript {
     ) {
         let mut active_cuts = h.retrieve_active_histogram_cuts();
         self.apply_active_cut_states(&mut active_cuts);
+        let column_names = get_column_names_from_lazyframe(lf).unwrap_or_else(|error| {
+            log::error!("Failed to retrieve column names for custom configs: {error}");
+            Vec::new()
+        });
         let active_custom_configs = self
             .custom_scripts
-            .merge_active_configs(Some(active_cuts.as_slice()));
+            .merge_active_configs(Some(active_cuts.as_slice()), &column_names);
 
         let mut cloned_configs = self.configs.clone();
         let merged_general_cuts = cloned_configs

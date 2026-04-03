@@ -3,6 +3,7 @@ use crate::histoer::{
     cuts::{ActiveHistogramCut, Cuts},
 };
 
+use super::fsu_custom_script::catrina::CATRiNAConfig;
 use super::fsu_custom_script::cebra::CeBrAConfig;
 // use super::fsu_custom_script::general::Calibration;
 use super::fsu_custom_script::icespice::ICESPICEConfig;
@@ -18,6 +19,8 @@ pub struct Options {
 pub struct CustomConfigs {
     pub sps: SPSConfig,
     pub cebra: CeBrAConfig,
+    #[serde(default)]
+    pub catrina: CATRiNAConfig,
     pub icespice: ICESPICEConfig,
     pub cuts: Cuts,
     pub options: Options,
@@ -28,6 +31,7 @@ impl Default for CustomConfigs {
         Self {
             sps: SPSConfig::new(),
             cebra: CeBrAConfig::default(),
+            catrina: CATRiNAConfig::default(),
             icespice: ICESPICEConfig::default(),
             cuts: Cuts::default(),
             options: Options {
@@ -50,6 +54,7 @@ impl CustomConfigs {
             ui.label("Custom Configs: ");
             ui.checkbox(&mut self.sps.active, "SPS");
             ui.checkbox(&mut self.cebra.active, "CeBrA");
+            ui.checkbox(&mut self.catrina.active, "CATRiNA");
             ui.checkbox(&mut self.icespice.active, "ICESPICE");
         });
 
@@ -105,6 +110,18 @@ impl CustomConfigs {
             });
         }
 
+        if self.catrina.active {
+            ui.collapsing("CATRiNA", |ui| {
+                self.catrina.ui(ui, column_names);
+                ui.horizontal(|ui| {
+                    if ui.button("Reset").clicked() {
+                        self.catrina = CATRiNAConfig::default();
+                        self.catrina.active = true;
+                    }
+                });
+            });
+        }
+
         if self.icespice.active {
             ui.collapsing("ICESPICE", |ui| {
                 self.icespice.ui(ui, &mut self.cebra, &mut self.sps);
@@ -118,7 +135,11 @@ impl CustomConfigs {
         }
     }
 
-    pub fn merge_active_configs(&mut self, active_cuts: Option<&[ActiveHistogramCut]>) -> Configs {
+    pub fn merge_active_configs(
+        &mut self,
+        active_cuts: Option<&[ActiveHistogramCut]>,
+        column_names: &[String],
+    ) -> Configs {
         let mut configs = Configs::default();
         let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts);
         let should_calculate_cut_histograms = !merged_cuts.is_empty();
@@ -153,6 +174,19 @@ impl CustomConfigs {
                         configs.merge(cebr3_configs.clone()); // Ensure `merge` handles in-place modifications
                     }
                 }
+            }
+        }
+
+        if self.catrina.active {
+            if should_calculate_cut_histograms {
+                let cuts = merged_cuts.clone();
+                let catrina_configs = self.catrina.configs(column_names, &Some(cuts.clone()));
+                configs.merge(catrina_configs.clone());
+            }
+
+            if self.options.calculate_no_cut_histograms {
+                let catrina_configs = self.catrina.configs(column_names, &None);
+                configs.merge(catrina_configs.clone());
             }
         }
 

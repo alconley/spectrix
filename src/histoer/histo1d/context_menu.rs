@@ -117,14 +117,11 @@ impl Histogram {
                 .on_hover_text("Open the fit panel.");
 
             SubMenuButton::new("Fits")
-            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
-            .ui(ui, |ui| {
-                self.fits.fit_context_menu_ui(ui);
-            });
-
+                .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
+                .ui(ui, |ui| {
+                    self.fits.fit_context_menu_ui(ui);
+                });
         });
-
-
 
         SubMenuButton::new("Peak Finder")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
