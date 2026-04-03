@@ -170,11 +170,15 @@ impl InteractiveCut1D {
     fn pointer_x_raw(
         plot_response: &egui_plot::PlotResponse<()>,
         calibration: Option<&Calibration>,
+        axis_range: (f64, f64),
+        hint_raw: f64,
         pointer_pos: egui::Pos2,
     ) -> f64 {
         let display_x = plot_response.transform.value_from_position(pointer_pos).x;
         if let Some(calibration) = calibration {
-            calibration.invert(display_x).unwrap_or(display_x)
+            calibration
+                .invert_in_range_with_hint(display_x, axis_range, Some(hint_raw))
+                .unwrap_or(axis_range.0)
         } else {
             display_x
         }
@@ -189,7 +193,14 @@ impl InteractiveCut1D {
         let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
 
         if let Some(pointer_pos) = pointer_state.hover_pos() {
-            let pointer_x = Self::pointer_x_raw(plot_response, calibration, pointer_pos);
+            let hint_raw = self.drag_anchor.unwrap_or_else(|| self.center());
+            let pointer_x = Self::pointer_x_raw(
+                plot_response,
+                calibration,
+                self.axis_range,
+                hint_raw,
+                pointer_pos,
+            );
             let (min_x, max_x) = self.ordered_limits();
 
             if pointer_state.button_pressed(egui::PointerButton::Primary)
@@ -313,8 +324,10 @@ impl InteractiveCut1D {
     ) {
         let previous_name = self.cut.name.clone();
         let previous_expression = self.cut.expression.clone();
-        self.line_1.interactive_dragging(plot_response, calibration);
-        self.line_2.interactive_dragging(plot_response, calibration);
+        self.line_1
+            .interactive_dragging(plot_response, calibration, Some(self.axis_range));
+        self.line_2
+            .interactive_dragging(plot_response, calibration, Some(self.axis_range));
         self.clamp_line_positions(self.axis_range);
 
         if self.line_1.is_dragging || self.line_2.is_dragging {

@@ -437,9 +437,9 @@ impl Projections {
     pub fn interactive_dragging(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
         if self.add_y_projection {
             self.y_projection_line_1
-                .interactive_dragging(plot_response, None);
+                .interactive_dragging(plot_response, None, None);
             self.y_projection_line_2
-                .interactive_dragging(plot_response, None);
+                .interactive_dragging(plot_response, None, None);
             if self.y_projection_line_1.is_dragging || self.y_projection_line_2.is_dragging {
                 self.y_area_dragging = false;
                 self.y_drag_anchor = None;

@@ -1,5 +1,6 @@
 use super::plot_settings::PlotSettings;
 use crate::egui_plot_stuff::egui_line::EguiLine;
+use crate::fitter::common::Calibration;
 use crate::fitter::fit_handler::Fits;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -59,26 +60,76 @@ impl Histogram {
             .collect();
     }
 
-    pub(crate) fn display_x_to_raw_x(&self, display_x: f64) -> f64 {
+    pub(crate) fn display_calibration(&self) -> Option<&Calibration> {
+        self.fits
+            .settings
+            .calibrated
+            .then_some(&self.fits.calibration)
+            .filter(|calibration| calibration.is_display_safe_on(self.range))
+    }
+
+    fn calibration_warning_message(&self) -> Option<&'static str> {
+        if !self.fits.settings.calibrated {
+            None
+        } else if !self.fits.calibration.coefficients_are_finite() {
+            Some("Calibration contains invalid values; using the raw X axis for this histogram.")
+        } else if !self.fits.calibration.is_display_safe_on(self.range) {
+            Some("Calibration is not safely invertible over this histogram; using the raw X axis.")
+        } else {
+            None
+        }
+    }
+
+    fn display_x_to_raw_x_with_fallback(
+        &self,
+        display_x: f64,
+        hint_raw: f64,
+        fallback_raw: f64,
+    ) -> f64 {
         let linear_display_x = if self.plot_settings.egui_settings.log_x {
             10_f64.powf(display_x)
         } else {
             display_x
         };
 
-        if self.fits.settings.calibrated {
-            self.fits
-                .calibration
-                .invert(linear_display_x)
-                .unwrap_or(linear_display_x)
+        if !linear_display_x.is_finite() {
+            return fallback_raw;
+        }
+
+        if let Some(calibration) = self.display_calibration() {
+            calibration
+                .invert_in_range_with_hint(linear_display_x, self.range, Some(hint_raw))
+                .unwrap_or(fallback_raw)
         } else {
             linear_display_x
         }
     }
 
+    fn current_raw_center_hint(&self) -> f64 {
+        self.plot_settings
+            .current_plot_bounds
+            .map(|(raw_min, raw_max)| (raw_min + raw_max) * 0.5)
+            .unwrap_or((self.range.0 + self.range.1) * 0.5)
+            .clamp(self.range.0, self.range.1)
+    }
+
+    pub(crate) fn display_x_to_raw_x(&self, display_x: f64) -> f64 {
+        let hint_raw = self.current_raw_center_hint();
+        self.display_x_to_raw_x_with_fallback(display_x, hint_raw, hint_raw)
+    }
+
     pub(crate) fn display_x_bounds_to_raw_bounds(&self, x_min: f64, x_max: f64) -> (f64, f64) {
-        let raw_x_min = self.display_x_to_raw_x(x_min);
-        let raw_x_max = self.display_x_to_raw_x(x_max);
+        let (hint_min, hint_max) = self.plot_settings.current_plot_bounds.unwrap_or(self.range);
+        let raw_x_min = self.display_x_to_raw_x_with_fallback(
+            x_min,
+            hint_min.clamp(self.range.0, self.range.1),
+            self.range.0,
+        );
+        let raw_x_max = self.display_x_to_raw_x_with_fallback(
+            x_max,
+            hint_max.clamp(self.range.0, self.range.1),
+            self.range.1,
+        );
 
         if raw_x_min <= raw_x_max {
             (raw_x_min, raw_x_max)
@@ -99,11 +150,7 @@ impl Histogram {
 
         self.line.log_y = log_y;
         self.line.log_x = log_x;
-        let calibration = if self.fits.settings.calibrated {
-            Some(self.fits.calibration.clone())
-        } else {
-            None
-        };
+        let calibration = self.display_calibration().cloned();
         let calibration_ref = calibration.as_ref();
 
         self.line.draw(plot_ui, calibration_ref);
@@ -112,8 +159,13 @@ impl Histogram {
             .draw_all_markers(plot_ui, calibration_ref);
 
         self.fits.set_log(log_y, log_x);
-        self.fits
-            .draw(plot_ui, &self.bins, self.range, self.bin_width);
+        self.fits.draw(
+            plot_ui,
+            &self.bins,
+            self.range,
+            self.bin_width,
+            calibration_ref,
+        );
         self.show_stats(plot_ui);
 
         self.update_background_pair_lines();
@@ -158,9 +210,13 @@ impl Histogram {
         self.update_line_points();
         self.keybinds(ui);
 
-        self.fits.ui(ui, &self.name);
+        self.fits.ui(ui, &self.name, self.range);
         self.apply_refit_all_request();
         self.apply_modify_fit_request();
+
+        if let Some(message) = self.calibration_warning_message() {
+            ui.colored_label(egui::Color32::from_rgb(200, 120, 0), message);
+        }
 
         let width = ui.available_width();
         let mut plot = egui_plot::Plot::new(self.name.clone()).width(width);
@@ -207,15 +263,10 @@ impl Histogram {
             self.context_menu(ui);
         });
 
-        let calibration = {
-            if self.fits.settings.calibrated {
-                Some(&self.fits.calibration)
-            } else {
-                None
-            }
-        };
+        let calibration = self.display_calibration().cloned();
+        let calibration_ref = calibration.as_ref();
 
         self.plot_settings
-            .interactive_response(&plot_response, calibration);
+            .interactive_response(&plot_response, calibration_ref, self.range);
     }
 }

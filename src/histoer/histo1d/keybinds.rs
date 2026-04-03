@@ -6,14 +6,7 @@ impl Histogram {
         self.plot_settings.markers.cursor_position = self.plot_settings.cursor_position;
 
         if let Some(cursor_position) = self.plot_settings.cursor_position {
-            let cursor_x_raw = if self.fits.settings.calibrated {
-                self.fits
-                    .calibration
-                    .invert(cursor_position.x)
-                    .unwrap_or(cursor_position.x)
-            } else {
-                cursor_position.x
-            };
+            let cursor_x_raw = self.display_x_to_raw_x(cursor_position.x);
 
             if ui.input(|i| i.key_pressed(egui::Key::P)) {
                 self.plot_settings.markers.add_peak_marker(cursor_x_raw);

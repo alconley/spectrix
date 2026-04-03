@@ -22,7 +22,7 @@ impl Histogram {
                 let raw_bin_center =
                     self.range.0 + (bin as f64 * self.bin_width) + self.bin_width * 0.5;
                 let bin_center = calibration
-                    .map(|calibration| calibration.calibrate(raw_bin_center))
+                    .and_then(|calibration| calibration.calibrate_checked(raw_bin_center))
                     .unwrap_or(raw_bin_center);
                 sum_product += self.bins[bin] as f64 * bin_center;
                 total_count += self.bins[bin];
@@ -43,7 +43,7 @@ impl Histogram {
                     let raw_bin_center =
                         self.range.0 + (bin as f64 * self.bin_width) + (self.bin_width * 0.5);
                     let bin_center = calibration
-                        .map(|calibration| calibration.calibrate(raw_bin_center))
+                        .and_then(|calibration| calibration.calibrate_checked(raw_bin_center))
                         .unwrap_or(raw_bin_center);
                     let diff = bin_center - mean;
                     sum_squared_diff += self.bins[bin] as f64 * diff * diff;
@@ -64,11 +64,7 @@ impl Histogram {
             let plot_bounds = plot_ui.plot_bounds();
             let (plot_min_x, plot_max_x) =
                 self.display_x_bounds_to_raw_bounds(plot_bounds.min()[0], plot_bounds.max()[0]);
-            let calibration = self
-                .fits
-                .settings
-                .calibrated
-                .then_some(&self.fits.calibration);
+            let calibration = self.display_calibration();
 
             let (integral, mean, stdev) = self.get_statistics(plot_min_x, plot_max_x, calibration);
             let stats_entries = [

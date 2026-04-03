@@ -119,7 +119,7 @@ impl Histogram {
             SubMenuButton::new("Fits")
                 .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
                 .ui(ui, |ui| {
-                    self.fits.fit_context_menu_ui(ui);
+                    self.fits.fit_context_menu_ui(ui, self.range);
                 });
         });
 

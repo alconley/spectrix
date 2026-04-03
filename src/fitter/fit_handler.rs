@@ -51,6 +51,16 @@ fn padded_range(mut min: f64, mut max: f64) -> (f64, f64) {
     }
 }
 
+fn unique_value_count(values: &[f64]) -> usize {
+    let mut unique = values.to_vec();
+    unique.sort_by(|left, right| left.total_cmp(right));
+    unique.dedup_by(|left, right| {
+        let scale = left.abs().max(right.abs()).max(1.0);
+        (*left - *right).abs() <= scale * 1e-9
+    });
+    unique.len()
+}
+
 fn draw_plot_segment(
     plot_ui: &mut PlotUi<'_>,
     id_source: impl std::hash::Hash,
@@ -482,9 +492,7 @@ impl Fits {
 
     pub fn calibrate_stored_fits(&mut self, linear: bool, quadratic: bool) {
         let mut mean = Vec::new();
-        let mut mean_uncertainty = Vec::new();
         let mut energy = Vec::new();
-        let mut energy_uncertainty = Vec::new();
 
         for fit in &mut self.stored_fits {
             // get the energy valye from the
@@ -492,18 +500,18 @@ impl Fits {
 
             if let Some(FitResult::Gaussian(gauss)) = fit_result {
                 let cal_data = gauss.get_calibration_data();
-                for (fit_mean, fit_mean_unc, fit_energy, fit_energy_unc) in cal_data {
+                for (fit_mean, _fit_mean_unc, fit_energy, _fit_energy_unc) in cal_data {
                     mean.push(fit_mean);
-                    mean_uncertainty.push(fit_mean_unc);
                     energy.push(fit_energy);
-                    energy_uncertainty.push(fit_energy_unc);
                 }
             }
         }
 
+        let unique_mean_count = unique_value_count(&mean);
+
         if linear {
             // make sure there are at least 2 points to fit a linear
-            if mean.len() < 2 || energy.len() < 2 {
+            if mean.len() < 2 || energy.len() < 2 || unique_mean_count < 2 {
                 log::error!("Not enough points to fit a linear. Need at least 2 points.");
                 return;
             }
@@ -516,19 +524,28 @@ impl Fits {
 
             match fitter.lmfit() {
                 Ok(_) => {
-                    self.calibration.a = crate::fitter::common::Value {
-                        value: 0.0,
-                        uncertainty: 0.0,
+                    let candidate = Calibration {
+                        a: crate::fitter::common::Value {
+                            value: 0.0,
+                            uncertainty: 0.0,
+                        },
+                        b: crate::fitter::common::Value {
+                            value: fitter.paramaters.slope.value.unwrap_or(1.0),
+                            uncertainty: fitter.paramaters.slope.uncertainty.unwrap_or(0.0),
+                        },
+                        c: crate::fitter::common::Value {
+                            value: fitter.paramaters.intercept.value.unwrap_or(0.0),
+                            uncertainty: fitter.paramaters.intercept.uncertainty.unwrap_or(0.0),
+                        },
+                        cov: None,
                     };
-                    self.calibration.b = crate::fitter::common::Value {
-                        value: fitter.paramaters.slope.value.unwrap_or(1.0),
-                        uncertainty: fitter.paramaters.slope.uncertainty.unwrap_or(0.0),
-                    };
-                    self.calibration.c = crate::fitter::common::Value {
-                        value: fitter.paramaters.intercept.value.unwrap_or(0.0),
-                        uncertainty: fitter.paramaters.intercept.uncertainty.unwrap_or(0.0),
-                    };
-                    self.calibration.cov = None;
+
+                    if !candidate.coefficients_are_finite() {
+                        log::error!("Calibration fit produced invalid linear coefficients.");
+                        return;
+                    }
+
+                    self.calibration = candidate;
                 }
                 Err(e) => {
                     log::error!("Calibration fit failed: {e:?}");
@@ -538,8 +555,10 @@ impl Fits {
 
         if quadratic {
             // make sure there are at least 3 points to fit a quadratic
-            if mean.len() < 3 || energy.len() < 3 {
-                log::error!("Not enough points to fit a quadratic. Need at least 3 points.");
+            if mean.len() < 3 || energy.len() < 3 || unique_mean_count < 3 {
+                log::error!(
+                    "Not enough points to fit a quadratic. Need at least 3 distinct points."
+                );
                 return;
             }
 
@@ -550,24 +569,47 @@ impl Fits {
 
             match fitter.lmfit() {
                 Ok(_) => {
-                    self.calibration.a = crate::fitter::common::Value {
-                        value: fitter.paramaters.a.value.unwrap_or(0.0),
-                        uncertainty: fitter.paramaters.a.uncertainty.unwrap_or(0.0),
+                    let candidate = Calibration {
+                        a: crate::fitter::common::Value {
+                            value: fitter.paramaters.a.value.unwrap_or(0.0),
+                            uncertainty: fitter.paramaters.a.uncertainty.unwrap_or(0.0),
+                        },
+                        b: crate::fitter::common::Value {
+                            value: fitter.paramaters.b.value.unwrap_or(1.0),
+                            uncertainty: fitter.paramaters.b.uncertainty.unwrap_or(0.0),
+                        },
+                        c: crate::fitter::common::Value {
+                            value: fitter.paramaters.c.value.unwrap_or(0.0),
+                            uncertainty: fitter.paramaters.c.uncertainty.unwrap_or(0.0),
+                        },
+                        cov: fitter.covar,
                     };
-                    self.calibration.b = crate::fitter::common::Value {
-                        value: fitter.paramaters.b.value.unwrap_or(1.0),
-                        uncertainty: fitter.paramaters.b.uncertainty.unwrap_or(0.0),
-                    };
-                    self.calibration.c = crate::fitter::common::Value {
-                        value: fitter.paramaters.c.value.unwrap_or(0.0),
-                        uncertainty: fitter.paramaters.c.uncertainty.unwrap_or(0.0),
-                    };
-                    self.calibration.cov = fitter.covar;
+
+                    if !candidate.coefficients_are_finite() {
+                        log::error!("Calibration fit produced invalid quadratic coefficients.");
+                        return;
+                    }
+
+                    let x_min = mean.iter().copied().fold(f64::INFINITY, f64::min);
+                    let x_max = mean.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                    if !candidate.is_display_safe_on((x_min, x_max)) {
+                        log::error!(
+                            "Quadratic calibration is not monotonic over the fitted calibration points. Check the assigned energies and try again."
+                        );
+                        return;
+                    }
+
+                    self.calibration = candidate;
                 }
                 Err(e) => {
                     log::error!("Calibration fit failed: {e:?}");
                 }
             }
+        }
+
+        if !self.calibration.coefficients_are_finite() {
+            log::error!("Calibration contains invalid coefficients and was not applied.");
+            return;
         }
 
         // Apply the calibration to all stored fits and temp fit
@@ -602,11 +644,16 @@ impl Fits {
                             return None;
                         };
 
-                        (energy != -1.0).then(|| CalibrationPlotPoint {
+                        (energy != -1.0
+                            && mean.is_finite()
+                            && mean_uncertainty.is_finite()
+                            && energy.is_finite()
+                            && energy_uncertainty.is_finite())
+                        .then(|| CalibrationPlotPoint {
                             mean,
-                            mean_uncertainty,
+                            mean_uncertainty: mean_uncertainty.max(0.0),
                             energy,
-                            energy_uncertainty,
+                            energy_uncertainty: energy_uncertainty.max(0.0),
                             uuid: params.uuid,
                             fit_name: fit.name.clone(),
                             peak_index,
@@ -661,19 +708,29 @@ impl Fits {
             } else {
                 x_bounds.0 + step * idx as f64
             };
-            let y = self.calibration.calibrate(x);
-            let uncertainty = self.calibration.curve_uncertainty(x);
+            let Some(y) = self.calibration.calibrate_checked(x) else {
+                continue;
+            };
+            let Some(uncertainty) = self.calibration.curve_uncertainty_checked(x) else {
+                continue;
+            };
+
+            let lower = y - uncertainty;
+            let upper = y + uncertainty;
+            if !lower.is_finite() || !upper.is_finite() {
+                continue;
+            }
 
             line_points.push([x, y]);
             band_x.push(x);
-            band_lower.push(y - uncertainty);
-            band_upper.push(y + uncertainty);
+            band_lower.push(lower);
+            band_upper.push(upper);
         }
 
         (line_points, band_x, band_lower, band_upper)
     }
 
-    fn energy_calibration_plots_ui(&self, ui: &mut egui::Ui) {
+    fn energy_calibration_plots_ui(&self, ui: &mut egui::Ui, histogram_range: (f64, f64)) {
         let points = self.calibration_plot_points();
         if points.is_empty() {
             return;
@@ -687,16 +744,45 @@ impl Fits {
         let calibration_line_id = ui.id().with("energy_calibration_fit_line");
         let residual_plot_id = ui.id().with("energy_calibration_residuals_plot");
 
-        let (x_bounds, y_bounds) = Self::calibration_curve_bounds(&points);
-        let (fit_line, band_x, band_lower, band_upper) = self.calibration_fit_series(x_bounds, 256);
+        let (point_x_bounds, y_bounds) = Self::calibration_curve_bounds(&points);
+        let fit_x_bounds = if histogram_range.0.is_finite()
+            && histogram_range.1.is_finite()
+            && histogram_range.0 != histogram_range.1
+        {
+            padded_range(
+                histogram_range.0.min(histogram_range.1),
+                histogram_range.0.max(histogram_range.1),
+            )
+        } else {
+            point_x_bounds
+        };
+        let (fit_line, band_x, band_lower, band_upper) =
+            self.calibration_fit_series(fit_x_bounds, 256);
 
-        let x_span = (x_bounds.1 - x_bounds.0).abs().max(1.0);
+        let x_span = (fit_x_bounds.1 - fit_x_bounds.0).abs().max(1.0);
         let y_span = (y_bounds.1 - y_bounds.0).abs().max(1.0);
         let x_cap_half_width = x_span * 0.01;
         let y_cap_half_height = y_span * 0.015;
         let uuid_label_offset = y_span * 0.02;
 
         ui.label("Energy Calibration");
+        ui.label(format!(
+            "Calibration curve shown over histogram range [{:.2}, {:.2}]",
+            histogram_range.0.min(histogram_range.1),
+            histogram_range.0.max(histogram_range.1)
+        ));
+        if !self.calibration.is_display_safe_on(histogram_range)
+            && let Some(turning_point) = self.calibration.turning_point()
+            && turning_point >= histogram_range.0.min(histogram_range.1)
+            && turning_point <= histogram_range.0.max(histogram_range.1)
+        {
+            ui.colored_label(
+                Color32::from_rgb(200, 120, 0),
+                format!(
+                    "Calibration turns over near x = {turning_point:.2} inside the histogram range."
+                ),
+            );
+        }
 
         Plot::new(calibration_plot_id)
             .width(plot_width)
@@ -717,20 +803,24 @@ impl Fits {
                 }
             })
             .show(ui, |plot_ui| {
-                plot_ui.add(
-                    FilledArea::new("Calibration Fit Band", &band_x, &band_lower, &band_upper)
-                        .allow_hover(false)
-                        .fill_color(fit_color.linear_multiply(0.18))
-                        .id(calibration_band_id),
-                );
+                if band_x.len() >= 2 {
+                    plot_ui.add(
+                        FilledArea::new("Calibration Fit Band", &band_x, &band_lower, &band_upper)
+                            .allow_hover(false)
+                            .fill_color(fit_color.linear_multiply(0.18))
+                            .id(calibration_band_id),
+                    );
+                }
 
-                plot_ui.line(
-                    Line::new("Calibration Fit", fit_line.clone())
-                        .allow_hover(false)
-                        .color(fit_color)
-                        .width(2.0)
-                        .id(calibration_line_id),
-                );
+                if fit_line.len() >= 2 {
+                    plot_ui.line(
+                        Line::new("Calibration Fit", fit_line.clone())
+                            .allow_hover(false)
+                            .color(fit_color)
+                            .width(2.0)
+                            .id(calibration_line_id),
+                    );
+                }
 
                 for point in &points {
                     let uuid_line = if point.uuid != 0 {
@@ -799,29 +889,38 @@ impl Fits {
 
         ui.add_space(8.0);
 
-        let residual_data: Vec<([f64; 2], f64, f64)> = points
+        let residual_data: Vec<(CalibrationPlotPoint, [f64; 2], f64, f64, f64)> = points
             .iter()
-            .map(|point| {
-                let fit_value = self.calibration.calibrate(point.mean);
+            .filter_map(|point| {
+                let fit_value = self.calibration.calibrate_checked(point.mean)?;
+                let derivative = self.calibration.derivative_checked(point.mean)?;
                 let residual = point.energy - fit_value;
                 let residual_uncertainty = point
                     .energy_uncertainty
-                    .hypot(self.calibration.derivative(point.mean) * point.mean_uncertainty);
-                (
+                    .hypot(derivative * point.mean_uncertainty);
+
+                (residual.is_finite() && residual_uncertainty.is_finite()).then_some((
+                    point.clone(),
                     [point.mean, residual],
                     point.mean_uncertainty,
                     residual_uncertainty,
-                )
+                    fit_value,
+                ))
             })
             .collect();
 
+        if residual_data.is_empty() {
+            ui.separator();
+            return;
+        }
+
         let residual_y_min = residual_data
             .iter()
-            .map(|(point, _, residual_uncertainty)| point[1] - residual_uncertainty.max(0.0))
+            .map(|(_, point, _, residual_uncertainty, _)| point[1] - residual_uncertainty.max(0.0))
             .fold(f64::INFINITY, f64::min);
         let residual_y_max = residual_data
             .iter()
-            .map(|(point, _, residual_uncertainty)| point[1] + residual_uncertainty.max(0.0))
+            .map(|(_, point, _, residual_uncertainty, _)| point[1] + residual_uncertainty.max(0.0))
             .fold(f64::NEG_INFINITY, f64::max);
         let residual_y_bounds = padded_range(residual_y_min, residual_y_max);
         let residual_y_span = (residual_y_bounds.1 - residual_y_bounds.0).abs().max(1.0);
@@ -849,14 +948,12 @@ impl Fits {
                 draw_plot_segment(
                     plot_ui,
                     ("energy_calibration_residuals", "zero_line"),
-                    vec![[x_bounds.0, 0.0], [x_bounds.1, 0.0]],
+                    vec![[fit_x_bounds.0, 0.0], [fit_x_bounds.1, 0.0]],
                     Color32::GRAY,
                     1.0,
                 );
 
-                for (source_point, (point, _, residual_uncertainty)) in
-                    points.iter().zip(residual_data.iter())
-                {
+                for (source_point, point, _, residual_uncertainty, fit_value) in &residual_data {
                     let uuid_line = if source_point.uuid != 0 {
                         format!("UUID: {}", source_point.uuid)
                     } else {
@@ -874,7 +971,7 @@ impl Fits {
                             source_point.energy_uncertainty,
                             3
                         ),
-                        self.calibration.calibrate(source_point.mean),
+                        fit_value,
                     );
 
                     plot_ui.points(
@@ -886,7 +983,7 @@ impl Fits {
                     );
                 }
 
-                for (index, (point, mean_uncertainty, residual_uncertainty)) in
+                for (index, (_, point, mean_uncertainty, residual_uncertainty, _)) in
                     residual_data.iter().enumerate()
                 {
                     draw_cross_error_bars(
@@ -1022,16 +1119,11 @@ impl Fits {
         histogram_bins: &[u64],
         histogram_range: (f64, f64),
         histogram_bin_width: f64,
+        calibration: Option<&Calibration>,
     ) {
         self.apply_visibility_settings();
 
-        let calibration = if self.settings.calibrated {
-            Some(&self.calibration)
-        } else {
-            None
-        };
-
-        let calibrated = self.settings.calibrated;
+        let calibrated = calibration.is_some();
         let uuid_draw_options = UuidDrawOptions {
             calibrate: calibrated,
             log_x: false,
@@ -1510,7 +1602,7 @@ impl Fits {
         self.pending_modify_fit = to_modify;
     }
 
-    fn fit_panel_contents_ui(&mut self, ui: &mut egui::Ui) {
+    fn fit_panel_contents_ui(&mut self, ui: &mut egui::Ui, histogram_range: (f64, f64)) {
         ui.horizontal(|ui| {
             ui.heading("Fit Panel");
             ui.separator();
@@ -1525,7 +1617,7 @@ impl Fits {
         self.calubration_ui(ui);
 
         self.fit_stats_grid_ui(ui);
-        self.energy_calibration_plots_ui(ui);
+        self.energy_calibration_plots_ui(ui, histogram_range);
 
         ui.add_space(10.0);
     }
@@ -1558,7 +1650,7 @@ impl Fits {
         ui.separator();
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, hist_name: &str) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, hist_name: &str, histogram_range: (f64, f64)) {
         if self.settings.show_fit_stats {
             let title = format!("Fit Panel: {hist_name}");
             let scroll_id = format!("fit_panel_scroll_{hist_name}");
@@ -1583,7 +1675,7 @@ impl Fits {
                             egui::ScrollArea::both()
                                 .id_salt(scroll_id.as_str())
                                 .show(ui, |ui| {
-                                    self.fit_panel_contents_ui(ui);
+                                    self.fit_panel_contents_ui(ui, histogram_range);
                                 });
                         });
                     });
@@ -1594,7 +1686,7 @@ impl Fits {
                         egui::ScrollArea::both()
                             .id_salt(scroll_id.as_str())
                             .show(ui, |ui| {
-                                self.fit_panel_contents_ui(ui);
+                                self.fit_panel_contents_ui(ui, histogram_range);
                             });
                     });
             }
@@ -1603,12 +1695,12 @@ impl Fits {
         }
     }
 
-    pub fn fit_context_menu_ui(&mut self, ui: &mut egui::Ui) {
+    pub fn fit_context_menu_ui(&mut self, ui: &mut egui::Ui, histogram_range: (f64, f64)) {
         egui::ScrollArea::both()
             .id_salt(ui.id().with("fit_context_menu_scroll"))
             .max_height(450.0)
             .show(ui, |ui| {
-                self.fit_panel_contents_ui(ui);
+                self.fit_panel_contents_ui(ui, histogram_range);
             });
     }
 

@@ -183,6 +183,9 @@ impl Default for Calibration {
 }
 
 impl Calibration {
+    const INVERT_EPSILON: f64 = 1e-12;
+    const INTERPOLATION_SAMPLES: usize = 2049;
+
     pub fn ui(&mut self, ui: &mut egui::Ui) -> bool {
         let mut changed = false;
         ui.horizontal(|ui| {
@@ -199,8 +202,41 @@ impl Calibration {
         self.a.value * x * x + self.b.value * x + self.c.value
     }
 
+    pub fn coefficients_are_finite(&self) -> bool {
+        self.a.value.is_finite()
+            && self.a.uncertainty.is_finite()
+            && self.b.value.is_finite()
+            && self.b.uncertainty.is_finite()
+            && self.c.value.is_finite()
+            && self.c.uncertainty.is_finite()
+            && self
+                .cov
+                .iter()
+                .flatten()
+                .flatten()
+                .all(|value| value.is_finite())
+    }
+
+    pub fn calibrate_checked(&self, x: f64) -> Option<f64> {
+        if !self.coefficients_are_finite() || !x.is_finite() {
+            return None;
+        }
+
+        let energy = self.calibrate(x);
+        energy.is_finite().then_some(energy)
+    }
+
     pub fn derivative(&self, x: f64) -> f64 {
         2.0 * self.a.value * x + self.b.value
+    }
+
+    pub fn derivative_checked(&self, x: f64) -> Option<f64> {
+        if !self.coefficients_are_finite() || !x.is_finite() {
+            return None;
+        }
+
+        let derivative = self.derivative(x);
+        derivative.is_finite().then_some(derivative)
     }
 
     pub fn curve_uncertainty(&self, x: f64) -> f64 {
@@ -222,10 +258,233 @@ impl Calibration {
         variance.max(0.0).sqrt()
     }
 
+    pub fn curve_uncertainty_checked(&self, x: f64) -> Option<f64> {
+        if !self.coefficients_are_finite() || !x.is_finite() {
+            return None;
+        }
+
+        let uncertainty = self.curve_uncertainty(x);
+        uncertainty.is_finite().then_some(uncertainty)
+    }
+
+    fn sorted_range(range: (f64, f64)) -> Option<(f64, f64)> {
+        if !range.0.is_finite() || !range.1.is_finite() {
+            return None;
+        }
+
+        Some(if range.0 <= range.1 {
+            range
+        } else {
+            (range.1, range.0)
+        })
+    }
+
+    fn sampled_curve(&self, raw_range: (f64, f64)) -> Option<Vec<(f64, f64)>> {
+        let (raw_min, raw_max) = Self::sorted_range(raw_range)?;
+        if !self.coefficients_are_finite() {
+            return None;
+        }
+
+        let sample_count = Self::INTERPOLATION_SAMPLES.max(2);
+        let step = if sample_count > 1 {
+            (raw_max - raw_min) / (sample_count.saturating_sub(1) as f64)
+        } else {
+            0.0
+        };
+
+        let mut samples = Vec::with_capacity(sample_count);
+        for index in 0..sample_count {
+            let raw = if index + 1 == sample_count {
+                raw_max
+            } else {
+                raw_min + step * index as f64
+            };
+            let energy = self.calibrate_checked(raw)?;
+            samples.push((raw, energy));
+        }
+
+        Some(samples)
+    }
+
+    fn interpolation_tolerances(samples: &[(f64, f64)]) -> (f64, f64) {
+        let raw_min = samples
+            .iter()
+            .map(|(raw, _)| *raw)
+            .fold(f64::INFINITY, f64::min);
+        let raw_max = samples
+            .iter()
+            .map(|(raw, _)| *raw)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let energy_min = samples
+            .iter()
+            .map(|(_, energy)| *energy)
+            .fold(f64::INFINITY, f64::min);
+        let energy_max = samples
+            .iter()
+            .map(|(_, energy)| *energy)
+            .fold(f64::NEG_INFINITY, f64::max);
+
+        let raw_tolerance = (raw_max - raw_min).abs() * 1e-9 + Self::INVERT_EPSILON;
+        let energy_tolerance = (energy_max - energy_min).abs() * 1e-9 + Self::INVERT_EPSILON;
+        (raw_tolerance, energy_tolerance)
+    }
+
+    pub fn turning_point(&self) -> Option<f64> {
+        if !self.coefficients_are_finite() || self.a.value.abs() < Self::INVERT_EPSILON {
+            return None;
+        }
+
+        let turning_point = -self.b.value / (2.0 * self.a.value);
+        turning_point.is_finite().then_some(turning_point)
+    }
+
+    pub fn is_monotonic_on(&self, raw_range: (f64, f64)) -> bool {
+        let Some(samples) = self.sampled_curve(raw_range) else {
+            return false;
+        };
+
+        let (_, energy_tolerance) = Self::interpolation_tolerances(&samples);
+        let mut saw_rising = false;
+        let mut saw_falling = false;
+
+        for window in samples.windows(2) {
+            let delta = window[1].1 - window[0].1;
+            if delta > energy_tolerance {
+                saw_rising = true;
+            } else if delta < -energy_tolerance {
+                saw_falling = true;
+            }
+
+            if saw_rising && saw_falling {
+                return false;
+            }
+        }
+
+        saw_rising || saw_falling
+    }
+
+    pub fn display_bounds_for_raw_range(&self, raw_range: (f64, f64)) -> Option<(f64, f64)> {
+        let samples = self.sampled_curve(raw_range)?;
+        let display_min = samples
+            .iter()
+            .map(|(_, energy)| *energy)
+            .fold(f64::INFINITY, f64::min);
+        let display_max = samples
+            .iter()
+            .map(|(_, energy)| *energy)
+            .fold(f64::NEG_INFINITY, f64::max);
+
+        (display_min.is_finite() && display_max.is_finite()).then_some((display_min, display_max))
+    }
+
+    pub fn can_display_on(&self, raw_range: (f64, f64)) -> bool {
+        self.display_bounds_for_raw_range(raw_range).is_some()
+    }
+
+    pub fn is_display_safe_on(&self, raw_range: (f64, f64)) -> bool {
+        self.is_monotonic_on(raw_range) && self.display_bounds_for_raw_range(raw_range).is_some()
+    }
+
+    fn nearest_sample_raw_for_energy(
+        energy: f64,
+        samples: &[(f64, f64)],
+        hint_raw: Option<f64>,
+    ) -> Option<f64> {
+        let hint_raw = hint_raw.filter(|value| value.is_finite());
+        samples
+            .iter()
+            .min_by(|(raw_a, energy_a), (raw_b, energy_b)| {
+                let energy_cmp = (energy - *energy_a)
+                    .abs()
+                    .total_cmp(&(energy - *energy_b).abs());
+                if energy_cmp != std::cmp::Ordering::Equal {
+                    energy_cmp
+                } else if let Some(hint_raw) = hint_raw {
+                    (hint_raw - *raw_a)
+                        .abs()
+                        .total_cmp(&(hint_raw - *raw_b).abs())
+                } else {
+                    raw_a.total_cmp(raw_b)
+                }
+            })
+            .map(|(raw, _)| *raw)
+    }
+
+    pub fn invert_in_range_with_hint(
+        &self,
+        energy: f64,
+        raw_range: (f64, f64),
+        hint_raw: Option<f64>,
+    ) -> Option<f64> {
+        let samples = self.sampled_curve(raw_range)?;
+
+        if !energy.is_finite() {
+            return None;
+        }
+
+        let (raw_tolerance, energy_tolerance) = Self::interpolation_tolerances(&samples);
+        let mut candidates = Vec::new();
+
+        for window in samples.windows(2) {
+            let (raw_0, energy_0) = window[0];
+            let (raw_1, energy_1) = window[1];
+            let segment_min = energy_0.min(energy_1) - energy_tolerance;
+            let segment_max = energy_0.max(energy_1) + energy_tolerance;
+            if energy < segment_min || energy > segment_max {
+                continue;
+            }
+
+            let delta_energy = energy_1 - energy_0;
+            let candidate = if delta_energy.abs() <= energy_tolerance {
+                if let Some(hint_raw) = hint_raw.filter(|hint| {
+                    *hint >= raw_0.min(raw_1) - raw_tolerance
+                        && *hint <= raw_0.max(raw_1) + raw_tolerance
+                }) {
+                    hint_raw
+                } else {
+                    (raw_0 + raw_1) * 0.5
+                }
+            } else {
+                let t = ((energy - energy_0) / delta_energy).clamp(0.0, 1.0);
+                raw_0 + t * (raw_1 - raw_0)
+            };
+
+            if candidate.is_finite() {
+                candidates.push(candidate);
+            }
+        }
+
+        candidates.sort_by(|left, right| left.total_cmp(right));
+        candidates.dedup_by(|left, right| (*left - *right).abs() <= raw_tolerance);
+
+        if candidates.is_empty() {
+            return Self::nearest_sample_raw_for_energy(energy, &samples, hint_raw);
+        }
+
+        hint_raw
+            .filter(|hint| hint.is_finite())
+            .and_then(|hint| {
+                candidates
+                    .iter()
+                    .min_by(|left, right| (hint - **left).abs().total_cmp(&(hint - **right).abs()))
+                    .copied()
+            })
+            .or_else(|| (candidates.len() == 1).then_some(candidates[0]))
+            .or_else(|| Self::nearest_sample_raw_for_energy(energy, &samples, hint_raw))
+    }
+
+    pub fn invert_in_range(&self, energy: f64, raw_range: (f64, f64)) -> Option<f64> {
+        self.invert_in_range_with_hint(energy, raw_range, None)
+    }
+
     pub fn invert(&self, energy: f64) -> Option<f64> {
         let a = self.a.value;
         let b = self.b.value;
         let c = self.c.value;
+
+        if !energy.is_finite() || !self.coefficients_are_finite() {
+            return None;
+        }
 
         if a.abs() < 1e-12 {
             // Linear case: E = bx + c ⇒ x = (E - c)/b
@@ -342,19 +601,34 @@ impl Default for Parameter {
 
 impl Parameter {
     pub fn calibrate_energy(&mut self, calibration: &Calibration) {
-        if let Some(x) = self.value {
-            let dx = self.uncertainty.unwrap_or(0.0);
+        let Some(x) = self.value.filter(|value| value.is_finite()) else {
+            self.calibrated_value = None;
+            self.calibrated_uncertainty = None;
+            return;
+        };
 
-            let energy = calibration.calibrate(x);
+        let dx = self.uncertainty.unwrap_or(0.0);
+        let Some(energy) = calibration.calibrate_checked(x) else {
+            self.calibrated_value = None;
+            self.calibrated_uncertainty = None;
+            return;
+        };
+        let Some(curve_uncertainty) = calibration.curve_uncertainty_checked(x) else {
+            self.calibrated_value = None;
+            self.calibrated_uncertainty = None;
+            return;
+        };
+        let Some(dy_dx) = calibration.derivative_checked(x) else {
+            self.calibrated_value = None;
+            self.calibrated_uncertainty = None;
+            return;
+        };
 
-            let sigma_params_sq = calibration.curve_uncertainty(x).powi(2);
+        let sigma_params_sq = curve_uncertainty.powi(2);
+        let sigma_x_sq = (dy_dx * dx).powi(2);
+        let de = (sigma_params_sq + sigma_x_sq).sqrt();
 
-            // x uncertainty (assumed independent of {a,b,c})
-            let dy_dx = calibration.derivative(x);
-            let sigma_x_sq = (dy_dx * dx).powi(2);
-
-            let de = (sigma_params_sq + sigma_x_sq).sqrt();
-
+        if de.is_finite() {
             self.calibrated_value = Some(energy);
             self.calibrated_uncertainty = Some(de);
         } else {
@@ -364,19 +638,26 @@ impl Parameter {
     }
 
     pub fn calibrate_sigma(&mut self, calibration: &Calibration, x: f64) {
-        if let Some(sigma_x) = self.value {
-            let a = calibration.a.value;
-            let b = calibration.b.value;
+        let Some(sigma_x) = self.value.filter(|value| value.is_finite()) else {
+            self.calibrated_value = None;
+            self.calibrated_uncertainty = None;
+            return;
+        };
 
-            let da = calibration.a.uncertainty;
-            let db = calibration.b.uncertainty;
+        let Some(dedx) = calibration.derivative_checked(x) else {
+            self.calibrated_value = None;
+            self.calibrated_uncertainty = None;
+            return;
+        };
 
-            let dedx = 2.0 * a * x + b;
-            let dedx_unc = (2.0 * x * da).hypot(db);
+        let da = calibration.a.uncertainty;
+        let db = calibration.b.uncertainty;
+        let dedx_unc = (2.0 * x * da).hypot(db);
 
-            let sigma_e = dedx.abs() * sigma_x;
-            let dsigma_e = (dedx * self.uncertainty.unwrap_or(0.0)).hypot(sigma_x * dedx_unc);
+        let sigma_e = dedx.abs() * sigma_x;
+        let dsigma_e = (dedx * self.uncertainty.unwrap_or(0.0)).hypot(sigma_x * dedx_unc);
 
+        if sigma_e.is_finite() && dsigma_e.is_finite() {
             self.calibrated_value = Some(sigma_e);
             self.calibrated_uncertainty = Some(dsigma_e);
         } else {
@@ -386,21 +667,27 @@ impl Parameter {
     }
 
     pub fn calibrate_fwhm(&mut self, calibration: &Calibration, x: f64) {
-        if let Some(fwhm_x) = self.value {
-            let sigma_x = fwhm_x / 2.355;
-            let a = calibration.a.value;
-            let b = calibration.b.value;
+        let Some(fwhm_x) = self.value.filter(|value| value.is_finite()) else {
+            self.calibrated_value = None;
+            self.calibrated_uncertainty = None;
+            return;
+        };
 
-            let da = calibration.a.uncertainty;
-            let db = calibration.b.uncertainty;
+        let Some(dedx) = calibration.derivative_checked(x) else {
+            self.calibrated_value = None;
+            self.calibrated_uncertainty = None;
+            return;
+        };
 
-            let dedx = 2.0 * a * x + b;
-            let dedx_unc = (2.0 * x * da).hypot(db);
+        let sigma_x = fwhm_x / 2.355;
+        let da = calibration.a.uncertainty;
+        let db = calibration.b.uncertainty;
+        let dedx_unc = (2.0 * x * da).hypot(db);
 
-            let fwhm_e = dedx.abs() * sigma_x * 2.355;
-            let dfwhm_e =
-                (dedx * self.uncertainty.unwrap_or(0.0)).hypot(sigma_x * 2.355 * dedx_unc);
+        let fwhm_e = dedx.abs() * sigma_x * 2.355;
+        let dfwhm_e = (dedx * self.uncertainty.unwrap_or(0.0)).hypot(sigma_x * 2.355 * dedx_unc);
 
+        if fwhm_e.is_finite() && dfwhm_e.is_finite() {
             self.calibrated_value = Some(fwhm_e);
             self.calibrated_uncertainty = Some(dfwhm_e);
         } else {

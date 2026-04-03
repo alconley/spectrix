@@ -67,10 +67,17 @@ impl EguiVerticalLine {
     pub fn draw(&self, plot_ui: &mut PlotUi<'_>, calibration: Option<&Calibration>) {
         if self.draw {
             let x_value = if let Some(calibration) = calibration {
-                calibration.calibrate(self.x_value)
+                calibration
+                    .calibrate_checked(self.x_value)
+                    .unwrap_or(self.x_value)
             } else {
                 self.x_value
             };
+
+            if !x_value.is_finite() {
+                return;
+            }
+
             let mut line = VLine::new("", x_value)
                 .highlight(self.highlighted)
                 .stroke(self.stroke)
@@ -135,6 +142,7 @@ impl EguiVerticalLine {
         &mut self,
         plot_response: &PlotResponse<()>,
         calibration: Option<&Calibration>,
+        raw_domain: Option<(f64, f64)>,
     ) {
         let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
 
@@ -155,7 +163,12 @@ impl EguiVerticalLine {
             if self.is_dragging {
                 let calibrated_x = plot_response.transform.value_from_position(pointer_pos).x;
                 self.x_value = if let Some(cal) = calibration {
-                    cal.invert(calibrated_x).unwrap_or(calibrated_x)
+                    if let Some(raw_domain) = raw_domain {
+                        cal.invert_in_range_with_hint(calibrated_x, raw_domain, Some(self.x_value))
+                            .unwrap_or(self.x_value)
+                    } else {
+                        cal.invert(calibrated_x).unwrap_or(self.x_value)
+                    }
                 } else {
                     calibrated_x
                 };

@@ -89,9 +89,9 @@ impl EguiLine {
             let plot_points: Vec<PlotPoint> = self
                 .points
                 .iter()
-                .map(|&[x, y]| {
+                .filter_map(|&[x, y]| {
                     let calibrated_x = if let Some(cal) = calibration {
-                        cal.calibrate(x)
+                        cal.calibrate_checked(x)?
                     } else {
                         x
                     };
@@ -108,9 +108,13 @@ impl EguiLine {
                         y
                     };
 
-                    PlotPoint::new(x, y)
+                    (x.is_finite() && y.is_finite()).then_some(PlotPoint::new(x, y))
                 })
                 .collect();
+
+            if plot_points.len() < 2 {
+                return;
+            }
 
             let mut line = Line::new("", PlotPoints::Owned(plot_points))
                 .highlight(self.highlighted)

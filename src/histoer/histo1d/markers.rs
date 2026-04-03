@@ -116,9 +116,12 @@ impl BackgroundPair {
         &mut self,
         plot_response: &egui_plot::PlotResponse<()>,
         calibration: Option<&Calibration>,
+        raw_axis_range: (f64, f64),
     ) {
-        self.start.interactive_dragging(plot_response, calibration);
-        self.end.interactive_dragging(plot_response, calibration);
+        self.start
+            .interactive_dragging(plot_response, calibration, Some(raw_axis_range));
+        self.end
+            .interactive_dragging(plot_response, calibration, Some(raw_axis_range));
     }
 
     /// Updates the `histogram_line` to match the histogram bins within this background pair
@@ -336,17 +339,18 @@ impl FitMarkers {
         &mut self,
         plot_response: &egui_plot::PlotResponse<()>,
         calibration: Option<&Calibration>,
+        raw_axis_range: (f64, f64),
     ) {
         for marker in &mut self.background_markers {
-            marker.interactive_dragging(plot_response, calibration);
+            marker.interactive_dragging(plot_response, calibration, raw_axis_range);
         }
 
         for marker in &mut self.region_markers {
-            marker.interactive_dragging(plot_response, calibration);
+            marker.interactive_dragging(plot_response, calibration, Some(raw_axis_range));
         }
 
         for marker in &mut self.peak_markers {
-            marker.interactive_dragging(plot_response, calibration);
+            marker.interactive_dragging(plot_response, calibration, Some(raw_axis_range));
         }
     }
 

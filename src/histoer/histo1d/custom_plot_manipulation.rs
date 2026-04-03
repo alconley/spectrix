@@ -67,10 +67,10 @@ impl Histogram {
     pub fn limit_scrolling(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         let plot_bounds = plot_ui.plot_bounds();
 
-        let range = if self.fits.settings.calibrated {
-            let range_1 = self.fits.calibration.calibrate(self.range.0);
-            let range_2 = self.fits.calibration.calibrate(self.range.1);
-            (range_1.min(range_2), range_1.max(range_2))
+        let range = if let Some(calibration) = self.display_calibration() {
+            calibration
+                .display_bounds_for_raw_range(self.range)
+                .unwrap_or(self.range)
         } else {
             self.range
         };

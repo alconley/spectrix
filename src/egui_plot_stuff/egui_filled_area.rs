@@ -45,7 +45,10 @@ impl EguiFilledArea {
 
         for ((&x, &y_min), &y_max) in self.xs.iter().zip(&self.lower).zip(&self.upper) {
             let calibrated_x = if let Some(calibration) = calibration {
-                calibration.calibrate(x)
+                let Some(calibrated_x) = calibration.calibrate_checked(x) else {
+                    continue;
+                };
+                calibrated_x
             } else {
                 x
             };
@@ -64,9 +67,21 @@ impl EguiFilledArea {
                 }
             };
 
-            xs.push(transformed_x);
-            lower.push(transform_y(y_min));
-            upper.push(transform_y(y_max));
+            let transformed_lower = transform_y(y_min);
+            let transformed_upper = transform_y(y_max);
+
+            if transformed_x.is_finite()
+                && transformed_lower.is_finite()
+                && transformed_upper.is_finite()
+            {
+                xs.push(transformed_x);
+                lower.push(transformed_lower);
+                upper.push(transformed_upper);
+            }
+        }
+
+        if xs.len() < 2 {
+            return;
         }
 
         plot_ui.add(

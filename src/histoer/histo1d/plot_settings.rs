@@ -69,8 +69,10 @@ impl PlotSettings {
         &mut self,
         response: &egui_plot::PlotResponse<()>,
         calibration: Option<&Calibration>,
+        raw_axis_range: (f64, f64),
     ) {
-        self.markers.interactive_dragging(response, calibration);
+        self.markers
+            .interactive_dragging(response, calibration, raw_axis_range);
 
         let mut cuts_dragging = false;
         for cut in &mut self.cuts {

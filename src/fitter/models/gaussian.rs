@@ -489,8 +489,12 @@ impl GaussianFitter {
                 params.mean.value,
                 params.mean.uncertainty,
             ) && energy != -1.0
+                && mean.is_finite()
+                && mean_unc.is_finite()
+                && energy.is_finite()
+                && energy_unc.is_finite()
             {
-                calibration_data.push((mean, mean_unc, energy, energy_unc));
+                calibration_data.push((mean, mean_unc.max(0.0), energy, energy_unc.max(0.0)));
             }
         }
 
