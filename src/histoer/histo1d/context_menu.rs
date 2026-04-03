@@ -113,17 +113,18 @@ impl Histogram {
             });
 
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.fits.settings.show_fit_stats, "Show Fit Panel")
+            ui.checkbox(&mut self.fits.settings.show_fit_stats, "Show")
                 .on_hover_text("Open the fit panel.");
-            ui.checkbox(&mut self.fits.settings.fit_panel_popout, "Pop Out")
-                .on_hover_text("Open the fit panel in a separate native window when supported.");
-        });
 
-        SubMenuButton::new("Fits")
+            SubMenuButton::new("Fits")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
             .ui(ui, |ui| {
                 self.fits.fit_context_menu_ui(ui);
             });
+
+        });
+
+
 
         SubMenuButton::new("Peak Finder")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
