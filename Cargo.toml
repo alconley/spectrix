@@ -45,6 +45,7 @@ regex = "1.12.3"
 indicatif = "0.18.4"
 polars-arrow = "0.53.0"
 polars-buffer = "0.53.0"
+sci-fmt = "0.1.0"
 
 [dev-dependencies]
 ron = "0.12.1"

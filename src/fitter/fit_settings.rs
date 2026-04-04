@@ -38,7 +38,7 @@ impl Default for FitSettings {
             show_fit_lines_area: true,
             uuid_label_size: 14.0,
             uuid_label_lift: 1.6,
-            uuid_label_guides: false,
+            uuid_label_guides: true,
             show_fit_stats: false,
             fit_panel_popout: false,
             equal_stddev: true,

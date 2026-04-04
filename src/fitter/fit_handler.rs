@@ -12,7 +12,7 @@ use super::main_fitter::{FitResult, Fitter};
 
 use super::models::gaussian::{GaussianFitter, HistogramDrawContext, UuidDrawOptions};
 
-use super::common::Calibration;
+use super::common::{Calibration, fit_measurement_label};
 
 use crate::custom_analysis::se_sps_analysis::uuid_map::FitUUID;
 use crate::fitter::common::Data;
@@ -1204,16 +1204,6 @@ impl Fits {
             energy: (f64, f64),
         }
 
-        let fmt = |v: f64, u: f64| -> String {
-            if v.is_finite() && u.is_finite() {
-                format!("{v:.2} ± {u:.2}")
-            } else if v.is_finite() {
-                format!("{v:.2}")
-            } else {
-                "—".to_owned()
-            }
-        };
-
         let pick = |v: Option<f64>, u: Option<f64>| -> (f64, f64) {
             (v.unwrap_or(f64::NAN), u.unwrap_or(f64::NAN))
         };
@@ -1340,8 +1330,68 @@ impl Fits {
             }
         };
 
+        let sort_rows = |rows: &mut [Row], state: SortState| {
+            rows.sort_by(|a, b| {
+                let ka = key(a, state.col);
+                let kb = key(b, state.col);
+                let ord = ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal);
+                if state.asc { ord } else { ord.reverse() }
+            });
+        };
+
+        sort_rows(&mut rows, current);
+
         let mut uuid_updates: Vec<(Option<usize>, usize, usize)> = Vec::new(); // (fit_idx, peak, new_uuid)
         let mut energy_updates: Vec<(Option<usize>, usize, f64, f64)> = Vec::new(); // (fit_idx, peak, energy, unc)
+
+        ui.horizontal(|ui| {
+            if ui
+                .button("\u{1F4CB}")
+                .on_hover_text(
+                    "Copy the currently displayed fit table to the clipboard as comma-delimited text, including values and uncertainties.",
+                )
+                .clicked()
+            {
+                let csv_number = |value: f64| {
+                    if value.is_finite() {
+                        value.to_string()
+                    } else {
+                        String::new()
+                    }
+                };
+
+                let mut csv_lines = Vec::with_capacity(rows.len() + 1);
+                csv_lines.push(
+                    "fit,peak,mean,mean_uncertainty,fwhm,fwhm_uncertainty,area,area_uncertainty,amplitude,amplitude_uncertainty,sigma,sigma_uncertainty,uuid,energy,energy_uncertainty".to_owned(),
+                );
+
+                for row in &rows {
+                    let fit_label = row
+                        .fit_idx
+                        .map_or_else(|| "Temp".to_owned(), |fit_idx| fit_idx.to_string());
+                    csv_lines.push(format!(
+                        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                        fit_label,
+                        row.peak,
+                        csv_number(row.mean.0),
+                        csv_number(row.mean.1),
+                        csv_number(row.fwhm.0),
+                        csv_number(row.fwhm.1),
+                        csv_number(row.area.0),
+                        csv_number(row.area.1),
+                        csv_number(row.amplitude.0),
+                        csv_number(row.amplitude.1),
+                        csv_number(row.sigma.0),
+                        csv_number(row.sigma.1),
+                        row.uuid,
+                        csv_number(row.energy.0),
+                        csv_number(row.energy.1),
+                    ));
+                }
+
+                ui.ctx().copy_text(csv_lines.join("\n"));
+            }
+        });
 
         egui::Grid::new("fit_params_grid_sortable")
             .striped(true)
@@ -1389,12 +1439,7 @@ impl Fits {
                 new_state = effective;
 
                 // apply sort
-                rows.sort_by(|a, b| {
-                    let ka = key(a, sort_col);
-                    let kb = key(b, sort_col);
-                    let ord = ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal);
-                    if asc { ord } else { ord.reverse() }
-                });
+                sort_rows(&mut rows, SortState { col: sort_col, asc });
 
                 // draw rows (your existing rendering code stays the same)
                 for r in &rows {
@@ -1415,11 +1460,11 @@ impl Fits {
                     });
 
                     ui.label(format!("{}", r.peak));
-                    ui.label(fmt(r.mean.0, r.mean.1));
-                    ui.label(fmt(r.fwhm.0, r.fwhm.1));
-                    ui.label(fmt(r.area.0, r.area.1));
-                    ui.label(fmt(r.amplitude.0, r.amplitude.1));
-                    ui.label(fmt(r.sigma.0, r.sigma.1));
+                    fit_measurement_label(ui, Some(r.mean.0), Some(r.mean.1));
+                    fit_measurement_label(ui, Some(r.fwhm.0), Some(r.fwhm.1));
+                    fit_measurement_label(ui, Some(r.area.0), Some(r.area.1));
+                    fit_measurement_label(ui, Some(r.amplitude.0), Some(r.amplitude.1));
+                    fit_measurement_label(ui, Some(r.sigma.0), Some(r.sigma.1));
                     let mut uuid_edit = r.uuid;
                     if ui
                         .add(

@@ -537,7 +537,7 @@ pub struct Parameter {
 
 #[cfg(test)]
 mod tests {
-    use super::{Parameter, Value};
+    use super::{Parameter, Value, fit_measurement_hover_text, format_fit_measurement};
 
     #[test]
     fn parameter_deserializes_null_min_max_as_infinities() {
@@ -573,6 +573,46 @@ mod tests {
         assert!(p.min.is_infinite() && p.min.is_sign_negative());
         assert!(p.max.is_infinite() && p.max.is_sign_positive());
     }
+
+    #[test]
+    fn format_fit_measurement_uses_sci_fmt_when_uncertainty_exists() {
+        assert_eq!(
+            format_fit_measurement(Some(12.345), Some(0.067)),
+            "12.35(7)"
+        );
+    }
+
+    #[test]
+    fn format_fit_measurement_falls_back_without_uncertainty() {
+        assert_eq!(format_fit_measurement(Some(12.345), None), "12.35");
+        assert_eq!(
+            format_fit_measurement(Some(12.345), Some(f64::NAN)),
+            "12.35"
+        );
+    }
+
+    #[test]
+    fn format_fit_measurement_uses_placeholder_for_missing_value() {
+        assert_eq!(format_fit_measurement(None, Some(0.067)), "—");
+        assert_eq!(format_fit_measurement(Some(f64::NAN), Some(0.067)), "—");
+    }
+
+    #[test]
+    fn fit_measurement_hover_text_shows_raw_value_and_uncertainty() {
+        assert_eq!(
+            fit_measurement_hover_text(Some(12.345), Some(0.067)).as_deref(),
+            Some("Value: 12.345\nUncertainty: 0.067")
+        );
+    }
+
+    #[test]
+    fn fit_measurement_hover_text_handles_missing_parts() {
+        assert_eq!(
+            fit_measurement_hover_text(Some(12.345), None).as_deref(),
+            Some("Value: 12.345\nUncertainty: —")
+        );
+        assert_eq!(fit_measurement_hover_text(None, Some(0.067)), None);
+    }
 }
 
 fn default_parameter_min() -> f64 {
@@ -596,6 +636,33 @@ impl Default for Parameter {
             calibrated_value: None,
             calibrated_uncertainty: None,
         }
+    }
+}
+
+pub fn format_fit_measurement(value: Option<f64>, uncertainty: Option<f64>) -> String {
+    let Some(value) = value.filter(|value| value.is_finite()) else {
+        return "—".to_owned();
+    };
+
+    match uncertainty.filter(|uncertainty| uncertainty.is_finite()) {
+        Some(uncertainty) if uncertainty != 0.0 => sci_fmt::scifmt(value, uncertainty),
+        _ => format!("{value:.2}"),
+    }
+}
+
+pub fn fit_measurement_hover_text(value: Option<f64>, uncertainty: Option<f64>) -> Option<String> {
+    let value = value.filter(|value| value.is_finite())?;
+    let uncertainty_text = uncertainty
+        .filter(|uncertainty| uncertainty.is_finite())
+        .map_or_else(|| "—".to_owned(), |uncertainty| uncertainty.to_string());
+
+    Some(format!("Value: {value}\nUncertainty: {uncertainty_text}"))
+}
+
+pub fn fit_measurement_label(ui: &mut egui::Ui, value: Option<f64>, uncertainty: Option<f64>) {
+    let response = ui.label(format_fit_measurement(value, uncertainty));
+    if let Some(hover) = fit_measurement_hover_text(value, uncertainty) {
+        response.on_hover_text(hover);
     }
 }
 

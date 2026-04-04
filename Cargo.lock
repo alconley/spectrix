@@ -4909,6 +4909,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sci-fmt"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "274aee646f2123be7cc35084fbf7732833a06638d5bf5f3d8079be14332da451"
+
+[[package]]
 name = "scoped-tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5261,6 +5267,7 @@ dependencies = [
  "regex",
  "rfd",
  "ron",
+ "sci-fmt",
  "serde",
  "serde_json",
  "serde_yaml",

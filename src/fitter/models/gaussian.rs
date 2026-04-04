@@ -1,5 +1,5 @@
 use crate::egui_plot_stuff::egui_filled_area::EguiFilledArea;
-use crate::fitter::common::{Data, Parameter};
+use crate::fitter::common::{Data, Parameter, fit_measurement_label};
 use crate::fitter::main_fitter::{BackgroundModel, BackgroundResult};
 use crate::fitter::models::exponential::ExponentialFitter;
 use crate::fitter::models::linear::LinearFitter;
@@ -212,61 +212,37 @@ impl GaussianParameters {
 
     pub fn params_ui(&mut self, ui: &mut egui::Ui, calibrate: bool) {
         if calibrate {
-            ui.label(format!(
-                "{:.2} ± {:.2}",
-                self.mean.calibrated_value.unwrap_or(0.0),
-                self.mean.calibrated_uncertainty.unwrap_or(0.0)
-            ));
-            ui.label(format!(
-                "{:.2} ± {:.2}",
-                self.fwhm.calibrated_value.unwrap_or(0.0),
-                self.fwhm.calibrated_uncertainty.unwrap_or(0.0)
-            ));
-            ui.label(format!(
-                "{:.2} ± {:.2}",
-                self.area.calibrated_value.unwrap_or(0.0),
-                self.area.calibrated_uncertainty.unwrap_or(0.0)
-            ));
-            ui.label(format!(
-                "{:.2} ± {:.2}",
-                self.amplitude.calibrated_value.unwrap_or(0.0),
-                self.amplitude.calibrated_uncertainty.unwrap_or(0.0)
-            ));
-            ui.label(format!(
-                "{:.2} ± {:.2}",
-                self.sigma.calibrated_value.unwrap_or(0.0),
-                self.sigma.calibrated_uncertainty.unwrap_or(0.0)
-            ));
+            fit_measurement_label(
+                ui,
+                self.mean.calibrated_value,
+                self.mean.calibrated_uncertainty,
+            );
+            fit_measurement_label(
+                ui,
+                self.fwhm.calibrated_value,
+                self.fwhm.calibrated_uncertainty,
+            );
+            fit_measurement_label(
+                ui,
+                self.area.calibrated_value,
+                self.area.calibrated_uncertainty,
+            );
+            fit_measurement_label(
+                ui,
+                self.amplitude.calibrated_value,
+                self.amplitude.calibrated_uncertainty,
+            );
+            fit_measurement_label(
+                ui,
+                self.sigma.calibrated_value,
+                self.sigma.calibrated_uncertainty,
+            );
         } else {
-            ui.label(format!(
-                "{:.2} ± {:.2}",
-                self.mean.value.unwrap_or(0.0),
-                self.mean.uncertainty.unwrap_or(0.0)
-            ));
-
-            ui.label(format!(
-                "{:.2} ± {:.2}",
-                self.fwhm.value.unwrap_or(0.0),
-                self.fwhm.uncertainty.unwrap_or(0.0)
-            ));
-
-            ui.label(format!(
-                "{:.2} ± {:.2}",
-                self.area.value.unwrap_or(0.0),
-                self.area.uncertainty.unwrap_or(0.0)
-            ));
-
-            ui.label(format!(
-                "{:.2} ± {:.2}",
-                self.amplitude.value.unwrap_or(0.0),
-                self.amplitude.uncertainty.unwrap_or(0.0)
-            ));
-
-            ui.label(format!(
-                "{:.2} ± {:.2}",
-                self.sigma.value.unwrap_or(0.0),
-                self.sigma.uncertainty.unwrap_or(0.0)
-            ));
+            fit_measurement_label(ui, self.mean.value, self.mean.uncertainty);
+            fit_measurement_label(ui, self.fwhm.value, self.fwhm.uncertainty);
+            fit_measurement_label(ui, self.area.value, self.area.uncertainty);
+            fit_measurement_label(ui, self.amplitude.value, self.amplitude.uncertainty);
+            fit_measurement_label(ui, self.sigma.value, self.sigma.uncertainty);
         }
     }
 
