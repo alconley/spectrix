@@ -3,6 +3,7 @@ use super::se_sps::SPSConfig;
 
 use crate::histoer::configs::Configs;
 use crate::histoer::cuts::{Cut, Cuts};
+use crate::histoer::ui_helpers::precise_drag_value;
 
 use std::collections::BTreeSet;
 use std::f64::consts::PI;
@@ -75,7 +76,7 @@ impl CeBrAConfig {
                     "Scan the loaded selected-file column names and add any missing CeBrA detectors inferred from columns like Cebra0Energy or Cebra3Time.",
                 )
                 .on_disabled_hover_text(
-                    "Load the selected file columns first with 'Get Column Names' in Selected File Settings.",
+                    "Load the selected file columns first with 'Get Column Names' in the Processor menu.",
                 );
 
             if discover_response.clicked() {
@@ -246,7 +247,7 @@ impl CeBrAConfig {
                         row.col(|ui| {
                             ui.add_enabled(
                                 detector.sps_timecut.active,
-                                egui::DragValue::new(&mut detector.sps_timecut.mean).speed(0.01),
+                                precise_drag_value(&mut detector.sps_timecut.mean).speed(0.01),
                             );
                         });
 
@@ -254,7 +255,7 @@ impl CeBrAConfig {
                         row.col(|ui| {
                             ui.add_enabled(
                                 detector.sps_timecut.active,
-                                egui::DragValue::new(&mut detector.sps_timecut.low).speed(0.01),
+                                precise_drag_value(&mut detector.sps_timecut.low).speed(0.01),
                             );
                         });
 
@@ -262,7 +263,7 @@ impl CeBrAConfig {
                         row.col(|ui| {
                             ui.add_enabled(
                                 detector.sps_timecut.active,
-                                egui::DragValue::new(&mut detector.sps_timecut.high).speed(0.01),
+                                precise_drag_value(&mut detector.sps_timecut.high).speed(0.01),
                             );
                         });
 
@@ -290,11 +291,11 @@ impl CeBrAConfig {
                     ui.separator();
 
                     ui.add(
-                        egui::DragValue::new(&mut range.0)
+                        precise_drag_value(&mut range.0)
                             .speed(1.0)
                             .prefix("Range: ("),
                     );
-                    ui.add(egui::DragValue::new(&mut range.1).speed(1.0).suffix(")"));
+                    ui.add(precise_drag_value(&mut range.1).speed(1.0).suffix(")"));
                     ui.add(egui::DragValue::new(&mut bins).speed(1).prefix("Bins: "));
                 });
 
@@ -355,7 +356,7 @@ impl CeBrAConfig {
                         row.col(|ui| {
                             ui.add_enabled(
                                 detector.gainmatch.active,
-                                egui::DragValue::new(&mut detector.gainmatch.a).speed(0.01),
+                                precise_drag_value(&mut detector.gainmatch.a).speed(0.01),
                             );
                         });
 
@@ -363,7 +364,7 @@ impl CeBrAConfig {
                         row.col(|ui| {
                             ui.add_enabled(
                                 detector.gainmatch.active,
-                                egui::DragValue::new(&mut detector.gainmatch.b).speed(0.01),
+                                precise_drag_value(&mut detector.gainmatch.b).speed(0.01),
                             );
                         });
 
@@ -371,7 +372,7 @@ impl CeBrAConfig {
                         row.col(|ui| {
                             ui.add_enabled(
                                 detector.gainmatch.active,
-                                egui::DragValue::new(&mut detector.gainmatch.c).speed(0.01),
+                                precise_drag_value(&mut detector.gainmatch.c).speed(0.01),
                             );
                         });
 
@@ -403,11 +404,11 @@ impl CeBrAConfig {
                     ui.separator();
 
                     ui.add(
-                        egui::DragValue::new(&mut range.0)
+                        precise_drag_value(&mut range.0)
                             .speed(1.0)
                             .prefix(" Range: ("),
                     );
-                    ui.add(egui::DragValue::new(&mut range.1).speed(1.0).suffix(")"));
+                    ui.add(precise_drag_value(&mut range.1).speed(1.0).suffix(")"));
                     ui.add(egui::DragValue::new(&mut bins).speed(1).prefix("Bins: "));
 
                     ui.label(format!("keV/bin: {:.2}", (range.1 - range.0) / bins as f64));
@@ -474,8 +475,7 @@ impl CeBrAConfig {
                         row.col(|ui| {
                             ui.add_enabled(
                                 detector.energy_calibration.active,
-                                egui::DragValue::new(&mut detector.energy_calibration.a)
-                                    .speed(0.01),
+                                precise_drag_value(&mut detector.energy_calibration.a).speed(0.01),
                             );
                         });
 
@@ -483,8 +483,7 @@ impl CeBrAConfig {
                         row.col(|ui| {
                             ui.add_enabled(
                                 detector.energy_calibration.active,
-                                egui::DragValue::new(&mut detector.energy_calibration.b)
-                                    .speed(0.01),
+                                precise_drag_value(&mut detector.energy_calibration.b).speed(0.01),
                             );
                         });
 
@@ -492,8 +491,7 @@ impl CeBrAConfig {
                         row.col(|ui| {
                             ui.add_enabled(
                                 detector.energy_calibration.active,
-                                egui::DragValue::new(&mut detector.energy_calibration.c)
-                                    .speed(0.01),
+                                precise_drag_value(&mut detector.energy_calibration.c).speed(0.01),
                             );
                         });
 

@@ -2,6 +2,7 @@ use super::general::{Calibration, TimeCut};
 
 use crate::histoer::configs::Configs;
 use crate::histoer::cuts::{Cut, Cuts};
+use crate::histoer::ui_helpers::precise_drag_value;
 
 use super::cebra::CeBrAConfig;
 use super::se_sps::SPSConfig;
@@ -249,19 +250,19 @@ impl PIPS {
                         ui.label("SE-SPS Time Cut: ");
                         ui.add_enabled(
                             self.sps_timecut.active,
-                            egui::DragValue::new(&mut self.sps_timecut.mean)
+                            precise_drag_value(&mut self.sps_timecut.mean)
                                 .speed(1)
                                 .prefix("Mean: "),
                         );
                         ui.add_enabled(
                             self.sps_timecut.active,
-                            egui::DragValue::new(&mut self.sps_timecut.low)
+                            precise_drag_value(&mut self.sps_timecut.low)
                                 .speed(1)
                                 .prefix("Low: "),
                         );
                         ui.add_enabled(
                             self.sps_timecut.active,
-                            egui::DragValue::new(&mut self.sps_timecut.high)
+                            precise_drag_value(&mut self.sps_timecut.high)
                                 .speed(1)
                                 .prefix("High: "),
                         );
@@ -467,12 +468,12 @@ impl ICESPICEConfig {
                 ui.label("Default:");
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::DragValue::new(&mut self.pips1000.range.0)
+                        precise_drag_value(&mut self.pips1000.range.0)
                             .speed(1.0)
                             .prefix("("),
                     );
                     ui.add(
-                        egui::DragValue::new(&mut self.pips1000.range.1)
+                        precise_drag_value(&mut self.pips1000.range.1)
                             .speed(1.0)
                             .suffix(")"),
                     );
@@ -485,12 +486,12 @@ impl ICESPICEConfig {
                 ui.label("Energy Calibrated");
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::DragValue::new(&mut self.pips1000.energy_calibration.range.0)
+                        precise_drag_value(&mut self.pips1000.energy_calibration.range.0)
                             .speed(1.0)
                             .prefix("("),
                     );
                     ui.add(
-                        egui::DragValue::new(&mut self.pips1000.energy_calibration.range.1)
+                        precise_drag_value(&mut self.pips1000.energy_calibration.range.1)
                             .speed(1.0)
                             .suffix(")"),
                     );
@@ -503,12 +504,12 @@ impl ICESPICEConfig {
                     ui.label("SE-SPS: No Time Cut");
                     ui.horizontal(|ui| {
                         ui.add(
-                            egui::DragValue::new(&mut self.pips1000.sps_timecut.no_cut_range.0)
+                            precise_drag_value(&mut self.pips1000.sps_timecut.no_cut_range.0)
                                 .speed(1.0)
                                 .prefix("("),
                         );
                         ui.add(
-                            egui::DragValue::new(&mut self.pips1000.sps_timecut.no_cut_range.1)
+                            precise_drag_value(&mut self.pips1000.sps_timecut.no_cut_range.1)
                                 .speed(1.0)
                                 .suffix(")"),
                         );
@@ -522,12 +523,12 @@ impl ICESPICEConfig {
 
                     ui.horizontal(|ui| {
                         ui.add(
-                            egui::DragValue::new(&mut self.pips1000.sps_timecut.range.0)
+                            precise_drag_value(&mut self.pips1000.sps_timecut.range.0)
                                 .speed(1.0)
                                 .prefix("("),
                         );
                         ui.add(
-                            egui::DragValue::new(&mut self.pips1000.sps_timecut.range.1)
+                            precise_drag_value(&mut self.pips1000.sps_timecut.range.1)
                                 .speed(1.0)
                                 .suffix(")"),
                         );

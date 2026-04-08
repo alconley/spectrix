@@ -1,6 +1,5 @@
 // External crates
 use egui_tiles::TileId;
-use indicatif::{ProgressBar, ProgressStyle};
 use polars::prelude::*;
 use pyo3::ffi::c_str;
 use pyo3::{prelude::*, types::PyModule};
@@ -285,6 +284,9 @@ impl Histogrammer {
         // Set calculating to true at the start
         calculating.store(true, Ordering::SeqCst);
         abort_flag.store(false, Ordering::SeqCst);
+        if let Ok(mut current_progress) = progress.lock() {
+            *current_progress = 0.0;
+        }
 
         let mut lf = lf.clone();
 
@@ -316,47 +318,6 @@ impl Histogrammer {
 
         // Apply the selection to the LazyFrame
         let lf = Arc::new(lf.clone().select(selected_columns.clone()));
-
-        // Initialize histogram maps
-        let hist1d_map: Vec<_> = valid_configs
-            .configs
-            .iter()
-            .filter_map(|config| {
-                if let Config::Hist1D(hist1d) = config {
-                    self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
-                        egui_tiles::Tile::Pane(Pane::Histogram(hist))
-                            if hist.lock().expect("Failed to lock histogram").name
-                                == hist1d.name =>
-                        {
-                            Some((Arc::clone(hist), hist1d.clone()))
-                        }
-                        _ => None,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let hist2d_map: Vec<_> = valid_configs
-            .configs
-            .iter()
-            .filter_map(|config| {
-                if let Config::Hist2D(hist2d) = config {
-                    self.tree.tiles.iter().find_map(|(_id, tile)| match tile {
-                        egui_tiles::Tile::Pane(Pane::Histogram2D(hist))
-                            if hist.lock().expect("Failed to lock 2D histogram").name
-                                == hist2d.name =>
-                        {
-                            Some((Arc::clone(hist), hist2d.clone()))
-                        }
-                        _ => None,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
 
         #[expect(clippy::type_complexity)]
         let mut cut_groups_1d: HashMap<
@@ -414,17 +375,22 @@ impl Histogrammer {
             let calculating = Arc::clone(&calculating);
             let progress = Arc::clone(&progress);
             let lf = Arc::clone(&lf);
-            let total_histos = (hist1d_map.len() + hist2d_map.len()) as u64;
-
-            let progress_bar = ProgressBar::new(total_histos);
-            progress_bar.set_style(
-                ProgressStyle::default_bar()
-                    .template("[{elapsed_precise}] {bar:40.cyan/blue} {percent}% ({pos}/{len})")
-                    .expect("progress bar template")
-                    .progress_chars("#>-"),
-            );
 
             move || {
+                struct CalculatingGuard {
+                    calculating: Arc<AtomicBool>,
+                }
+
+                impl Drop for CalculatingGuard {
+                    fn drop(&mut self) {
+                        self.calculating.store(false, Ordering::SeqCst);
+                    }
+                }
+
+                let _calculating_guard = CalculatingGuard {
+                    calculating: Arc::clone(&calculating),
+                };
+
                 let mut completed = 0.0;
                 let total = (cut_groups_1d
                     .values()
@@ -459,75 +425,13 @@ impl Histogrammer {
 
                             completed += 1.0;
                             *progress.lock().expect("Failed to lock progress") = completed / total;
-                            progress_bar.inc(1);
                             if abort_flag.load(Ordering::SeqCst) {
-                                println!("Processing aborted by user.");
+                                log::info!("Histogram calculation aborted by user.");
                                 return;
                             }
                         }
                     }
                 }
-
-                // for (cuts, grouped) in cut_groups_1d.values() {
-                //     let filtered_lf = if cuts.is_empty() {
-                //         Ok((*lf).clone())
-                //     } else {
-                //         cuts.filter_lazyframe_in_batches(&(*lf).clone(), rows_per_chunk)
-                //     };
-
-                //     if let Ok(filtered_lf) = filtered_lf {
-                //         for (hist, config) in grouped {
-                //             let mut guard = hist.lock().expect("Failed to lock histogram");
-                //             if let Err(e) = guard.fill_from_lazyframe(
-                //                 filtered_lf.clone(),
-                //                 &config.column_name,
-                //                 -1e6,
-                //             ) {
-                //                 log::error!("Failed to fill hist1d '{}': {:?}", config.name, e);
-                //             }
-                //             guard.plot_settings.egui_settings.reset_axis = true;
-
-                //             completed += 1.0;
-                //             *progress.lock().expect("Failed to lock progress") = completed / total;
-                //             progress_bar.inc(1);
-                //             if abort_flag.load(Ordering::SeqCst) {
-                //                 println!("Processing aborted by user.");
-                //                 return;
-                //             }
-                //         }
-                //     }
-                // }
-
-                // for (cuts, grouped) in cut_groups_2d.values() {
-                //     let filtered_lf = if cuts.is_empty() {
-                //         Ok((*lf).clone())
-                //     } else {
-                //         cuts.filter_lazyframe_in_batches(&(*lf).clone(), rows_per_chunk)
-                //     };
-
-                //     if let Ok(filtered_lf) = filtered_lf {
-                //         for (hist, config) in grouped {
-                //             let mut guard = hist.lock().expect("Failed to lock 2D histogram");
-                //             if let Err(e) = guard.fill_from_lazyframe(
-                //                 filtered_lf.clone(),
-                //                 &config.x_column_name,
-                //                 &config.y_column_name,
-                //                 -1e6,
-                //             ) {
-                //                 log::error!("Failed to fill hist2d '{}': {:?}", config.name, e);
-                //             }
-
-                //             // reset
-                //             completed += 1.0;
-                //             *progress.lock().expect("Failed to lock progress") = completed / total;
-                //             progress_bar.inc(1);
-                //             if abort_flag.load(Ordering::SeqCst) {
-                //                 println!("Processing aborted by user.");
-                //                 return;
-                //             }
-                //         }
-                //     }
-                // }
 
                 let mut values: Vec<_> = cut_groups_2d.values().collect();
                 values.sort_by_key(|(cuts, _)| format!("{cuts:?}")); // sort by cuts debug string (stable)
@@ -553,18 +457,15 @@ impl Histogrammer {
 
                             completed += 1.0;
                             *progress.lock().expect("Failed to lock progress") = completed / total;
-                            progress_bar.inc(1);
                             if abort_flag.load(Ordering::SeqCst) {
-                                println!("Processing aborted by user.");
+                                log::info!("Histogram calculation aborted by user.");
                                 return;
                             }
                         }
                     }
                 }
 
-                progress_bar.finish_with_message("Column-wise histogram fill complete.");
                 *progress.lock().expect("Failed to lock progress") = 1.0;
-                calculating.store(false, Ordering::SeqCst);
             }
         });
     }

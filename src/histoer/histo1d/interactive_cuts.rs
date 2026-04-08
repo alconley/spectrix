@@ -153,7 +153,7 @@ impl InteractiveCut1D {
         self.clamp_line_positions(self.axis_range);
         let (x1, x2) = self.ordered_limits();
         self.cut.expression = format!(
-            "({} >= ({})) & ({} <= {})",
+            "(({} >= {}) & ({} <= {}))",
             self.column_name,
             Self::format_value(x1),
             self.column_name,

@@ -187,7 +187,8 @@ impl HistogramScript {
                     });
 
                     ui.separator();
-                    self.configs.ui(ui, Some(active_cuts.as_mut_slice()));
+                    self.configs
+                        .ui(ui, Some(active_cuts.as_mut_slice()), column_names);
                 });
 
             ui.separator();

@@ -1,3 +1,5 @@
+use crate::histoer::ui_helpers::precise_drag_value;
+
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Calibration {
     pub a: f64,
@@ -27,17 +29,17 @@ impl Calibration {
             if self.active {
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::DragValue::new(&mut self.a)
+                        precise_drag_value(&mut self.a)
                             .speed(0.0000000001)
                             .prefix("a: "),
                     );
                     ui.add(
-                        egui::DragValue::new(&mut self.b)
+                        precise_drag_value(&mut self.b)
                             .speed(0.0000000001)
                             .prefix("b: "),
                     );
                     ui.add(
-                        egui::DragValue::new(&mut self.c)
+                        precise_drag_value(&mut self.c)
                             .speed(0.0000000001)
                             .prefix("c: "),
                     );
@@ -52,12 +54,12 @@ impl Calibration {
                                 .prefix("Bins: "),
                         );
                         ui.add(
-                            egui::DragValue::new(&mut self.range.0)
+                            precise_drag_value(&mut self.range.0)
                                 .speed(1)
                                 .prefix("Range: (")
                                 .suffix(", "),
                         );
-                        ui.add(egui::DragValue::new(&mut self.range.1).speed(1).suffix(")"));
+                        ui.add(precise_drag_value(&mut self.range.1).speed(1).suffix(")"));
                     });
                 }
             }
@@ -127,21 +129,21 @@ impl TimeCut {
                     ui.horizontal(|ui| {
                         ui.add_enabled(
                             self.active,
-                            egui::DragValue::new(&mut self.range.0)
+                            precise_drag_value(&mut self.range.0)
                                 .speed(1)
                                 .prefix("(")
                                 .suffix(", "),
                         );
                         ui.add_enabled(
                             self.active,
-                            egui::DragValue::new(&mut self.range.1).speed(1).suffix(")"),
+                            precise_drag_value(&mut self.range.1).speed(1).suffix(")"),
                         );
                     });
 
                     ui.add_enabled(self.active, egui::DragValue::new(&mut self.bins).speed(1));
-                    ui.add_enabled(self.active, egui::DragValue::new(&mut self.mean).speed(1));
-                    ui.add_enabled(self.active, egui::DragValue::new(&mut self.low).speed(1));
-                    ui.add_enabled(self.active, egui::DragValue::new(&mut self.high).speed(1));
+                    ui.add_enabled(self.active, precise_drag_value(&mut self.mean).speed(1));
+                    ui.add_enabled(self.active, precise_drag_value(&mut self.low).speed(1));
+                    ui.add_enabled(self.active, precise_drag_value(&mut self.high).speed(1));
 
                     ui.end_row();
                 }
@@ -150,13 +152,13 @@ impl TimeCut {
 
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::DragValue::new(&mut self.no_cut_range.0)
+                        precise_drag_value(&mut self.no_cut_range.0)
                             .speed(1)
                             .prefix("(")
                             .suffix(", "),
                     );
                     ui.add(
-                        egui::DragValue::new(&mut self.no_cut_range.1)
+                        precise_drag_value(&mut self.no_cut_range.1)
                             .speed(1)
                             .suffix(")"),
                     );

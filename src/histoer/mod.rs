@@ -5,3 +5,4 @@ pub mod histo2d;
 pub mod histogrammer;
 pub mod pane;
 pub mod tree;
+pub mod ui_helpers;

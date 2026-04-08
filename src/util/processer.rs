@@ -1,5 +1,6 @@
 use crate::custom_analysis::analysis::AnalysisScripts;
 use crate::histoer::histogrammer::Histogrammer;
+use crate::histoer::ui_helpers::precise_drag_value;
 
 use crate::histogram_scripter::histogram_script::HistogramScript;
 use pyo3::ffi::c_str;
@@ -63,6 +64,8 @@ pub struct Processor {
     pub selected_files: Vec<(PathBuf, bool)>, // Vec preserves order
     #[serde(skip)]
     pub lazyframe: Option<LazyFrame>,
+    #[serde(skip)]
+    loaded_column_files: Vec<PathBuf>,
     #[serde(skip)]
     root_import_result: Arc<Mutex<Option<RootImportResult>>>,
     pub histogrammer: Histogrammer,
@@ -165,6 +168,7 @@ impl Processor {
                 ),
             selected_files: Vec::new(),
             lazyframe: None,
+            loaded_column_files: Vec::new(),
             root_import_result: Arc::new(Mutex::new(None)),
             histogrammer: Histogrammer::default(),
             histogram_script: HistogramScript::new(),
@@ -339,13 +343,47 @@ impl Processor {
         }
     }
 
+    fn histogram_progress_fraction(&self) -> f32 {
+        self.histogrammer
+            .progress
+            .lock()
+            .map(|progress| progress.clamp(0.0, 1.0))
+            .unwrap_or(0.0)
+    }
+
+    fn clear_loaded_column_names(&mut self) {
+        self.lazyframe = None;
+        self.loaded_column_files.clear();
+        self.settings.column_names.clear();
+    }
+
+    fn ensure_parquet_column_names_loaded(&mut self) {
+        let mut checked_parquet_files = self.checked_parquet_files();
+        checked_parquet_files.sort();
+
+        if checked_parquet_files.is_empty()
+            || !matches!(self.checked_file_format(), SelectedFileFormat::Parquet)
+        {
+            if !self.loaded_column_files.is_empty() || !self.settings.column_names.is_empty() {
+                self.clear_loaded_column_names();
+            }
+            return;
+        }
+
+        if self.settings.column_names.is_empty()
+            || self.loaded_column_files != checked_parquet_files
+        {
+            self.create_lazyframe(&checked_parquet_files);
+        }
+    }
+
     pub fn session_processor_menu_ui(&mut self, ui: &mut egui::Ui) {
         ui.label("Processor");
 
         ui.horizontal(|ui| {
             ui.label("Estimated Memory:");
             ui.add(
-                egui::DragValue::new(&mut self.settings.estimated_memory)
+                precise_drag_value(&mut self.settings.estimated_memory)
                     .range(0.1..=f64::INFINITY)
                     .speed(1)
                     .suffix(" GB"),
@@ -359,6 +397,35 @@ impl Processor {
             &mut self.settings.calculate_histograms_seperately,
             "Calculate/Get histograms separately",
         );
+
+        ui.separator();
+
+        let checked_parquet_files = self.checked_parquet_files();
+        let can_load_columns = matches!(self.checked_file_format(), SelectedFileFormat::Parquet)
+            && !checked_parquet_files.is_empty();
+        let load_columns_response =
+            ui.add_enabled(can_load_columns, egui::Button::new("Get Column Names"));
+        let load_columns_response = if can_load_columns {
+            load_columns_response.on_hover_text(
+                "Load the selected parquet schema so histogram, cut, and column builders can use the available column names.",
+            )
+        } else {
+            load_columns_response
+                .on_disabled_hover_text("Select one or more parquet files to load column names.")
+        };
+
+        if load_columns_response.clicked() {
+            self.create_lazyframe(&checked_parquet_files);
+        }
+
+        if self.settings.column_names.is_empty() {
+            ui.label("Columns: (none loaded)");
+        } else {
+            ui.label(format!(
+                "Columns loaded: {}",
+                self.settings.column_names.len()
+            ));
+        }
 
         ui.separator();
         ui.label("Analysis");
@@ -667,13 +734,15 @@ def get_2d_histograms(file_name):
     }
 
     fn create_lazyframe(&mut self, checked_files: &[PathBuf]) {
-        let parquet_files: Vec<PathBuf> = checked_files
+        let mut parquet_files: Vec<PathBuf> = checked_files
             .iter()
             .filter(|file| file.extension().is_some_and(|ext| ext == "parquet"))
             .cloned()
             .collect();
+        parquet_files.sort();
 
         if parquet_files.is_empty() {
+            self.clear_loaded_column_names();
             log::warn!("No selected Parquet files to process.");
             return;
         }
@@ -682,14 +751,15 @@ def get_2d_histograms(file_name):
         let args = ScanArgsParquet::default();
 
         let paths: Result<polars_buffer::Buffer<PlRefPath>, PolarsError> = parquet_files
-            .into_iter()
+            .iter()
+            .cloned()
             .map(PlRefPath::try_from_pathbuf)
             .collect();
 
         let paths = match paths {
             Ok(paths) => paths,
             Err(e) => {
-                self.lazyframe = None;
+                self.clear_loaded_column_names();
                 log::error!("Failed to convert parquet paths: {e}");
                 return;
             }
@@ -701,10 +771,11 @@ def get_2d_histograms(file_name):
                 let column_names = Self::get_column_names_from_lazyframe(&lf);
 
                 self.lazyframe = Some(lf);
+                self.loaded_column_files = parquet_files;
                 self.settings.column_names = column_names;
             }
             Err(e) => {
-                self.lazyframe = None;
+                self.clear_loaded_column_names();
                 log::error!("Failed to load selected Parquet files: {e}");
             }
         }
@@ -1102,20 +1173,6 @@ def get_2d_histograms(file_name):
                     self.settings.histogram_script_open = !self.settings.histogram_script_open;
                 }
 
-                if self.histogrammer.calculating.load(Ordering::Relaxed) {
-                    ui.separator();
-
-                    // Show spinner while `calculating` is true
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(self.histogram_progress_label());
-                        ui.add(egui::widgets::Spinner::default());
-                        ui.separator();
-                        if ui.button("Cancel").clicked() {
-                            self.histogrammer.abort_flag.store(true, Ordering::Relaxed);
-                        }
-                    });
-                }
-
                 ui.separator();
 
                 self.selected_files_ui(ui);
@@ -1358,32 +1415,6 @@ def get_2d_histograms(file_name):
                 ui.collapsing("Selected File Settings", |ui| {
                     let full_width = ui.available_width();
 
-                    // button to get the column names from the selected files
-                    if ui
-                        .add_sized([full_width, 0.0], egui::Button::new("Get Column Names"))
-                        .on_hover_text("Get the column names from the selected files")
-                        .clicked()
-                    {
-                        let checked_files: Vec<PathBuf> = self
-                            .selected_files
-                            .iter()
-                            .filter(|(_, checked)| *checked)
-                            .map(|(file, _)| file.clone())
-                            .collect();
-                        self.create_lazyframe(&checked_files);
-                    }
-
-                    if self.lazyframe.is_some() {
-                        ui.label(format!(
-                            "Columns: {}",
-                            self.settings.column_names.join(", ")
-                        ));
-                    } else {
-                        ui.label("Columns: (none loaded)");
-                    }
-
-                    ui.separator();
-
                     // Save Filtered Files controls + live status
                     let saving = self.settings.saving_in_progress.load(Ordering::Relaxed);
                     let active_filter_cut_count = self.active_filter_cut_count();
@@ -1479,8 +1510,34 @@ def get_2d_histograms(file_name):
         });
     }
 
+    fn histogram_progress_bottom_panel_ui(&self, ui: &mut egui::Ui) {
+        egui::Panel::bottom("spectrix_histogram_progress_panel")
+            .resizable(false)
+            .show_separator_line(true)
+            .show_inside(ui, |ui| {
+                let progress = self.histogram_progress_fraction();
+                ui.horizontal(|ui| {
+                    ui.label(self.histogram_progress_label());
+                    ui.add(egui::widgets::Spinner::default());
+                    ui.add(
+                        egui::widgets::ProgressBar::new(progress)
+                            .animate(true)
+                            .show_percentage()
+                            .desired_width((ui.available_width() - 90.0).max(120.0)),
+                    );
+                    if ui.button("Cancel").clicked() {
+                        self.histogrammer.abort_flag.store(true, Ordering::Relaxed);
+                    }
+                });
+            });
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.flush_root_import_result();
+        self.ensure_parquet_column_names_loaded();
+        if self.histogrammer.calculating.load(Ordering::Relaxed) {
+            self.histogram_progress_bottom_panel_ui(ui);
+        }
         self.left_side_panels_ui(ui);
         self.central_panel_ui(ui);
 

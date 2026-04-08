@@ -43,7 +43,7 @@ impl Default for FitSettings {
             fit_panel_popout: false,
             equal_stddev: true,
             free_position: true,
-            background_model: BackgroundModel::Linear(LinearParameters::default()),
+            background_model: BackgroundModel::None,
             linear_params: LinearParameters::default(),
             quadratic_params: QuadraticParameters::default(),
             power_law_params: PowerLawParameters::default(),

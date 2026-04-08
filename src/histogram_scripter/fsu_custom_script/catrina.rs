@@ -1,5 +1,6 @@
 use crate::histoer::configs::Configs;
 use crate::histoer::cuts::{Cut, Cuts};
+use crate::histoer::ui_helpers::precise_drag_value;
 
 use std::collections::BTreeSet;
 
@@ -106,7 +107,7 @@ impl CATRiNAConfig {
                     "Scan the loaded selected-file column names and add any missing CATRiNA detectors inferred from columns like CATRINA0Energy or CATRINA3PSD.",
                 )
                 .on_disabled_hover_text(
-                    "Load the selected file columns first with 'Get Column Names' in Selected File Settings.",
+                    "Load the selected file columns first with 'Get Column Names' in the Processor menu.",
                 );
 
             if discover_response.clicked() {
@@ -146,12 +147,12 @@ impl CATRiNAConfig {
         ui.horizontal(|ui| {
             ui.label("Energy");
             ui.add(
-                egui::DragValue::new(&mut self.energy_range.0)
+                precise_drag_value(&mut self.energy_range.0)
                     .speed(1.0)
                     .prefix("Range: ("),
             );
             ui.add(
-                egui::DragValue::new(&mut self.energy_range.1)
+                precise_drag_value(&mut self.energy_range.1)
                     .speed(1.0)
                     .suffix(")"),
             );
@@ -175,12 +176,12 @@ impl CATRiNAConfig {
         ui.horizontal(|ui| {
             ui.label("ToF");
             ui.add(
-                egui::DragValue::new(&mut self.tof_range.0)
+                precise_drag_value(&mut self.tof_range.0)
                     .speed(1.0)
                     .prefix("Range: ("),
             );
             ui.add(
-                egui::DragValue::new(&mut self.tof_range.1)
+                precise_drag_value(&mut self.tof_range.1)
                     .speed(1.0)
                     .suffix(")"),
             );
