@@ -2441,18 +2441,23 @@ fn add_computed_column(
 }
 
 pub fn get_column_names_from_lazyframe(lf: &LazyFrame) -> Result<Vec<String>, PolarsError> {
-    let lf = lf.clone().limit(1);
+    let mut lf = lf.clone();
 
-    // Attempt to collect the LazyFrame into a DataFrame
-    let df = lf.collect().map_err(|err| {
-        log::error!("Failed to collect LazyFrame: {err:?}");
+    // Use the logical schema instead of collecting rows from the source files.
+    let schema = lf.collect_schema().map_err(|err| {
+        log::error!("Failed to collect LazyFrame schema: {err:?}");
+        let err_text = err.to_string();
+        if err_text.contains("Operation timed out") || err_text.contains("os error 60") {
+            log::error!(
+                "This looks like a file availability issue outside Spectrix. One or more selected parquet files may still be cloud-only in OneDrive or another synced folder. Download them locally and mark them available offline, then retry."
+            );
+        }
         err
     })?;
 
     // Get column names
-    let columns: Vec<String> = df
-        .get_column_names_owned()
-        .into_iter()
+    let columns: Vec<String> = schema
+        .iter_names_cloned()
         .map(|name| name.to_string())
         .collect();
 

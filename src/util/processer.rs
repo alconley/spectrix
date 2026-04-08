@@ -11,7 +11,9 @@ use egui_file_dialog::{FileDialog, Filter};
 use polars::prelude::*;
 
 use std::cmp::Ordering as CmpOrdering;
-use std::path::PathBuf;
+use std::fs::File;
+use std::io::{Read as _, Seek as _, SeekFrom};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -222,6 +224,54 @@ impl Processor {
             .collect()
     }
 
+    fn parquet_unavailable_message(
+        file: &Path,
+        purpose: &str,
+        error: &dyn std::fmt::Display,
+    ) -> String {
+        format!(
+            "Spectrix could not {purpose} because '{}' is not readable locally: {error}. Spectrix reads parquet metadata from the file footer before loading data, so this is usually a cloud-sync issue rather than a Spectrix issue. If the file is in OneDrive, iCloud Drive, Dropbox, or another synced folder, make sure it is fully downloaded and marked available offline before retrying.",
+            file.display()
+        )
+    }
+
+    fn ensure_local_parquet_file_available(file: &Path, purpose: &str) -> Result<(), String> {
+        let metadata = std::fs::metadata(file)
+            .map_err(|error| Self::parquet_unavailable_message(file, purpose, &error))?;
+
+        if metadata.len() < 8 {
+            return Err(format!(
+                "Spectrix could not {purpose} because '{}' does not contain a readable parquet footer yet. This usually means the file is incomplete or not fully downloaded locally, rather than a Spectrix issue.",
+                file.display()
+            ));
+        }
+
+        let mut handle = File::open(file)
+            .map_err(|error| Self::parquet_unavailable_message(file, purpose, &error))?;
+
+        handle
+            .seek(SeekFrom::End(-8))
+            .map_err(|error| Self::parquet_unavailable_message(file, purpose, &error))?;
+
+        let mut footer = [0_u8; 8];
+        handle
+            .read_exact(&mut footer)
+            .map_err(|error| Self::parquet_unavailable_message(file, purpose, &error))?;
+
+        Ok(())
+    }
+
+    fn ensure_local_parquet_files_available(
+        files: &[PathBuf],
+        purpose: &str,
+    ) -> Result<(), String> {
+        for file in files {
+            Self::ensure_local_parquet_file_available(file, purpose)?;
+        }
+
+        Ok(())
+    }
+
     fn active_filter_cut_count(&self) -> usize {
         self.histogram_script
             .active_filter_cut_count(&self.histogrammer)
@@ -370,9 +420,7 @@ impl Processor {
             return;
         }
 
-        if self.settings.column_names.is_empty()
-            || self.loaded_column_files != checked_parquet_files
-        {
+        if self.loaded_column_files != checked_parquet_files {
             self.create_lazyframe(&checked_parquet_files);
         }
     }
@@ -733,7 +781,7 @@ def get_2d_histograms(file_name):
         }
     }
 
-    fn create_lazyframe(&mut self, checked_files: &[PathBuf]) {
+    fn create_lazyframe(&mut self, checked_files: &[PathBuf]) -> bool {
         let mut parquet_files: Vec<PathBuf> = checked_files
             .iter()
             .filter(|file| file.extension().is_some_and(|ext| ext == "parquet"))
@@ -744,10 +792,22 @@ def get_2d_histograms(file_name):
         if parquet_files.is_empty() {
             self.clear_loaded_column_names();
             log::warn!("No selected Parquet files to process.");
-            return;
+            return false;
         }
 
         log::info!("Processing Parquet files: {parquet_files:?}");
+        self.lazyframe = None;
+        self.loaded_column_files = parquet_files.clone();
+        self.settings.column_names.clear();
+
+        if let Err(message) = Self::ensure_local_parquet_files_available(
+            &parquet_files,
+            "access the selected parquet files",
+        ) {
+            log::error!("{message}");
+            return false;
+        }
+
         let args = ScanArgsParquet::default();
 
         let paths: Result<polars_buffer::Buffer<PlRefPath>, PolarsError> = parquet_files
@@ -759,9 +819,8 @@ def get_2d_histograms(file_name):
         let paths = match paths {
             Ok(paths) => paths,
             Err(e) => {
-                self.clear_loaded_column_names();
                 log::error!("Failed to convert parquet paths: {e}");
-                return;
+                return false;
             }
         };
 
@@ -771,12 +830,12 @@ def get_2d_histograms(file_name):
                 let column_names = Self::get_column_names_from_lazyframe(&lf);
 
                 self.lazyframe = Some(lf);
-                self.loaded_column_files = parquet_files;
                 self.settings.column_names = column_names;
+                true
             }
             Err(e) => {
-                self.clear_loaded_column_names();
                 log::error!("Failed to load selected Parquet files: {e}");
+                false
             }
         }
     }
@@ -855,6 +914,19 @@ def get_2d_histograms(file_name):
 
                 log::info!("Processing file: {file:?}");
                 log::info!("Saving filtered file as: {new_file_path:?}");
+
+                if let Err(message) = Self::ensure_local_parquet_file_available(
+                    &file,
+                    "save a filtered version of this parquet file",
+                ) {
+                    log::error!("{message}");
+
+                    if let Ok(mut p) = save_progress.lock() {
+                        *p = ((i + 1) as f32) / (total_files as f32);
+                    }
+
+                    continue;
+                }
 
                 // Load and collect one file at a time
                 match PlRefPath::try_from_pathbuf(file.clone()) {
@@ -956,6 +1028,15 @@ def get_2d_histograms(file_name):
             let total_files = parquet_files.len().max(1);
 
             std::thread::spawn(move || {
+                if let Err(message) = Self::ensure_local_parquet_files_available(
+                    &parquet_files,
+                    "combine the selected parquet files",
+                ) {
+                    log::error!("{message}");
+                    combining_flag.store(false, Ordering::Relaxed);
+                    return;
+                }
+
                 let input_paths: Result<polars_buffer::Buffer<PlRefPath>, PolarsError> =
                     parquet_files
                         .into_iter()
@@ -1032,16 +1113,15 @@ def get_2d_histograms(file_name):
     }
 
     fn get_column_names_from_lazyframe(lazyframe: &LazyFrame) -> Vec<String> {
-        let lf = lazyframe.clone().limit(1);
+        let mut lf = lazyframe.clone();
 
-        match lf.collect() {
-            Ok(df) => df
-                .get_column_names_owned()
-                .into_iter()
+        match lf.collect_schema() {
+            Ok(schema) => schema
+                .iter_names_cloned()
                 .map(|name| name.to_string())
                 .collect(),
             Err(e) => {
-                eprintln!("Error collecting DataFrame: {e:?}");
+                eprintln!("Error collecting LazyFrame schema: {e:?}");
                 Vec::new() // Return an empty vector on error
             }
         }
@@ -1087,8 +1167,9 @@ def get_2d_histograms(file_name):
                     .map(|stem| stem.to_string_lossy().to_string());
 
                 if file.extension().is_some_and(|ext| ext == "parquet") {
-                    self.create_lazyframe(std::slice::from_ref(file));
-                    self.perform_histogrammer_from_lazyframe(prefix);
+                    if self.create_lazyframe(std::slice::from_ref(file)) {
+                        self.perform_histogrammer_from_lazyframe(prefix);
+                    }
                 } else if file.extension().is_some_and(|ext| ext == "root") {
                     root_jobs.push((file.clone(), prefix));
                 }
@@ -1101,8 +1182,9 @@ def get_2d_histograms(file_name):
             .iter()
             .any(|file| file.extension().is_some_and(|ext| ext == "parquet"))
         {
-            self.create_lazyframe(&checked_files);
-            self.perform_histogrammer_from_lazyframe(None);
+            if self.create_lazyframe(&checked_files) {
+                self.perform_histogrammer_from_lazyframe(None);
+            }
         } else if checked_files
             .iter()
             .any(|file| file.extension().is_some_and(|ext| ext == "root"))

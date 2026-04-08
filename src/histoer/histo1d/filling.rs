@@ -4,6 +4,10 @@ use std::time::Instant;
 
 impl Histogram {
     pub fn fill(&mut self, value: f64) {
+        if value.is_nan() {
+            return;
+        }
+
         if value >= self.range.0 && value < self.range.1 {
             let index = ((value - self.range.0) / self.bin_width) as usize;
             if index < self.bins.len() {
@@ -29,6 +33,9 @@ impl Histogram {
         let bin_width = self.bin_width;
 
         let raw_bin = ((col(column) - lit(min_val)) / lit(bin_width)).cast(DataType::Int32);
+        let valid_values = col(column)
+            .neq(lit(invalid_value))
+            .and(col(column).is_not_nan());
 
         let bin_index = when(col(column).lt(lit(min_val)))
             .then(lit(-2))
@@ -38,7 +45,7 @@ impl Histogram {
             .alias("bin_index");
 
         let df = lf
-            .filter(col(column).neq(lit(invalid_value)))
+            .filter(valid_values)
             .with_columns([bin_index])
             .group_by([col("bin_index")])
             .agg([col("bin_index").count().alias("count")])

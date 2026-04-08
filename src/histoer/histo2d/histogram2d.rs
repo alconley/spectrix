@@ -63,6 +63,10 @@ impl Histogram2D {
     }
 
     pub fn fill(&mut self, x_value: f64, y_value: f64) {
+        if x_value.is_nan() || y_value.is_nan() {
+            return;
+        }
+
         if x_value < self.range.x.min {
             self.underflow += 1; // Increment x-axis underflow
         } else if x_value >= self.range.x.max {
@@ -97,6 +101,11 @@ impl Histogram2D {
 
         let raw_x = ((col(x_column) - lit(x_min)) / lit(x_width)).cast(DataType::Int32);
         let raw_y = ((col(y_column) - lit(y_min)) / lit(y_width)).cast(DataType::Int32);
+        let valid_values = col(x_column)
+            .neq(lit(invalid_value))
+            .and(col(x_column).is_not_nan())
+            .and(col(y_column).neq(lit(invalid_value)))
+            .and(col(y_column).is_not_nan());
 
         let x_bin = when(col(x_column).lt(lit(x_min)))
             .then(lit(-2))
@@ -113,11 +122,7 @@ impl Histogram2D {
             .alias("y_bin");
 
         let df = lf
-            .filter(
-                col(x_column)
-                    .neq(lit(invalid_value))
-                    .and(col(y_column).neq(lit(invalid_value))),
-            )
+            .filter(valid_values)
             .with_columns([x_bin, y_bin])
             .group_by([col("x_bin"), col("y_bin")])
             .agg([col("x_bin").count().alias("count")])
