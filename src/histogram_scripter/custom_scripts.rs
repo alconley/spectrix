@@ -69,7 +69,7 @@ impl CustomConfigs {
 
         // ui.separator();
 
-        self.cuts.ui(ui, active_cuts, "custom");
+        self.cuts.ui(ui, active_cuts, column_names, "custom");
 
         ui.separator();
 

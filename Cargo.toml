@@ -1,6 +1,6 @@
 [package]
 name = "spectrix"
-version = "1.0.0"
+version = "1.1.0"
 authors = ["Alex Conley <imaconley1@gmail.com>"]
 edition = "2024"
 rust-version = "1.94"
@@ -40,7 +40,7 @@ fnv = "1.0.7"
 nalgebra = "0.34.2"
 compute = "0.2.3"
 find_peaks = "0.1.5"
-pyo3 = { version = "0.28.2", features = ["auto-initialize"] }
+pyo3 = { version = "0.28.3", features = ["auto-initialize"] }
 regex = "1.12.3"
 indicatif = "0.18.4"
 polars-arrow = "0.53.0"

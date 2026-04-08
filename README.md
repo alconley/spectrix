@@ -154,9 +154,9 @@ After 1D ROOT histograms are loaded, their axes are reset automatically so the p
 
 Parquet is the **preferred format** for analysis, since Spectrix can build histograms directly from raw columns using the Histogram Script system.
 
-If you are unsure of available columns, open **Selected File Settings** and click **Get Column Names**.
+When one or more `.parquet` files are selected, Spectrix loads the column names automatically when needed so the searchable pickers in the Histogram Script stay populated.
 
-Spectrix will list columns from the selected parquet files.
+You can also refresh them manually with **Get Column Names** in the **Processor** menu.
 
 In the same section, you can:
 - Save filtered versions of your `.parquet` files.
@@ -179,6 +179,7 @@ Large combines can still take time and produce large output files, so reducing f
 The **Histogram Script** panel can be opened or closed using the **“Histograms”** button under the **“Get Files”** button.
 
 This tool allows you to:
+- Define reusable numeric **variables**.
 - Define new analysis columns from existing parquet columns.
 - Define and manage **1D and 2D cuts**.
 - Define **1D and 2D histograms** (name, columns, bins, range, and applied cuts).
@@ -186,11 +187,12 @@ This tool allows you to:
 
 ### Typical Workflow
 
-1. Load one or more parquet files and inspect available column names.
-2. Create any derived columns you need (for example timing differences or calibrated values).
-3. Define cuts (1D expressions and/or 2D graphical cuts).
-4. Create histogram definitions and attach active cuts.
-5. Save the configuration to JSON so the same analysis can be reused.
+1. Load one or more parquet files and make sure the column names are available.
+2. Add reusable variables if you want named constants such as calibration coefficients.
+3. Create any derived columns you need with the computed-column builder.
+4. Define cuts with the 1D cut builder and/or 2D graphical cuts.
+5. Create histogram definitions and attach active cuts.
+6. Save the configuration to JSON so the same analysis can be reused.
 
 ---
 
@@ -212,19 +214,74 @@ The following subsections assume you are in the **“General”** section of the
 
 ### Column Creation
 
-You can create derived columns such as time differences, sums, averages, or calibrated variants of existing columns.
+You can create derived columns such as time differences, sums, averages, calibrated values, or polynomial-style transforms.
 
 Derived columns can then be used exactly like native columns in cuts and histogram definitions.
 
-> ⚠️ **Tip:**  
-> Define column aliases (names) without spaces.  
-> This is required for correct parsing in string-based 1D cut expressions.
+The computed-column UI now uses a dedicated **Builder** panel:
+
+- The table row shows the column alias, a **Builder** button, the term count, and a one-line expression summary.
+- The builder opens below the table and edits one computed column at a time.
+- Aliases are sanitized automatically so they only contain letters, numbers, and underscores.
+- Column and variable selection uses searchable combo boxes.
+- Each term can be:
+  - `Column` or `Constant`
+  - added or subtracted from the expression
+  - multiplied by a coefficient that is a `Value`, `Variable`, or another `Column`
+  - raised to a power, including fractional powers such as `0.5`
+
+### Variables
+
+The **Variables** section lets you define reusable named constants such as `a`, `m`, and `c`.
+
+- Variable names follow the same identifier rules as column aliases: letters, numbers, and underscores only.
+- Variable names cannot safely overlap with real or computed column names.
+- Variables can be reused in any computed-column term where the coefficient type is set to **Variable**.
+
+Example:
+
+- `a = 2.5`
+- `m = -1.2`
+- `c = 15.0`
+
+You can then reuse those values in multiple computed columns without retyping them each time.
+
+### Computed Column Examples
+
+**Average of two focal-plane channels**
+
+1. Add a new column and set the alias to `Xavg_manual`.
+2. Open **Builder**.
+3. Add two terms:
+   - first term: `Column`, coefficient `Value = 0.5`, source column `X1`, power `1`
+   - second term: `+ Column`, coefficient `Value = 0.5`, source column `X2`, power `1`
+
+This produces:
+
+```text
+(0.5 * X1) + (0.5 * X2)
+```
+
+**Square-root calibration using variables**
+
+1. Define variables `a = 3.0` and `c = -12.0`.
+2. Add a new column and set the alias to `Xsqrt_cal`.
+3. Open **Builder**.
+4. Add two terms:
+   - first term: `Column`, coefficient `Variable = a`, source column `Xavg`, power `0.5`
+   - second term: `+ Constant`, coefficient `Variable = c`
+
+This produces:
+
+```text
+(a * Xavg ** 0.5) + (c)
+```
 
 ### Cuts
 
 You can define:
 
-- **1D cuts** by providing a cut name and a logical expression, or by loading saved 1D cut JSON files with **`+1D Load`**.
+- **1D cuts** with the builder UI, or by loading saved 1D cut JSON files with **`+1D Load`**.
 - **2D cuts** as graphical polygons in the 2D histogram view.
 
 For cut management in the Histogram Script UI, you can:
@@ -235,19 +292,64 @@ For cut management in the Histogram Script UI, you can:
 - Add a cut folder to load multiple cut files.
 - Use **Active Histogram Cuts** created interactively in 1D or 2D plots, even before saving them to disk.
 
-For expression-based 1D cuts, use valid column names and logical operators such as `&` to combine conditions.
+The **1D cut** UI is builder-first:
 
-Common operators in 1D cut expressions include:
+- Click **Builder** in the cut row to open the dedicated editor below the table.
+- Each **Expression** is one parenthesized group.
+- Conditions inside the same expression are combined with **AND**.
+- Separate expressions are combined with **OR**.
+- Each condition uses:
+  - a searchable column picker
+  - an operator picker
+  - a numeric value field
+- Use **Add Condition** to add another AND clause to the current expression.
+- Use **Add OR Expression** to start a new OR group.
 
-- `&` for AND
-- `|` for OR
-- `==`, `!=`, `>`, `>=`, `<`, `<=` for comparisons
+Supported comparison operators in the builder are:
 
-Example:
+- `>`
+- `>=`
+- `<`
+- `<=`
+- `==`
+- `!=`
 
-- `(Column1Energy > 400) & (Column1Energy < 1200) & (Column2Time != -1e6)`
+Spectrix automatically generates the underlying logical expression string from the builder, so the user does not need to type it manually.
 
-If a 1D cut parses as a simple range, its **Info** menu shows the extracted column name and the `>=` / `<=` bounds.
+### 1D Cut Examples
+
+**Single range gate**
+
+1. Add a 1D cut with **`+1D Manual`**.
+2. Name it `Column1Window`.
+3. Open **Builder**.
+4. In `Expression 1`, add:
+   - condition 1: column `Column1`, operator `>=`, value `-100`
+   - condition 2: column `Column1`, operator `<=`, value `100`
+
+This produces:
+
+```text
+((Column1 >= -100) & (Column1 <= 100))
+```
+
+**Two alternative gates joined with OR**
+
+1. Add a 1D cut and name it `GoodColumns`.
+2. Open **Builder**.
+3. In `Expression 1`, add:
+   - condition 1: column `Column1`, operator `>=`, value `0`
+   - condition 2: column `Column1`, operator `<=`, value `4096`
+4. Click **Add OR Expression**.
+5. In `Expression 2`, add:
+   - condition 1: column `Column2`, operator `>=`, value `0`
+   - condition 2: column `Column2`, operator `<=`, value `4096`
+
+This produces:
+
+```text
+((Column1 >= 0) & (Column1 <= 4096)) | ((Column2 >= 0) & (Column2 <= 4096))
+```
 
 Cuts that were loaded from disk or explicitly saved to disk remember their save path. If you later edit the cut name or cut values inside Spectrix, the cut is automatically re-saved back to that same file.
 
@@ -259,8 +361,7 @@ Enter the histogram name and select the input column(s), bin count, and axis ran
 
 Using slashes (`/`) in histogram names automatically groups plots into nested containers.
 
-The **“Column(s)”** field must exactly match a column name from the `.parquet` file or a previously created alias.  
-Then specify range, binning, and which active cuts should be applied.
+The **“Column(s)”** field now uses searchable pickers, so histogram source columns can be chosen directly from the loaded parquet columns or previously created aliases. Then specify range, binning, and which active cuts should be applied.
 
 If a cut is defined but not enabled, it will not affect that histogram.
 

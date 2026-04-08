@@ -2,12 +2,15 @@ use geo::Contains as _;
 use regex::Regex;
 use std::fs::File;
 use std::io::{BufReader, Write as _};
-use std::ops::BitAnd as _;
+use std::ops::{BitAnd as _, BitOr as _};
 use std::path::{Path, PathBuf};
 
 use polars::prelude::*;
 
 use crate::egui_plot_stuff::egui_polygon::EguiPolygon;
+use crate::histoer::ui_helpers::{
+    SearchableColumnPickerSize, precise_drag_value, searchable_column_picker_with_width_ui,
+};
 use egui_extras::{Column, TableBuilder};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -38,10 +41,25 @@ impl Cut {
         }
     }
 
-    pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>) {
+    pub fn table_row(
+        &mut self,
+        row: &mut egui_extras::TableRow<'_, '_>,
+        row_index: usize,
+        is_selected: bool,
+    ) -> bool {
         match self {
-            Self::Cut1D(cut1d) => cut1d.table_row(row),
-            Self::Cut2D(cut2d) => cut2d.table_row(row),
+            Self::Cut1D(cut1d) => cut1d.table_row(row, row_index, is_selected),
+            Self::Cut2D(cut2d) => {
+                cut2d.table_row(row);
+                false
+            }
+        }
+    }
+
+    pub fn table_row_height(&self) -> f32 {
+        match self {
+            Self::Cut1D(_) => Cut1D::table_row_height(),
+            Self::Cut2D(_) => 28.0,
         }
     }
 
@@ -83,6 +101,8 @@ impl Cut {
 pub struct Cuts {
     pub cuts: Vec<Cut>,
     pub cut_folder: Option<PathBuf>,
+    #[serde(skip)]
+    pub selected_cut_index: Option<usize>,
 }
 
 impl Cuts {
@@ -166,6 +186,7 @@ impl Cuts {
         Self {
             cuts,
             cut_folder: None,
+            selected_cut_index: None,
         }
     }
 
@@ -215,7 +236,7 @@ impl Cuts {
                     let cut1d: Result<Cut1D, _> = serde_json::from_str(&content);
                     if let Ok(mut cut) = cut1d {
                         cut.active = false; // Set active to false by default
-                        cut.parse_conditions();
+                        cut.normalize_after_load();
                         cut.saved_path = Some(path.clone());
                         cuts.push(Cut::Cut1D(cut));
                         continue;
@@ -276,19 +297,22 @@ impl Cuts {
         &mut self,
         ui: &mut egui::Ui,
         active_cuts: Option<&mut [ActiveHistogramCut]>,
+        available_columns: &[String],
         id_suffix: &str,
     ) {
         ui.horizontal_wrapped(|ui| {
             ui.label("Cuts");
 
             if ui.button("+1D Manual").clicked() {
-                self.cuts.push(Cut::Cut1D(Cut1D::new("", "")));
+                self.cuts.push(Cut::Cut1D(Cut1D::builder_default()));
+                self.selected_cut_index = Some(self.cuts.len() - 1);
             }
 
             if ui.button("+1D Load").clicked() {
                 let mut new_cut1d = Cut1D::default();
                 if new_cut1d.load_cut_from_json().is_ok() {
                     self.cuts.push(Cut::Cut1D(new_cut1d));
+                    self.selected_cut_index = Some(self.cuts.len() - 1);
                 } else {
                     log::error!("Failed to load 1D cut from file.");
                 }
@@ -355,6 +379,13 @@ impl Cuts {
             ui.separator();
         }
 
+        if self
+            .selected_cut_index
+            .is_some_and(|index| index >= self.cuts.len())
+        {
+            self.selected_cut_index = None;
+        }
+
         if !self.cuts.is_empty() {
             let mut indices_to_remove_cut = Vec::new();
 
@@ -372,6 +403,13 @@ impl Cuts {
             // Render 1D Cuts Table
             if !cuts_1d.is_empty() {
                 ui.label("1D Cuts");
+                if self.selected_cut_index.is_none() {
+                    ui.label(
+                        egui::RichText::new("Click Builder on a 1D cut to edit its clauses.")
+                            .weak()
+                            .small(),
+                    );
+                }
                 TableBuilder::new(ui)
                     .id_salt("cuts_1d_table")
                     .column(Column::auto()) // Name
@@ -400,11 +438,18 @@ impl Cuts {
                     })
                     .body(|mut body| {
                         for (index, cut1d) in cuts_1d {
-                            body.row(18.0, |mut row| {
-                                cut1d.table_row(&mut row);
+                            let row_height = Cut1D::table_row_height();
+                            body.row(row_height, |mut row| {
+                                let is_selected = self.selected_cut_index == Some(index);
+                                let builder_clicked = cut1d.table_row(&mut row, index, is_selected);
 
                                 row.col(|ui| {
-                                    if ui.button("X").clicked() {
+                                    if builder_clicked {
+                                        self.selected_cut_index =
+                                            if is_selected { None } else { Some(index) };
+                                    }
+
+                                    if ui.small_button("X").clicked() {
                                         indices_to_remove_cut.push(index);
                                     }
                                 });
@@ -436,8 +481,8 @@ impl Cuts {
                     })
                     .body(|mut body| {
                         for (index, cut2d) in cuts_2d {
-                            body.row(18.0, |mut row| {
-                                cut2d.table_row(&mut row);
+                            body.row(28.0, |mut row| {
+                                cut2d.table_row(&mut row, index, false);
                                 row.col(|ui| {
                                     if ui.button("X").clicked() {
                                         indices_to_remove_cut.push(index);
@@ -450,7 +495,47 @@ impl Cuts {
 
             for &index in indices_to_remove_cut.iter().rev() {
                 self.cuts.remove(index);
+                match self.selected_cut_index {
+                    Some(selected) if selected == index => self.selected_cut_index = None,
+                    Some(selected) if selected > index => {
+                        self.selected_cut_index = Some(selected - 1);
+                    }
+                    _ => {}
+                }
             }
+        }
+
+        if let Some(selected_index) = self.selected_cut_index
+            && let Some(Cut::Cut1D(cut1d)) = self.cuts.get_mut(selected_index)
+        {
+            ui.separator();
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "1D Cut Builder: {}",
+                            if cut1d.name.trim().is_empty() {
+                                "Unnamed Cut"
+                            } else {
+                                cut1d.name.trim()
+                            }
+                        ))
+                        .strong(),
+                    );
+                    if ui.small_button("Close").clicked() {
+                        self.selected_cut_index = None;
+                    }
+                });
+                ui.label(
+                    egui::RichText::new(
+                        "Build clauses here. The expression preview updates automatically.",
+                    )
+                    .weak()
+                    .small(),
+                );
+                ui.separator();
+                cut1d.builder_editor_ui(ui, available_columns, selected_index);
+            });
         }
 
         if let Some(active_cuts) = active_cuts {
@@ -912,7 +997,7 @@ impl Cut2D {
 
 #[cfg(test)]
 mod tests {
-    use super::Cut2D;
+    use super::{Cut1D, Cut2D};
 
     #[test]
     fn loading_cut_disables_interactive_vertex_adding() {
@@ -922,6 +1007,40 @@ mod tests {
         cut.normalize_after_load();
 
         assert!(!cut.polygon.interactive_clicking);
+    }
+
+    #[test]
+    fn parse_conditions_accepts_legacy_parenthesized_literals() {
+        let mut cut = Cut1D::new("Legacy", "(X1 >= (50.749586467606804)) & (X1 <= 100)");
+
+        cut.parse_conditions();
+
+        let parsed_groups = cut
+            .parsed_groups
+            .as_ref()
+            .expect("legacy expression should parse");
+        assert_eq!(parsed_groups.len(), 1);
+        assert_eq!(parsed_groups[0].conditions.len(), 2);
+        assert_eq!(parsed_groups[0].conditions[0].column_name, "X1");
+        assert_eq!(parsed_groups[0].conditions[0].operator, ">=");
+        assert!((parsed_groups[0].conditions[0].literal_value - 50.749586467606804).abs() < 1e-12);
+        assert_eq!(parsed_groups[0].conditions[1].column_name, "X1");
+        assert_eq!(parsed_groups[0].conditions[1].operator, "<=");
+        assert!((parsed_groups[0].conditions[1].literal_value - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parse_conditions_accepts_builder_style_grouped_ranges() {
+        let mut cut = Cut1D::new("Grouped", "((X1 >= 50) & (X1 <= 100))");
+
+        cut.parse_conditions();
+
+        let parsed_groups = cut
+            .parsed_groups
+            .as_ref()
+            .expect("grouped expression should parse");
+        assert_eq!(parsed_groups.len(), 1);
+        assert_eq!(parsed_groups[0].conditions.len(), 2);
     }
 }
 
@@ -933,13 +1052,87 @@ pub struct ParsedCondition {
     pub literal_value: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedConditionGroup {
+    pub conditions: Vec<ParsedCondition>,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub enum Cut1DEditMode {
+    #[default]
+    Builder,
+    Advanced,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub enum Cut1DOperator {
+    #[default]
+    GreaterThan,
+    GreaterThanOrEqual,
+    LessThan,
+    LessThanOrEqual,
+    Equal,
+    NotEqual,
+}
+
+impl Cut1DOperator {
+    fn symbol(self) -> &'static str {
+        match self {
+            Self::GreaterThan => ">",
+            Self::GreaterThanOrEqual => ">=",
+            Self::LessThan => "<",
+            Self::LessThanOrEqual => "<=",
+            Self::Equal => "==",
+            Self::NotEqual => "!=",
+        }
+    }
+
+    fn from_symbol(symbol: &str) -> Option<Self> {
+        match symbol {
+            ">" => Some(Self::GreaterThan),
+            ">=" => Some(Self::GreaterThanOrEqual),
+            "<" => Some(Self::LessThan),
+            "<=" => Some(Self::LessThanOrEqual),
+            "==" => Some(Self::Equal),
+            "!=" => Some(Self::NotEqual),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct Cut1DBuilderCondition {
+    pub column_name: String,
+    pub operator: Cut1DOperator,
+    pub literal_value: f64,
+}
+
+impl Default for Cut1DBuilderCondition {
+    fn default() -> Self {
+        Self {
+            column_name: String::new(),
+            operator: Cut1DOperator::GreaterThanOrEqual,
+            literal_value: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default)]
+pub struct Cut1DBuilderGroup {
+    pub conditions: Vec<Cut1DBuilderCondition>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct Cut1D {
     pub name: String,
     pub expression: String, // Logical expression to evaluate, e.g., "X1 != -1e6 & X2 == -1e6"
     pub active: bool,
+    #[serde(default)]
+    pub edit_mode: Cut1DEditMode,
+    #[serde(default)]
+    pub builder_groups: Vec<Cut1DBuilderGroup>,
     #[serde(skip)] // Skip during serialization
-    pub parsed_conditions: Option<Vec<ParsedCondition>>, // Cache parsed conditions
+    pub parsed_groups: Option<Vec<ParsedConditionGroup>>, // Cache parsed conditions
     #[serde(skip)]
     pub saved_path: Option<PathBuf>,
 }
@@ -958,9 +1151,23 @@ impl Cut1D {
             name: name.to_owned(),
             expression: expression.to_owned(),
             active: true,
-            parsed_conditions: None,
+            edit_mode: Cut1DEditMode::Builder,
+            builder_groups: vec![Cut1DBuilderGroup {
+                conditions: vec![Cut1DBuilderCondition::default()],
+            }],
+            parsed_groups: None,
             saved_path: None,
         }
+    }
+
+    pub fn builder_default() -> Self {
+        Self::new("", "")
+    }
+
+    fn normalize_after_load(&mut self) {
+        self.edit_mode = Cut1DEditMode::Builder;
+        self.parse_conditions();
+        self.ensure_builder_groups();
     }
 
     fn format_value(value: f64) -> String {
@@ -992,16 +1199,25 @@ impl Cut1D {
     }
 
     fn range_editor_fields(&self) -> (String, String, String) {
-        let Some(conditions) = &self.parsed_conditions else {
+        let Some(groups) = &self.parsed_groups else {
             return (String::new(), String::new(), String::new());
         };
 
-        let Some(first_condition) = conditions.first() else {
+        if groups.len() != 1 {
+            return (String::new(), String::new(), String::new());
+        }
+
+        let Some(first_group) = groups.first() else {
+            return (String::new(), String::new(), String::new());
+        };
+
+        let Some(first_condition) = first_group.conditions.first() else {
             return (String::new(), String::new(), String::new());
         };
 
         let column_name = first_condition.column_name.clone();
-        if !conditions
+        if !first_group
+            .conditions
             .iter()
             .all(|condition| condition.column_name == column_name)
         {
@@ -1011,7 +1227,7 @@ impl Cut1D {
         let mut lower_bound: Option<f64> = None;
         let mut upper_bound: Option<f64> = None;
 
-        for condition in conditions {
+        for condition in &first_group.conditions {
             match condition.operator.as_str() {
                 ">" | ">=" => {
                     lower_bound = Some(lower_bound.map_or(condition.literal_value, |current| {
@@ -1034,8 +1250,238 @@ impl Cut1D {
         )
     }
 
-    pub fn table_row(&mut self, row: &mut egui_extras::TableRow<'_, '_>) {
+    fn table_row_height() -> f32 {
+        44.0
+    }
+
+    fn ensure_builder_groups(&mut self) {
+        if self
+            .builder_groups
+            .iter()
+            .any(|group| !group.conditions.is_empty())
+        {
+            return;
+        }
+
+        if !self.expression.trim().is_empty() {
+            if self.parsed_groups.is_none() {
+                self.parse_conditions();
+            }
+            if self
+                .builder_groups
+                .iter()
+                .any(|group| !group.conditions.is_empty())
+            {
+                return;
+            }
+        }
+
+        self.builder_groups.push(Cut1DBuilderGroup {
+            conditions: vec![Cut1DBuilderCondition::default()],
+        });
+    }
+
+    fn sync_expression_from_builder(&mut self) {
+        let parsed_groups = self
+            .builder_groups
+            .iter()
+            .filter_map(|group| {
+                let conditions = group
+                    .conditions
+                    .iter()
+                    .filter(|condition| !condition.column_name.trim().is_empty())
+                    .map(|condition| ParsedCondition {
+                        column_name: condition.column_name.trim().to_owned(),
+                        operator: condition.operator.symbol().to_owned(),
+                        literal_value: condition.literal_value,
+                    })
+                    .collect::<Vec<_>>();
+
+                if conditions.is_empty() {
+                    None
+                } else {
+                    Some(ParsedConditionGroup { conditions })
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let expression = parsed_groups
+            .iter()
+            .map(|group| {
+                let group_expression = group
+                    .conditions
+                    .iter()
+                    .map(|condition| {
+                        format!(
+                            "({} {} {})",
+                            condition.column_name,
+                            condition.operator,
+                            Self::format_value(condition.literal_value)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" & ");
+                format!("({group_expression})")
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+
+        self.expression = expression;
+        if parsed_groups.is_empty() {
+            self.parsed_groups = None;
+        } else {
+            self.parsed_groups = Some(parsed_groups);
+        }
+    }
+
+    fn builder_editor_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        available_columns: &[String],
+        row_index: usize,
+    ) {
+        self.ensure_builder_groups();
+
+        let mut changed = false;
+        let mut group_indices_to_remove = Vec::new();
+        let total_group_count = self.builder_groups.len();
+        let total_condition_count = self
+            .builder_groups
+            .iter()
+            .map(|group| group.conditions.len())
+            .sum::<usize>();
+
+        ui.label(format!(
+            "Expressions: {total_group_count}  Conditions: {total_condition_count}"
+        ));
+        ui.separator();
+
+        for (group_index, group) in self.builder_groups.iter_mut().enumerate() {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("Expression {}", group_index + 1)).strong(),
+                    );
+                    ui.label(
+                        egui::RichText::new("(conditions inside here use AND)")
+                            .weak()
+                            .small(),
+                    );
+                    if total_group_count > 1 && ui.small_button("Remove Expression").clicked() {
+                        group_indices_to_remove.push(group_index);
+                    }
+                });
+
+                let mut condition_indices_to_remove = Vec::new();
+
+                for (condition_index, condition) in group.conditions.iter_mut().enumerate() {
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Condition {}", condition_index + 1));
+                        if ui.small_button("Remove").clicked() {
+                            condition_indices_to_remove.push(condition_index);
+                        }
+                    });
+
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Column");
+                        changed |= searchable_column_picker_with_width_ui(
+                            ui,
+                            format!(
+                                "cut1d_builder_column_{row_index}_{group_index}_{condition_index}"
+                            ),
+                            &mut condition.column_name,
+                            available_columns,
+                            "Select column",
+                            true,
+                            SearchableColumnPickerSize {
+                                closed_width: 220.0,
+                                open_width: 420.0,
+                            },
+                        );
+
+                        ui.label("Operator");
+                        egui::ComboBox::from_id_salt(format!(
+                            "cut1d_builder_operator_{row_index}_{group_index}_{condition_index}"
+                        ))
+                        .selected_text(condition.operator.symbol())
+                        .show_ui(ui, |ui| {
+                            for operator in [
+                                Cut1DOperator::GreaterThan,
+                                Cut1DOperator::GreaterThanOrEqual,
+                                Cut1DOperator::LessThan,
+                                Cut1DOperator::LessThanOrEqual,
+                                Cut1DOperator::Equal,
+                                Cut1DOperator::NotEqual,
+                            ] {
+                                changed |= ui
+                                    .selectable_value(
+                                        &mut condition.operator,
+                                        operator,
+                                        operator.symbol(),
+                                    )
+                                    .changed();
+                            }
+                        });
+
+                        ui.label("Value");
+                        changed |= ui
+                            .add(precise_drag_value(&mut condition.literal_value).speed(0.1))
+                            .changed();
+                    });
+                }
+
+                for &index in condition_indices_to_remove.iter().rev() {
+                    group.conditions.remove(index);
+                    changed = true;
+                }
+
+                if group.conditions.is_empty() {
+                    group.conditions.push(Cut1DBuilderCondition::default());
+                }
+
+                if ui.button("Add Condition").clicked() {
+                    group.conditions.push(Cut1DBuilderCondition::default());
+                    changed = true;
+                    ui.ctx().request_repaint();
+                }
+            });
+
+            if group_index + 1 < total_group_count {
+                ui.label(egui::RichText::new("OR").strong());
+            }
+        }
+
+        for &index in group_indices_to_remove.iter().rev() {
+            self.builder_groups.remove(index);
+            changed = true;
+        }
+
+        ui.horizontal(|ui| {
+            if ui.button("Add OR Expression").clicked() {
+                self.builder_groups.push(Cut1DBuilderGroup {
+                    conditions: vec![Cut1DBuilderCondition::default()],
+                });
+                changed = true;
+                ui.ctx().request_repaint();
+            }
+
+            ui.label("Expressions are combined with OR.");
+        });
+
+        if changed {
+            self.sync_expression_from_builder();
+        }
+    }
+
+    pub fn table_row(
+        &mut self,
+        row: &mut egui_extras::TableRow<'_, '_>,
+        _row_index: usize,
+        is_selected: bool,
+    ) -> bool {
         let previous = self.clone();
+        let mut builder_clicked = false;
 
         row.col(|ui| {
             ui.add(
@@ -1045,16 +1491,47 @@ impl Cut1D {
             );
         });
         row.col(|ui| {
-            if ui
-                .add(
-                    egui::TextEdit::singleline(&mut self.expression)
-                        .hint_text("Expression")
-                        .clip_text(false),
-                )
-                .changed()
-            {
-                self.parse_conditions();
-            }
+            ui.vertical(|ui| {
+                self.edit_mode = Cut1DEditMode::Builder;
+                let condition_count = self
+                    .builder_groups
+                    .iter()
+                    .map(|group| {
+                        group
+                            .conditions
+                            .iter()
+                            .filter(|condition| !condition.column_name.trim().is_empty())
+                            .count()
+                    })
+                    .sum::<usize>();
+                let expression_count = self
+                    .builder_groups
+                    .iter()
+                    .filter(|group| {
+                        group
+                            .conditions
+                            .iter()
+                            .any(|condition| !condition.column_name.trim().is_empty())
+                    })
+                    .count();
+
+                ui.horizontal(|ui| {
+                    if ui
+                        .small_button(if is_selected {
+                            "Hide Builder"
+                        } else {
+                            "Builder"
+                        })
+                        .clicked()
+                    {
+                        builder_clicked = true;
+                    }
+
+                    ui.label(format!(
+                        "{condition_count} condition(s) in {expression_count} expression(s)"
+                    ));
+                });
+            });
         });
         row.col(|ui| {
             ui.add(egui::Checkbox::new(&mut self.active, ""));
@@ -1066,26 +1543,19 @@ impl Cut1D {
         if self.name != previous.name || self.expression != previous.expression {
             self.autosave_to_saved_path();
         }
+
+        builder_clicked
     }
 
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
         let previous = self.clone();
+        self.edit_mode = Cut1DEditMode::Builder;
         ui.add(
             egui::TextEdit::singleline(&mut self.name)
                 .hint_text("Name")
                 .clip_text(false),
         );
-
-        if ui
-            .add(
-                egui::TextEdit::singleline(&mut self.expression)
-                    .hint_text("Expression")
-                    .clip_text(false),
-            )
-            .changed()
-        {
-            self.parse_conditions();
-        }
+        ui.label("Use the 1D cut builder to edit conditions.");
 
         if self.name != previous.name || self.expression != previous.expression {
             self.autosave_to_saved_path();
@@ -1172,7 +1642,7 @@ impl Cut1D {
             let file = File::open(&file_path)?;
             let reader = BufReader::new(file);
             let mut cut: Self = serde_json::from_reader(reader)?;
-            cut.parse_conditions();
+            cut.normalize_after_load();
             cut.saved_path = Some(file_path);
             *self = cut;
         }
@@ -1229,70 +1699,225 @@ impl Cut1D {
     }
 
     pub fn required_columns(&self) -> Vec<String> {
-        self.parsed_conditions
-            .as_ref()
-            .map_or(vec![], |conditions| {
-                conditions
-                    .iter()
-                    .map(|cond| cond.column_name.clone())
-                    .collect()
-            })
+        self.parsed_groups.as_ref().map_or(vec![], |groups| {
+            groups
+                .iter()
+                .flat_map(|group| group.conditions.iter())
+                .map(|cond| cond.column_name.clone())
+                .collect()
+        })
+    }
+
+    fn trim_wrapping_parentheses(expression: &str) -> String {
+        let mut trimmed = expression.trim().to_owned();
+
+        loop {
+            if !trimmed.starts_with('(') || !trimmed.ends_with(')') {
+                break;
+            }
+
+            let mut depth = 0usize;
+            let mut wraps_entire_expression = true;
+
+            for (index, character) in trimmed.char_indices() {
+                match character {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 && index + character.len_utf8() < trimmed.len() {
+                            wraps_entire_expression = false;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if wraps_entire_expression && depth == 0 {
+                trimmed = trimmed[1..trimmed.len() - 1].trim().to_owned();
+            } else {
+                break;
+            }
+        }
+
+        trimmed
+    }
+
+    fn split_top_level(expression: &str, separator: char) -> Vec<String> {
+        let mut parts = Vec::new();
+        let mut depth = 0usize;
+        let mut start = 0usize;
+
+        for (index, character) in expression.char_indices() {
+            match character {
+                '(' => depth += 1,
+                ')' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+
+            if character == separator && depth == 0 {
+                parts.push(expression[start..index].trim().to_owned());
+                start = index + character.len_utf8();
+            }
+        }
+
+        parts.push(expression[start..].trim().to_owned());
+        parts.into_iter().filter(|part| !part.is_empty()).collect()
     }
 
     pub fn parse_conditions(&mut self) {
-        // self.parsed_conditions = None; // Reset
         if self.expression.trim().is_empty() {
             log::error!("Empty expression for cut '{}'", self.name);
-            self.parsed_conditions = None;
+            self.parsed_groups = None;
             return;
         }
 
         let condition_re = Regex::new(
-            r"(?P<column>\w+)\s*(?P<op>>=|<=|!=|==|>|<)\s*(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|[+-]?inf|nan)"
+            r"(?P<column>\w+)\s*(?P<op>>=|<=|!=|==|>|<)\s*\(?(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|[+-]?inf|nan)\)?"
         )
         .expect("Failed to create regex");
 
-        let mut conditions = Vec::new();
+        let expression = Self::trim_wrapping_parentheses(&self.expression);
+        let group_expressions = Self::split_top_level(&expression, '|');
+        let mut parsed_groups = Vec::new();
 
-        // Split on '&' to allow multiple conditions in one expression
-        for expr in self.expression.split('&') {
-            let expr = expr.replace(['(', ')'], " ");
-            let expr = expr.trim();
-            if let Some(caps) = condition_re.captures(expr) {
-                let column_name = caps["column"].to_string();
-                let operator = caps["op"].to_string();
-                let literal_value: f64 = match caps["value"].parse() {
-                    Ok(v) => v,
-                    Err(e) => {
-                        log::error!(
-                            "Invalid numeric literal in cut '{}': {} ({})",
-                            self.name,
-                            expr,
-                            e
-                        );
-                        continue;
-                    }
-                };
+        for group_expression in group_expressions {
+            let group_expression = Self::trim_wrapping_parentheses(&group_expression);
+            let condition_expressions = Self::split_top_level(&group_expression, '&');
+            let mut group_conditions = Vec::new();
 
-                conditions.push(ParsedCondition {
-                    column_name,
-                    operator,
-                    literal_value,
+            for expression in condition_expressions {
+                let expression = Self::trim_wrapping_parentheses(&expression);
+                let expression = expression.trim();
+
+                if let Some(caps) = condition_re.captures(expression) {
+                    let column_name = caps["column"].to_string();
+                    let operator = caps["op"].to_string();
+                    let literal_value: f64 = match caps["value"].parse() {
+                        Ok(v) => v,
+                        Err(error) => {
+                            log::error!(
+                                "Invalid numeric literal in cut '{}': {} ({})",
+                                self.name,
+                                expression,
+                                error
+                            );
+                            continue;
+                        }
+                    };
+
+                    group_conditions.push(ParsedCondition {
+                        column_name,
+                        operator,
+                        literal_value,
+                    });
+                } else {
+                    log::error!(
+                        "Failed to parse expression '{}' in cut '{}'",
+                        expression,
+                        self.name
+                    );
+                }
+            }
+
+            if !group_conditions.is_empty() {
+                parsed_groups.push(ParsedConditionGroup {
+                    conditions: group_conditions,
                 });
-            } else {
-                log::error!(
-                    "Failed to parse expression '{}' in cut '{}'",
-                    expr,
-                    self.name
-                );
             }
         }
 
-        if conditions.is_empty() {
+        if parsed_groups.is_empty() {
             log::error!("No valid conditions parsed in cut '{}'", self.name);
+            self.parsed_groups = None;
+            return;
         }
 
-        self.parsed_conditions = Some(conditions);
+        self.builder_groups = parsed_groups
+            .iter()
+            .map(|group| Cut1DBuilderGroup {
+                conditions: group
+                    .conditions
+                    .iter()
+                    .filter_map(|condition| {
+                        Some(Cut1DBuilderCondition {
+                            column_name: condition.column_name.clone(),
+                            operator: Cut1DOperator::from_symbol(&condition.operator)?,
+                            literal_value: condition.literal_value,
+                        })
+                    })
+                    .collect(),
+            })
+            .collect();
+
+        self.parsed_groups = Some(parsed_groups);
+    }
+
+    fn condition_valid_for_row(
+        df: &DataFrame,
+        row_idx: usize,
+        condition: &ParsedCondition,
+    ) -> bool {
+        if let Ok(column) = df.column(&condition.column_name).and_then(|c| c.f64()) {
+            if let Some(value) = column.get(row_idx) {
+                match condition.operator.as_str() {
+                    ">" => {
+                        value.partial_cmp(&condition.literal_value)
+                            == Some(std::cmp::Ordering::Greater)
+                    }
+                    "<" => {
+                        value.partial_cmp(&condition.literal_value)
+                            == Some(std::cmp::Ordering::Less)
+                    }
+                    ">=" => {
+                        value.partial_cmp(&condition.literal_value)
+                            != Some(std::cmp::Ordering::Less)
+                    }
+                    "<=" => {
+                        value.partial_cmp(&condition.literal_value)
+                            != Some(std::cmp::Ordering::Greater)
+                    }
+                    "==" => {
+                        value.partial_cmp(&condition.literal_value)
+                            == Some(std::cmp::Ordering::Equal)
+                    }
+                    "!=" => {
+                        value.partial_cmp(&condition.literal_value)
+                            != Some(std::cmp::Ordering::Equal)
+                    }
+                    _ => {
+                        log::error!("Unknown operator: {}", condition.operator);
+                        false
+                    }
+                }
+            } else {
+                false
+            }
+        } else {
+            log::error!("Column not found: {}", condition.column_name);
+            false
+        }
+    }
+
+    fn mask_for_condition(
+        df: &DataFrame,
+        condition: &ParsedCondition,
+    ) -> Result<BooleanChunked, PolarsError> {
+        let column = df.column(&condition.column_name)?.f64()?;
+        let mask = match condition.operator.as_str() {
+            ">" => column.gt(condition.literal_value),
+            "<" => column.lt(condition.literal_value),
+            ">=" => column.gt_eq(condition.literal_value),
+            "<=" => column.lt_eq(condition.literal_value),
+            "==" => column.equal(condition.literal_value),
+            "!=" => column.not_equal(condition.literal_value),
+            _ => {
+                return Err(PolarsError::ComputeError(
+                    format!("Unknown operator: {}", condition.operator).into(),
+                ));
+            }
+        };
+        Ok(mask)
     }
 
     // Validate a row using cached conditions
@@ -1300,99 +1925,39 @@ impl Cut1D {
         if !self.active {
             return false; // If the cut is not active, it is not valid
         }
-        if let Some(conditions) = &self.parsed_conditions {
-            // Iterate through all parsed conditions
-            for condition in conditions {
-                if let Ok(column) = df.column(&condition.column_name).and_then(|c| c.f64()) {
-                    if let Some(value) = column.get(row_idx) {
-                        match condition.operator.as_str() {
-                            ">" => {
-                                if value.partial_cmp(&condition.literal_value)
-                                    != Some(std::cmp::Ordering::Greater)
-                                {
-                                    return false;
-                                }
-                            }
-                            "<" => {
-                                if value.partial_cmp(&condition.literal_value)
-                                    != Some(std::cmp::Ordering::Less)
-                                {
-                                    return false;
-                                }
-                            }
-                            ">=" => {
-                                if value.partial_cmp(&condition.literal_value)
-                                    == Some(std::cmp::Ordering::Less)
-                                {
-                                    return false;
-                                }
-                            }
-                            "<=" => {
-                                if value.partial_cmp(&condition.literal_value)
-                                    == Some(std::cmp::Ordering::Greater)
-                                {
-                                    return false;
-                                }
-                            }
-                            "==" => {
-                                if value.partial_cmp(&condition.literal_value)
-                                    != Some(std::cmp::Ordering::Equal)
-                                {
-                                    return false;
-                                }
-                            }
-                            "!=" => {
-                                if value.partial_cmp(&condition.literal_value)
-                                    == Some(std::cmp::Ordering::Equal)
-                                {
-                                    return false;
-                                }
-                            }
-                            _ => {
-                                log::error!("Unknown operator: {}", condition.operator);
-                                return false;
-                            }
-                        }
-                    } else {
-                        return false; // Missing value for row
-                    }
-                } else {
-                    log::error!("Column not found: {}", condition.column_name);
-                    return false; // Missing column
-                }
-            }
-            true // All conditions passed
+        if let Some(groups) = &self.parsed_groups {
+            groups.iter().any(|group| {
+                group
+                    .conditions
+                    .iter()
+                    .all(|condition| Self::condition_valid_for_row(df, row_idx, condition))
+            })
         } else {
             log::error!("No parsed conditions for Cut1D '{}'", self.name);
-            false // Parsing failed or was not performed
+            false
         }
     }
 
     pub fn create_mask(&self, df: &DataFrame) -> Result<BooleanChunked, PolarsError> {
-        if let Some(conditions) = &self.parsed_conditions {
-            let mut masks = Vec::new();
-            for condition in conditions {
-                let column = df.column(&condition.column_name)?.f64()?;
-                let mask = match condition.operator.as_str() {
-                    ">" => column.gt(condition.literal_value),
-                    "<" => column.lt(condition.literal_value),
-                    ">=" => column.gt_eq(condition.literal_value),
-                    "<=" => column.lt_eq(condition.literal_value),
-                    "==" => column.equal(condition.literal_value),
-                    "!=" => column.not_equal(condition.literal_value),
-                    _ => {
-                        return Err(PolarsError::ComputeError(
-                            format!("Unknown operator: {}", condition.operator).into(),
-                        ));
-                    }
-                };
-                masks.push(mask);
+        if let Some(groups) = &self.parsed_groups {
+            let mut group_masks = Vec::new();
+
+            for group in groups {
+                let mut condition_masks = Vec::new();
+                for condition in &group.conditions {
+                    condition_masks.push(Self::mask_for_condition(df, condition)?);
+                }
+
+                let group_mask = condition_masks
+                    .into_iter()
+                    .reduce(|a, b| a.bitand(b))
+                    .unwrap_or_else(|| BooleanChunked::from_slice("".into(), &[]));
+                group_masks.push(group_mask);
             }
 
-            // Combine all masks with a logical AND
-            let combined_mask = masks
+            let combined_mask = group_masks
                 .into_iter()
-                .reduce(|a, b| a.bitand(b))
+                .reduce(|a, b| a.bitor(b))
                 .unwrap_or_else(|| BooleanChunked::from_slice("".into(), &[]));
             Ok(combined_mask)
         } else {
