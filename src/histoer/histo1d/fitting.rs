@@ -243,7 +243,7 @@ impl Histogram {
             new_sorted.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
             for ((new_idx, _), (_, uuid, energy, energy_unc)) in
-                new_sorted.into_iter().zip(prev_sorted.into_iter())
+                new_sorted.into_iter().zip(prev_sorted)
             {
                 if let Err(e) = g.update_uuid_for_peak(new_idx, uuid) {
                     log::warn!("Failed to preserve UUID for peak {new_idx}: {e}");

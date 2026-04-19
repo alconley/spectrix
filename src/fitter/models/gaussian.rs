@@ -2086,7 +2086,7 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
             );
             let Some(reference_height) = composition_height
                 .into_iter()
-                .chain(histogram_height.into_iter())
+                .chain(histogram_height)
                 .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             else {
                 continue;

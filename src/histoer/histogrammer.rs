@@ -80,21 +80,18 @@ type RootExportHist2D = (String, String, Vec<Vec<u64>>, (f64, f64), (f64, f64));
 
 impl Histogrammer {
     pub fn find_existing_histogram(&self, name: &str) -> Option<TileId> {
-        self.tree.tiles.iter().find_map(|(id, tile)| {
-            match tile {
-                egui_tiles::Tile::Pane(Pane::Histogram(hist)) => {
-                    if hist.lock().expect("Failed to lock histogram").name == name {
-                        return Some(*id);
-                    }
-                }
-                egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) => {
-                    if hist.lock().expect("Failed to lock 2D histogram").name == name {
-                        return Some(*id);
-                    }
-                }
-                _ => {}
+        self.tree.tiles.iter().find_map(|(id, tile)| match tile {
+            egui_tiles::Tile::Pane(Pane::Histogram(hist))
+                if hist.lock().expect("Failed to lock histogram").name == name =>
+            {
+                Some(*id)
             }
-            None
+            egui_tiles::Tile::Pane(Pane::Histogram2D(hist))
+                if hist.lock().expect("Failed to lock 2D histogram").name == name =>
+            {
+                Some(*id)
+            }
+            _ => None,
         })
     }
 
