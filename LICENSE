@@ -1,21 +1,70 @@
-MIT License
+Spectrix Source-Available Collaboration License
 
-Copyright (c) 2024 Alex Conley
+Copyright (c) 2024-2026 Alex Conley. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Spectrix and its associated source code, binaries, documentation, user
+interfaces, designs, and project files (the "Software") are owned by Alex
+Conley.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. Permitted Use
+
+You may view, run, study, and use the Software for personal, academic,
+research, or internal evaluation purposes.
+
+2. Permitted Modification
+
+You may modify the Software for your own personal, academic, research, or
+internal use. You may also submit modifications, fixes, improvements,
+documentation, examples, or other contributions to the official Spectrix
+project by pull request, patch, issue attachment, or another contribution
+method accepted by Alex Conley.
+
+3. Contributions
+
+By submitting a contribution to Spectrix, you grant Alex Conley a perpetual,
+worldwide, non-exclusive, royalty-free license to use, copy, modify, merge,
+publish, distribute, sublicense, and relicense that contribution as part of
+Spectrix or related projects. You represent that you have the right to submit
+the contribution and to grant these rights.
+
+4. Restrictions
+
+Except with prior written permission from Alex Conley, you may not:
+
+- publish, distribute, mirror, host, upload, or otherwise make the Software or
+  a modified version of the Software available to any third party;
+- sell, lease, sublicense, repackage, or commercially offer the Software or a
+  modified version of the Software;
+- use the Spectrix name, logos, screenshots, or branding to imply that a fork,
+  copy, derivative work, hosted service, or redistributed package is official
+  or endorsed by Alex Conley;
+- remove or alter copyright notices, license notices, or attribution notices in
+  the Software.
+
+5. Official Project
+
+The intended collaboration path is to submit improvements back to the official
+Spectrix project rather than publishing separate public forks or redistributed
+copies. Public forks or mirrors are not permitted unless Alex Conley gives
+prior written permission.
+
+6. Third-Party Software
+
+Third-party libraries, tools, and dependencies used by Spectrix remain governed
+by their own separate license terms.
+
+7. Earlier Versions
+
+This license applies to versions of Spectrix distributed with this license. It
+does not revoke or alter rights, if any, that were already granted for earlier
+copies of Spectrix under a different license.
+
+8. No Warranty
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM,
+OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF OR OTHER DEALINGS IN
+THE SOFTWARE.
