@@ -1,3 +1,4 @@
+use crate::ai::{AiAssistant, AiContextSnapshot};
 use crate::custom_analysis::analysis::AnalysisScripts;
 use crate::histoer::histogrammer::Histogrammer;
 use crate::histoer::ui_helpers::precise_drag_value;
@@ -29,6 +30,7 @@ pub struct ProcessorSettings {
     pub name: String,
     pub left_panel_open: bool,
     pub histogram_script_open: bool,
+    pub ai_open: bool,
     pub column_names: Vec<String>,
     pub estimated_memory: f64,
     pub saved_cut_suffix: String,
@@ -47,6 +49,7 @@ impl Default for ProcessorSettings {
             name: String::new(),
             left_panel_open: true,
             histogram_script_open: true,
+            ai_open: false,
             column_names: Vec::new(),
             estimated_memory: 4.0,
             saved_cut_suffix: String::new(),
@@ -72,6 +75,7 @@ pub struct Processor {
     root_import_result: Arc<Mutex<Option<RootImportResult>>>,
     pub histogrammer: Histogrammer,
     pub histogram_script: HistogramScript,
+    pub ai: AiAssistant,
     pub settings: ProcessorSettings,
     pub analysis: AnalysisScripts,
     pub file_sort: FileSortState,
@@ -174,6 +178,7 @@ impl Processor {
             root_import_result: Arc::new(Mutex::new(None)),
             histogrammer: Histogrammer::default(),
             histogram_script: HistogramScript::new(),
+            ai: AiAssistant::default(),
             settings,
             analysis: AnalysisScripts::default(),
             file_sort: FileSortState::default(),
@@ -477,6 +482,7 @@ impl Processor {
 
         ui.separator();
         ui.label("Analysis");
+        ui.checkbox(&mut self.settings.ai_open, "Open AI Assistant");
         ui.checkbox(&mut self.analysis.open, "Open SE-SPS Analysis");
         ui.label(
             egui::RichText::new("Under development for SE-SPS experiments.")
@@ -1255,6 +1261,16 @@ def get_2d_histograms(file_name):
                     self.settings.histogram_script_open = !self.settings.histogram_script_open;
                 }
 
+                if ui
+                    .add(
+                        egui::Button::selectable(self.settings.ai_open, "Open AI Assistant")
+                            .min_size(egui::vec2(ui.available_width(), 0.0)),
+                    )
+                    .clicked()
+                {
+                    self.settings.ai_open = !self.settings.ai_open;
+                }
+
                 ui.separator();
 
                 self.selected_files_ui(ui);
@@ -1592,6 +1608,23 @@ def get_2d_histograms(file_name):
         });
     }
 
+    fn ai_panel_ui(&mut self, ui: &mut egui::Ui) {
+        let snapshot = AiContextSnapshot::from_state(
+            &self.selected_files,
+            &self.settings.column_names,
+            &self.histogram_script,
+            &self.histogrammer,
+        );
+
+        egui::Panel::right("spectrix_ai_panel")
+            .resizable(true)
+            .default_size(430.0)
+            .size_range(320.0..=720.0)
+            .show_animated_inside(ui, self.settings.ai_open, |ui| {
+                self.ai.ui(ui, snapshot);
+            });
+    }
+
     fn histogram_progress_bottom_panel_ui(&self, ui: &mut egui::Ui) {
         egui::Panel::bottom("spectrix_histogram_progress_panel")
             .resizable(false)
@@ -1621,6 +1654,7 @@ def get_2d_histograms(file_name):
             self.histogram_progress_bottom_panel_ui(ui);
         }
         self.left_side_panels_ui(ui);
+        self.ai_panel_ui(ui);
         self.central_panel_ui(ui);
 
         self.analysis
@@ -1635,6 +1669,7 @@ def get_2d_histograms(file_name):
                 .load(Ordering::Relaxed)
             || self.settings.saving_in_progress.load(Ordering::Relaxed)
             || self.settings.combining_in_progress.load(Ordering::Relaxed)
+            || self.ai.is_busy()
         {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
         }

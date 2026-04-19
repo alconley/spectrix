@@ -1,6 +1,8 @@
 # Spectrix
 
-**Spectrix** is a comprehensive software package for **nuclear spectrum analysis**. It provides tools for histogramming, Gaussian fitting, and interactive visualization of 1D and 2D histograms using the crates:  
+**Spectrix** is an **AI-assisted spectrum analysis** and experimental event based-data exploration tool. It provides tools for histogramming, Gaussian fitting, interactive visualization of 1D and 2D histograms, and help through **Spectrix AI** (currently in development).
+
+Spectrix is built around event data where users are often working with observables such as energy, time, position, PID, detector channels, calibrated columns, and fitted peak yields. It uses the crates:  
 `egui`, `egui-tiles`, `egui_plot`, and `polars`.
 
 Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting is performed using Python’s **lmfit** library.
@@ -21,6 +23,7 @@ Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting 
 - UUID peak labels with configurable size/lift and optional guide lines  
 - UI-based histogram and cut definition  
 - Custom histogram scripting  
+- Spectrix AI assistant for source-grounded usage questions, UI workflow help, and event-data explanations  
 - Built-in screenshot capture from the top bar  
 - Integration with Polars for high-performance data processing  
 
@@ -606,3 +609,13 @@ While the SE-SPS analysis is currently the only implemented module, the system i
 
 > ⚠️ **Note:**  
 > The SE-SPS cross-section analysis is still experimental and under active development
+
+---
+
+## License
+
+Spectrix is source-available collaboration software owned by Alex Conley. You may use it and modify it for personal, academic, research, or internal purposes, and contributions should be submitted back to the official project by pull request or patch.
+
+Redistribution, public forks or mirrors, sublicensing, resale, hosted copies, and publishing modified versions elsewhere are not permitted without prior written permission.
+
+See [LICENSE](./LICENSE) for the full terms.
