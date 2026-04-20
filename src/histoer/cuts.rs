@@ -13,6 +13,43 @@ use crate::histoer::ui_helpers::{
 };
 use egui_extras::{Column, TableBuilder};
 
+pub(crate) fn sanitize_cut_file_name_component(name: &str, fallback: &str) -> String {
+    let trimmed_name = name.trim();
+    let base_name = if trimmed_name.is_empty() {
+        fallback
+    } else {
+        trimmed_name
+    };
+
+    let mut collapsed = String::with_capacity(base_name.len());
+    let mut previous_was_underscore = false;
+
+    for character in base_name.chars() {
+        let mapped = if character.is_ascii_alphanumeric() || character == '-' {
+            character
+        } else {
+            '_'
+        };
+
+        if mapped == '_' {
+            if !previous_was_underscore {
+                collapsed.push('_');
+            }
+            previous_was_underscore = true;
+        } else {
+            collapsed.push(mapped);
+            previous_was_underscore = false;
+        }
+    }
+
+    let trimmed = collapsed.trim_matches('_');
+    if trimmed.is_empty() {
+        fallback.to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum Cut {
     Cut1D(Cut1D),
@@ -699,39 +736,13 @@ impl Cut2D {
 
     pub fn sanitized_file_name(&self) -> String {
         let trimmed_name = self.polygon.name.trim();
-        let base_name = if trimmed_name.is_empty() {
+        let fallback = if trimmed_name.is_empty() {
             Self::default_name(&self.x_column, &self.y_column)
         } else {
-            trimmed_name.to_owned()
+            "cut".to_owned()
         };
 
-        let mut collapsed = String::with_capacity(base_name.len());
-        let mut previous_was_underscore = false;
-
-        for character in base_name.chars() {
-            let mapped = if character.is_ascii_alphanumeric() || character == '-' {
-                character
-            } else {
-                '_'
-            };
-
-            if mapped == '_' {
-                if !previous_was_underscore {
-                    collapsed.push('_');
-                }
-                previous_was_underscore = true;
-            } else {
-                collapsed.push(mapped);
-                previous_was_underscore = false;
-            }
-        }
-
-        let trimmed = collapsed.trim_matches('_');
-        if trimmed.is_empty() {
-            "cut".to_owned()
-        } else {
-            trimmed.to_owned()
-        }
+        sanitize_cut_file_name_component(&self.polygon.name, &fallback)
     }
 
     fn save_to_path(&self, file_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -997,7 +1008,7 @@ impl Cut2D {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cut1D, Cut2D};
+    use super::{Cut1D, Cut2D, sanitize_cut_file_name_component};
 
     #[test]
     fn loading_cut_disables_interactive_vertex_adding() {
@@ -1007,6 +1018,22 @@ mod tests {
         cut.normalize_after_load();
 
         assert!(!cut.polygon.interactive_clicking);
+    }
+
+    #[test]
+    fn cut_file_name_components_replace_collapse_and_trim_invalid_characters() {
+        assert_eq!(
+            sanitize_cut_file_name_component(" alpha beta!! gamma. ", "cut"),
+            "alpha_beta_gamma"
+        );
+    }
+
+    #[test]
+    fn cut2d_sanitized_file_name_keeps_existing_fallback_behavior() {
+        let mut cut = Cut2D::default();
+        cut.polygon.name = "!!!".to_owned();
+
+        assert_eq!(cut.sanitized_file_name(), "cut");
     }
 
     #[test]
@@ -1563,40 +1590,7 @@ impl Cut1D {
     }
 
     pub fn sanitized_file_name(&self) -> String {
-        let trimmed_name = self.name.trim();
-        let base_name = if trimmed_name.is_empty() {
-            "1d_cut".to_owned()
-        } else {
-            trimmed_name.to_owned()
-        };
-
-        let mut collapsed = String::with_capacity(base_name.len());
-        let mut previous_was_underscore = false;
-
-        for character in base_name.chars() {
-            let mapped = if character.is_ascii_alphanumeric() || character == '-' {
-                character
-            } else {
-                '_'
-            };
-
-            if mapped == '_' {
-                if !previous_was_underscore {
-                    collapsed.push('_');
-                }
-                previous_was_underscore = true;
-            } else {
-                collapsed.push(mapped);
-                previous_was_underscore = false;
-            }
-        }
-
-        let trimmed = collapsed.trim_matches('_');
-        if trimmed.is_empty() {
-            "1d_cut".to_owned()
-        } else {
-            trimmed.to_owned()
-        }
+        sanitize_cut_file_name_component(&self.name, "1d_cut")
     }
 
     fn save_to_path(&self, file_path: &Path) -> Result<(), Box<dyn std::error::Error>> {

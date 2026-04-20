@@ -1,5 +1,6 @@
 use crate::ai::{AiAssistant, AiContextSnapshot};
 use crate::custom_analysis::analysis::AnalysisScripts;
+use crate::histoer::cuts::sanitize_cut_file_name_component;
 use crate::histoer::histogrammer::Histogrammer;
 use crate::histoer::ui_helpers::precise_drag_value;
 
@@ -355,6 +356,20 @@ impl Processor {
             path
         } else {
             path.with_extension("parquet")
+        }
+    }
+
+    fn clean_filtered_file_suffix(suffix: &str) -> String {
+        sanitize_cut_file_name_component(suffix, "")
+    }
+
+    fn filtered_file_stem(file_stem: &str, suffix: &str) -> String {
+        let suffix = Self::clean_filtered_file_suffix(suffix);
+
+        if suffix.is_empty() {
+            format!("{file_stem}_filtered")
+        } else {
+            format!("{file_stem}_{suffix}")
         }
     }
 
@@ -846,7 +861,7 @@ def get_2d_histograms(file_name):
         }
     }
 
-    pub fn filter_selected_files_and_save(&self) {
+    pub fn filter_selected_files_and_save(&mut self) {
         // Gather checked files
         let checked_files = self.checked_files();
 
@@ -881,7 +896,11 @@ def get_2d_histograms(file_name):
             cut.cuts.len()
         );
 
-        let saved_cut_suffix = self.settings.saved_cut_suffix.clone();
+        let saved_cut_suffix = Self::clean_filtered_file_suffix(&self.settings.saved_cut_suffix);
+        if saved_cut_suffix != self.settings.saved_cut_suffix {
+            log::info!("Cleaned filtered file suffix to {saved_cut_suffix:?} before saving.");
+            self.settings.saved_cut_suffix = saved_cut_suffix.clone();
+        }
 
         // Initialize UI state
         self.settings
@@ -911,11 +930,7 @@ def get_2d_histograms(file_name):
                         );
                         "filtered".to_owned()
                     });
-                let new_file_name = if saved_cut_suffix.is_empty() {
-                    format!("{file_stem}_filtered")
-                } else {
-                    format!("{file_stem}_{saved_cut_suffix}")
-                };
+                let new_file_name = Self::filtered_file_stem(&file_stem, &saved_cut_suffix);
                 let new_file_path = file.with_file_name(format!("{new_file_name}.parquet"));
 
                 log::info!("Processing file: {file:?}");
@@ -1780,4 +1795,51 @@ fn compare_numeric_chunks(a: &str, b: &str) -> CmpOrdering {
         .cmp(&normalized_b.len())
         .then_with(|| normalized_a.cmp(normalized_b))
         .then_with(|| a.len().cmp(&b.len()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Processor;
+
+    #[test]
+    fn clean_filtered_file_suffix_replaces_invalid_filename_characters() {
+        let suffix = r#"gate/<bad>:"name"|?*!"#;
+
+        assert_eq!(
+            Processor::clean_filtered_file_suffix(suffix),
+            "gate_bad_name"
+        );
+    }
+
+    #[test]
+    fn clean_filtered_file_suffix_trims_and_preserves_valid_characters() {
+        assert_eq!(
+            Processor::clean_filtered_file_suffix("  alpha_beta-1.2  "),
+            "alpha_beta-1_2"
+        );
+    }
+
+    #[test]
+    fn clean_filtered_file_suffix_replaces_spaces_and_bangs_like_2d_cuts() {
+        assert_eq!(
+            Processor::clean_filtered_file_suffix("alpha beta! gamma"),
+            "alpha_beta_gamma"
+        );
+    }
+
+    #[test]
+    fn filtered_file_stem_uses_default_suffix_when_clean_suffix_is_empty() {
+        assert_eq!(
+            Processor::filtered_file_stem("run_83", " \t\n "),
+            "run_83_filtered"
+        );
+    }
+
+    #[test]
+    fn filtered_file_stem_uses_cleaned_suffix() {
+        assert_eq!(
+            Processor::filtered_file_stem("run_83", r#"tof/gate:good?"#),
+            "run_83_tof_gate_good"
+        );
+    }
 }
