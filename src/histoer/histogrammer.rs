@@ -384,6 +384,118 @@ impl Histogrammer {
                     }
                 }
 
+                fn active_cut_refs(cuts: &Cuts) -> Vec<&Cut> {
+                    cuts.cuts
+                        .iter()
+                        .filter(|cut| match cut {
+                            Cut::Cut1D(cut1d) => cut1d.active,
+                            Cut::Cut2D(cut2d) => cut2d.active,
+                        })
+                        .collect()
+                }
+
+                fn filtered_batch(cuts: &Cuts, df: DataFrame) -> PolarsResult<DataFrame> {
+                    let active_cuts = active_cut_refs(cuts);
+                    if active_cuts.is_empty() {
+                        return Ok(df);
+                    }
+
+                    let mask = cuts.create_combined_mask(&df, &active_cuts)?;
+                    df.filter(&mask)
+                }
+
+                fn fill_1d_group_in_chunks(
+                    lf: &LazyFrame,
+                    cuts: &Cuts,
+                    grouped: &[(Arc<Mutex<Box<Histogram>>>, Hist1DConfig)],
+                    rows_per_chunk: usize,
+                    abort_flag: &Arc<AtomicBool>,
+                ) -> PolarsResult<bool> {
+                    let mut offset = 0;
+
+                    loop {
+                        if abort_flag.load(Ordering::SeqCst) {
+                            log::info!("Histogram calculation aborted by user.");
+                            return Ok(true);
+                        }
+
+                        let batch = lf.clone().slice(offset as i64, rows_per_chunk as u32);
+                        let df = batch.collect()?;
+                        if df.height() == 0 {
+                            break;
+                        }
+
+                        let filtered_df = filtered_batch(cuts, df)?;
+
+                        for (hist, config) in grouped {
+                            if abort_flag.load(Ordering::SeqCst) {
+                                log::info!("Histogram calculation aborted by user.");
+                                return Ok(true);
+                            }
+
+                            let mut guard = hist.lock().expect("Failed to lock histogram");
+                            if let Err(e) = guard.fill_from_lazyframe(
+                                filtered_df.clone().lazy(),
+                                &config.column_name,
+                                -1e6,
+                            ) {
+                                log::error!("Failed to fill hist1d '{}': {:?}", config.name, e);
+                            }
+                            guard.plot_settings.egui_settings.reset_axis = true;
+                        }
+
+                        offset += rows_per_chunk;
+                    }
+
+                    Ok(false)
+                }
+
+                fn fill_2d_group_in_chunks(
+                    lf: &LazyFrame,
+                    cuts: &Cuts,
+                    grouped: &[(Arc<Mutex<Box<Histogram2D>>>, Hist2DConfig)],
+                    rows_per_chunk: usize,
+                    abort_flag: &Arc<AtomicBool>,
+                ) -> PolarsResult<bool> {
+                    let mut offset = 0;
+
+                    loop {
+                        if abort_flag.load(Ordering::SeqCst) {
+                            log::info!("Histogram calculation aborted by user.");
+                            return Ok(true);
+                        }
+
+                        let batch = lf.clone().slice(offset as i64, rows_per_chunk as u32);
+                        let df = batch.collect()?;
+                        if df.height() == 0 {
+                            break;
+                        }
+
+                        let filtered_df = filtered_batch(cuts, df)?;
+
+                        for (hist, config) in grouped {
+                            if abort_flag.load(Ordering::SeqCst) {
+                                log::info!("Histogram calculation aborted by user.");
+                                return Ok(true);
+                            }
+
+                            let mut guard = hist.lock().expect("Failed to lock 2D histogram");
+                            if let Err(e) = guard.fill_from_lazyframe(
+                                filtered_df.clone().lazy(),
+                                &config.x_column_name,
+                                &config.y_column_name,
+                                -1e6,
+                            ) {
+                                log::error!("Failed to fill hist2d '{}': {:?}", config.name, e);
+                            }
+                        }
+
+                        offset += rows_per_chunk;
+                    }
+
+                    Ok(false)
+                }
+
                 let _calculating_guard = CalculatingGuard {
                     calculating: Arc::clone(&calculating),
                 };
@@ -397,35 +509,21 @@ impl Histogrammer {
                         .values()
                         .map(|(_, list)| list.len())
                         .sum::<usize>()) as f32;
+                let total = total.max(1.0);
+                let rows_per_chunk = rows_per_chunk.max(1).min(u32::MAX as usize);
 
                 let mut values: Vec<_> = cut_groups_1d.values().collect();
                 values.sort_by_key(|(cuts, _)| format!("{cuts:?}")); // Stable deterministic ordering
 
                 for (cuts, grouped) in values {
-                    let filtered_lf = if cuts.is_empty() {
-                        Ok((*lf).clone())
-                    } else {
-                        cuts.filter_lazyframe_in_batches(&(*lf).clone(), rows_per_chunk)
-                    };
-
-                    if let Ok(filtered_lf) = filtered_lf {
-                        for (hist, config) in grouped {
-                            let mut guard = hist.lock().expect("Failed to lock histogram");
-                            if let Err(e) = guard.fill_from_lazyframe(
-                                filtered_lf.clone(),
-                                &config.column_name,
-                                -1e6,
-                            ) {
-                                log::error!("Failed to fill hist1d '{}': {:?}", config.name, e);
-                            }
-                            guard.plot_settings.egui_settings.reset_axis = true;
-
-                            completed += 1.0;
+                    match fill_1d_group_in_chunks(&lf, cuts, grouped, rows_per_chunk, &abort_flag) {
+                        Ok(true) => return,
+                        Ok(false) => {
+                            completed += grouped.len() as f32;
                             *progress.lock().expect("Failed to lock progress") = completed / total;
-                            if abort_flag.load(Ordering::SeqCst) {
-                                log::info!("Histogram calculation aborted by user.");
-                                return;
-                            }
+                        }
+                        Err(e) => {
+                            log::error!("Failed to apply cuts for 1D histogram group: {e:?}");
                         }
                     }
                 }
@@ -434,30 +532,14 @@ impl Histogrammer {
                 values.sort_by_key(|(cuts, _)| format!("{cuts:?}")); // sort by cuts debug string (stable)
 
                 for (cuts, grouped) in values {
-                    let filtered_lf = if cuts.is_empty() {
-                        Ok((*lf).clone())
-                    } else {
-                        cuts.filter_lazyframe_in_batches(&(*lf).clone(), rows_per_chunk)
-                    };
-
-                    if let Ok(filtered_lf) = filtered_lf {
-                        for (hist, config) in grouped {
-                            let mut guard = hist.lock().expect("Failed to lock 2D histogram");
-                            if let Err(e) = guard.fill_from_lazyframe(
-                                filtered_lf.clone(),
-                                &config.x_column_name,
-                                &config.y_column_name,
-                                -1e6,
-                            ) {
-                                log::error!("Failed to fill hist2d '{}': {:?}", config.name, e);
-                            }
-
-                            completed += 1.0;
+                    match fill_2d_group_in_chunks(&lf, cuts, grouped, rows_per_chunk, &abort_flag) {
+                        Ok(true) => return,
+                        Ok(false) => {
+                            completed += grouped.len() as f32;
                             *progress.lock().expect("Failed to lock progress") = completed / total;
-                            if abort_flag.load(Ordering::SeqCst) {
-                                log::info!("Histogram calculation aborted by user.");
-                                return;
-                            }
+                        }
+                        Err(e) => {
+                            log::error!("Failed to apply cuts for 2D histogram group: {e:?}");
                         }
                     }
                 }
