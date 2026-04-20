@@ -477,11 +477,7 @@ impl GaussianFitter {
         calibration_data
     }
 
-    pub fn calibrate(&mut self, calibration: &Calibration) {
-        log::info!("Calibrating");
-        // Calibration logic goes here
-
-        // calibrate the parameters
+    pub fn calibrate_parameters(&mut self, calibration: &Calibration) {
         for param in &mut self.fit_result {
             // param.amplitude.calibrate(calibration);
             param.mean.calibrate_energy(calibration);
@@ -501,6 +497,14 @@ impl GaussianFitter {
             param.area.calibrated_value = param.area.value;
             param.area.calibrated_uncertainty = param.area.uncertainty;
         }
+    }
+
+    pub fn calibrate(&mut self, calibration: &Calibration) {
+        log::info!("Calibrating");
+        // Calibration logic goes here
+
+        // calibrate the parameters
+        self.calibrate_parameters(calibration);
 
         // add calibration to result file
         if let Err(e) = self.add_calibration_to_result(calibration) {

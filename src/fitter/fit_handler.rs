@@ -413,13 +413,31 @@ impl Fits {
         }
     }
 
+    fn sync_calibration_values(&mut self) {
+        for fit in &mut self.stored_fits {
+            fit.sync_calibration_values(&self.calibration);
+        }
+
+        if let Some(temp_fit) = &mut self.temp_fit {
+            temp_fit.sync_calibration_values(&self.calibration);
+        }
+    }
+
+    fn apply_loaded_fits(&mut self, loaded_fits: Self) {
+        self.settings = loaded_fits.settings;
+        self.calibration = loaded_fits.calibration;
+        self.sort_state = loaded_fits.sort_state;
+        self.stored_fits.extend(loaded_fits.stored_fits);
+        self.temp_fit = loaded_fits.temp_fit;
+        self.sync_calibration_values();
+    }
+
     fn load_from_file(&mut self) {
         if let Some(path) = FileDialog::new().add_filter("JSON", &["json"]).pick_file() {
             match std::fs::read_to_string(&path) {
                 Ok(contents) => match serde_json::from_str::<Self>(&contents) {
                     Ok(loaded_fits) => {
-                        self.stored_fits.extend(loaded_fits.stored_fits);
-                        self.temp_fit = loaded_fits.temp_fit;
+                        self.apply_loaded_fits(loaded_fits);
                     }
                     Err(e) => {
                         log::error!("Failed to deserialize fits from {}: {e}", path.display());
@@ -1785,4 +1803,89 @@ impl Fits {
     }
 
     // pub fn
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fitter::common::Value;
+    use crate::fitter::models::gaussian::GaussianParameters;
+
+    fn calibration(a: f64, b: f64, c: f64) -> Calibration {
+        Calibration {
+            a: Value {
+                value: a,
+                uncertainty: 0.0,
+            },
+            b: Value {
+                value: b,
+                uncertainty: 0.0,
+            },
+            c: Value {
+                value: c,
+                uncertainty: 0.0,
+            },
+            cov: None,
+        }
+    }
+
+    #[test]
+    fn apply_loaded_fits_restores_saved_calibration_and_fit_settings() {
+        let mut current = Fits::new();
+        let mut loaded = Fits::new();
+        loaded.settings.calibrated = true;
+        loaded.settings.show_fit_stats = true;
+        loaded.calibration = calibration(0.02, 1.5, 8.0);
+        loaded.sort_state = SortState {
+            col: SortCol::Energy,
+            asc: false,
+        };
+
+        current.apply_loaded_fits(loaded);
+
+        assert!(current.settings.calibrated);
+        assert!(current.settings.show_fit_stats);
+        assert_eq!(current.calibration.a.value, 0.02);
+        assert_eq!(current.calibration.b.value, 1.5);
+        assert_eq!(current.calibration.c.value, 8.0);
+        assert_eq!(current.sort_state.col, SortCol::Energy);
+        assert!(!current.sort_state.asc);
+    }
+
+    #[test]
+    fn apply_loaded_fits_refreshes_live_calibrated_parameter_values() {
+        let mut gaussian = GaussianFitter::default();
+        let mut params = GaussianParameters::new(
+            (100.0, 1.0),
+            (4.0, 0.2),
+            (1.0, 0.1),
+            (2.355, 0.2),
+            (250.0, 5.0),
+        );
+        params.energy.value = Some(42.0);
+        params.energy.uncertainty = Some(0.3);
+        gaussian.fit_result.push(params);
+
+        let mut fitter = Fitter::default();
+        fitter.fit_result = Some(FitResult::Gaussian(gaussian));
+
+        let mut loaded = Fits::new();
+        loaded.settings.calibrated = true;
+        loaded.calibration = calibration(0.5, 2.0, 10.0);
+        loaded.stored_fits.push(fitter);
+
+        let mut current = Fits::new();
+        current.apply_loaded_fits(loaded);
+
+        let Some(FitResult::Gaussian(gaussian)) = &current.stored_fits[0].fit_result else {
+            panic!("loaded fit should remain Gaussian");
+        };
+        let params = &gaussian.fit_result[0];
+
+        assert_eq!(current.stored_fits[0].calibration.a.value, 0.5);
+        assert_eq!(params.mean.calibrated_value, Some(26.0));
+        assert_eq!(params.sigma.calibrated_value, Some(6.0));
+        assert_eq!(params.energy.calibrated_value, Some(42.0));
+        assert_eq!(params.area.calibrated_value, Some(250.0));
+    }
 }

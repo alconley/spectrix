@@ -63,9 +63,60 @@ fn experimental_data_interpretation_guide() -> &'static str {
 }
 
 fn source_derived_workflow_hints(prompt: &str) -> String {
+    let mut sections = Vec::new();
+
+    if is_gaussian_fit_question(prompt) {
+        sections.push(
+            r#"Source-derived workflow hints for Gaussian fitting:
+- Gaussian fitting is a 1D histogram workflow. The cursor must be inside the plot for keybinds to act at the cursor position.
+- Marker keybinds: `P` adds a peak marker, `B` adds a background marker pair, `R` adds a region marker, `-` removes the nearest marker, and `Delete` clears temporary markers and temp fits.
+- Fitting keybinds: `O` runs peak detection and places peak markers, `G` fits the current background model, `F` fits Gaussian peaks, and `S` stores the current temp fit.
+- A common manual pipeline is: open a 1D histogram, add two `R` region markers around the fit interval, add one or more `B` background marker pairs in background-only areas, add peak markers with `P` or `O`, adjust options in the right-click `Fits` panel, press `G` if an explicit background fit is wanted, press `F`, inspect the Fit Panel, then press `S` to store the fit.
+- `R` keeps at most two active region markers. Adding another region marker after two are present clears the old region markers and starts again.
+- Peak markers, region markers, and background marker lines can be dragged directly on the plot. Background markers are stored as start/end pairs.
+- The `Fits` panel contains background model selection, `Equal sigma`, `Free Position`, optional `Constrain sigma`, fit-line display toggles, UUID label controls, fit reports, modify/refit actions, save/load controls, and calibration controls.
+- After fitting, Spectrix replaces peak markers with the fitted peak means when available and opens the Fit Panel for Gaussian results.
+- Use `Store Fit`/`S` when the temp fit should become a stored fit for later comparison, calibration, saving, exporting, or refitting.
+"#,
+        );
+    }
+
+    if is_calibration_question(prompt) {
+        sections.push(
+            r#"Source-derived workflow hints for calibration:
+- Spectrix has two different calibration workflows: calibrating Gaussian fit results/display on an existing 1D histogram, and creating a new calibrated event-data column in Histogram Script.
+- For 1D histogram fit calibration, first fit and store Gaussian peaks. In the Fit Panel table, enter each peak's assigned energy and uncertainty; peaks with assigned energy `-1` are ignored as invalid calibration points.
+- In the Fit Panel, enable `Calibration`. You can type coefficients directly as `a`, `b`, and `c` for `a*x^2 + b*x + c`, then click `Calibrate` to apply them to stored/temp fits.
+- To derive coefficients from stored fits, use `Linear` for a linear calibration from at least 2 valid calibration points, or `Quadratic` for a quadratic calibration from at least 3 distinct valid points.
+- Fit calibration affects the 1D histogram display/fit results when the calibration is safe over the histogram range. It attaches calibrated mean, sigma, and FWHM values to Gaussian parameters, while area and amplitude are copied through.
+- Fit calibration does not create a new parquet/event column. It is for calibrated fit quantities and calibrated display behavior on that histogram.
+- To create a calibrated column, open Histogram Script, use `Variables` for reusable coefficients if desired, then use `Column Creation` -> `+` -> `Builder`.
+- A quadratic calibrated column can be built as three terms: coefficient `a` times source column with power `2`, plus coefficient `b` times source column with power `1`, plus constant `c`. The coefficients can be literal values or Variables.
+- Give the computed column an alias such as `EnergyCalibrated`. Computed-column aliases are sanitized to letters, numbers, and underscores.
+- Derived columns can then be selected like native columns in 1D/2D histogram definitions and cuts. To view the calibrated data as a new 1D histogram, add a `+1D` histogram using the calibrated-column alias, set calibrated range/bins, and calculate histograms.
+"#,
+        );
+    }
+
+    if is_2d_projection_question(prompt) {
+        sections.push(
+            r#"Source-derived workflow hints for 2D projections:
+- 2D projections are created from an open 2D histogram. The cursor must be inside the plot for projection keybinds to act.
+- Press `X` to toggle an X projection. It sums counts over a selected Y interval and opens a 1D histogram named `X-Projection of ...` with the 2D histogram's X column as its source column.
+- Press `Y` to toggle a Y projection. It sums counts over a selected X interval and opens a 1D histogram named `Y-Projection of ...` with the 2D histogram's Y column as its source column.
+- Projection regions initialize from the current visible axis bounds with a small inset from each edge.
+- Drag a projection boundary line by its center dot to adjust the selected interval. Drag the filled span between projection lines to translate the whole projection window while keeping its width.
+- You can also right-click the 2D plot and open `Projections` to toggle `Add X Projection` or `Add Y Projection`, edit X1/X2 or Y1/Y2 values, or set the projection span by width/range.
+- The projection windows are normal 1D histogram windows, so 1D controls such as fitting, peak markers, statistics, rebinning, and 1D cuts can be used on the projected spectrum.
+- 1D cuts created on projection windows inherit the projected axis column name automatically.
+"#,
+        );
+    }
+
     if is_1d_cut_question(prompt) {
         if asks_definition(prompt) {
-            return r#"Source-derived concept hints for 1D cuts:
+            sections.push(
+                r#"Source-derived concept hints for 1D cuts:
 - In Spectrix, a 1D cut is a one-variable gate: it keeps or rejects event rows by comparing numeric column values to one or more limits or literal values.
 - In the code it is `Cut1D`. It stores a name, an expression string, an active flag, builder groups, and parsed condition groups.
 - Conditions inside one builder group are combined with AND. Separate builder groups are combined with OR.
@@ -73,10 +124,10 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
 - Experimentally, a 1D cut is how the user gates on one event observable, such as an energy window, time window, position window, PID value, or validity flag, so only matching events contribute to histograms, fits, or saved filtered parquet output.
 - An interactive 1D cut drawn from a 1D histogram is the same idea: two draggable vertical bounds are synced into an expression like `column >= low & column <= high`.
 "#
-            .to_owned();
-        }
-
-        return r#"Source-derived workflow hints for 1D cuts:
+            );
+        } else {
+            sections.push(
+                r#"Source-derived workflow hints for 1D cuts:
 - A 1D cut is a one-column event gate. It compares event values in a selected column against bounds or literal values, then uses the resulting boolean mask when calculating histograms or saving filtered parquet.
 - The Histogram Script cut UI creates manual 1D cuts with the `+1D Manual` button and loads saved 1D cuts with `+1D Load`.
 - A new manual 1D cut starts in Builder mode. In the 1D cut row, click `Builder` to open the dedicated editor.
@@ -84,12 +135,14 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
 - `Add OR Expression` starts another expression group, so separate groups are combined with OR.
 - Enable the cut checkbox when you want it used by histogram generation or parquet filtering.
 - From an existing 1D histogram, pressing `C` or using the right-click Cuts menu can create an interactive draggable 1D cut if the histogram has a source column. Those appear under Active Histogram Cuts.
-"#
-        .to_owned();
+"#,
+            );
+        }
     }
 
     if is_2d_cut_question(prompt) {
-        return r#"Source-derived workflow hints for 2D cuts:
+        sections.push(
+            r#"Source-derived workflow hints for 2D cuts:
 - In Spectrix, a 2D cut is a graphical polygon gate tied to an X column and a Y column. In the code it is `Cut2D`, which stores polygon vertices and checks whether each row's `(x, y)` point is inside the polygon.
 - To create a new 2D cut, first create/open a 2D histogram so Spectrix knows the X/Y columns.
 - In the 2D plot, press `C` or right-click the plot and use `Cuts` -> `+` to start a new polygon cut.
@@ -100,10 +153,41 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
 - The Histogram Script `+2D` button loads a saved 2D cut JSON. It is not the main path for drawing a new blank 2D polygon.
 - Unsaved 2D cuts from a plot can still appear under Active Histogram Cuts and can be enabled for histogram generation or parquet filtering.
 "#
-        .to_owned();
+        );
     }
 
-    "Source-derived workflow hints: no special workflow hint matched; rely on the source excerpts below.".to_owned()
+    if sections.is_empty() {
+        "Source-derived workflow hints: no special workflow hint matched; rely on the source excerpts below.".to_owned()
+    } else {
+        sections.join("\n")
+    }
+}
+
+fn is_gaussian_fit_question(prompt: &str) -> bool {
+    let normalized = prompt.to_lowercase();
+    let mentions_fit = normalized.contains("fit")
+        || normalized.contains("fitting")
+        || normalized.contains("fitted");
+    let mentions_gaussian = normalized.contains("gaussian");
+    let mentions_peak = normalized.contains("peak");
+    let mentions_marker = normalized.contains("marker");
+
+    mentions_fit && (mentions_gaussian || mentions_peak || mentions_marker)
+}
+
+fn is_calibration_question(prompt: &str) -> bool {
+    let normalized = prompt.to_lowercase();
+
+    normalized.contains("calibrat")
+}
+
+fn is_2d_projection_question(prompt: &str) -> bool {
+    let normalized = prompt.to_lowercase();
+    let mentions_projection = normalized.contains("projection") || normalized.contains("project");
+    let mentions_2d = normalized.contains("2d") || normalized.contains("two d");
+    let mentions_histogram = normalized.contains("histogram") || normalized.contains("hist");
+
+    mentions_projection && (mentions_2d || mentions_histogram)
 }
 
 fn is_1d_cut_question(prompt: &str) -> bool {
@@ -190,12 +274,16 @@ mod tests {
     fn user_prompt_prioritizes_1d_cut_definition_for_what_is_question() {
         let prompt = build_user_prompt("What is a 1D cut?", &[], &empty_snapshot())
             .expect("prompt should build");
+        let hint_section = prompt
+            .split("Codebase search results")
+            .next()
+            .expect("prompt should include hint section before codebase context");
 
-        assert!(prompt.contains("Source-derived concept hints for 1D cuts"));
-        assert!(prompt.contains("one-variable gate"));
-        assert!(prompt.contains("Polars boolean masks"));
-        assert!(prompt.contains("event observable"));
-        assert!(!prompt.contains("Source-derived workflow hints for 1D cuts"));
+        assert!(hint_section.contains("Source-derived concept hints for 1D cuts"));
+        assert!(hint_section.contains("one-variable gate"));
+        assert!(hint_section.contains("Polars boolean masks"));
+        assert!(hint_section.contains("event observable"));
+        assert!(!hint_section.contains("Source-derived workflow hints for 1D cuts"));
     }
 
     #[test]
@@ -208,5 +296,65 @@ mod tests {
         assert!(prompt.contains("right-click the plot"));
         assert!(prompt.contains("Double-click"));
         assert!(prompt.contains("`+2D` button loads a saved 2D cut JSON"));
+    }
+
+    #[test]
+    fn user_prompt_includes_gaussian_fit_workflow_hints() {
+        let prompt = build_user_prompt("How do I fit Gaussian peaks?", &[], &empty_snapshot())
+            .expect("prompt should build");
+
+        assert!(prompt.contains("Source-derived workflow hints for Gaussian fitting"));
+        assert!(prompt.contains("`P` adds a peak marker"));
+        assert!(prompt.contains("`B` adds a background marker pair"));
+        assert!(prompt.contains("`R` adds a region marker"));
+        assert!(prompt.contains("`F` fits Gaussian peaks"));
+        assert!(prompt.contains("Store Fit"));
+    }
+
+    #[test]
+    fn user_prompt_includes_calibration_workflow_hints() {
+        let prompt = build_user_prompt(
+            "How do I calibrate a 1D histogram and make a calibrated column?",
+            &[],
+            &empty_snapshot(),
+        )
+        .expect("prompt should build");
+
+        assert!(prompt.contains("Source-derived workflow hints for calibration"));
+        assert!(prompt.contains("creating a new calibrated event-data column"));
+        assert!(prompt.contains("assigned energy `-1`"));
+        assert!(prompt.contains("a*x^2 + b*x + c"));
+        assert!(prompt.contains("Column Creation"));
+        assert!(prompt.contains("EnergyCalibrated"));
+    }
+
+    #[test]
+    fn user_prompt_includes_2d_projection_workflow_hints() {
+        let prompt = build_user_prompt(
+            "How do projections on 2D histograms work?",
+            &[],
+            &empty_snapshot(),
+        )
+        .expect("prompt should build");
+
+        assert!(prompt.contains("Source-derived workflow hints for 2D projections"));
+        assert!(prompt.contains("Press `X` to toggle an X projection"));
+        assert!(prompt.contains("Press `Y` to toggle a Y projection"));
+        assert!(prompt.contains("right-click the 2D plot"));
+        assert!(prompt.contains("normal 1D histogram windows"));
+    }
+
+    #[test]
+    fn user_prompt_can_include_multiple_workflow_hint_sections() {
+        let prompt = build_user_prompt(
+            "How do I fit Gaussian peaks, calibrate them, and make 2D projections?",
+            &[],
+            &empty_snapshot(),
+        )
+        .expect("prompt should build");
+
+        assert!(prompt.contains("Source-derived workflow hints for Gaussian fitting"));
+        assert!(prompt.contains("Source-derived workflow hints for calibration"));
+        assert!(prompt.contains("Source-derived workflow hints for 2D projections"));
     }
 }

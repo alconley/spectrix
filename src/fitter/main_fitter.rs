@@ -267,6 +267,7 @@ impl Fitter {
     pub fn calibrate(&mut self, calibration: &Calibration) {
         log::info!("Calibrating");
         // Calibration logic goes here
+        self.calibration = calibration.clone();
 
         // update gaussian fit parameters
         if let Some(fit_result) = &mut self.fit_result {
@@ -275,6 +276,14 @@ impl Fitter {
                     fit.calibrate(calibration);
                 }
             }
+        }
+    }
+
+    pub fn sync_calibration_values(&mut self, calibration: &Calibration) {
+        self.calibration = calibration.clone();
+
+        if let Some(FitResult::Gaussian(fit)) = &mut self.fit_result {
+            fit.calibrate_parameters(calibration);
         }
     }
 
