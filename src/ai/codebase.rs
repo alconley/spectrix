@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
@@ -6,7 +6,11 @@ const MAX_SOURCE_BYTES: u64 = 260_000;
 const MAX_EXCERPTS: usize = 10;
 const MAX_MATCHED_FILES: usize = 12;
 const MAX_UI_CLUES: usize = 18;
+const MAX_INTERACTION_CLUES: usize = 20;
 const MAX_DATA_CLUES: usize = 18;
+const MAX_CALL_CHAIN_CLUES: usize = 24;
+const MAX_CALL_CHAIN_SEEDS: usize = 10;
+const MAX_CALL_CHAIN_DEPTH: usize = 4;
 const MAX_PROMPT_CHARS: usize = 24_000;
 const EXCERPT_RADIUS: usize = 7;
 
@@ -15,7 +19,9 @@ pub(crate) struct CodebaseContext {
     excerpts: Vec<CodeExcerpt>,
     matched_files: Vec<String>,
     ui_clues: Vec<SourceClue>,
+    interaction_clues: Vec<SourceClue>,
     data_clues: Vec<SourceClue>,
+    call_chain_clues: Vec<SourceClue>,
     searched_file_count: usize,
     warning: Option<String>,
 }
@@ -99,13 +105,17 @@ impl CodebaseContext {
             .map(|document| document.document.relative_path.clone())
             .collect::<Vec<_>>();
         let ui_clues = extract_ui_clues(&relevant_documents, &terms);
+        let interaction_clues = extract_interaction_clues(&relevant_documents, &terms);
         let data_clues = extract_data_clues(&relevant_documents, &terms);
+        let call_chain_clues = extract_call_chain_clues(&scored, &relevant_documents, &terms);
 
         Self {
             excerpts: selected,
             matched_files,
             ui_clues,
+            interaction_clues,
             data_clues,
+            call_chain_clues,
             searched_file_count,
             warning,
         }
@@ -135,6 +145,16 @@ impl CodebaseContext {
 
         section.push_str("\nUI controls and entry-point clues found in matched source:\n");
         append_clues(&mut section, &self.ui_clues);
+
+        section.push_str(
+            "\nInteraction and gesture clues found in matched source (click, right-click, hover, drag, keybinds, context menus):\n",
+        );
+        append_clues(&mut section, &self.interaction_clues);
+
+        section.push_str(
+            "\nCall-chain and UI reachability clues found by following matched functions back toward callers:\n",
+        );
+        append_clues(&mut section, &self.call_chain_clues);
 
         section.push_str("\nData and experiment operation clues found in matched source:\n");
         append_clues(&mut section, &self.data_clues);
@@ -303,6 +323,15 @@ fn extract_ui_clues(documents: &[&ScoredDocument], terms: &[String]) -> Vec<Sour
     extract_clues(documents, terms, is_ui_source_line, MAX_UI_CLUES)
 }
 
+fn extract_interaction_clues(documents: &[&ScoredDocument], terms: &[String]) -> Vec<SourceClue> {
+    extract_clues(
+        documents,
+        terms,
+        is_interaction_source_line,
+        MAX_INTERACTION_CLUES,
+    )
+}
+
 fn extract_data_clues(documents: &[&ScoredDocument], terms: &[String]) -> Vec<SourceClue> {
     extract_clues(
         documents,
@@ -310,6 +339,141 @@ fn extract_data_clues(documents: &[&ScoredDocument], terms: &[String]) -> Vec<So
         is_data_or_experiment_source_line,
         MAX_DATA_CLUES,
     )
+}
+
+fn extract_call_chain_clues(
+    all_documents: &[ScoredDocument],
+    relevant_documents: &[&ScoredDocument],
+    terms: &[String],
+) -> Vec<SourceClue> {
+    let seed_functions = seed_functions_from_documents(relevant_documents, terms);
+    if seed_functions.is_empty() {
+        return Vec::new();
+    }
+
+    let mut frontier = seed_functions.into_iter().collect::<BTreeSet<_>>();
+    let mut visited_functions = frontier.clone();
+    let mut clues = Vec::new();
+    let mut seen_clues = BTreeSet::new();
+
+    for depth in 0..MAX_CALL_CHAIN_DEPTH {
+        let mut next_frontier = BTreeSet::new();
+
+        for document in all_documents {
+            let mut current_function = None;
+
+            for (line_index, line) in document.document.text.lines().enumerate() {
+                let trimmed = line.trim();
+
+                if let Some(function_name) = function_name_from_line(trimmed) {
+                    current_function = Some(function_name);
+                }
+
+                let Some(called_function) = frontier
+                    .iter()
+                    .find(|function_name| line_calls_function(trimmed, function_name))
+                else {
+                    continue;
+                };
+
+                let clue = SourceClue {
+                    relative_path: document.document.relative_path.clone(),
+                    line_number: line_index + 1,
+                    function_name: current_function.clone(),
+                    text: compact_source_line(trimmed),
+                };
+
+                let dedupe_key =
+                    format!("{}:{}:{}", clue.relative_path, clue.line_number, clue.text);
+                if seen_clues.insert(dedupe_key) {
+                    clues.push((
+                        call_chain_clue_score(&clue, terms, called_function, depth),
+                        clue,
+                    ));
+                }
+
+                if let Some(caller) = &current_function
+                    && caller != called_function
+                    && is_traceable_function(caller)
+                    && visited_functions.insert(caller.clone())
+                {
+                    next_frontier.insert(caller.clone());
+                }
+            }
+        }
+
+        if next_frontier.is_empty() {
+            break;
+        }
+
+        frontier = next_frontier;
+    }
+
+    clues.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| left.1.relative_path.cmp(&right.1.relative_path))
+            .then_with(|| left.1.line_number.cmp(&right.1.line_number))
+    });
+
+    clues
+        .into_iter()
+        .map(|(_, clue)| clue)
+        .take(MAX_CALL_CHAIN_CLUES)
+        .collect()
+}
+
+fn seed_functions_from_documents(documents: &[&ScoredDocument], terms: &[String]) -> Vec<String> {
+    let mut function_scores = BTreeMap::<String, usize>::new();
+
+    for document in documents {
+        let mut current_function = None;
+
+        for line in document.document.text.lines() {
+            let trimmed = line.trim();
+
+            if let Some(function_name) = function_name_from_line(trimmed) {
+                current_function = is_traceable_function(&function_name).then_some(function_name);
+
+                if let Some(function_name) = &current_function {
+                    let name_score = score_text_for_terms(function_name, terms);
+                    if name_score > 0 {
+                        *function_scores.entry(function_name.clone()).or_default() += name_score
+                            * 12
+                            + usize::from(is_high_signal_file(&document.document.relative_path));
+                    }
+                }
+            }
+
+            let Some(function_name) = &current_function else {
+                continue;
+            };
+
+            let line_score = score_text_for_terms(trimmed, terms);
+            if line_score == 0 {
+                continue;
+            }
+
+            let source_kind_boost = usize::from(is_ui_source_line(trimmed))
+                + usize::from(is_data_or_experiment_source_line(trimmed));
+            *function_scores.entry(function_name.clone()).or_default() +=
+                line_score * 5 + source_kind_boost * 4;
+        }
+    }
+
+    let mut scored_functions = function_scores
+        .into_iter()
+        .filter(|(_, score)| *score > 0)
+        .collect::<Vec<_>>();
+
+    scored_functions.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+
+    scored_functions
+        .into_iter()
+        .map(|(function_name, _)| function_name)
+        .take(MAX_CALL_CHAIN_SEEDS)
+        .collect()
 }
 
 fn extract_clues(
@@ -367,6 +531,13 @@ fn is_ui_source_line(line: &str) -> bool {
         .any(|pattern| line.contains(pattern))
 }
 
+fn is_interaction_source_line(line: &str) -> bool {
+    let lowercase = line.to_lowercase();
+    INTERACTION_SOURCE_PATTERNS
+        .iter()
+        .any(|pattern| lowercase.contains(pattern))
+}
+
 fn is_data_or_experiment_source_line(line: &str) -> bool {
     let lowercase = line.to_lowercase();
     DATA_SOURCE_PATTERNS
@@ -383,6 +554,47 @@ fn function_name_from_line(line: &str) -> Option<String> {
         .collect::<String>();
 
     (!name.is_empty()).then_some(name)
+}
+
+fn is_traceable_function(function_name: &str) -> bool {
+    function_name.len() >= 4
+        && !matches!(
+            function_name,
+            "main" | "new" | "ui" | "fmt" | "clone" | "default" | "from" | "into"
+        )
+}
+
+fn line_calls_function(line: &str, function_name: &str) -> bool {
+    if line.contains(&format!("fn {function_name}")) {
+        return false;
+    }
+
+    for (index, _) in line.match_indices(function_name) {
+        let Some(after) = line[index + function_name.len()..].chars().next() else {
+            continue;
+        };
+
+        if after != '(' {
+            continue;
+        }
+
+        let before = line[..index].chars().next_back();
+        if before.is_some_and(|character| character.is_ascii_alphanumeric() || character == '_') {
+            continue;
+        }
+
+        return true;
+    }
+
+    false
+}
+
+fn score_text_for_terms(text: &str, terms: &[String]) -> usize {
+    let lowercase = text.to_lowercase();
+    terms
+        .iter()
+        .map(|term| lowercase.matches(term).count())
+        .sum()
 }
 
 fn clue_score(clue: &SourceClue, terms: &[String]) -> usize {
@@ -404,6 +616,26 @@ fn clue_score(clue: &SourceClue, terms: &[String]) -> usize {
         .sum::<usize>();
 
     term_score + usize::from(is_high_signal_file(&clue.relative_path))
+}
+
+fn call_chain_clue_score(
+    clue: &SourceClue,
+    terms: &[String],
+    called_function: &str,
+    depth: usize,
+) -> usize {
+    let depth_boost = MAX_CALL_CHAIN_DEPTH.saturating_sub(depth) * 20;
+    let called_function_boost = score_text_for_terms(called_function, terms) * 8;
+    let ui_boost = usize::from(is_ui_source_line(&clue.text)) * 80
+        + clue
+            .function_name
+            .as_deref()
+            .map(|function_name| {
+                usize::from(function_name.contains("ui") || function_name.contains("menu")) * 40
+            })
+            .unwrap_or_default();
+
+    clue_score(clue, terms) + depth_boost + called_function_boost + ui_boost
 }
 
 fn compact_source_line(line: &str) -> String {
@@ -478,6 +710,20 @@ fn synonyms_for(term: &str) -> Option<&'static [&'static str]> {
         "fit" | "fits" | "fitting" => Some(&["fit", "fits", "fitter", "gaussian", "lmfit"]),
         "root" => Some(&["root", "uproot"]),
         "parquet" => Some(&["parquet", "lazyframe", "polars"]),
+        "click" | "clicked" => Some(&[
+            "click",
+            "clicked",
+            "click_and_drag",
+            "interactive_clicking",
+            "context_menu",
+        ]),
+        "right" => Some(&["right", "secondary_clicked", "context_menu"]),
+        "hover" | "hovered" => Some(&["hover", "hovered", "on_hover_text"]),
+        "drag" | "dragging" => {
+            Some(&["drag", "dragging", "click_and_drag", "interactive_dragging"])
+        }
+        "double" => Some(&["double", "double-click", "allow_double_click_reset"]),
+        "keybind" | "keybinds" => Some(&["keybind", "keybinds", "press"]),
         "save" | "export" => Some(&["save", "export", "file"]),
         "open" | "load" => Some(&["open", "load", "file"]),
         "plot" | "view" => Some(&["plot", "view", "histogram"]),
@@ -563,6 +809,25 @@ const UI_SOURCE_PATTERNS: &[&str] = &[
     "TextEdit::",
 ];
 
+const INTERACTION_SOURCE_PATTERNS: &[&str] = &[
+    ".clicked(",
+    ".secondary_clicked(",
+    ".on_hover_text(",
+    ".on_disabled_hover_text(",
+    ".context_menu(",
+    "hovered(",
+    "hover_pos",
+    "drag",
+    "click_and_drag",
+    "interactive_dragging",
+    "interactive_clicking",
+    "double-click",
+    "double_click",
+    "keybind",
+    "press `",
+    "sense(egui::sense::click_and_drag())",
+];
+
 const DATA_SOURCE_PATTERNS: &[&str] = &[
     "active_filter_cuts",
     "add_hist",
@@ -636,11 +901,60 @@ mod tests {
         let prompt_section = context.to_prompt_section();
 
         assert!(prompt_section.contains("UI controls and entry-point clues"));
+        assert!(prompt_section.contains("Interaction and gesture clues"));
+        assert!(prompt_section.contains("Call-chain and UI reachability clues"));
         assert!(prompt_section.contains("Data and experiment operation clues"));
         assert!(prompt_section.contains("Save Filtered Files"));
         assert!(
             prompt_section.contains("active_filter_cuts")
                 || prompt_section.contains("filter_selected_files_and_save")
         );
+    }
+
+    #[test]
+    fn codebase_context_includes_interaction_clues_for_mouse_and_context_menu_queries() {
+        let context =
+            CodebaseContext::for_query("How do I right click and drag on a 2D histogram?");
+        let prompt_section = context.to_prompt_section();
+
+        assert!(prompt_section.contains("Interaction and gesture clues"));
+        assert!(
+            prompt_section.contains("context_menu")
+                || prompt_section.contains("interactive_dragging")
+                || prompt_section.contains("hover_pos")
+        );
+    }
+
+    #[test]
+    fn call_chain_clues_follow_implementation_function_to_ui_caller() {
+        let scored = vec![ScoredDocument {
+            score: 10,
+            document: CodeDocument {
+                relative_path: "src/histoer/histo2d/context_menu.rs".to_owned(),
+                text: r#"
+impl Histogram2D {
+    pub fn context_menu(&mut self, ui: &mut egui::Ui) {
+        if ui.button("+").clicked() {
+            self.new_cut();
+        }
+    }
+
+    pub fn new_cut(&mut self) {
+        self.plot_settings.cuts.push(Cut2D::default());
+    }
+}
+"#
+                .to_owned(),
+            },
+        }];
+        let relevant_documents = vec![&scored[0]];
+        let terms = vec!["cut".to_owned()];
+
+        let clues = extract_call_chain_clues(&scored, &relevant_documents, &terms);
+
+        assert!(clues.iter().any(|clue| {
+            clue.function_name.as_deref() == Some("context_menu")
+                && clue.text.contains("self.new_cut()")
+        }));
     }
 }

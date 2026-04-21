@@ -131,7 +131,7 @@ impl AiAssistant {
         ui.heading("Spectrix AI");
         ui.label(
             egui::RichText::new(
-                "Ask usage questions. The assistant searches Spectrix source before answering.",
+                "Ask usage questions. The assistant searches Spectrix source, traces call sites back to UI controls, and answers with practical steps including the exact interaction method when the code shows it.",
             )
             .weak()
             .small(),

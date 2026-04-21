@@ -70,6 +70,10 @@ pub(crate) fn normalize_help_response(mut response: AiResponse, prompt: &str) ->
         return fallback;
     }
 
+    if let Some(fallback) = source_backed_gaussian_fit_fallback_response(prompt) {
+        return fallback;
+    }
+
     if let Some(fallback) = source_backed_1d_cut_fallback_response(prompt, &response) {
         return fallback;
     }
@@ -165,6 +169,21 @@ fn source_backed_1d_cut_fallback_response(
     })
 }
 
+fn source_backed_gaussian_fit_fallback_response(prompt: &str) -> Option<AiResponse> {
+    if !is_fit_workflow_question(prompt) || prompt_mentions_analysis(prompt) {
+        return None;
+    }
+
+    Some(AiResponse {
+        summary: "The current fitting workflow in Spectrix is the 1D Gaussian fit workflow. First create or open a 1D histogram, then move the cursor into that histogram plot, because the fit keybinds act at the current cursor position inside the plot. The default background model is `None`. If you want background fitting, right-click the histogram, open `Fits`, and choose a background model. Press `R` twice to place the two region markers that define the fit interval. Press `B` to add a green background marker pair at the cursor; it starts very narrow, and you can click and drag the green marker lines to widen or narrow it. Press `P` to add peak markers manually, or press `O` to run the peak finder and tune its settings from the right-click `Peak Finder` panel. Then press `F` to run the Gaussian fit with `lmfit`. The Python environment Spectrix is using must have `lmfit` available.\n\nPress `G` if you want a background-only fit from the background marker pairs. If you run `F` with a background model selected but no background marker pairs, Spectrix falls back to two tiny background windows at the left and right edges of the region. If you run `F` with no peak markers, Spectrix still needs the two region markers, then it seeds one peak from the strongest bin inside that region. After a successful fit, the Fit Panel opens and the result is the `Temp` fit. Press `S` / `Store Fit` to keep it as a stored fit.\n\nIn the Fit Panel you can assign per-peak UUID values and energies. `UUID = 0` is the default invalid UUID. `Energy = -1` means that peak is not used for calibration. The fit settings also let you adjust `Equal σ`, `Free Position`, optional `Constrain σ`, the UUID label controls, and the displayed fit lines (`Decomposition`, `Composition`, `Background`, `1σ Uncertainty`). Use `Save Fits` / `Load Fits` for normal Spectrix workflows, and `Export All lmfit Results` / `Load lmfit .sav` when you want to move fits to or from Python/lmfit. If you enable `Calibration`, you can type coefficients manually and click `Calibrate`, or use `Linear` with at least 2 valid points or `Quadratic` with at least 3 distinct valid points.".to_owned(),
+        clarification_questions: Vec::new(),
+        notes: vec![
+            "This answer is based on the 1D histogram keybinds, Gaussian fitter, Fit Panel, and calibration code paths.".to_owned(),
+            "If a quadratic calibration is not safely invertible over the relevant range, Spectrix warns and falls back to the raw X axis for display.".to_owned(),
+        ],
+    })
+}
+
 fn source_backed_2d_cut_fallback_response(
     prompt: &str,
     response: &AiResponse,
@@ -222,6 +241,30 @@ fn is_1d_cut_question(prompt: &str) -> bool {
     let mentions_1d = normalized.contains("1d") || normalized.contains("one d");
 
     mentions_cut && mentions_1d
+}
+
+fn is_fit_workflow_question(prompt: &str) -> bool {
+    let normalized = prompt.to_lowercase();
+    let mentions_fit = normalized.contains("fit")
+        || normalized.contains("fits")
+        || normalized.contains("fitting")
+        || normalized.contains("fitted");
+    let mentions_gaussian = normalized.contains("gaussian");
+    let mentions_peak = normalized.contains("peak");
+    let mentions_marker = normalized.contains("marker");
+    let mentions_workflow = normalized.contains("how do")
+        || normalized.contains("how can")
+        || normalized.contains("procedure")
+        || normalized.contains("steps")
+        || normalized.contains("perform")
+        || normalized.contains("do fits")
+        || normalized.contains("make fits")
+        || normalized.contains("fit stuff")
+        || normalized.contains("run fits")
+        || normalized.contains("run a fit")
+        || normalized.contains("make a fit");
+
+    mentions_fit && (mentions_gaussian || mentions_peak || mentions_marker || mentions_workflow)
 }
 
 fn is_2d_cut_question(prompt: &str) -> bool {
@@ -442,6 +485,47 @@ mod tests {
         assert!(response.summary.contains("press `C`"));
         assert!(response.summary.contains("double-click"));
         assert!(response.summary.contains("`+2D` button loads"));
+        assert!(response.clarification_questions.is_empty());
+    }
+
+    #[test]
+    fn gaussian_fit_question_gets_source_backed_fallback_when_answer_is_misdirected() {
+        let response = normalize_help_response(
+            AiResponse {
+                summary: "Use the general analysis workflow to post-process the data.".to_owned(),
+                clarification_questions: vec!["Which analysis mode do you mean?".to_owned()],
+                notes: vec!["This depends on the analysis module.".to_owned()],
+            },
+            "How do I fit Gaussian peaks?",
+        );
+
+        assert!(response.summary.contains("right-click the histogram"));
+        assert!(response.summary.contains("Press `R` twice"));
+        assert!(response.summary.contains("Press `B`"));
+        assert!(response.summary.contains("`F`"));
+        assert!(response.summary.contains("`Temp` fit"));
+        assert!(response.summary.contains("`UUID = 0`"));
+        assert!(response.summary.contains("`Energy = -1`"));
+        assert!(response.clarification_questions.is_empty());
+    }
+
+    #[test]
+    fn generic_fit_workflow_question_gets_source_backed_fit_procedure() {
+        let response = normalize_help_response(
+            AiResponse {
+                summary: "To perform fits in Spectrix, first create and display a 1D histogram. With your cursor inside the histogram plot area, press `F` to initiate a Gaussian fit.".to_owned(),
+                clarification_questions: Vec::new(),
+                notes: Vec::new(),
+            },
+            "how do i do fits?",
+        );
+
+        assert!(response.summary.contains("1D Gaussian fit workflow"));
+        assert!(response.summary.contains("Press `R` twice"));
+        assert!(response.summary.contains("Press `B`"));
+        assert!(response.summary.contains("`O`"));
+        assert!(response.summary.contains("`F`"));
+        assert!(response.summary.contains("Press `S`"));
         assert!(response.clarification_questions.is_empty());
     }
 

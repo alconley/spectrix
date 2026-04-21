@@ -2,7 +2,7 @@
 
 **Spectrix** is an **AI-assisted spectrum analysis** and experimental event based-data exploration tool. It provides tools for histogramming, Gaussian fitting, interactive visualization of 1D and 2D histograms, and help through **Spectrix AI** (currently in development).
 
-Spectrix is built around event data where users are often working with observables such as energy, time, position, PID, detector channels, calibrated columns, and fitted peak yields. It uses the crates:  
+Spectrix is built around event data where users are often working with observables such as energy, time, position, detector channels, calibrated columns, and fitted peak yields. It uses the crates:  
 `egui`, `egui-tiles`, `egui_plot`, and `polars`.
 
 Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting is performed using Python’s **lmfit** library.

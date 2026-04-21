@@ -315,24 +315,27 @@ impl eframe::App for Spectrix {
 
                                         ui.separator();
 
-                                        if ui.button("Reset Session").clicked() {
-                                            if session.settings.name.trim().is_empty() {
-                                                session.settings.name = fallback_name.clone();
+                                        ui.horizontal( |ui| {
+                                            ui.label("Session:");
+                                                if ui.button("Reset").clicked() {
+                                                    if session.settings.name.trim().is_empty() {
+                                                        session.settings.name = fallback_name.clone();
+                                                    }
+                                                pending_reset = Some(i);
+                                                ui.close();
                                             }
-                                            pending_reset = Some(i);
-                                            ui.close();
-                                        }
 
-                                        if ui
-                                            .add_enabled(
-                                                can_remove_session,
-                                                egui::Button::new("Remove Session"),
-                                            )
-                                            .clicked()
-                                        {
-                                            pending_remove = Some(i);
-                                            ui.close();
-                                        }
+                                            if ui
+                                                .add_enabled(
+                                                    can_remove_session,
+                                                    egui::Button::new("Remove"),
+                                                )
+                                                .clicked()
+                                            {
+                                                pending_remove = Some(i);
+                                                ui.close();
+                                            }
+                                        });
                                     });
 
                                 if let Some(dragged_index) = response.dnd_release_payload::<usize>() {

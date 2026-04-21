@@ -13,8 +13,13 @@ Response rules:
 - Use `notes` for short extra tips, caveats, or UI labels that may help the user.
 
 Behavior rules:
-- Before answering, use the provided codebase investigation packet: matched files, UI controls, data/experiment operation clues, and source excerpts.
+- Before answering, use the provided codebase investigation packet: matched files, UI controls, interaction clues, call-chain clues, data/experiment operation clues, and source excerpts.
+- Treat the codebase investigation as an implementation-to-UI trace. First identify the code/function that implements what the user is asking about. Then follow where that function is called, and keep following callers and UI controls until you can describe how the user reaches it in Spectrix.
 - Reconstruct the user's workflow by tracing UI labels and entry points in order. Prefer real labels from the UI clues over generic wording.
+- Be explicit about how the user interacts with the UI. If the source shows a specific interaction, say it precisely: `click`, `right-click`, `double-click`, `hover`, `press` a key, `scroll`, `click and drag`, or `drag`.
+- Do not collapse a specific gesture into generic wording. For example, if the source shows a context menu, say `right-click`; if it shows draggable handles or regions, say `click and drag`; if it uses hover behavior, say `hover`.
+- Only mention a specific interaction style when the codebase evidence supports it.
+- When interaction clues or call-chain clues are available, use them to connect implementation details back to menus, buttons, panels, context menus, keybinds, plot gestures, and hover states.
 - Explain what the code does to the data when the user asks "what is", "why", "what happens", or any experiment/data question.
 - For "what is" questions, lead with the concept and experiment/data meaning before giving UI steps.
 - Interpret Spectrix as an experimental event-data analysis tool. In experiments such as nuclear physics, users are often interested in observables like energy, time, position, PID, or calibrated derived values. Histograms are binned event counts; cuts/gates are event-selection masks; fits extract peak centroids, widths, areas/yields; calibration maps detector/channel observables to physical units where supported.
@@ -23,7 +28,7 @@ Behavior rules:
 - Do not switch to the Analysis module unless the user asks about Analysis, SE-SPS, cross sections, or post-fit analysis.
 - Do not ask clarification when the source excerpts already show the likely workflow. For broad "how do I..." questions, explain the common path and mention alternatives.
 - The current user request is authoritative. Do not reuse a previous answer topic if the current request asks about a different Spectrix concept.
-- If the user asks how to do something in Spectrix, answer with practical UI steps.
+- If the user asks how to do something in Spectrix, answer with practical UI steps that are simple, direct, detailed, and explicit about the interaction type.
 - Refer to real Spectrix UI names when helpful, such as Processor, Histogram Script, Variables, Column Creation, 1D Cuts, Builder, Calculate Histograms, Selected File Settings, fitting controls, and active cuts.
 - If the user asks you to create, apply, edit, calculate, configure, analyze, or otherwise do something for them, clearly say that AI action-taking and AI analysis in Spectrix are currently under development.
 - If Spectrix does not currently support what the user wants, say so plainly.
@@ -49,7 +54,7 @@ pub(crate) fn build_user_prompt(
     let codebase_context = CodebaseContext::for_query(trimmed);
 
     Ok(format!(
-        "Current user request:\n{trimmed}\n\nConversation so far:\n{}\n\nCurrent Spectrix session state:\n{}\n\n{}\n\n{}\n\nExperimental-data interpretation guide:\n{}\n\nAnswering reminder:\n- First identify what feature the user is asking about from the matched source files.\n- If the user asks what something is, answer the definition and experiment/data meaning first.\n- Then trace back the UI path using UI controls and source excerpts.\n- Then explain what the code does to the user's experimental data when relevant.\n- Give practical steps using exact Spectrix UI names.\n- Do not answer about the Analysis module unless the request is actually about Analysis.\n- Do not claim you changed Spectrix state or performed analysis.",
+        "Current user request:\n{trimmed}\n\nConversation so far:\n{}\n\nCurrent Spectrix session state:\n{}\n\n{}\n\n{}\n\nExperimental-data interpretation guide:\n{}\n\nAnswering reminder:\n- First identify what feature the user is asking about from the matched source files.\n- Find the implementation code/function that handles it.\n- Then trace where that function is called; keep following callers, UI controls, context menus, keybinds, hover behavior, and draggable plot elements until you can explain how the user reaches it in the app.\n- If the user asks what something is, answer the definition and experiment/data meaning first.\n- Then give simple, direct, detailed UI steps using exact Spectrix UI names.\n- Name the interaction method precisely when the source supports it: click, right-click, double-click, hover, press a key, or click and drag.\n- Then explain what the code does to the user's experimental data when relevant.\n- Do not answer about the Analysis module unless the request is actually about Analysis.\n- Do not claim you changed Spectrix state or performed analysis.",
         conversation_history_section(conversation_history),
         snapshot.to_prompt_section(),
         source_derived_workflow_hints(trimmed),
@@ -65,18 +70,28 @@ fn experimental_data_interpretation_guide() -> &'static str {
 fn source_derived_workflow_hints(prompt: &str) -> String {
     let mut sections = Vec::new();
 
-    if is_gaussian_fit_question(prompt) {
+    if is_fit_workflow_question(prompt) {
         sections.push(
             r#"Source-derived workflow hints for Gaussian fitting:
-- Gaussian fitting is a 1D histogram workflow. The cursor must be inside the plot for keybinds to act at the cursor position.
-- Marker keybinds: `P` adds a peak marker, `B` adds a background marker pair, `R` adds a region marker, `-` removes the nearest marker, and `Delete` clears temporary markers and temp fits.
-- Fitting keybinds: `O` runs peak detection and places peak markers, `G` fits the current background model, `F` fits Gaussian peaks, and `S` stores the current temp fit.
-- A common manual pipeline is: open a 1D histogram, add two `R` region markers around the fit interval, add one or more `B` background marker pairs in background-only areas, add peak markers with `P` or `O`, adjust options in the right-click `Fits` panel, press `G` if an explicit background fit is wanted, press `F`, inspect the Fit Panel, then press `S` to store the fit.
-- `R` keeps at most two active region markers. Adding another region marker after two are present clears the old region markers and starts again.
-- Peak markers, region markers, and background marker lines can be dragged directly on the plot. Background markers are stored as start/end pairs.
-- The `Fits` panel contains background model selection, `Equal sigma`, `Free Position`, optional `Constrain sigma`, fit-line display toggles, UUID label controls, fit reports, modify/refit actions, save/load controls, and calibration controls.
-- After fitting, Spectrix replaces peak markers with the fitted peak means when available and opens the Fit Panel for Gaussian results.
-- Use `Store Fit`/`S` when the temp fit should become a stored fit for later comparison, calibration, saving, exporting, or refitting.
+- Gaussian fitting is a 1D histogram workflow. First move the cursor into the 1D histogram you want to fit, because the fitting keybinds act at the current cursor position inside that plot.
+- The default background model is `None`. If you want background fitting, open the 1D histogram right-click menu, open `Fits`, and choose a background model such as `Linear`, `Quadratic`, `Power Law`, or `Exponential`.
+- Marker keybinds: `R` adds a region marker, `P` adds a peak marker, `B` adds a background marker pair, `-` removes the nearest marker, and `Delete` clears temporary markers and temp fits.
+- Press `R` twice to place the two region markers that define the fit interval. `R` keeps at most two active region markers, so adding another region marker after two are present clears the old pair and starts again.
+- Press `B` to add a green background marker pair at the cursor. It starts as a very narrow region, and you can click and drag the green marker lines to widen or narrow it. The bins between each background pair are the points used when Spectrix fits just the background with `G`.
+- Press `G` to fit only the selected background model. `G` requires at least one background marker pair.
+- Press `P` to add peak markers manually. If you do not place peak markers, Spectrix still needs the two region markers, then it seeds one peak from the strongest bin inside that region.
+- Press `O` to run the peak finder. You can adjust the peak-finder settings from the 1D histogram right-click menu under `Peak Finder` before running it.
+- Press `F` to perform the Gaussian fit with `lmfit`. The Python environment Spectrix is using must have `lmfit` available.
+- If you run `F` with a background model selected but no background marker pairs, Spectrix does not use the whole region as background. It falls back to two tiny background windows at the left and right edges of the region.
+- The fit settings in the `Fits` panel include `Equal σ`, `Free Position`, optional `Constrain σ` bounds, and the fit-line display toggles `Decomposition`, `Composition`, `Background`, and `1σ Uncertainty`.
+- After a successful fit, the result appears in the Fit Panel as the `Temp` fit. Spectrix also replaces the peak markers with the fitted peak means when available.
+- Press `S` / `Store Fit` when you want to keep the temp fit as a stored fit for later comparison, calibration, saving, exporting, or refitting.
+- In the Fit Panel you can assign per-peak UUID values and energies. `UUID = 0` is the default invalid UUID. `Energy = -1` means that peak is invalid for calibration.
+- UUID labels can be drawn above peaks and adjusted in the Fit Panel with `Size`, `Lift`, and `Guide`.
+- If you enable `Calibration` in the Fit Panel, you can type the coefficients manually and click `Calibrate`, or fit them from assigned energies with `Linear` or `Quadratic`.
+- Applying calibration updates all stored fits and the temp fit, and each Gaussian fit writes calibration metadata back into the lmfit result, so large fit collections can take a moment.
+- Use `Save Fits` / `Load Fits` for normal Spectrix workflows. Use `Export All lmfit Results` or `Load lmfit .sav` when you want to move fits to or from Python/lmfit.
+- After calibration, the Fit Panel also shows the calibration curve and residuals. If a quadratic calibration is not safely invertible over the relevant range, Spectrix warns and falls back to the raw X axis for display.
 "#,
         );
     }
@@ -86,13 +101,14 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
             r#"Source-derived workflow hints for calibration:
 - Spectrix has two different calibration workflows: calibrating Gaussian fit results/display on an existing 1D histogram, and creating a new calibrated event-data column in Histogram Script.
 - For 1D histogram fit calibration, first fit and store Gaussian peaks. In the Fit Panel table, enter each peak's assigned energy and uncertainty; peaks with assigned energy `-1` are ignored as invalid calibration points.
-- In the Fit Panel, enable `Calibration`. You can type coefficients directly as `a`, `b`, and `c` for `a*x^2 + b*x + c`, then click `Calibrate` to apply them to stored/temp fits.
+- In the Fit Panel, enable `Calibration`. You can type coefficients directly as `a`, `b`, and `c` for `a*x^2 + b*x + c`, then click `Calibrate` to apply them to stored/temp fits and the bin edges on the histogram.
 - To derive coefficients from stored fits, use `Linear` for a linear calibration from at least 2 valid calibration points, or `Quadratic` for a quadratic calibration from at least 3 distinct valid points.
 - Fit calibration affects the 1D histogram display/fit results when the calibration is safe over the histogram range. It attaches calibrated mean, sigma, and FWHM values to Gaussian parameters, while area and amplitude are copied through.
 - Fit calibration does not create a new parquet/event column. It is for calibrated fit quantities and calibrated display behavior on that histogram.
+- Applying calibration updates all stored fits and the temp fit, so large fit collections can take a moment.
 - To create a calibrated column, open Histogram Script, use `Variables` for reusable coefficients if desired, then use `Column Creation` -> `+` -> `Builder`.
 - A quadratic calibrated column can be built as three terms: coefficient `a` times source column with power `2`, plus coefficient `b` times source column with power `1`, plus constant `c`. The coefficients can be literal values or Variables.
-- Give the computed column an alias such as `EnergyCalibrated`. Computed-column aliases are sanitized to letters, numbers, and underscores.
+- Give the computed column an alias such as `ColumnNameEnergyCalibrated`. Computed-column aliases are sanitized to letters, numbers, and underscores.
 - Derived columns can then be selected like native columns in 1D/2D histogram definitions and cuts. To view the calibrated data as a new 1D histogram, add a `+1D` histogram using the calibrated-column alias, set calibrated range/bins, and calculate histograms.
 "#,
         );
@@ -163,16 +179,28 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
     }
 }
 
-fn is_gaussian_fit_question(prompt: &str) -> bool {
+fn is_fit_workflow_question(prompt: &str) -> bool {
     let normalized = prompt.to_lowercase();
     let mentions_fit = normalized.contains("fit")
+        || normalized.contains("fits")
         || normalized.contains("fitting")
         || normalized.contains("fitted");
     let mentions_gaussian = normalized.contains("gaussian");
     let mentions_peak = normalized.contains("peak");
     let mentions_marker = normalized.contains("marker");
+    let mentions_workflow = normalized.contains("how do")
+        || normalized.contains("how can")
+        || normalized.contains("procedure")
+        || normalized.contains("steps")
+        || normalized.contains("perform")
+        || normalized.contains("do fits")
+        || normalized.contains("make fits")
+        || normalized.contains("fit stuff")
+        || normalized.contains("run fits")
+        || normalized.contains("run a fit")
+        || normalized.contains("make a fit");
 
-    mentions_fit && (mentions_gaussian || mentions_peak || mentions_marker)
+    mentions_fit && (mentions_gaussian || mentions_peak || mentions_marker || mentions_workflow)
 }
 
 fn is_calibration_question(prompt: &str) -> bool {
@@ -265,7 +293,12 @@ mod tests {
         assert!(prompt.contains("Add OR Expression"));
         assert!(prompt.contains("Current Spectrix session state"));
         assert!(prompt.contains("Experimental-data interpretation guide"));
-        assert!(prompt.contains("trace back the UI path"));
+        assert!(prompt.contains("hover behavior"));
+        assert!(
+            prompt.contains(
+                "click, right-click, double-click, hover, press a key, or click and drag"
+            )
+        );
         assert!(!prompt.contains("## Analysis"));
         assert!(!prompt.contains("README"));
     }
@@ -304,11 +337,26 @@ mod tests {
             .expect("prompt should build");
 
         assert!(prompt.contains("Source-derived workflow hints for Gaussian fitting"));
-        assert!(prompt.contains("`P` adds a peak marker"));
-        assert!(prompt.contains("`B` adds a background marker pair"));
-        assert!(prompt.contains("`R` adds a region marker"));
-        assert!(prompt.contains("`F` fits Gaussian peaks"));
-        assert!(prompt.contains("Store Fit"));
+        assert!(prompt.contains("default background model is `None`"));
+        assert!(prompt.contains("Press `B` to add a green background marker pair"));
+        assert!(prompt.contains("Press `R` twice"));
+        assert!(prompt.contains("Press `F` to perform the Gaussian fit with `lmfit`"));
+        assert!(prompt.contains("`Temp` fit"));
+        assert!(prompt.contains("`UUID = 0`"));
+        assert!(prompt.contains("`Energy = -1`"));
+    }
+
+    #[test]
+    fn user_prompt_includes_fit_workflow_hints_for_generic_fit_question() {
+        let prompt = build_user_prompt("how do i do fits?", &[], &empty_snapshot())
+            .expect("prompt should build");
+
+        assert!(prompt.contains("Source-derived workflow hints for Gaussian fitting"));
+        assert!(prompt.contains("Press `R` twice"));
+        assert!(prompt.contains("Press `B`"));
+        assert!(prompt.contains("Press `O`"));
+        assert!(prompt.contains("Press `F`"));
+        assert!(prompt.contains("Press `S`"));
     }
 
     #[test]
