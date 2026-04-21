@@ -99,6 +99,7 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
     if is_calibration_question(prompt) {
         sections.push(
             r#"Source-derived workflow hints for calibration:
+- These calibration workflow hints also apply when the user is asking about gain matching or shifting columns, because the same coefficient-based transforms are used there.
 - Spectrix has two different calibration workflows: calibrating Gaussian fit results/display on an existing 1D histogram, and creating a new calibrated event-data column in Histogram Script.
 - For 1D histogram fit calibration, first fit and store Gaussian peaks. In the Fit Panel table, enter each peak's assigned energy and uncertainty; peaks with assigned energy `-1` are ignored as invalid calibration points.
 - In the Fit Panel, enable `Calibration`. You can type coefficients directly as `a`, `b`, and `c` for `a*x^2 + b*x + c`, then click `Calibrate` to apply them to stored/temp fits and the bin edges on the histogram.
@@ -106,10 +107,14 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
 - Fit calibration affects the 1D histogram display/fit results when the calibration is safe over the histogram range. It attaches calibrated mean, sigma, and FWHM values to Gaussian parameters, while area and amplitude are copied through.
 - Fit calibration does not create a new parquet/event column. It is for calibrated fit quantities and calibrated display behavior on that histogram.
 - Applying calibration updates all stored fits and the temp fit, so large fit collections can take a moment.
-- To create a calibrated column, open Histogram Script, use `Variables` for reusable coefficients if desired, then use `Column Creation` -> `+` -> `Builder`.
-- A quadratic calibrated column can be built as three terms: coefficient `a` times source column with power `2`, plus coefficient `b` times source column with power `1`, plus constant `c`. The coefficients can be literal values or Variables.
+- To create a calibrated event-data column in Histogram Script, there are two main paths.
+- Path 1: use the dedicated `Calibration` section under the General Histogram Script tab. Add a source column, fill in `A`, `B`, and `C` for `output = A*input^2 + B*input + C`, and optionally edit `Output Column Name`.
+- In that Calibration table, the output name defaults to the source column name. Leaving it unchanged overwrites that column name in Histogram Script outputs; changing it creates a separate calibrated column. Rows only apply when the coefficients differ from the defaults `0, 1, 0`.
+- The Calibration section also supports `Import [.csv]` and `Export [.csv]` for `column_name,a,b,c,output_column_name`. Rows whose source columns are missing from the current parquet schema stay visible in red and are skipped until those columns exist again.
+- Path 2: use `Column Creation` -> `+` -> `Builder` if you want to assemble the calibration manually from reusable `Variables` or more general expression terms.
+- In Column Creation, a quadratic calibrated column can be built as three terms: coefficient `a` times source column with power `2`, plus coefficient `b` times source column with power `1`, plus constant `c`. The coefficients can be literal values or Variables.
 - Give the computed column an alias such as `ColumnNameEnergyCalibrated`. Computed-column aliases are sanitized to letters, numbers, and underscores.
-- Derived columns can then be selected like native columns in 1D/2D histogram definitions and cuts. To view the calibrated data as a new 1D histogram, add a `+1D` histogram using the calibrated-column alias, set calibrated range/bins, and calculate histograms.
+- Derived/calibrated columns can then be selected like native columns in 1D/2D histogram definitions and cuts. To view the calibrated data as a new 1D histogram, add a `+1D` histogram using the calibrated-column alias, set calibrated range/bins, and calculate histograms.
 "#,
         );
     }
@@ -206,7 +211,17 @@ fn is_fit_workflow_question(prompt: &str) -> bool {
 fn is_calibration_question(prompt: &str) -> bool {
     let normalized = prompt.to_lowercase();
 
-    normalized.contains("calibrat")
+    let mentions_calibration = normalized.contains("calibrat");
+    let mentions_gain_matching = normalized.contains("gain match")
+        || normalized.contains("gain-match")
+        || normalized.contains("gain matching");
+    let mentions_shifting = normalized.contains("shifting")
+        || normalized.contains("shift column")
+        || normalized.contains("shift columns")
+        || normalized.contains("energy shift")
+        || normalized.contains("offset");
+
+    mentions_calibration || mentions_gain_matching || mentions_shifting
 }
 
 fn is_2d_projection_question(prompt: &str) -> bool {
@@ -372,8 +387,26 @@ mod tests {
         assert!(prompt.contains("creating a new calibrated event-data column"));
         assert!(prompt.contains("assigned energy `-1`"));
         assert!(prompt.contains("a*x^2 + b*x + c"));
+        assert!(prompt.contains("gain matching or shifting columns"));
+        assert!(prompt.contains("two main paths"));
+        assert!(prompt.contains("dedicated `Calibration` section"));
+        assert!(prompt.contains("Import [.csv]"));
         assert!(prompt.contains("Column Creation"));
         assert!(prompt.contains("EnergyCalibrated"));
+    }
+
+    #[test]
+    fn user_prompt_includes_calibration_workflow_hints_for_gain_matching_question() {
+        let prompt = build_user_prompt(
+            "How do I gain match or shift columns in Spectrix?",
+            &[],
+            &empty_snapshot(),
+        )
+        .expect("prompt should build");
+
+        assert!(prompt.contains("Source-derived workflow hints for calibration"));
+        assert!(prompt.contains("gain matching or shifting columns"));
+        assert!(prompt.contains("dedicated `Calibration` section"));
     }
 
     #[test]

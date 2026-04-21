@@ -1,5 +1,8 @@
 use crate::ai::{AiAssistant, AiContextSnapshot};
 use crate::custom_analysis::analysis::AnalysisScripts;
+use crate::histoer::configs::{
+    apply_computed_columns_to_lazyframe, get_column_names_from_lazyframe,
+};
 use crate::histoer::cuts::sanitize_cut_file_name_component;
 use crate::histoer::histogrammer::Histogrammer;
 use crate::histoer::ui_helpers::precise_drag_value;
@@ -913,6 +916,7 @@ def get_2d_histograms(file_name):
         // Clone Arcs for worker thread
         let saving_flag = self.settings.saving_in_progress.clone();
         let save_progress = self.settings.save_progress.clone();
+        let calibration = self.histogram_script.calibration.clone();
 
         let total_files = parquet_files.len().max(1); // avoid div-by-zero
 
@@ -952,24 +956,52 @@ def get_2d_histograms(file_name):
                 // Load and collect one file at a time
                 match PlRefPath::try_from_pathbuf(file.clone()) {
                     Ok(path) => match LazyFrame::scan_parquet(path, Default::default()) {
-                        Ok(lf) => match lf.collect() {
-                            Ok(df) => {
-                                if let Err(e) = cut.filter_df_and_save(&df, &new_file_path) {
+                        Ok(mut lf) => {
+                            let mut current_column_names = match get_column_names_from_lazyframe(
+                                &lf,
+                            ) {
+                                Ok(column_names) => column_names,
+                                Err(error) => {
                                     log::error!(
-                                        "Failed to save filtered DataFrame for {file:?}: {e}"
+                                        "Failed to retrieve column names for {file:?} before applying calibration: {error}"
                                     );
-                                } else {
-                                    log::info!(
-                                        "Successfully saved filtered DataFrame: {new_file_path:?}"
+
+                                    if let Ok(mut p) = save_progress.lock() {
+                                        *p = ((i + 1) as f32) / (total_files as f32);
+                                    }
+
+                                    continue;
+                                }
+                            };
+
+                            let calibration_columns =
+                                calibration.computed_columns(&current_column_names);
+                            apply_computed_columns_to_lazyframe(
+                                &mut lf,
+                                &mut current_column_names,
+                                &calibration_columns,
+                                &[],
+                            );
+
+                            match lf.collect() {
+                                Ok(df) => {
+                                    if let Err(e) = cut.filter_df_and_save(&df, &new_file_path) {
+                                        log::error!(
+                                            "Failed to save filtered DataFrame for {file:?}: {e}"
+                                        );
+                                    } else {
+                                        log::info!(
+                                            "Successfully saved filtered DataFrame: {new_file_path:?}"
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!(
+                                        "Failed to collect DataFrame from LazyFrame: {e} ({file:?})"
                                     );
                                 }
                             }
-                            Err(e) => {
-                                log::error!(
-                                    "Failed to collect DataFrame from LazyFrame: {e} ({file:?})"
-                                );
-                            }
-                        },
+                        }
                         Err(e) => log::error!("Failed to read Parquet file {file:?}: {e}"),
                     },
                     Err(e) => log::error!("Failed to convert Parquet path {file:?}: {e}"),

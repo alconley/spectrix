@@ -1,3 +1,4 @@
+use super::calibration::CalibrationScript;
 use super::custom_scripts::CustomConfigs;
 
 use crate::histoer::configs::{Configs, get_column_names_from_lazyframe};
@@ -13,6 +14,8 @@ use std::io::{BufReader, Write as _};
 pub struct HistogramScript {
     pub configs: Configs,
     pub custom_scripts: CustomConfigs,
+    #[serde(default)]
+    pub calibration: CalibrationScript,
     pub active_cut_states: HashMap<String, bool>,
 }
 
@@ -21,6 +24,7 @@ impl HistogramScript {
         Self {
             configs: Configs::default(),
             custom_scripts: CustomConfigs::default(),
+            calibration: CalibrationScript::default(),
             active_cut_states: HashMap::new(),
         }
     }
@@ -154,6 +158,14 @@ impl HistogramScript {
         self.active_filter_cuts(histogrammer).cuts.len()
     }
 
+    pub fn available_column_names(&self, column_names: &[String]) -> Vec<String> {
+        let mut available_columns = column_names.to_vec();
+        available_columns.extend(self.calibration.output_columns(column_names));
+        available_columns.sort();
+        available_columns.dedup();
+        available_columns
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui, histogrammer: &Histogrammer, column_names: &[String]) {
         let mut active_cuts = histogrammer.retrieve_active_histogram_cuts();
         self.apply_active_cut_states(&mut active_cuts);
@@ -174,6 +186,16 @@ impl HistogramScript {
         ui.separator();
 
         egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::CollapsingHeader::new("Calibration")
+                .default_open(false)
+                .show(ui, |ui| {
+                    self.calibration.ui(ui, column_names);
+                });
+
+            ui.separator();
+
+            let available_columns = self.available_column_names(column_names);
+
             egui::CollapsingHeader::new("General")
                 .default_open(false)
                 .show(ui, |ui| {
@@ -188,7 +210,7 @@ impl HistogramScript {
 
                     ui.separator();
                     self.configs
-                        .ui(ui, Some(active_cuts.as_mut_slice()), column_names);
+                        .ui(ui, Some(active_cuts.as_mut_slice()), &available_columns);
                 });
 
             ui.separator();
@@ -227,6 +249,7 @@ impl HistogramScript {
             .merged_with_active_cuts(Some(active_cuts.as_slice()));
         cloned_configs.sync_histogram_cuts(&merged_general_cuts);
         cloned_configs.merge(active_custom_configs);
+        cloned_configs.prepend_computed_columns(self.calibration.computed_columns(&column_names));
         let mut merged_configs = cloned_configs;
 
         if let Some(prefix) = prefix {

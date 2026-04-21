@@ -295,7 +295,7 @@ impl Histogrammer {
         // if valid configs is empty, return early
         if valid_configs.is_empty() {
             calculating.store(false, Ordering::SeqCst);
-            log::error!("No valid configurations found for histograms.");
+            log::warn!("No valid configurations found for histograms.");
             return;
         }
 
@@ -384,6 +384,17 @@ impl Histogrammer {
                     }
                 }
 
+                fn summarized_histogram_names(names: Vec<&str>) -> String {
+                    const MAX_NAMES: usize = 3;
+
+                    let preview = names.into_iter().take(MAX_NAMES).collect::<Vec<_>>();
+                    if preview.is_empty() {
+                        return "unnamed group".to_owned();
+                    }
+
+                    preview.join(", ")
+                }
+
                 fn active_cut_refs(cuts: &Cuts) -> Vec<&Cut> {
                     cuts.cuts
                         .iter()
@@ -411,6 +422,24 @@ impl Histogrammer {
                     rows_per_chunk: usize,
                     abort_flag: &Arc<AtomicBool>,
                 ) -> PolarsResult<bool> {
+                    let mut schema_lf = lf.clone();
+                    let available_columns = schema_lf
+                        .collect_schema()?
+                        .iter_names_cloned()
+                        .map(|name| name.to_string())
+                        .collect::<Vec<_>>();
+                    let valid_cuts = cuts.active_cuts_valid_for_columns(
+                        &available_columns,
+                        &format!(
+                            "1D histogram group ({})",
+                            summarized_histogram_names(
+                                grouped
+                                    .iter()
+                                    .map(|(_, config)| config.name.as_str())
+                                    .collect()
+                            )
+                        ),
+                    );
                     let mut offset = 0;
 
                     loop {
@@ -425,7 +454,7 @@ impl Histogrammer {
                             break;
                         }
 
-                        let filtered_df = filtered_batch(cuts, df)?;
+                        let filtered_df = filtered_batch(&valid_cuts, df)?;
 
                         for (hist, config) in grouped {
                             if abort_flag.load(Ordering::SeqCst) {
@@ -457,6 +486,24 @@ impl Histogrammer {
                     rows_per_chunk: usize,
                     abort_flag: &Arc<AtomicBool>,
                 ) -> PolarsResult<bool> {
+                    let mut schema_lf = lf.clone();
+                    let available_columns = schema_lf
+                        .collect_schema()?
+                        .iter_names_cloned()
+                        .map(|name| name.to_string())
+                        .collect::<Vec<_>>();
+                    let valid_cuts = cuts.active_cuts_valid_for_columns(
+                        &available_columns,
+                        &format!(
+                            "2D histogram group ({})",
+                            summarized_histogram_names(
+                                grouped
+                                    .iter()
+                                    .map(|(_, config)| config.name.as_str())
+                                    .collect()
+                            )
+                        ),
+                    );
                     let mut offset = 0;
 
                     loop {
@@ -471,7 +518,7 @@ impl Histogrammer {
                             break;
                         }
 
-                        let filtered_df = filtered_batch(cuts, df)?;
+                        let filtered_df = filtered_batch(&valid_cuts, df)?;
 
                         for (hist, config) in grouped {
                             if abort_flag.load(Ordering::SeqCst) {

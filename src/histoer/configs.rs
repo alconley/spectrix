@@ -255,6 +255,35 @@ impl Configs {
         self
     }
 
+    pub fn prepend_computed_columns(&mut self, computed_columns: Vec<(String, String)>) {
+        if computed_columns.is_empty() {
+            return;
+        }
+
+        let replacement_aliases = computed_columns
+            .iter()
+            .map(|(_, alias)| alias.as_str())
+            .filter(|alias| !alias.trim().is_empty())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        self.columns.retain(|(_, alias)| {
+            let keep = !replacement_aliases.contains(alias.as_str());
+            if !keep {
+                log::warn!(
+                    "Replacing computed column '{alias}' with an earlier calibration column definition."
+                );
+            }
+            keep
+        });
+
+        let mut prepended_columns = computed_columns
+            .into_iter()
+            .filter(|(_, alias)| !alias.trim().is_empty())
+            .collect::<Vec<_>>();
+        prepended_columns.append(&mut self.columns);
+        self.columns = prepended_columns;
+    }
+
     pub fn valid_configs(&mut self, lf: &mut LazyFrame) -> Self {
         let mut column_names = match get_column_names_from_lazyframe(lf) {
             Ok(names) => names,
@@ -294,21 +323,7 @@ impl Configs {
             valid_variables.push((name.clone(), *value));
         }
 
-        // Add new computed columns to the LazyFrame
-        for (expression, alias) in &self.columns {
-            if column_names.contains(alias) {
-                log::info!(
-                    "Skipping computed column '{alias}' because it already exists in the LazyFrame"
-                );
-                continue;
-            }
-
-            if let Err(e) = add_computed_column(lf, expression, alias, &valid_variables) {
-                log::error!("Error adding computed column '{alias}': {e}");
-            } else {
-                column_names.push(alias.clone());
-            }
-        }
+        apply_computed_columns_to_lazyframe(lf, &mut column_names, &self.columns, &valid_variables);
 
         // Ensure 1D cuts have their expressions parsed
         self.cuts.parse_conditions();
@@ -323,10 +338,13 @@ impl Configs {
         for config in &expanded_configs.configs {
             match config {
                 Config::Hist1D(hist1d) => {
+                    let mut parsed_hist1d = hist1d.clone();
+                    parsed_hist1d.cuts.parse_conditions();
+
                     if hist1d.calculate {
-                        if column_names.contains(&hist1d.column_name) {
+                        if column_names.contains(&parsed_hist1d.column_name) {
                             // Validate cuts for the histogram
-                            let valid_hist_cuts: Vec<Cut> = hist1d
+                            let valid_hist_cuts: Vec<Cut> = parsed_hist1d
                                 .cuts
                                 .cuts
                                 .iter()
@@ -340,10 +358,10 @@ impl Configs {
                                     if !has_columns {
                                         for column in required_columns {
                                             if !column_names.contains(&column) {
-                                                log::error!(
+                                                log::warn!(
                                                     "Invalid cut '{}' for 1D histogram '{}': Missing column '{}'",
                                                     cut.name(),
-                                                    hist1d.name,
+                                                    parsed_hist1d.name,
                                                     column
                                                 );
                                             }
@@ -354,26 +372,29 @@ impl Configs {
                                 .cloned()
                                 .collect();
 
-                            let mut validated_hist1d = hist1d.clone();
+                            let mut validated_hist1d = parsed_hist1d;
                             validated_hist1d.cuts = Cuts::new(valid_hist_cuts);
                             validated_hist1d.cuts.parse_conditions();
                             valid_configs.push(Config::Hist1D(validated_hist1d));
                         } else {
-                            log::error!(
+                            log::warn!(
                                 "Invalid 1D histogram '{}': Missing column '{}'",
-                                hist1d.name,
-                                hist1d.column_name
+                                parsed_hist1d.name,
+                                parsed_hist1d.column_name
                             );
                         }
                     }
                 }
                 Config::Hist2D(hist2d) => {
+                    let mut parsed_hist2d = hist2d.clone();
+                    parsed_hist2d.cuts.parse_conditions();
+
                     if hist2d.calculate {
-                        if column_names.contains(&hist2d.x_column_name)
-                            && column_names.contains(&hist2d.y_column_name)
+                        if column_names.contains(&parsed_hist2d.x_column_name)
+                            && column_names.contains(&parsed_hist2d.y_column_name)
                         {
                             // Validate cuts for the histogram
-                            let valid_hist_cuts: Vec<Cut> = hist2d
+                            let valid_hist_cuts: Vec<Cut> = parsed_hist2d
                                 .cuts
                                 .cuts
                                 .iter()
@@ -387,10 +408,10 @@ impl Configs {
                                     if !has_columns {
                                         for column in required_columns {
                                             if !column_names.contains(&column) {
-                                                log::error!(
+                                                log::warn!(
                                                     "Invalid cut '{}' for 2D histogram '{}': Missing column '{}'",
                                                     cut.name(),
-                                                    hist2d.name,
+                                                    parsed_hist2d.name,
                                                     column
                                                 );
                                             }
@@ -401,16 +422,16 @@ impl Configs {
                                 .cloned()
                                 .collect();
 
-                            let mut validated_hist2d = hist2d.clone();
+                            let mut validated_hist2d = parsed_hist2d;
                             validated_hist2d.cuts.cuts = valid_hist_cuts;
                             validated_hist2d.cuts.parse_conditions();
                             valid_configs.push(Config::Hist2D(validated_hist2d));
                         } else {
-                            log::error!(
+                            log::warn!(
                                 "Invalid 2D histogram '{}': Missing column(s) '{}', '{}'",
-                                hist2d.name,
-                                hist2d.x_column_name,
-                                hist2d.y_column_name
+                                parsed_hist2d.name,
+                                parsed_hist2d.x_column_name,
+                                parsed_hist2d.y_column_name
                             );
                         }
                     }
@@ -429,7 +450,7 @@ impl Configs {
             } else {
                 for column in required_columns {
                     if !column_names.contains(&column) {
-                        log::error!(
+                        log::warn!(
                             "Invalid cut '{}': Missing required column '{}'",
                             cut.name(),
                             column
@@ -2438,6 +2459,70 @@ fn add_computed_column(
     log::info!("Successfully added computed column '{alias}'");
 
     Ok(())
+}
+
+fn computed_column_dependencies(expression: &str, variables: &[(String, f64)]) -> Vec<String> {
+    let number_pattern = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?";
+    let token_re = regex::Regex::new(&format!(r"{number_pattern}|[A-Za-z_]\w*|\*\*|[+*/()-]"))
+        .expect("failed to create computed-column token regex");
+    let identifier_re =
+        regex::Regex::new(r"^[A-Za-z_]\w*$").expect("failed to create identifier regex");
+    let variable_names = variables
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<std::collections::HashSet<_>>();
+
+    let mut dependencies = token_re
+        .find_iter(expression)
+        .map(|token| token.as_str())
+        .filter(|token| identifier_re.is_match(token))
+        .filter(|token| {
+            !variable_names.contains(token)
+                && !matches!(token.to_ascii_lowercase().as_str(), "inf" | "nan")
+        })
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+
+    dependencies.sort();
+    dependencies.dedup();
+    dependencies
+}
+
+pub(crate) fn apply_computed_columns_to_lazyframe(
+    lf: &mut LazyFrame,
+    column_names: &mut Vec<String>,
+    computed_columns: &[(String, String)],
+    variables: &[(String, f64)],
+) {
+    for (expression, alias) in computed_columns {
+        if alias.trim().is_empty() {
+            log::error!("Skipping computed column with an empty alias.");
+            continue;
+        }
+
+        let replacing_existing = column_names.iter().any(|column_name| column_name == alias);
+        if replacing_existing {
+            log::info!("Overwriting existing column '{alias}' with a computed expression.");
+        }
+
+        let missing_dependencies = computed_column_dependencies(expression, variables)
+            .into_iter()
+            .filter(|dependency| !column_names.contains(dependency))
+            .collect::<Vec<_>>();
+        if !missing_dependencies.is_empty() {
+            log::warn!(
+                "Skipping computed column '{alias}': missing dependency column(s): {}",
+                missing_dependencies.join(", ")
+            );
+            continue;
+        }
+
+        if let Err(error) = add_computed_column(lf, expression, alias, variables) {
+            log::error!("Error adding computed column '{alias}': {error}");
+        } else if !replacing_existing {
+            column_names.push(alias.clone());
+        }
+    }
 }
 
 pub fn get_column_names_from_lazyframe(lf: &LazyFrame) -> Result<Vec<String>, PolarsError> {

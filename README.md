@@ -184,6 +184,7 @@ The **Histogram Script** panel can be opened or closed using the **“Histograms
 This tool allows you to:
 - Define reusable numeric **variables**.
 - Define new analysis columns from existing parquet columns.
+- Define calibration/gain-match/shift transforms with a dedicated **Calibration** table.
 - Define and manage **1D and 2D cuts**.
 - Define **1D and 2D histograms** (name, columns, bins, range, and applied cuts).
 - Save/load complete histogram-script setups as `.json` configuration files.
@@ -192,7 +193,7 @@ This tool allows you to:
 
 1. Load one or more parquet files and make sure the column names are available.
 2. Add reusable variables if you want named constants such as calibration coefficients.
-3. Create any derived columns you need with the computed-column builder.
+3. Create any derived columns you need with the computed-column builder and/or the Calibration table.
 4. Define cuts with the 1D cut builder and/or 2D graphical cuts.
 5. Create histogram definitions and attach active cuts.
 6. Save the configuration to JSON so the same analysis can be reused.
@@ -279,6 +280,59 @@ This produces:
 ```text
 (a * Xavg ** 0.5) + (c)
 ```
+
+### Calibration
+
+The **Calibration** section under the **General** Histogram Script tab is a faster way to apply
+per-column quadratic transforms of the form:
+
+```text
+output = A*input^2 + B*input + C
+```
+
+This is useful for energy calibration, gain matching, or simple shifts without building each
+column manually in **Column Creation**.
+
+- Use the **Add column** picker and `+` button to choose which source columns should have calibration rows.
+- Each row contains:
+  - **Column Name**
+  - **A**
+  - **B**
+  - **C**
+  - **Output Column Name**
+- The default coefficients are `A = 0`, `B = 1`, `C = 0`.
+- The default output column name matches the source column name.
+- If the output column name stays the same as the source column name, the calibrated result overwrites that column name in Histogram Script outputs.
+- If the output column name is changed, Spectrix creates a separate calibrated output column instead.
+- Rows only create additional/overwritten calibrated columns when the coefficients are not the default `0, 1, 0`.
+
+The calibration table is designed to work well across changing parquet schemas:
+
+- If a row's source column is not present in the currently loaded parquet file, that row is shown in **red**.
+- Red rows are preserved in the table, but they are skipped during calculation until a matching parquet column exists again.
+- Switching parquet files does not delete existing calibration rows.
+
+CSV import/export is also supported:
+
+- **Import [.csv]** reads calibration rows from a CSV file.
+- **Export [.csv]** writes the current calibration table to CSV.
+- The expected columns are:
+
+```text
+column_name,a,b,c,output_column_name
+```
+
+- If the CSV header or some rows are imperfect, Spectrix warns the user but still fills every calibration value it can recognize.
+- Imported rows whose source columns are not in the current parquet schema are still kept and shown in red.
+- The currently loaded calibration CSV path is displayed at the top of the section.
+- Clicking the `X` next to that path clears the loaded CSV association and resets the imported values from that file.
+- **Clear All** removes every calibration row and clears the loaded calibration CSV association.
+
+Calibrated output columns from this section behave like other derived columns:
+
+- They can be selected in histogram definitions and cuts.
+- They are added to the available column list in the Histogram Script UI.
+- When filtered parquet files are saved, active calibration rows are applied there too.
 
 ### Cuts
 

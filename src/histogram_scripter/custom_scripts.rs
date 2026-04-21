@@ -50,7 +50,7 @@ impl CustomConfigs {
     ) {
         let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
 
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Custom Configs: ");
             ui.checkbox(&mut self.sps.active, "SPS");
             ui.checkbox(&mut self.cebra.active, "CeBrA");
@@ -74,7 +74,7 @@ impl CustomConfigs {
         ui.separator();
 
         if !merged_cuts.is_empty() {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Options: ");
                 ui.checkbox(
                     &mut self.options.calculate_no_cut_histograms,
@@ -101,7 +101,7 @@ impl CustomConfigs {
         if self.cebra.active {
             ui.collapsing("CeBrA", |ui| {
                 self.cebra.ui(ui, &self.sps, column_names);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button("Reset").clicked() {
                         self.cebra = CeBrAConfig::default();
                         self.cebra.active = true;
@@ -113,7 +113,7 @@ impl CustomConfigs {
         if self.catrina.active {
             ui.collapsing("CATRiNA", |ui| {
                 self.catrina.ui(ui, column_names);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button("Reset").clicked() {
                         self.catrina = CATRiNAConfig::default();
                         self.catrina.active = true;
@@ -125,7 +125,7 @@ impl CustomConfigs {
         if self.icespice.active {
             ui.collapsing("ICESPICE", |ui| {
                 self.icespice.ui(ui, &mut self.cebra, &mut self.sps);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button("Reset").clicked() {
                         self.icespice = ICESPICEConfig::default();
                         self.icespice.active = true;

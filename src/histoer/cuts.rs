@@ -1,5 +1,6 @@
 use geo::Contains as _;
 use regex::Regex;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufReader, Write as _};
 use std::ops::{BitAnd as _, BitOr as _};
@@ -238,6 +239,57 @@ impl Cuts {
             .cloned()
             .collect();
         Self::new(active_cuts)
+    }
+
+    pub fn active_cuts_valid_for_columns(
+        &self,
+        available_columns: &[String],
+        context: &str,
+    ) -> Self {
+        let available_columns = available_columns
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+
+        let valid_cuts = self
+            .cuts
+            .iter()
+            .filter_map(|cut| {
+                let is_active = match cut {
+                    Cut::Cut1D(cut1d) => cut1d.active,
+                    Cut::Cut2D(cut2d) => cut2d.active,
+                };
+
+                if !is_active {
+                    return None;
+                }
+
+                let missing_columns = cut
+                    .required_columns()
+                    .into_iter()
+                    .filter(|column| !available_columns.contains(column.as_str()))
+                    .collect::<Vec<_>>();
+
+                if missing_columns.is_empty() {
+                    Some(cut.clone())
+                } else {
+                    log::warn!(
+                        "Skipping cut '{}' for {context}: missing column(s): {}",
+                        cut.name(),
+                        missing_columns.join(", ")
+                    );
+                    None
+                }
+            })
+            .collect();
+
+        let mut filtered_cuts = Self {
+            cuts: valid_cuts,
+            cut_folder: self.cut_folder.clone(),
+            selected_cut_index: None,
+        };
+        filtered_cuts.parse_conditions();
+        filtered_cuts
     }
 
     pub fn is_empty(&self) -> bool {
@@ -625,20 +677,24 @@ impl Cuts {
         df: &DataFrame,
         file_path: &Path,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // get only valid cuts
-        let valid_cuts: Vec<&Cut> = self
-            .cuts
-            .iter()
-            .filter(|cut| match cut {
-                Cut::Cut1D(cut1d) => cut1d.active,
-                Cut::Cut2D(cut2d) => cut2d.active,
-            })
-            .collect();
-        let mask = self.create_combined_mask(df, &valid_cuts)?;
-        let mut filtered_df = df.filter(&mask)?; // Make filtered_df mutable
+        let available_columns = df
+            .get_column_names_owned()
+            .into_iter()
+            .map(|column| column.to_string())
+            .collect::<Vec<_>>();
+        let valid_cuts =
+            self.active_cuts_valid_for_columns(&available_columns, "filtered parquet saving");
+
+        let mut filtered_df = if valid_cuts.cuts.is_empty() {
+            df.clone()
+        } else {
+            let valid_cut_refs = valid_cuts.cuts.iter().collect::<Vec<_>>();
+            let mask = valid_cuts.create_combined_mask(df, &valid_cut_refs)?;
+            df.filter(&mask)?
+        };
 
         let file = std::fs::File::create(file_path)?;
-        ParquetWriter::new(file).finish(&mut filtered_df)?; // Pass as mutable reference
+        ParquetWriter::new(file).finish(&mut filtered_df)?;
 
         Ok(())
     }
