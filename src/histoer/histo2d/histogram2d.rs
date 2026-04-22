@@ -17,6 +17,16 @@ pub struct Histogram2D {
     pub plot_settings: PlotSettings,
     pub image: EguiImage,
     pub backup_bins: Option<Bins>,
+    #[serde(skip)]
+    pub(crate) stats_cache: Option<StatsCache>,
+    #[serde(skip)]
+    pub(crate) stats_dirty: bool,
+}
+
+#[derive(Clone)]
+pub(crate) struct StatsCache {
+    pub bounds: ((f64, f64), (f64, f64)),
+    pub stats: (u64, f64, f64, f64, f64),
 }
 
 impl Histogram2D {
@@ -52,6 +62,8 @@ impl Histogram2D {
                 [range.1.0, range.1.1],
             ),
             backup_bins: None,
+            stats_cache: None,
+            stats_dirty: true,
         }
     }
 
@@ -60,6 +72,11 @@ impl Histogram2D {
         self.bins.min_count = u64::MAX;
         self.bins.max_count = u64::MIN;
         self.plot_settings.recalculate_image = true;
+        self.mark_stats_dirty();
+    }
+
+    pub(crate) fn mark_stats_dirty(&mut self) {
+        self.stats_dirty = true;
     }
 
     pub fn fill(&mut self, x_value: f64, y_value: f64) {
@@ -68,12 +85,16 @@ impl Histogram2D {
         }
 
         if x_value < self.range.x.min {
+            self.mark_stats_dirty();
             self.underflow += 1; // Increment x-axis underflow
         } else if x_value >= self.range.x.max {
+            self.mark_stats_dirty();
             self.overflow += 1; // Increment x-axis overflow
         } else if y_value < self.range.y.min {
+            self.mark_stats_dirty();
             self.underflow += 1; // Increment y-axis underflow
         } else if y_value >= self.range.y.max {
+            self.mark_stats_dirty();
             self.overflow += 1; // Increment y-axis overflow
         } else {
             // Value is within range; proceed to calculate indices and update counts
@@ -85,6 +106,7 @@ impl Histogram2D {
 
             self.bins.min_count = self.bins.min_count.min(*count);
             self.bins.max_count = self.bins.max_count.max(*count);
+            self.mark_stats_dirty();
         }
     }
 
@@ -153,6 +175,7 @@ impl Histogram2D {
         self.plot_settings.recalculate_image = true;
         self.plot_settings.x_column = x_column.to_owned();
         self.plot_settings.y_column = y_column.to_owned();
+        self.mark_stats_dirty();
 
         Ok(())
     }

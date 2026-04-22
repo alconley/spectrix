@@ -21,8 +21,6 @@ use super::pane::Pane;
 use super::tree::TreeBehavior;
 use crate::fitter::main_fitter::{FitResult, Fitter};
 use crate::fitter::models::gaussian::GaussianFitter;
-use crate::histoer::configs::Hist1DConfig;
-use crate::histoer::configs::Hist2DConfig;
 use std::path::Path;
 
 #[derive(serde::Deserialize, serde::Serialize, PartialEq, Eq, Debug)]
@@ -57,6 +55,8 @@ pub struct Histogrammer {
     pub fill_column_wise: bool,
     #[serde(skip)]
     pub root_export_in_progress: Arc<AtomicBool>,
+    #[serde(skip)]
+    active_histogram_cuts_cache: Arc<Mutex<Vec<ActiveHistogramCut>>>,
 }
 
 impl Default for Histogrammer {
@@ -71,12 +71,329 @@ impl Default for Histogrammer {
             histogram_map: HashMap::new(),
             fill_column_wise: true,
             root_export_in_progress: Arc::new(AtomicBool::new(false)),
+            active_histogram_cuts_cache: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
 
 type RootExportHist1D = (String, String, Vec<u64>, u64, u64, (f64, f64));
 type RootExportHist2D = (String, String, Vec<Vec<u64>>, (f64, f64), (f64, f64));
+type Hist1DHandle = Arc<Mutex<Box<Histogram>>>;
+type Hist2DHandle = Arc<Mutex<Box<Histogram2D>>>;
+pub static HISTOGRAM_CALCULATION_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+pub fn histogram_calculation_active() -> bool {
+    HISTOGRAM_CALCULATION_ACTIVE.load(Ordering::Relaxed)
+}
+
+#[derive(Clone)]
+struct Prepared1DTarget {
+    histogram: Hist1DHandle,
+    multiplicity: usize,
+}
+
+struct Prepared1DSourceGroup {
+    column_name: String,
+    histograms: Vec<Prepared1DTarget>,
+}
+
+#[derive(Clone)]
+struct Prepared2DTarget {
+    histogram: Hist2DHandle,
+    multiplicity: usize,
+}
+
+struct Prepared2DSourceGroup {
+    x_column_name: String,
+    y_column_name: String,
+    histograms: Vec<Prepared2DTarget>,
+}
+
+struct PreparedCutGroup {
+    sort_key: String,
+    cuts: Cuts,
+    histogram_names: Vec<String>,
+    hist1d_sources: Vec<Prepared1DSourceGroup>,
+    hist2d_sources: Vec<Prepared2DSourceGroup>,
+}
+
+struct CutGroupBuilder {
+    cuts: Cuts,
+    histogram_names: Vec<String>,
+    hist1d_entries: Vec<(Hist1DHandle, String)>,
+    hist2d_entries: Vec<(Hist2DHandle, String, String)>,
+}
+
+impl CutGroupBuilder {
+    fn new(cuts: Cuts) -> Self {
+        Self {
+            cuts,
+            histogram_names: Vec::new(),
+            hist1d_entries: Vec::new(),
+            hist2d_entries: Vec::new(),
+        }
+    }
+
+    fn add_hist1d(&mut self, histogram: Hist1DHandle, histogram_name: String, column_name: String) {
+        self.histogram_names.push(histogram_name);
+        self.hist1d_entries.push((histogram, column_name));
+    }
+
+    fn add_hist2d(
+        &mut self,
+        histogram: Hist2DHandle,
+        histogram_name: String,
+        x_column_name: String,
+        y_column_name: String,
+    ) {
+        self.histogram_names.push(histogram_name);
+        self.hist2d_entries
+            .push((histogram, x_column_name, y_column_name));
+    }
+
+    fn into_prepared(mut self, sort_key: String) -> PreparedCutGroup {
+        self.histogram_names.sort();
+        self.histogram_names.dedup();
+
+        let mut hist1d_sources = HashMap::<String, Vec<Prepared1DTarget>>::new();
+        for (histogram, column_name) in self.hist1d_entries {
+            let targets = hist1d_sources.entry(column_name).or_default();
+            if let Some(existing) = targets
+                .iter_mut()
+                .find(|target| Arc::ptr_eq(&target.histogram, &histogram))
+            {
+                existing.multiplicity += 1;
+            } else {
+                targets.push(Prepared1DTarget {
+                    histogram,
+                    multiplicity: 1,
+                });
+            }
+        }
+
+        let mut hist1d_sources = hist1d_sources
+            .into_iter()
+            .map(|(column_name, histograms)| Prepared1DSourceGroup {
+                column_name,
+                histograms,
+            })
+            .collect::<Vec<_>>();
+        hist1d_sources.sort_by(|left, right| left.column_name.cmp(&right.column_name));
+
+        let mut hist2d_sources = HashMap::<(String, String), Vec<Prepared2DTarget>>::new();
+        for (histogram, x_column_name, y_column_name) in self.hist2d_entries {
+            let targets = hist2d_sources
+                .entry((x_column_name, y_column_name))
+                .or_default();
+            if let Some(existing) = targets
+                .iter_mut()
+                .find(|target| Arc::ptr_eq(&target.histogram, &histogram))
+            {
+                existing.multiplicity += 1;
+            } else {
+                targets.push(Prepared2DTarget {
+                    histogram,
+                    multiplicity: 1,
+                });
+            }
+        }
+
+        let mut hist2d_sources = hist2d_sources
+            .into_iter()
+            .map(
+                |((x_column_name, y_column_name), histograms)| Prepared2DSourceGroup {
+                    x_column_name,
+                    y_column_name,
+                    histograms,
+                },
+            )
+            .collect::<Vec<_>>();
+        hist2d_sources.sort_by(|left, right| {
+            left.x_column_name
+                .cmp(&right.x_column_name)
+                .then_with(|| left.y_column_name.cmp(&right.y_column_name))
+        });
+
+        PreparedCutGroup {
+            sort_key,
+            cuts: self.cuts,
+            histogram_names: self.histogram_names,
+            hist1d_sources,
+            hist2d_sources,
+        }
+    }
+}
+
+fn summarized_histogram_names(names: &[String]) -> String {
+    const MAX_NAMES: usize = 3;
+
+    let preview = names
+        .iter()
+        .take(MAX_NAMES)
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if preview.is_empty() {
+        "unnamed group".to_owned()
+    } else {
+        preview.join(", ")
+    }
+}
+
+fn active_cut_refs(cuts: &Cuts) -> Vec<&Cut> {
+    cuts.cuts
+        .iter()
+        .filter(|cut| match cut {
+            Cut::Cut1D(cut1d) => cut1d.active,
+            Cut::Cut2D(cut2d) => cut2d.active,
+        })
+        .collect()
+}
+
+fn filtered_batch(cuts: &Cuts, df: &DataFrame) -> PolarsResult<DataFrame> {
+    let active_cuts = active_cut_refs(cuts);
+    if active_cuts.is_empty() {
+        return Ok(df.clone());
+    }
+
+    let mask = cuts.create_combined_mask(df, &active_cuts)?;
+    df.filter(&mask)
+}
+
+fn lazyframe_row_count(lf: &LazyFrame) -> Option<u64> {
+    let count_df = lf.clone().select([len().alias("count")]).collect().ok()?;
+    let count_column = count_df.column("count").ok()?;
+
+    count_column
+        .u64()
+        .ok()
+        .and_then(|count| count.get(0))
+        .or_else(|| {
+            count_column
+                .u32()
+                .ok()
+                .and_then(|count| count.get(0).map(u64::from))
+        })
+        .or_else(|| {
+            count_column
+                .i64()
+                .ok()
+                .and_then(|count| count.get(0))
+                .and_then(|count| u64::try_from(count).ok())
+        })
+}
+
+fn fill_1d_source_group(
+    filtered_df: &DataFrame,
+    source_group: &Prepared1DSourceGroup,
+    invalid_value: f64,
+) -> PolarsResult<()> {
+    let values_column = filtered_df
+        .column(&source_group.column_name)?
+        .cast(&DataType::Float64)?;
+    let values = values_column.f64()?;
+
+    let mut histogram_guards = source_group
+        .histograms
+        .iter()
+        .map(|target| {
+            (
+                target.multiplicity,
+                target.histogram.lock().expect("Failed to lock histogram"),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    for value_opt in values {
+        let Some(value) = value_opt else {
+            continue;
+        };
+
+        if value == invalid_value || value.is_nan() {
+            continue;
+        }
+
+        for (multiplicity, histogram) in &mut histogram_guards {
+            for _ in 0..*multiplicity {
+                histogram.fill(value);
+            }
+        }
+    }
+
+    for (_multiplicity, histogram) in &mut histogram_guards {
+        histogram
+            .plot_settings
+            .column_name
+            .clone_from(&source_group.column_name);
+        for cut in &mut histogram.plot_settings.cuts {
+            cut.set_column_name(&source_group.column_name);
+        }
+    }
+
+    Ok(())
+}
+
+fn fill_2d_source_group(
+    filtered_df: &DataFrame,
+    source_group: &Prepared2DSourceGroup,
+    invalid_value: f64,
+) -> PolarsResult<()> {
+    let x_values_column = filtered_df
+        .column(&source_group.x_column_name)?
+        .cast(&DataType::Float64)?;
+    let y_values_column = filtered_df
+        .column(&source_group.y_column_name)?
+        .cast(&DataType::Float64)?;
+    let x_values = x_values_column.f64()?;
+    let y_values = y_values_column.f64()?;
+
+    let mut histogram_guards = source_group
+        .histograms
+        .iter()
+        .map(|target| {
+            (
+                target.multiplicity,
+                target
+                    .histogram
+                    .lock()
+                    .expect("Failed to lock 2D histogram"),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    for (x_opt, y_opt) in x_values.into_iter().zip(y_values) {
+        let (Some(x_value), Some(y_value)) = (x_opt, y_opt) else {
+            continue;
+        };
+
+        if x_value == invalid_value
+            || y_value == invalid_value
+            || x_value.is_nan()
+            || y_value.is_nan()
+        {
+            continue;
+        }
+
+        for (multiplicity, histogram) in &mut histogram_guards {
+            for _ in 0..*multiplicity {
+                histogram.fill(x_value, y_value);
+            }
+        }
+    }
+
+    for (_multiplicity, histogram) in &mut histogram_guards {
+        histogram.plot_settings.recalculate_image = true;
+        histogram
+            .plot_settings
+            .x_column
+            .clone_from(&source_group.x_column_name);
+        histogram
+            .plot_settings
+            .y_column
+            .clone_from(&source_group.y_column_name);
+    }
+
+    Ok(())
+}
 
 impl Histogrammer {
     pub fn find_existing_histogram(&self, name: &str) -> Option<TileId> {
@@ -280,6 +597,7 @@ impl Histogrammer {
 
         // Set calculating to true at the start
         calculating.store(true, Ordering::SeqCst);
+        HISTOGRAM_CALCULATION_ACTIVE.store(true, Ordering::SeqCst);
         abort_flag.store(false, Ordering::SeqCst);
         if let Ok(mut current_progress) = progress.lock() {
             *current_progress = 0.0;
@@ -295,6 +613,7 @@ impl Histogrammer {
         // if valid configs is empty, return early
         if valid_configs.is_empty() {
             calculating.store(false, Ordering::SeqCst);
+            HISTOGRAM_CALCULATION_ACTIVE.store(false, Ordering::SeqCst);
             log::warn!("No valid configurations found for histograms.");
             return;
         }
@@ -314,19 +633,11 @@ impl Histogrammer {
         let rows_per_chunk = (chunk_size_bytes / bytes_per_row).floor() as usize;
 
         // Apply the selection to the LazyFrame
-        let lf = Arc::new(lf.clone().select(selected_columns.clone()));
+        let selected_lf = lf.clone().select(selected_columns);
+        let total_rows = lazyframe_row_count(&selected_lf);
+        let lf = Arc::new(selected_lf);
 
-        #[expect(clippy::type_complexity)]
-        let mut cut_groups_1d: HashMap<
-            String,
-            (Cuts, Vec<(Arc<Mutex<Box<Histogram>>>, Hist1DConfig)>),
-        > = HashMap::new();
-
-        #[expect(clippy::type_complexity)]
-        let mut cut_groups_2d: HashMap<
-            String,
-            (Cuts, Vec<(Arc<Mutex<Box<Histogram2D>>>, Hist2DConfig)>),
-        > = HashMap::new();
+        let mut cut_groups = HashMap::<String, CutGroupBuilder>::new();
 
         for config in &valid_configs.configs {
             match config {
@@ -341,11 +652,10 @@ impl Histogrammer {
                         _ => None,
                     }) {
                         let key = hist1d.cuts.generate_key();
-                        cut_groups_1d
+                        cut_groups
                             .entry(key.clone())
-                            .or_insert_with(|| (hist1d.cuts.clone(), vec![]))
-                            .1
-                            .push((hist, hist1d.clone()));
+                            .or_insert_with(|| CutGroupBuilder::new(hist1d.cuts.clone()))
+                            .add_hist1d(hist, hist1d.name.clone(), hist1d.column_name.clone());
                     }
                 }
                 Config::Hist2D(hist2d) => {
@@ -359,15 +669,35 @@ impl Histogrammer {
                         _ => None,
                     }) {
                         let key = hist2d.cuts.generate_key();
-                        cut_groups_2d
+                        cut_groups
                             .entry(key.clone())
-                            .or_insert_with(|| (hist2d.cuts.clone(), vec![]))
-                            .1
-                            .push((hist, hist2d.clone()));
+                            .or_insert_with(|| CutGroupBuilder::new(hist2d.cuts.clone()))
+                            .add_hist2d(
+                                hist,
+                                hist2d.name.clone(),
+                                hist2d.x_column_name.clone(),
+                                hist2d.y_column_name.clone(),
+                            );
                     }
                 }
             }
         }
+
+        let mut prepared_cut_groups = cut_groups
+            .into_iter()
+            .map(|(key, mut builder)| {
+                let context = format!(
+                    "histogram group ({})",
+                    summarized_histogram_names(&builder.histogram_names)
+                );
+                builder.cuts = builder
+                    .cuts
+                    .active_cuts_valid_for_columns(&used_columns, &context);
+                builder.into_prepared(key)
+            })
+            .collect::<Vec<_>>();
+        prepared_cut_groups.sort_by(|left, right| left.sort_key.cmp(&right.sort_key));
+
         std::thread::spawn({
             let calculating = Arc::clone(&calculating);
             let progress = Arc::clone(&progress);
@@ -381,213 +711,90 @@ impl Histogrammer {
                 impl Drop for CalculatingGuard {
                     fn drop(&mut self) {
                         self.calculating.store(false, Ordering::SeqCst);
+                        HISTOGRAM_CALCULATION_ACTIVE.store(false, Ordering::SeqCst);
                     }
-                }
-
-                fn summarized_histogram_names(names: Vec<&str>) -> String {
-                    const MAX_NAMES: usize = 3;
-
-                    let preview = names.into_iter().take(MAX_NAMES).collect::<Vec<_>>();
-                    if preview.is_empty() {
-                        return "unnamed group".to_owned();
-                    }
-
-                    preview.join(", ")
-                }
-
-                fn active_cut_refs(cuts: &Cuts) -> Vec<&Cut> {
-                    cuts.cuts
-                        .iter()
-                        .filter(|cut| match cut {
-                            Cut::Cut1D(cut1d) => cut1d.active,
-                            Cut::Cut2D(cut2d) => cut2d.active,
-                        })
-                        .collect()
-                }
-
-                fn filtered_batch(cuts: &Cuts, df: DataFrame) -> PolarsResult<DataFrame> {
-                    let active_cuts = active_cut_refs(cuts);
-                    if active_cuts.is_empty() {
-                        return Ok(df);
-                    }
-
-                    let mask = cuts.create_combined_mask(&df, &active_cuts)?;
-                    df.filter(&mask)
-                }
-
-                fn fill_1d_group_in_chunks(
-                    lf: &LazyFrame,
-                    cuts: &Cuts,
-                    grouped: &[(Arc<Mutex<Box<Histogram>>>, Hist1DConfig)],
-                    rows_per_chunk: usize,
-                    abort_flag: &Arc<AtomicBool>,
-                ) -> PolarsResult<bool> {
-                    let mut schema_lf = lf.clone();
-                    let available_columns = schema_lf
-                        .collect_schema()?
-                        .iter_names_cloned()
-                        .map(|name| name.to_string())
-                        .collect::<Vec<_>>();
-                    let valid_cuts = cuts.active_cuts_valid_for_columns(
-                        &available_columns,
-                        &format!(
-                            "1D histogram group ({})",
-                            summarized_histogram_names(
-                                grouped
-                                    .iter()
-                                    .map(|(_, config)| config.name.as_str())
-                                    .collect()
-                            )
-                        ),
-                    );
-                    let mut offset = 0;
-
-                    loop {
-                        if abort_flag.load(Ordering::SeqCst) {
-                            log::info!("Histogram calculation aborted by user.");
-                            return Ok(true);
-                        }
-
-                        let batch = lf.clone().slice(offset as i64, rows_per_chunk as u32);
-                        let df = batch.collect()?;
-                        if df.height() == 0 {
-                            break;
-                        }
-
-                        let filtered_df = filtered_batch(&valid_cuts, df)?;
-
-                        for (hist, config) in grouped {
-                            if abort_flag.load(Ordering::SeqCst) {
-                                log::info!("Histogram calculation aborted by user.");
-                                return Ok(true);
-                            }
-
-                            let mut guard = hist.lock().expect("Failed to lock histogram");
-                            if let Err(e) = guard.fill_from_lazyframe(
-                                filtered_df.clone().lazy(),
-                                &config.column_name,
-                                -1e6,
-                            ) {
-                                log::error!("Failed to fill hist1d '{}': {:?}", config.name, e);
-                            }
-                            guard.plot_settings.egui_settings.reset_axis = true;
-                        }
-
-                        offset += rows_per_chunk;
-                    }
-
-                    Ok(false)
-                }
-
-                fn fill_2d_group_in_chunks(
-                    lf: &LazyFrame,
-                    cuts: &Cuts,
-                    grouped: &[(Arc<Mutex<Box<Histogram2D>>>, Hist2DConfig)],
-                    rows_per_chunk: usize,
-                    abort_flag: &Arc<AtomicBool>,
-                ) -> PolarsResult<bool> {
-                    let mut schema_lf = lf.clone();
-                    let available_columns = schema_lf
-                        .collect_schema()?
-                        .iter_names_cloned()
-                        .map(|name| name.to_string())
-                        .collect::<Vec<_>>();
-                    let valid_cuts = cuts.active_cuts_valid_for_columns(
-                        &available_columns,
-                        &format!(
-                            "2D histogram group ({})",
-                            summarized_histogram_names(
-                                grouped
-                                    .iter()
-                                    .map(|(_, config)| config.name.as_str())
-                                    .collect()
-                            )
-                        ),
-                    );
-                    let mut offset = 0;
-
-                    loop {
-                        if abort_flag.load(Ordering::SeqCst) {
-                            log::info!("Histogram calculation aborted by user.");
-                            return Ok(true);
-                        }
-
-                        let batch = lf.clone().slice(offset as i64, rows_per_chunk as u32);
-                        let df = batch.collect()?;
-                        if df.height() == 0 {
-                            break;
-                        }
-
-                        let filtered_df = filtered_batch(&valid_cuts, df)?;
-
-                        for (hist, config) in grouped {
-                            if abort_flag.load(Ordering::SeqCst) {
-                                log::info!("Histogram calculation aborted by user.");
-                                return Ok(true);
-                            }
-
-                            let mut guard = hist.lock().expect("Failed to lock 2D histogram");
-                            if let Err(e) = guard.fill_from_lazyframe(
-                                filtered_df.clone().lazy(),
-                                &config.x_column_name,
-                                &config.y_column_name,
-                                -1e6,
-                            ) {
-                                log::error!("Failed to fill hist2d '{}': {:?}", config.name, e);
-                            }
-                        }
-
-                        offset += rows_per_chunk;
-                    }
-
-                    Ok(false)
                 }
 
                 let _calculating_guard = CalculatingGuard {
                     calculating: Arc::clone(&calculating),
                 };
 
-                let mut completed = 0.0;
-                let total = (cut_groups_1d
-                    .values()
-                    .map(|(_, list)| list.len())
-                    .sum::<usize>()
-                    + cut_groups_2d
-                        .values()
-                        .map(|(_, list)| list.len())
-                        .sum::<usize>()) as f32;
-                let total = total.max(1.0);
                 let rows_per_chunk = rows_per_chunk.max(1).min(u32::MAX as usize);
+                let mut offset = 0usize;
 
-                let mut values: Vec<_> = cut_groups_1d.values().collect();
-                values.sort_by_key(|(cuts, _)| format!("{cuts:?}")); // Stable deterministic ordering
+                loop {
+                    if abort_flag.load(Ordering::SeqCst) {
+                        log::info!("Histogram calculation aborted by user.");
+                        return;
+                    }
 
-                for (cuts, grouped) in values {
-                    match fill_1d_group_in_chunks(&lf, cuts, grouped, rows_per_chunk, &abort_flag) {
-                        Ok(true) => return,
-                        Ok(false) => {
-                            completed += grouped.len() as f32;
-                            *progress.lock().expect("Failed to lock progress") = completed / total;
-                        }
+                    let batch = lf
+                        .as_ref()
+                        .clone()
+                        .slice(offset as i64, rows_per_chunk as u32);
+                    let df = match batch.collect() {
+                        Ok(df) => df,
                         Err(e) => {
-                            log::error!("Failed to apply cuts for 1D histogram group: {e:?}");
+                            log::error!("Failed to collect histogram batch: {e:?}");
+                            break;
+                        }
+                    };
+                    let height = df.height();
+                    if height == 0 {
+                        break;
+                    }
+
+                    for cut_group in &prepared_cut_groups {
+                        if abort_flag.load(Ordering::SeqCst) {
+                            log::info!("Histogram calculation aborted by user.");
+                            return;
+                        }
+
+                        let filtered_df = match filtered_batch(&cut_group.cuts, &df) {
+                            Ok(filtered_df) => filtered_df,
+                            Err(e) => {
+                                log::error!(
+                                    "Failed to apply cuts for histogram group ({}): {e:?}",
+                                    summarized_histogram_names(&cut_group.histogram_names)
+                                );
+                                continue;
+                            }
+                        };
+
+                        for source_group in &cut_group.hist1d_sources {
+                            if abort_flag.load(Ordering::SeqCst) {
+                                log::info!("Histogram calculation aborted by user.");
+                                return;
+                            }
+
+                            if let Err(e) = fill_1d_source_group(&filtered_df, source_group, -1e6) {
+                                log::error!(
+                                    "Failed to fill 1D histograms for column '{}': {e:?}",
+                                    source_group.column_name
+                                );
+                            }
+                        }
+
+                        for source_group in &cut_group.hist2d_sources {
+                            if abort_flag.load(Ordering::SeqCst) {
+                                log::info!("Histogram calculation aborted by user.");
+                                return;
+                            }
+
+                            if let Err(e) = fill_2d_source_group(&filtered_df, source_group, -1e6) {
+                                log::error!(
+                                    "Failed to fill 2D histograms for columns '{}' and '{}': {e:?}",
+                                    source_group.x_column_name,
+                                    source_group.y_column_name
+                                );
+                            }
                         }
                     }
-                }
 
-                let mut values: Vec<_> = cut_groups_2d.values().collect();
-                values.sort_by_key(|(cuts, _)| format!("{cuts:?}")); // sort by cuts debug string (stable)
-
-                for (cuts, grouped) in values {
-                    match fill_2d_group_in_chunks(&lf, cuts, grouped, rows_per_chunk, &abort_flag) {
-                        Ok(true) => return,
-                        Ok(false) => {
-                            completed += grouped.len() as f32;
-                            *progress.lock().expect("Failed to lock progress") = completed / total;
-                        }
-                        Err(e) => {
-                            log::error!("Failed to apply cuts for 2D histogram group: {e:?}");
-                        }
+                    offset += height;
+                    if let Some(total_rows) = total_rows.filter(|rows| *rows > 0) {
+                        *progress.lock().expect("Failed to lock progress") =
+                            (offset as f32 / total_rows as f32).min(1.0);
                     }
                 }
 
@@ -715,6 +922,7 @@ impl Histogrammer {
                 hist.bins = source_bins;
                 hist.backup_bins = None;
                 hist.plot_settings.recalculate_image = true;
+                hist.mark_stats_dirty();
             }
         } else {
             log::error!("2D histogram '{name}' not found in the tree");
@@ -1147,45 +1355,67 @@ impl Histogrammer {
 
     pub fn retrieve_active_histogram_cuts(&self) -> Vec<ActiveHistogramCut> {
         let mut active_cuts = Vec::new();
+        let mut all_histograms_available = true;
+
         for (_id, tile) in self.tree.tiles.iter() {
             if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                let hist = hist.lock().expect("Failed to lock histogram");
-                for cut in &hist.plot_settings.cuts {
-                    let is_active = cut.cut.active;
-                    let cut = Cut::Cut1D(cut.cut.clone());
-                    if is_active
-                        && !active_cuts
-                            .iter()
-                            .any(|existing: &ActiveHistogramCut| existing.cut.name() == cut.name())
-                    {
-                        active_cuts.push(ActiveHistogramCut {
-                            histogram_name: hist.name.clone(),
-                            enabled: true,
-                            cut,
-                        });
+                if let Ok(hist) = hist.try_lock() {
+                    for cut in &hist.plot_settings.cuts {
+                        let is_active = cut.cut.active;
+                        let cut = Cut::Cut1D(cut.cut.clone());
+                        if is_active
+                            && !active_cuts.iter().any(|existing: &ActiveHistogramCut| {
+                                existing.cut.name() == cut.name()
+                            })
+                        {
+                            active_cuts.push(ActiveHistogramCut {
+                                histogram_name: hist.name.clone(),
+                                enabled: true,
+                                cut,
+                            });
+                        }
                     }
+                } else {
+                    all_histograms_available = false;
                 }
             }
 
             if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
-                let hist = hist.lock().expect("Failed to lock 2D histogram");
-                for cut in &hist.plot_settings.cuts {
-                    let is_active = cut.active;
-                    let cut = Cut::Cut2D(cut.clone());
-                    if is_active
-                        && !active_cuts
-                            .iter()
-                            .any(|existing: &ActiveHistogramCut| existing.cut.name() == cut.name())
-                    {
-                        active_cuts.push(ActiveHistogramCut {
-                            histogram_name: hist.name.clone(),
-                            enabled: true,
-                            cut,
-                        });
+                if let Ok(hist) = hist.try_lock() {
+                    for cut in &hist.plot_settings.cuts {
+                        let is_active = cut.active;
+                        let cut = Cut::Cut2D(cut.clone());
+                        if is_active
+                            && !active_cuts.iter().any(|existing: &ActiveHistogramCut| {
+                                existing.cut.name() == cut.name()
+                            })
+                        {
+                            active_cuts.push(ActiveHistogramCut {
+                                histogram_name: hist.name.clone(),
+                                enabled: true,
+                                cut,
+                            });
+                        }
                     }
+                } else {
+                    all_histograms_available = false;
                 }
             }
         }
+
+        if all_histograms_available {
+            if let Ok(mut cache) = self.active_histogram_cuts_cache.lock() {
+                *cache = active_cuts.clone();
+            }
+            return active_cuts;
+        }
+
+        if let Ok(cache) = self.active_histogram_cuts_cache.lock()
+            && !cache.is_empty()
+        {
+            return cache.clone();
+        }
+
         active_cuts
     }
 

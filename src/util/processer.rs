@@ -55,7 +55,7 @@ impl Default for ProcessorSettings {
             histogram_script_open: true,
             ai_open: false,
             column_names: Vec::new(),
-            estimated_memory: 4.0,
+            estimated_memory: 0.1,
             saved_cut_suffix: String::new(),
             calculate_histograms_seperately: false,
             saving_in_progress: Arc::new(AtomicBool::new(false)),
@@ -1656,18 +1656,17 @@ def get_2d_histograms(file_name):
     }
 
     fn ai_panel_ui(&mut self, ui: &mut egui::Ui) {
-        let snapshot = AiContextSnapshot::from_state(
-            &self.selected_files,
-            &self.settings.column_names,
-            &self.histogram_script,
-            &self.histogrammer,
-        );
-
         egui::Panel::right("spectrix_ai_panel")
             .resizable(true)
             .default_size(430.0)
             .size_range(320.0..=720.0)
             .show_animated_inside(ui, self.settings.ai_open, |ui| {
+                let snapshot = AiContextSnapshot::from_state(
+                    &self.selected_files,
+                    &self.settings.column_names,
+                    &self.histogram_script,
+                    &self.histogrammer,
+                );
                 self.ai.ui(ui, snapshot);
             });
     }
@@ -1704,8 +1703,10 @@ def get_2d_histograms(file_name):
         self.ai_panel_ui(ui);
         self.central_panel_ui(ui);
 
-        self.analysis
-            .ui(ui, &self.selected_files, &mut self.histogrammer);
+        if !self.histogrammer.calculating.load(Ordering::Relaxed) {
+            self.analysis
+                .ui(ui, &self.selected_files, &mut self.histogrammer);
+        }
 
         self.file_dialog.update(ui);
 
@@ -1718,7 +1719,8 @@ def get_2d_histograms(file_name):
             || self.settings.combining_in_progress.load(Ordering::Relaxed)
             || self.ai.is_busy()
         {
-            ui.ctx().request_repaint_after(Duration::from_millis(100));
+            let repaint_delay = Duration::from_millis(100);
+            ui.ctx().request_repaint_after(repaint_delay);
         }
     }
 }
