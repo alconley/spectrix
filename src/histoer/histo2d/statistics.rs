@@ -94,7 +94,7 @@ impl Histogram2D {
     }
 
     // Show statistics on the plot
-    pub fn show_stats(&self, plot_ui: &mut egui_plot::PlotUi<'_>) {
+    pub fn show_stats(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
         if !self.plot_settings.stats_info {
             return;
         }
@@ -103,8 +103,24 @@ impl Histogram2D {
         let plot_max_x = plot_ui.plot_bounds().max()[0];
         let plot_min_y = plot_ui.plot_bounds().min()[1];
         let plot_max_y = plot_ui.plot_bounds().max()[1];
+        let bounds = ((plot_min_x, plot_max_x), (plot_min_y, plot_max_y));
 
-        let stats = self.get_statistics(plot_min_x, plot_max_x, plot_min_y, plot_max_y);
+        let stats = if self.stats_dirty
+            || self
+                .stats_cache
+                .as_ref()
+                .is_none_or(|cache| cache.bounds != bounds)
+        {
+            let stats = self.get_statistics(plot_min_x, plot_max_x, plot_min_y, plot_max_y);
+            self.stats_cache = Some(super::histogram2d::StatsCache { bounds, stats });
+            self.stats_dirty = false;
+            stats
+        } else {
+            self.stats_cache
+                .as_ref()
+                .map(|cache| cache.stats)
+                .unwrap_or((0, 0.0, 0.0, 0.0, 0.0))
+        };
 
         let stats_entries = [
             format!("Integral: {}", stats.0),

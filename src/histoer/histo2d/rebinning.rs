@@ -97,6 +97,7 @@ impl Histogram2D {
 
         self.bins = new_bins;
         self.plot_settings.recalculate_image = true;
+        self.mark_stats_dirty();
 
         if x_rebin_factor == 1 && y_rebin_factor == 1 {
             self.backup_bins = None;

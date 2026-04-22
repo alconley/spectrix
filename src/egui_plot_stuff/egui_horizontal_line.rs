@@ -101,17 +101,18 @@ impl EguiHorizontalLine {
     pub fn interactive_dragging(&mut self, plot_response: &PlotResponse<()>) {
         let pointer_state = plot_response.response.ctx.input(|i| i.pointer.clone());
         if let Some(pointer_pos) = pointer_state.hover_pos() {
-            if let Some(hovered_id) = plot_response.hovered_plot_item {
-                if hovered_id == Id::new(self.name.clone()) {
-                    self.highlighted = true;
-                    if pointer_state.button_pressed(egui::PointerButton::Primary) {
-                        self.is_dragging = true;
-                    }
-                } else {
-                    self.highlighted = false;
-                }
-            } else {
-                self.highlighted = false;
+            let hovered_item = plot_response.hovered_plot_item == Some(Id::new(self.name.clone()));
+            let plot_bounds = plot_response.transform.bounds();
+            let center_x = (plot_bounds.min()[0] + plot_bounds.max()[0]) / 2.0;
+            let midpoint = plot_response
+                .transform
+                .position_from_point(&egui_plot::PlotPoint::new(center_x, self.y_value));
+            let midpoint_hit = midpoint.distance(pointer_pos) <= self.mid_point_radius + 4.0;
+
+            self.highlighted = hovered_item || midpoint_hit;
+
+            if self.highlighted && pointer_state.button_pressed(egui::PointerButton::Primary) {
+                self.is_dragging = true;
             }
 
             if self.is_dragging {
