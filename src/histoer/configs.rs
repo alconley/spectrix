@@ -650,8 +650,6 @@ impl Configs {
 
     pub fn variable_ui(&mut self, ui: &mut egui::Ui, base_columns: &[String]) {
         ui.horizontal(|ui| {
-            ui.label("Variables");
-
             if ui.button("+").clicked() {
                 self.variables.push((String::new(), 0.0));
             }
@@ -960,8 +958,6 @@ impl Configs {
         }
 
         ui.horizontal(|ui| {
-            ui.label("Column Creation");
-
             if ui.button("+").clicked() {
                 self.columns.push((String::new(), String::new()));
                 self.column_ui_state.push(ComputedColumnUiState::default());
@@ -1363,8 +1359,13 @@ impl Configs {
         mut active_cuts: Option<&mut [ActiveHistogramCut]>,
         available_columns: &[String],
     ) {
-        self.cuts
-            .ui(ui, active_cuts.as_deref_mut(), available_columns, "general");
+        self.cuts.ui(
+            ui,
+            active_cuts.as_deref_mut(),
+            available_columns,
+            "general",
+            false,
+        );
         let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
 
         self.sync_histogram_cuts(&merged_cuts);
@@ -1379,15 +1380,30 @@ impl Configs {
         let mut merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
         let available_columns = self.available_columns_for_ui(base_columns);
 
-        self.variable_ui(ui, base_columns);
+        egui::CollapsingHeader::new("Variables")
+            .id_salt("general_variables_section")
+            .default_open(true)
+            .show(ui, |ui| {
+                self.variable_ui(ui, base_columns);
+            });
 
         ui.separator();
 
-        self.column_ui(ui, base_columns);
+        egui::CollapsingHeader::new("Column Creation")
+            .id_salt("general_column_creation_section")
+            .default_open(true)
+            .show(ui, |ui| {
+                self.column_ui(ui, base_columns);
+            });
 
         ui.separator();
 
-        self.cut_ui(ui, active_cuts, &available_columns);
+        egui::CollapsingHeader::new("Cuts")
+            .id_salt("general_cuts_section")
+            .default_open(true)
+            .show(ui, |ui| {
+                self.cut_ui(ui, active_cuts, &available_columns);
+            });
 
         ui.separator();
 

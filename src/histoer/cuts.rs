@@ -388,9 +388,12 @@ impl Cuts {
         active_cuts: Option<&mut [ActiveHistogramCut]>,
         available_columns: &[String],
         id_suffix: &str,
+        show_title: bool,
     ) {
         ui.horizontal_wrapped(|ui| {
-            ui.label("Cuts");
+            if show_title {
+                ui.label("Cuts");
+            }
 
             if ui.button("+1D Manual").clicked() {
                 self.cuts.push(Cut::Cut1D(Cut1D::builder_default()));
