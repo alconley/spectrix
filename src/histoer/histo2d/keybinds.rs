@@ -8,7 +8,7 @@ impl Histogram2D {
                 self.plot_settings.stats_info = !self.plot_settings.stats_info;
             }
 
-            if ui.input(|i| i.key_pressed(egui::Key::C)) {
+            if ui.input(|i| i.key_pressed(egui::Key::C)) && self.plot_settings.cuts_available() {
                 self.new_cut();
             };
 

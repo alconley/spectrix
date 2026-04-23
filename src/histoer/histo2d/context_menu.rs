@@ -59,28 +59,40 @@ impl Histogram2D {
         SubMenuButton::new("Cuts")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
             .ui(ui, |ui| {
+                let cuts_available = self.plot_settings.cuts_available();
+
                 ui.horizontal(|ui| {
                     ui.heading("Cuts");
 
-                    if ui.button("+").clicked() {
+                    if ui
+                        .add_enabled(cuts_available, egui::Button::new("+"))
+                        .on_disabled_hover_text(self.plot_settings.cuts_unavailable_reason())
+                        .clicked()
+                    {
                         self.new_cut();
                     }
                 });
 
-                ui.horizontal(|ui| {
-                    ui.label("X: ");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.plot_settings.x_column)
-                            .hint_text("X Column Name"),
-                    );
-                });
+                if !cuts_available {
+                    ui.label(self.plot_settings.cuts_unavailable_reason());
+                }
 
-                ui.horizontal(|ui| {
-                    ui.label("Y: ");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.plot_settings.y_column)
-                            .hint_text("Y Column Name"),
-                    );
+                ui.add_enabled_ui(cuts_available, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("X: ");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.plot_settings.x_column)
+                                .hint_text("X Column Name"),
+                        );
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Y: ");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.plot_settings.y_column)
+                                .hint_text("Y Column Name"),
+                        );
+                    });
                 });
 
                 let mut to_remove = None;
@@ -93,7 +105,9 @@ impl Histogram2D {
 
                         ui.separator();
 
-                        cut.ui(ui);
+                        ui.add_enabled_ui(cuts_available, |ui| {
+                            cut.ui(ui);
+                        });
                     });
                 }
 
@@ -147,6 +161,14 @@ impl Histogram2D {
     }
 
     pub fn new_cut(&mut self) {
+        if !self.plot_settings.cuts_available() {
+            log::warn!(
+                "Cannot add a 2D cut to histogram '{}' because it has multiple source pairs.",
+                self.name
+            );
+            return;
+        }
+
         for cut in &mut self.plot_settings.cuts {
             cut.polygon.interactive_clicking = false;
             cut.polygon.interactive_dragging = false;

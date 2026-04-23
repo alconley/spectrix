@@ -117,6 +117,19 @@ struct PreparedCutGroup {
     hist2d_sources: Vec<Prepared2DSourceGroup>,
 }
 
+struct Hist1DSourceMetadata {
+    histogram: Hist1DHandle,
+    fill_count: usize,
+    column_name: Option<String>,
+}
+
+struct Hist2DSourceMetadata {
+    histogram: Hist2DHandle,
+    fill_count: usize,
+    x_column_name: Option<String>,
+    y_column_name: Option<String>,
+}
+
 struct CutGroupBuilder {
     cuts: Cuts,
     histogram_names: Vec<String>,
@@ -319,16 +332,6 @@ fn fill_1d_source_group(
         }
     }
 
-    for (_multiplicity, histogram) in &mut histogram_guards {
-        histogram
-            .plot_settings
-            .column_name
-            .clone_from(&source_group.column_name);
-        for cut in &mut histogram.plot_settings.cuts {
-            cut.set_column_name(&source_group.column_name);
-        }
-    }
-
     Ok(())
 }
 
@@ -382,17 +385,66 @@ fn fill_2d_source_group(
 
     for (_multiplicity, histogram) in &mut histogram_guards {
         histogram.plot_settings.recalculate_image = true;
-        histogram
-            .plot_settings
-            .x_column
-            .clone_from(&source_group.x_column_name);
-        histogram
-            .plot_settings
-            .y_column
-            .clone_from(&source_group.y_column_name);
     }
 
     Ok(())
+}
+
+fn apply_hist1d_source_metadata(histograms: &HashMap<usize, Hist1DSourceMetadata>) {
+    let mut histogram_keys = histograms.keys().copied().collect::<Vec<_>>();
+    histogram_keys.sort_unstable();
+
+    for histogram_key in histogram_keys {
+        let metadata = histograms
+            .get(&histogram_key)
+            .expect("Missing 1D histogram metadata");
+        let mut histogram = metadata.histogram.lock().expect("Failed to lock histogram");
+
+        if metadata.fill_count == 1 {
+            if let Some(column_name) = &metadata.column_name {
+                histogram.plot_settings.column_name.clone_from(column_name);
+                for cut in &mut histogram.plot_settings.cuts {
+                    cut.set_column_name(column_name);
+                }
+            } else {
+                histogram.plot_settings.column_name.clear();
+            }
+        } else {
+            histogram.plot_settings.column_name.clear();
+        }
+    }
+}
+
+fn apply_hist2d_source_metadata(histograms: &HashMap<usize, Hist2DSourceMetadata>) {
+    let mut histogram_keys = histograms.keys().copied().collect::<Vec<_>>();
+    histogram_keys.sort_unstable();
+
+    for histogram_key in histogram_keys {
+        let metadata = histograms
+            .get(&histogram_key)
+            .expect("Missing 2D histogram metadata");
+        let mut histogram = metadata
+            .histogram
+            .lock()
+            .expect("Failed to lock 2D histogram");
+
+        histogram.plot_settings.recalculate_image = true;
+
+        if metadata.fill_count == 1 {
+            if let (Some(x_column_name), Some(y_column_name)) =
+                (&metadata.x_column_name, &metadata.y_column_name)
+            {
+                histogram.plot_settings.x_column.clone_from(x_column_name);
+                histogram.plot_settings.y_column.clone_from(y_column_name);
+            } else {
+                histogram.plot_settings.x_column.clear();
+                histogram.plot_settings.y_column.clear();
+            }
+        } else {
+            histogram.plot_settings.x_column.clear();
+            histogram.plot_settings.y_column.clear();
+        }
+    }
 }
 
 impl Histogrammer {
@@ -638,6 +690,8 @@ impl Histogrammer {
         let lf = Arc::new(selected_lf);
 
         let mut cut_groups = HashMap::<String, CutGroupBuilder>::new();
+        let mut hist1d_source_metadata = HashMap::<usize, Hist1DSourceMetadata>::new();
+        let mut hist2d_source_metadata = HashMap::<usize, Hist2DSourceMetadata>::new();
 
         for config in &valid_configs.configs {
             match config {
@@ -651,6 +705,22 @@ impl Histogrammer {
                         }
                         _ => None,
                     }) {
+                        let histogram_key = Arc::as_ptr(&hist) as usize;
+                        let metadata =
+                            hist1d_source_metadata
+                                .entry(histogram_key)
+                                .or_insert_with(|| Hist1DSourceMetadata {
+                                    histogram: Arc::clone(&hist),
+                                    fill_count: 0,
+                                    column_name: None,
+                                });
+                        metadata.fill_count += 1;
+                        if metadata.fill_count == 1 {
+                            metadata.column_name = Some(hist1d.column_name.clone());
+                        } else {
+                            metadata.column_name = None;
+                        }
+
                         let key = hist1d.cuts.generate_key();
                         cut_groups
                             .entry(key.clone())
@@ -668,6 +738,25 @@ impl Histogrammer {
                         }
                         _ => None,
                     }) {
+                        let histogram_key = Arc::as_ptr(&hist) as usize;
+                        let metadata =
+                            hist2d_source_metadata
+                                .entry(histogram_key)
+                                .or_insert_with(|| Hist2DSourceMetadata {
+                                    histogram: Arc::clone(&hist),
+                                    fill_count: 0,
+                                    x_column_name: None,
+                                    y_column_name: None,
+                                });
+                        metadata.fill_count += 1;
+                        if metadata.fill_count == 1 {
+                            metadata.x_column_name = Some(hist2d.x_column_name.clone());
+                            metadata.y_column_name = Some(hist2d.y_column_name.clone());
+                        } else {
+                            metadata.x_column_name = None;
+                            metadata.y_column_name = None;
+                        }
+
                         let key = hist2d.cuts.generate_key();
                         cut_groups
                             .entry(key.clone())
@@ -697,6 +786,8 @@ impl Histogrammer {
             })
             .collect::<Vec<_>>();
         prepared_cut_groups.sort_by(|left, right| left.sort_key.cmp(&right.sort_key));
+        apply_hist1d_source_metadata(&hist1d_source_metadata);
+        apply_hist2d_source_metadata(&hist2d_source_metadata);
 
         std::thread::spawn({
             let calculating = Arc::clone(&calculating);
@@ -1382,19 +1473,21 @@ impl Histogrammer {
 
             if let egui_tiles::Tile::Pane(Pane::Histogram2D(hist)) = tile {
                 if let Ok(hist) = hist.try_lock() {
-                    for cut in &hist.plot_settings.cuts {
-                        let is_active = cut.active;
-                        let cut = Cut::Cut2D(cut.clone());
-                        if is_active
-                            && !active_cuts.iter().any(|existing: &ActiveHistogramCut| {
-                                existing.cut.name() == cut.name()
-                            })
-                        {
-                            active_cuts.push(ActiveHistogramCut {
-                                histogram_name: hist.name.clone(),
-                                enabled: true,
-                                cut,
-                            });
+                    if hist.plot_settings.cuts_available() {
+                        for cut in &hist.plot_settings.cuts {
+                            let is_active = cut.active;
+                            let cut = Cut::Cut2D(cut.clone());
+                            if is_active
+                                && !active_cuts.iter().any(|existing: &ActiveHistogramCut| {
+                                    existing.cut.name() == cut.name()
+                                })
+                            {
+                                active_cuts.push(ActiveHistogramCut {
+                                    histogram_name: hist.name.clone(),
+                                    enabled: true,
+                                    cut,
+                                });
+                            }
                         }
                     }
                 } else {

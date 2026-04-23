@@ -17,6 +17,7 @@ Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting 
 - Background ROOT histogram retrieval/export so long uproot operations do not block the UI  
 - Combine matching ROOT histograms across multiple files, or load them separately with per-file prefixes  
 - Interactive histogramming (1D & 2D)  
+- Multi-select 1D/2D histogram source pickers, with safe 2D pair expansion and de-duplication  
 - Interactive histogram-created cuts for 1D and 2D views  
 - Gaussian fitting with Python’s lmfit, including total-fit uncertainty bands  
 - Visible-range auto-Y scaling for 1D histograms, with log-Y support  
@@ -169,7 +170,7 @@ You can also load 2D cuts in this area; those cuts are then available as active 
 
 When saving filtered files, Spectrix applies all enabled **active 1D/2D cuts** from the Histogram Script cut sections and writes output using `filename_{suffix}.parquet` naming.
 
-Interactive cuts created directly on 1D and 2D histograms also appear in the same active-cuts area, so they can be enabled/disabled for histogram generation and parquet filtering before being added manually to the script.
+Interactive cuts created directly on 1D histograms, and on 2D histograms that resolve to a single X/Y source pair, also appear in the same active-cuts area, so they can be enabled/disabled for histogram generation and parquet filtering before being added manually to the script.
 
 When combining parquet files, Spectrix scans the selected inputs lazily and streams the merged result directly to the output parquet sink. It does **not** collect the full combined dataset into memory first.
 
@@ -186,7 +187,7 @@ This tool allows you to:
 - Define new analysis columns from existing parquet columns.
 - Define calibration/gain-match/shift transforms with a dedicated **Calibration** table.
 - Define and manage **1D and 2D cuts**.
-- Define **1D and 2D histograms** (name, columns, bins, range, and applied cuts).
+- Define **1D and 2D histograms** (name, one or more source columns/source pairs, bins, range, and applied cuts).
 - Save/load complete histogram-script setups as `.json` configuration files.
 
 ### Typical Workflow
@@ -341,6 +342,8 @@ You can define:
 - **1D cuts** with the builder UI, or by loading saved 1D cut JSON files with **`+1D Load`**.
 - **2D cuts** as graphical polygons in the 2D histogram view.
 
+Interactive 2D cuts are only available on 2D histograms that have one unambiguous X/Y source pair. If a 2D histogram is filled from multiple source pairs, Spectrix disables plot-created 2D cuts for that plot.
+
 For cut management in the Histogram Script UI, you can:
 
 - Add a blank 1D cut with **`+1D Manual`**.
@@ -418,7 +421,15 @@ Enter the histogram name and select the input column(s), bin count, and axis ran
 
 Using slashes (`/`) in histogram names automatically groups plots into nested containers.
 
-The **“Column(s)”** field now uses searchable pickers, so histogram source columns can be chosen directly from the loaded parquet columns or previously created aliases. Then specify range, binning, and which active cuts should be applied.
+The histogram source-column fields use searchable pickers, so source columns can be chosen directly from the loaded parquet columns or previously created aliases. Then specify range, binning, and which active cuts should be applied.
+
+- **1D histograms** support selecting multiple source columns in a single histogram row. Spectrix fills the same 1D histogram once per selected source column.
+- If a 1D histogram is filled from more than one source column or configuration, its displayed source-column metadata is cleared instead of pointing at only one of the inputs.
+- **2D histograms** support selecting multiple X columns and multiple Y columns in a single histogram row.
+- Spectrix expands those selections into explicit `(x, y)` source pairs before filling.
+- Self-pairs where `x` and `y` resolve to the same column are skipped.
+- Mirrored pairs such as `(A, B)` and `(B, A)` are only filled once, so the same detector pairing is not double-counted.
+- If a 2D histogram is filled from more than one X/Y source pair, its stored axis-source metadata is cleared and plot-created 2D cuts are disabled for that histogram.
 
 If a cut is defined but not enabled, it will not affect that histogram.
 
@@ -630,6 +641,8 @@ Cursor must be inside the plot for keybinds to be active.
 ### Cut Notes
 
 - Press **C** (or add a cut from the right-click menu) to start a new interactive polygon cut.
+- The 2D histogram must have one unambiguous X/Y source pair for 2D cuts to be available.
+- If the histogram was filled from multiple X/Y source pairs, Spectrix clears the stored X/Y source labels and disables plot-created 2D cuts for that histogram.
 - **Click** to add each vertex.
 - **Double-click** to finish the polygon.
 - After creation, **click and drag a vertex** to reposition it.

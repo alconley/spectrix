@@ -1,6 +1,8 @@
 use super::cuts::{ActiveHistogramCut, Cut, Cuts};
 use super::histogrammer::Histogrammer;
-use super::ui_helpers::{precise_drag_value, searchable_column_picker_ui};
+use super::ui_helpers::{
+    precise_drag_value, searchable_column_picker_ui, searchable_multi_column_picker_ui,
+};
 
 use egui_extras::{Column, TableBuilder};
 
@@ -171,7 +173,13 @@ impl Configs {
                         Config::Hist1D(h) if h.name == other_hist1d.name => Some(h),
                         _ => None,
                     }) {
-                        if existing.column_name != other_hist1d.column_name
+                        let existing_columns = existing.fill_columns();
+                        let other_columns = other_hist1d.fill_columns();
+                        let shares_existing_column = other_columns
+                            .iter()
+                            .any(|column_name| existing_columns.contains(column_name));
+
+                        if !shares_existing_column
                             && existing.range == other_hist1d.range
                             && existing.bins == other_hist1d.bins
                         {
@@ -192,8 +200,12 @@ impl Configs {
                         Config::Hist2D(h) if h.name == other_hist2d.name => Some(h),
                         _ => None,
                     }) {
-                        if (existing.x_column_name != other_hist2d.x_column_name
-                            || existing.y_column_name != other_hist2d.y_column_name)
+                        let existing_pairs = existing.fill_pairs_for_merge();
+                        let other_pairs = other_hist2d.fill_pairs_for_merge();
+                        let shares_existing_pair =
+                            other_pairs.iter().any(|pair| existing_pairs.contains(pair));
+
+                        if !shares_existing_pair
                             && existing.x_range == other_hist2d.x_range
                             && existing.y_range == other_hist2d.y_range
                             && existing.bins == other_hist2d.bins
@@ -497,12 +509,12 @@ impl Configs {
         for config in &self.configs {
             match config {
                 Config::Hist1D(hist1d) => {
-                    used_column_names.push(hist1d.column_name.clone());
+                    used_column_names.extend(hist1d.fill_columns());
                     used_column_names.extend(hist1d.cuts.required_columns());
                 }
                 Config::Hist2D(hist2d) => {
-                    used_column_names.push(hist2d.x_column_name.clone());
-                    used_column_names.push(hist2d.y_column_name.clone());
+                    used_column_names.extend(hist2d.x_fill_columns());
+                    used_column_names.extend(hist2d.y_fill_columns());
                     used_column_names.extend(hist2d.cuts.required_columns());
                 }
             }
@@ -738,6 +750,7 @@ impl Configs {
                 self.configs.push(Config::Hist1D(Hist1DConfig {
                     name: String::new(),
                     column_name: String::new(),
+                    additional_column_names: Vec::new(),
                     range: (0.0, 4096.0),
                     bins: 512,
                     cuts: Cuts::default(),
@@ -751,6 +764,8 @@ impl Configs {
                     name: String::new(),
                     x_column_name: String::new(),
                     y_column_name: String::new(),
+                    additional_x_column_names: Vec::new(),
+                    additional_y_column_names: Vec::new(),
                     x_range: (0.0, 4096.0),
                     y_range: (0.0, 4096.0),
                     bins: (512, 512),
@@ -1395,7 +1410,9 @@ impl Configs {
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 pub struct Hist1DConfig {
     pub name: String,        // Histogram display name
-    pub column_name: String, // Data column to fill from
+    pub column_name: String, // Primary data column to fill from
+    #[serde(default)]
+    pub additional_column_names: Vec<String>, // Additional columns to also fill into this histogram
     pub range: (f64, f64),   // Range for the histogram
     pub bins: usize,         // Number of bins
     pub cuts: Cuts,          // Cuts for the histogram
@@ -1408,12 +1425,51 @@ impl Hist1DConfig {
         Self {
             name: name.to_owned(),
             column_name: column_name.to_owned(),
+            additional_column_names: Vec::new(),
             range,
             bins,
             cuts: Cuts::default(),
             calculate: true,
             enabled: true,
         }
+    }
+
+    fn fill_columns(&self) -> Vec<String> {
+        let mut fill_columns = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        for column_name in
+            std::iter::once(&self.column_name).chain(self.additional_column_names.iter())
+        {
+            let trimmed = column_name.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let normalized = trimmed.to_owned();
+            if seen.insert(normalized.clone()) {
+                fill_columns.push(normalized);
+            }
+        }
+
+        fill_columns
+    }
+
+    fn set_fill_columns(&mut self, columns: Vec<String>) {
+        let mut fill_columns = columns
+            .into_iter()
+            .map(|column_name| column_name.trim().to_owned())
+            .filter(|column_name| !column_name.is_empty())
+            .collect::<Vec<_>>();
+
+        if fill_columns.is_empty() {
+            self.column_name.clear();
+            self.additional_column_names.clear();
+            return;
+        }
+
+        self.column_name = fill_columns.remove(0);
+        self.additional_column_names = fill_columns;
     }
 
     pub fn table_row(
@@ -1441,14 +1497,17 @@ impl Hist1DConfig {
         });
 
         row.col(|ui| {
-            searchable_column_picker_ui(
+            let mut fill_columns = self.fill_columns();
+            if searchable_multi_column_picker_ui(
                 ui,
                 format!("hist1d_column_picker_{row_index}"),
-                &mut self.column_name,
+                &mut fill_columns,
                 available_columns,
-                "Column Name",
+                "Column Names",
                 self.enabled,
-            );
+            ) {
+                self.set_fill_columns(fill_columns);
+            }
         });
 
         row.col(|ui| {
@@ -1531,67 +1590,60 @@ impl Hist1DConfig {
         let mut configs = Vec::new();
 
         if self.calculate {
-            if self.name.contains("{}") {
-                // name has {} and column_name has a range pattern
-                if let Some(caps) = range_re.captures(&self.column_name) {
-                    let start: usize = caps[1].parse().expect("Failed to parse start range");
-                    let end: usize = caps[2].parse().expect("Failed to parse end range");
+            for fill_column in self.fill_columns() {
+                if self.name.contains("{}") {
+                    if let Some(caps) = range_re.captures(&fill_column) {
+                        let start: usize = caps[1].parse().expect("Failed to parse start range");
+                        let end: usize = caps[2].parse().expect("Failed to parse end range");
 
-                    // Loop through start and end values
-                    for i in start..=end {
-                        let mut new_config = self.clone();
-                        new_config.name = self.name.replace("{}", &i.to_string());
-                        new_config.column_name = range_re
-                            .replace(&self.column_name, i.to_string())
-                            .to_string();
-                        configs.push(new_config);
+                        for i in start..=end {
+                            let mut new_config = self.clone();
+                            new_config.name = self.name.replace("{}", &i.to_string());
+                            new_config.column_name =
+                                range_re.replace(&fill_column, i.to_string()).to_string();
+                            new_config.additional_column_names.clear();
+                            configs.push(new_config);
+                        }
+                    } else if let Some(caps) = list_re.captures(&fill_column) {
+                        let values: Vec<&str> = caps[1].split(',').collect();
+                        for val in values {
+                            let mut new_config = self.clone();
+                            new_config.name = self.name.replace("{}", val);
+                            new_config.column_name = list_re.replace(&fill_column, val).to_string();
+                            new_config.additional_column_names.clear();
+                            configs.push(new_config);
+                        }
+                    } else {
+                        log::error!(
+                            "Warning: Unsupported pattern for 1D histogram with name '{}', column '{}'",
+                            self.name,
+                            fill_column
+                        );
                     }
-                }
-                // name has {} and column_name has a list pattern
-                else if let Some(caps) = list_re.captures(&self.column_name) {
-                    // Split comma-separated values and loop over them
-                    let values: Vec<&str> = caps[1].split(',').collect();
-                    for val in values {
-                        let mut new_config = self.clone();
-                        new_config.name = self.name.replace("{}", val);
-                        new_config.column_name =
-                            list_re.replace(&self.column_name, val).to_string();
-                        configs.push(new_config);
-                    }
-                // Unsupported pattern
-                } else {
-                    log::error!(
-                        "Warning: Unsupported pattern for 1D histogram with name '{}', column '{}'",
-                        self.name,
-                        self.column_name
-                    );
-                }
-            } else {
-                // No {} in name, but column_name has a range pattern
-                if let Some(caps) = range_re.captures(&self.column_name) {
+                } else if let Some(caps) = range_re.captures(&fill_column) {
                     let start: usize = caps[1].parse().expect("Failed to parse start range");
                     let end: usize = caps[2].parse().expect("Failed to parse end range");
 
                     for i in start..=end {
                         let mut new_config = self.clone();
-                        new_config.column_name = range_re
-                            .replace(&self.column_name, i.to_string())
-                            .to_string();
+                        new_config.column_name =
+                            range_re.replace(&fill_column, i.to_string()).to_string();
+                        new_config.additional_column_names.clear();
                         configs.push(new_config);
                     }
-                }
-                // No {} in name, but column_name has a list pattern
-                else if let Some(caps) = list_re.captures(&self.column_name) {
+                } else if let Some(caps) = list_re.captures(&fill_column) {
                     let values: Vec<&str> = caps[1].split(',').collect();
                     for val in values {
                         let mut new_config = self.clone();
-                        new_config.column_name =
-                            list_re.replace(&self.column_name, val).to_string();
+                        new_config.column_name = list_re.replace(&fill_column, val).to_string();
+                        new_config.additional_column_names.clear();
                         configs.push(new_config);
                     }
-                // No {} in name or column_name i.e. a normal configuration
                 } else {
-                    configs.push(self.clone());
+                    let mut new_config = self.clone();
+                    new_config.column_name = fill_column;
+                    new_config.additional_column_names.clear();
+                    configs.push(new_config);
                 }
             }
         }
@@ -1604,12 +1656,16 @@ pub struct Hist2DConfig {
     pub name: String,          // Histogram display name
     pub x_column_name: String, // Data column for X-axis
     pub y_column_name: String, // Data column for Y-axis
-    pub x_range: (f64, f64),   // Range for X-axis
-    pub y_range: (f64, f64),   // Range for Y-axis
-    pub bins: (usize, usize),  // Number of bins for X and Y axes
-    pub cuts: Cuts,            // Cuts for the histogram
-    pub calculate: bool,       // Whether to calculate the histogram
-    pub enabled: bool,         // Whether to let the user interact with the histogram
+    #[serde(default)]
+    pub additional_x_column_names: Vec<String>,
+    #[serde(default)]
+    pub additional_y_column_names: Vec<String>,
+    pub x_range: (f64, f64),  // Range for X-axis
+    pub y_range: (f64, f64),  // Range for Y-axis
+    pub bins: (usize, usize), // Number of bins for X and Y axes
+    pub cuts: Cuts,           // Cuts for the histogram
+    pub calculate: bool,      // Whether to calculate the histogram
+    pub enabled: bool,        // Whether to let the user interact with the histogram
 }
 
 impl Hist2DConfig {
@@ -1625,6 +1681,8 @@ impl Hist2DConfig {
             name: name.to_owned(),
             x_column_name: x_column_name.to_owned(),
             y_column_name: y_column_name.to_owned(),
+            additional_x_column_names: Vec::new(),
+            additional_y_column_names: Vec::new(),
             x_range,
             y_range,
             bins,
@@ -1632,6 +1690,139 @@ impl Hist2DConfig {
             calculate: true,
             enabled: true,
         }
+    }
+
+    fn normalized_axis_columns(
+        primary_column_name: &str,
+        additional_column_names: &[String],
+    ) -> Vec<String> {
+        let mut columns = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        for column_name in std::iter::once(primary_column_name)
+            .chain(additional_column_names.iter().map(String::as_str))
+        {
+            let trimmed = column_name.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let normalized = trimmed.to_owned();
+            if seen.insert(normalized.clone()) {
+                columns.push(normalized);
+            }
+        }
+
+        columns
+    }
+
+    fn x_fill_columns(&self) -> Vec<String> {
+        Self::normalized_axis_columns(&self.x_column_name, &self.additional_x_column_names)
+    }
+
+    fn y_fill_columns(&self) -> Vec<String> {
+        Self::normalized_axis_columns(&self.y_column_name, &self.additional_y_column_names)
+    }
+
+    fn set_x_fill_columns(&mut self, columns: Vec<String>) {
+        let mut columns = columns
+            .into_iter()
+            .map(|column_name| column_name.trim().to_owned())
+            .filter(|column_name| !column_name.is_empty())
+            .collect::<Vec<_>>();
+
+        if columns.is_empty() {
+            self.x_column_name.clear();
+            self.additional_x_column_names.clear();
+            return;
+        }
+
+        self.x_column_name = columns.remove(0);
+        self.additional_x_column_names = columns;
+    }
+
+    fn set_y_fill_columns(&mut self, columns: Vec<String>) {
+        let mut columns = columns
+            .into_iter()
+            .map(|column_name| column_name.trim().to_owned())
+            .filter(|column_name| !column_name.is_empty())
+            .collect::<Vec<_>>();
+
+        if columns.is_empty() {
+            self.y_column_name.clear();
+            self.additional_y_column_names.clear();
+            return;
+        }
+
+        self.y_column_name = columns.remove(0);
+        self.additional_y_column_names = columns;
+    }
+
+    fn expanded_axis_columns(
+        columns: Vec<String>,
+        range_re: &regex::Regex,
+        list_re: &regex::Regex,
+    ) -> Vec<(String, Option<String>)> {
+        let mut expanded_columns = Vec::new();
+
+        for column_name in columns {
+            if let Some(caps) = range_re.captures(&column_name) {
+                let start: usize = caps[1].parse().expect("Failed to parse start range");
+                let end: usize = caps[2].parse().expect("Failed to parse end range");
+
+                for i in start..=end {
+                    expanded_columns.push((
+                        range_re.replace(&column_name, i.to_string()).to_string(),
+                        Some(i.to_string()),
+                    ));
+                }
+            } else if let Some(caps) = list_re.captures(&column_name) {
+                let values: Vec<&str> = caps[1].split(',').collect();
+                for value in values {
+                    expanded_columns.push((
+                        list_re.replace(&column_name, value).to_string(),
+                        Some(value.to_owned()),
+                    ));
+                }
+            } else {
+                expanded_columns.push((column_name, None));
+            }
+        }
+
+        expanded_columns
+    }
+
+    fn fill_pairs_for_merge(&self) -> Vec<(String, String)> {
+        let mut pairs = Vec::new();
+        let mut seen_pairs = std::collections::HashSet::new();
+        let mut seen_unordered_pairs = std::collections::HashSet::new();
+
+        for x_column_name in self.x_fill_columns() {
+            for y_column_name in self.y_fill_columns() {
+                if x_column_name == y_column_name {
+                    continue;
+                }
+
+                let pair = (x_column_name.clone(), y_column_name.clone());
+                if !seen_pairs.insert(pair.clone()) {
+                    continue;
+                }
+
+                let unordered_pair = if x_column_name <= y_column_name {
+                    (x_column_name.clone(), y_column_name.clone())
+                } else {
+                    (y_column_name.clone(), x_column_name.clone())
+                };
+
+                if !seen_unordered_pairs.insert(unordered_pair) {
+                    continue;
+                }
+
+                pairs.push(pair);
+            }
+        }
+
+        pairs
     }
 
     pub fn table_row(
@@ -1661,22 +1852,35 @@ impl Hist2DConfig {
 
         row.col(|ui| {
             ui.vertical(|ui| {
-                searchable_column_picker_ui(
-                    ui,
-                    format!("hist2d_x_column_picker_{row_index}"),
-                    &mut self.x_column_name,
-                    available_columns,
-                    "X Column Name",
-                    self.enabled,
-                );
-                searchable_column_picker_ui(
-                    ui,
-                    format!("hist2d_y_column_picker_{row_index}"),
-                    &mut self.y_column_name,
-                    available_columns,
-                    "Y Column Name",
-                    self.enabled,
-                );
+                ui.horizontal(|ui| {
+                    ui.label("X");
+                    let mut x_fill_columns = self.x_fill_columns();
+                    if searchable_multi_column_picker_ui(
+                        ui,
+                        format!("hist2d_x_column_picker_{row_index}"),
+                        &mut x_fill_columns,
+                        available_columns,
+                        "X Column Names",
+                        self.enabled,
+                    ) {
+                        self.set_x_fill_columns(x_fill_columns);
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Y");
+                    let mut y_fill_columns = self.y_fill_columns();
+                    if searchable_multi_column_picker_ui(
+                        ui,
+                        format!("hist2d_y_column_picker_{row_index}"),
+                        &mut y_fill_columns,
+                        available_columns,
+                        "Y Column Names",
+                        self.enabled,
+                    ) {
+                        self.set_y_fill_columns(y_fill_columns);
+                    }
+                });
             });
         });
 
@@ -1795,102 +1999,65 @@ impl Hist2DConfig {
         let mut configs = Vec::new();
 
         if self.calculate {
-            if self.name.contains("{}") {
-                // Case 1: `{}` in `name`, `x_column_name` has a pattern
-                if let Some(caps) = range_re.captures(&self.x_column_name) {
-                    let start: usize = caps[1].parse().expect("Failed to parse start range");
-                    let end: usize = caps[2].parse().expect("Failed to parse end range");
-                    for i in start..=end {
-                        let mut new_config = self.clone();
-                        new_config.name = self.name.replace("{}", &i.to_string());
-                        new_config.x_column_name = range_re
-                            .replace(&self.x_column_name, i.to_string())
-                            .to_string();
-                        new_config.y_column_name = self.y_column_name.clone();
-                        configs.push(new_config);
+            let expanded_x_columns =
+                Self::expanded_axis_columns(self.x_fill_columns(), &range_re, &list_re);
+            let expanded_y_columns =
+                Self::expanded_axis_columns(self.y_fill_columns(), &range_re, &list_re);
+            let mut seen_pairs = std::collections::HashSet::new();
+            let mut seen_unordered_pairs = std::collections::HashSet::new();
+
+            for (x_column_name, x_name_token) in &expanded_x_columns {
+                for (y_column_name, y_name_token) in &expanded_y_columns {
+                    if x_column_name == y_column_name {
+                        continue;
                     }
-                } else if let Some(caps) = list_re.captures(&self.x_column_name) {
-                    let values: Vec<&str> = caps[1].split(',').collect();
-                    for val in values {
-                        let mut new_config = self.clone();
-                        new_config.name = self.name.replace("{}", val);
-                        new_config.x_column_name =
-                            list_re.replace(&self.x_column_name, val).to_string();
-                        new_config.y_column_name = self.y_column_name.clone();
-                        configs.push(new_config);
+
+                    let pair = (x_column_name.clone(), y_column_name.clone());
+                    if !seen_pairs.insert(pair.clone()) {
+                        continue;
                     }
-                }
-                // Case 2: `{}` in `name`, `y_column_name` has a pattern
-                else if let Some(caps) = range_re.captures(&self.y_column_name) {
-                    let start: usize = caps[1].parse().expect("Failed to parse start range");
-                    let end: usize = caps[2].parse().expect("Failed to parse end range");
-                    for i in start..=end {
-                        let mut new_config = self.clone();
-                        new_config.name = self.name.replace("{}", &i.to_string());
-                        new_config.x_column_name = self.x_column_name.clone();
-                        new_config.y_column_name = range_re
-                            .replace(&self.y_column_name, i.to_string())
-                            .to_string();
-                        configs.push(new_config);
+
+                    let unordered_pair = if x_column_name <= y_column_name {
+                        (x_column_name.clone(), y_column_name.clone())
+                    } else {
+                        (y_column_name.clone(), x_column_name.clone())
+                    };
+
+                    if !seen_unordered_pairs.insert(unordered_pair) {
+                        continue;
                     }
-                } else if let Some(caps) = list_re.captures(&self.y_column_name) {
-                    let values: Vec<&str> = caps[1].split(',').collect();
-                    for val in values {
-                        let mut new_config = self.clone();
-                        new_config.name = self.name.replace("{}", val);
-                        new_config.x_column_name = self.x_column_name.clone();
-                        new_config.y_column_name =
-                            list_re.replace(&self.y_column_name, val).to_string();
-                        configs.push(new_config);
+
+                    let mut new_config = self.clone();
+                    new_config.x_column_name = x_column_name.clone();
+                    new_config.y_column_name = y_column_name.clone();
+                    new_config.additional_x_column_names.clear();
+                    new_config.additional_y_column_names.clear();
+
+                    if self.name.contains("{}") {
+                        match (x_name_token.as_deref(), y_name_token.as_deref()) {
+                            (Some(x_token), None) => {
+                                new_config.name = self.name.replace("{}", x_token);
+                            }
+                            (None, Some(y_token)) => {
+                                new_config.name = self.name.replace("{}", y_token);
+                            }
+                            (Some(x_token), Some(y_token)) => {
+                                new_config.name =
+                                    self.name.replace("{}", &format!("{x_token}_{y_token}"));
+                            }
+                            (None, None) => {
+                                log::error!(
+                                    "Warning: Unsupported pattern for 2D histogram with name '{}', x_column '{}', y_column '{}'",
+                                    self.name,
+                                    self.x_column_name,
+                                    self.y_column_name
+                                );
+                                continue;
+                            }
+                        }
                     }
-                } else {
-                    log::error!(
-                        "Warning: Unsupported pattern for 2D histogram with name '{}', x_column '{}', y_column '{}'",
-                        self.name,
-                        self.x_column_name,
-                        self.y_column_name
-                    );
-                }
-            } else {
-                // Static `name`, expand `x_column_name` or `y_column_name` with range or list patterns
-                if let Some(caps) = range_re.captures(&self.x_column_name) {
-                    let start: usize = caps[1].parse().expect("Failed to parse start range");
-                    let end: usize = caps[2].parse().expect("Failed to parse end range");
-                    for i in start..=end {
-                        let mut new_config = self.clone();
-                        new_config.x_column_name = range_re
-                            .replace(&self.x_column_name, i.to_string())
-                            .to_string();
-                        configs.push(new_config);
-                    }
-                } else if let Some(caps) = list_re.captures(&self.x_column_name) {
-                    let values: Vec<&str> = caps[1].split(',').collect();
-                    for val in values {
-                        let mut new_config = self.clone();
-                        new_config.x_column_name =
-                            list_re.replace(&self.x_column_name, val).to_string();
-                        configs.push(new_config);
-                    }
-                } else if let Some(caps) = range_re.captures(&self.y_column_name) {
-                    let start: usize = caps[1].parse().expect("Failed to parse start range");
-                    let end: usize = caps[2].parse().expect("Failed to parse end range");
-                    for i in start..=end {
-                        let mut new_config = self.clone();
-                        new_config.y_column_name = range_re
-                            .replace(&self.y_column_name, i.to_string())
-                            .to_string();
-                        configs.push(new_config);
-                    }
-                } else if let Some(caps) = list_re.captures(&self.y_column_name) {
-                    let values: Vec<&str> = caps[1].split(',').collect();
-                    for val in values {
-                        let mut new_config = self.clone();
-                        new_config.y_column_name =
-                            list_re.replace(&self.y_column_name, val).to_string();
-                        configs.push(new_config);
-                    }
-                } else {
-                    configs.push(self.clone());
+
+                    configs.push(new_config);
                 }
             }
         }

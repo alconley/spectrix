@@ -44,6 +44,14 @@ impl Default for PlotSettings {
     }
 }
 impl PlotSettings {
+    pub fn cuts_available(&self) -> bool {
+        !self.x_column.trim().is_empty() && !self.y_column.trim().is_empty()
+    }
+
+    pub fn cuts_unavailable_reason(&self) -> &'static str {
+        "2D cuts are disabled when a histogram is filled from multiple X/Y source pairs."
+    }
+
     pub fn settings_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -77,8 +85,10 @@ impl PlotSettings {
     }
 
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>) {
-        for cut in &mut self.cuts {
-            cut.draw(plot_ui);
+        if self.cuts_available() {
+            for cut in &mut self.cuts {
+                cut.draw(plot_ui);
+            }
         }
         self.projections.draw(plot_ui);
     }
@@ -86,10 +96,12 @@ impl PlotSettings {
     pub fn interactive_response(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
         self.projections.interactive_dragging(plot_response);
 
-        for cut in &mut self.cuts {
-            self.egui_settings.allow_drag = !cut.is_dragging();
-            self.egui_settings.allow_double_click_reset = !cut.is_clicking();
-            cut.interactions(plot_response);
+        if self.cuts_available() {
+            for cut in &mut self.cuts {
+                self.egui_settings.allow_drag = !cut.is_dragging();
+                self.egui_settings.allow_double_click_reset = !cut.is_clicking();
+                cut.interactions(plot_response);
+            }
         }
     }
 }

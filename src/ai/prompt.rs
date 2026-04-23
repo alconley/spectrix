@@ -23,6 +23,7 @@ Behavior rules:
 - Explain what the code does to the data when the user asks "what is", "why", "what happens", or any experiment/data question.
 - For "what is" questions, lead with the concept and experiment/data meaning before giving UI steps.
 - Interpret Spectrix as an experimental event-data analysis tool. In experiments such as nuclear physics, users are often interested in observables like energy, time, position, PID, or calibrated derived values. Histograms are binned event counts; cuts/gates are event-selection masks; fits extract peak centroids, widths, areas/yields; calibration maps detector/channel observables to physical units where supported.
+- When the source shows that a histogram can be filled from multiple selected columns or source pairs, explain that behavior explicitly instead of implying there is only one backing column.
 - Trust implementation source excerpts and UI/data clues over docs, prior assumptions, or generic app behavior.
 - If the codebase investigation did not find enough evidence, say what was missing and answer only what the source supports.
 - Do not switch to the Analysis module unless the user asks about Analysis, SE-SPS, cross sections, or post-fit analysis.
@@ -64,7 +65,7 @@ pub(crate) fn build_user_prompt(
 }
 
 fn experimental_data_interpretation_guide() -> &'static str {
-    "- Parquet columns represent event-by-event experimental observables, such as energy, time, position, detector IDs, or calibrated derived values.\n- A histogram bins one or two observables and displays counts/yields per bin.\n- A cut/gate creates a boolean event-selection mask. A 1D cut compares one column to bounds or values. A 2D cut tests whether an event's `(x, y)` point lies inside a polygon gate.\n- Applying cuts before histogramming means only events passing the enabled gates contribute to the displayed histogram, fit, or saved filtered parquet file.\n- Gaussian fitting measures peak centroids, widths, amplitudes, and areas. In experiments such as nuclear physics, those are commonly used for energy/time/position calibration checks, resolution estimates, and yield extraction.\n- Calibration code maps detector/channel coordinates to physical units where the source code supports it.\n- Cross-section analysis, where present, combines fitted yields with beam/current/target/solid-angle style metadata; do not imply it is available for unrelated workflows unless source excerpts show it."
+    "- Parquet columns represent event-by-event experimental observables, such as energy, time, position, detector IDs, or calibrated derived values.\n- A histogram bins one or two observables and displays counts/yields per bin.\n- Spectrix can fill the same histogram from multiple selected source columns or vetted `(x, y)` source pairs when the Histogram Script configuration asks for it.\n- A cut/gate creates a boolean event-selection mask. A 1D cut compares one column to bounds or values. A 2D cut tests whether an event's `(x, y)` point lies inside a polygon gate.\n- Applying cuts before histogramming means only events passing the enabled gates contribute to the displayed histogram, fit, or saved filtered parquet file.\n- Gaussian fitting measures peak centroids, widths, amplitudes, and areas. In experiments such as nuclear physics, those are commonly used for energy/time/position calibration checks, resolution estimates, and yield extraction.\n- Calibration code maps detector/channel coordinates to physical units where the source code supports it.\n- Cross-section analysis, where present, combines fitted yields with beam/current/target/solid-angle style metadata; do not imply it is available for unrelated workflows unless source excerpts show it."
 }
 
 fn source_derived_workflow_hints(prompt: &str) -> String {
@@ -134,6 +135,22 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
         );
     }
 
+    if is_histogram_setup_question(prompt) {
+        sections.push(
+            r#"Source-derived workflow hints for histogram source selection:
+- In Histogram Script, 1D histogram rows use searchable multi-select source-column pickers.
+- Selecting multiple 1D source columns fills the same histogram once per selected column.
+- If a 1D histogram is filled from more than one source column or configuration, Spectrix clears that histogram's stored source-column label instead of leaving a misleading single column name behind.
+- In Histogram Script, 2D histogram rows use searchable multi-select pickers for both X and Y source columns.
+- Spectrix expands those selections into explicit `(x, y)` source pairs before filling the histogram.
+- It skips self-pairs where `x` and `y` resolve to the same column.
+- It also suppresses mirrored duplicates such as `(A, B)` and `(B, A)` so the same detector pairing is not double-counted.
+- If a 2D histogram is filled from more than one X/Y source pair, Spectrix clears the stored X/Y source labels for that histogram.
+- 2D cuts are only available when a 2D histogram has one unambiguous X/Y source pair. For multi-source 2D histograms, plot-created 2D cuts are disabled and existing ones are not exposed as active histogram cuts.
+"#,
+        );
+    }
+
     if is_1d_cut_question(prompt) {
         if asks_definition(prompt) {
             sections.push(
@@ -166,6 +183,7 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
             r#"Source-derived workflow hints for 2D cuts:
 - In Spectrix, a 2D cut is a graphical polygon gate tied to an X column and a Y column. In the code it is `Cut2D`, which stores polygon vertices and checks whether each row's `(x, y)` point is inside the polygon.
 - To create a new 2D cut, first create/open a 2D histogram so Spectrix knows the X/Y columns.
+- 2D cuts are only available when that 2D histogram resolves to one unambiguous X/Y source pair. If the histogram was filled from multiple source pairs, Spectrix clears the stored X/Y source labels and disables plot-created 2D cuts for that plot.
 - In the 2D plot, press `C` or right-click the plot and use `Cuts` -> `+` to start a new polygon cut.
 - Click on the 2D plot to add polygon vertices. Double-click to finish adding vertices.
 - After creation, drag vertices to edit the polygon.
@@ -247,6 +265,22 @@ fn is_2d_cut_question(prompt: &str) -> bool {
     let mentions_2d = normalized.contains("2d") || normalized.contains("two d");
 
     mentions_cut && mentions_2d
+}
+
+fn is_histogram_setup_question(prompt: &str) -> bool {
+    let normalized = prompt.to_lowercase();
+    let mentions_histogram = normalized.contains("histogram") || normalized.contains("hist");
+    let mentions_sources = normalized.contains("column")
+        || normalized.contains("columns")
+        || normalized.contains("fill")
+        || normalized.contains("source")
+        || normalized.contains("pair")
+        || normalized.contains("pairs")
+        || normalized.contains("1d")
+        || normalized.contains("2d")
+        || normalized.contains("axis");
+
+    mentions_histogram && mentions_sources
 }
 
 fn asks_definition(prompt: &str) -> bool {
@@ -344,6 +378,24 @@ mod tests {
         assert!(prompt.contains("right-click the plot"));
         assert!(prompt.contains("Double-click"));
         assert!(prompt.contains("`+2D` button loads a saved 2D cut JSON"));
+    }
+
+    #[test]
+    fn user_prompt_includes_histogram_source_selection_hints() {
+        let prompt = build_user_prompt(
+            "How do I fill a 2D histogram from multiple columns without double counting?",
+            &[],
+            &empty_snapshot(),
+        )
+        .expect("prompt should build");
+
+        assert!(prompt.contains("Source-derived workflow hints for histogram source selection"));
+        assert!(prompt.contains("searchable multi-select pickers for both X and Y source columns"));
+        assert!(prompt.contains("skips self-pairs"));
+        assert!(prompt.contains("suppresses mirrored duplicates"));
+        assert!(prompt.contains(
+            "2D cuts are only available when a 2D histogram has one unambiguous X/Y source pair"
+        ));
     }
 
     #[test]
