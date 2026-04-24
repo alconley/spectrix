@@ -349,6 +349,8 @@ pub struct GaussianFitter {
 }
 
 impl GaussianFitter {
+    const MAX_COMPOSITION_POINTS: usize = 4096;
+
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         data: Data,
@@ -453,6 +455,42 @@ impl GaussianFitter {
             .collect();
 
         Some(EguiFilledArea::new(xs.to_vec(), lower, upper))
+    }
+
+    fn decimate_composition_arrays(
+        xs: Vec<f64>,
+        ys: Vec<f64>,
+        uncertainties: Vec<f64>,
+    ) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        if xs.len() <= Self::MAX_COMPOSITION_POINTS
+            || xs.len() != ys.len()
+            || xs.len() != uncertainties.len()
+        {
+            return (xs, ys, uncertainties);
+        }
+
+        let last_index = xs.len().saturating_sub(1);
+        let stride =
+            ((last_index as f64) / ((Self::MAX_COMPOSITION_POINTS - 1) as f64)).ceil() as usize;
+
+        let mut decimated_xs = Vec::with_capacity(Self::MAX_COMPOSITION_POINTS);
+        let mut decimated_ys = Vec::with_capacity(Self::MAX_COMPOSITION_POINTS);
+        let mut decimated_uncertainties = Vec::with_capacity(Self::MAX_COMPOSITION_POINTS);
+
+        for (index, ((x, y), uncertainty)) in xs
+            .into_iter()
+            .zip(ys.into_iter())
+            .zip(uncertainties.into_iter())
+            .enumerate()
+        {
+            if index == 0 || index == last_index || index % stride == 0 {
+                decimated_xs.push(x);
+                decimated_ys.push(y);
+                decimated_uncertainties.push(uncertainty);
+            }
+        }
+
+        (decimated_xs, decimated_ys, decimated_uncertainties)
     }
 
     pub fn get_calibration_data(&self) -> Vec<(f64, f64, f64, f64)> {
@@ -1459,6 +1497,12 @@ def load_result(filename: str):
             let x_composition = result.get_item(2)?.extract::<Vec<f64>>()?;
             let y_composition = result.get_item(3)?.extract::<Vec<f64>>()?;
             let y_composition_uncertainty = result.get_item(4)?.extract::<Vec<f64>>()?;
+            let (x_composition, y_composition, y_composition_uncertainty) =
+                Self::decimate_composition_arrays(
+                    x_composition,
+                    y_composition,
+                    y_composition_uncertainty,
+                );
             let fit_report = result.get_item(5)?.extract::<String>()?;
             let additional_params = result.get_item(6)?.extract::<Vec<(f64, f64)>>()?;
             let fit_metadata = result.get_item(7).ok().and_then(|item| {
@@ -2247,5 +2291,34 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
 
     pub fn get_fit_report(&self) -> String {
         self.fit_report.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GaussianFitter;
+
+    #[test]
+    fn decimate_composition_arrays_limits_density_and_keeps_endpoints() {
+        let point_count = GaussianFitter::MAX_COMPOSITION_POINTS + 5000;
+        let xs = (0..point_count).map(|i| i as f64).collect::<Vec<_>>();
+        let ys = xs.iter().map(|x| x * 2.0).collect::<Vec<_>>();
+        let uncertainties = xs.iter().map(|x| x * 0.1).collect::<Vec<_>>();
+
+        let (xs, ys, uncertainties) =
+            GaussianFitter::decimate_composition_arrays(xs, ys, uncertainties);
+
+        assert!(xs.len() <= GaussianFitter::MAX_COMPOSITION_POINTS);
+        assert_eq!(xs.len(), ys.len());
+        assert_eq!(xs.len(), uncertainties.len());
+        assert_eq!(xs.first().copied(), Some(0.0));
+        assert_eq!(ys.first().copied(), Some(0.0));
+        assert_eq!(uncertainties.first().copied(), Some(0.0));
+        assert_eq!(xs.last().copied(), Some((point_count - 1) as f64));
+        assert_eq!(ys.last().copied(), Some(((point_count - 1) as f64) * 2.0));
+        assert_eq!(
+            uncertainties.last().copied(),
+            Some(((point_count - 1) as f64) * 0.1)
+        );
     }
 }
