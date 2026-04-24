@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::{BufReader, Write as _};
 use std::ops::{BitAnd as _, BitOr as _};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use polars::prelude::*;
 
@@ -48,6 +49,36 @@ pub(crate) fn sanitize_cut_file_name_component(name: &str, fallback: &str) -> St
         fallback.to_owned()
     } else {
         trimmed.to_owned()
+    }
+}
+
+fn preferred_cut_dialog_directory_store() -> &'static Mutex<Option<PathBuf>> {
+    static PREFERRED_CUT_DIALOG_DIRECTORY: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+    PREFERRED_CUT_DIALOG_DIRECTORY.get_or_init(|| Mutex::new(None))
+}
+
+fn cut_dialog_directory_from_path(path: &Path) -> Option<PathBuf> {
+    if path.is_dir() {
+        Some(path.to_path_buf())
+    } else {
+        path.parent().map(Path::to_path_buf)
+    }
+}
+
+fn preferred_cut_dialog_directory() -> Option<PathBuf> {
+    preferred_cut_dialog_directory_store()
+        .lock()
+        .ok()
+        .and_then(|directory| directory.clone())
+}
+
+fn remember_cut_dialog_directory(path: &Path) {
+    let Some(directory) = cut_dialog_directory_from_path(path) else {
+        return;
+    };
+
+    if let Ok(mut preferred_directory) = preferred_cut_dialog_directory_store().lock() {
+        *preferred_directory = Some(directory);
     }
 }
 
@@ -390,6 +421,10 @@ impl Cuts {
         id_suffix: &str,
         show_title: bool,
     ) {
+        if let Some(folder) = &self.cut_folder {
+            remember_cut_dialog_directory(folder);
+        }
+
         ui.horizontal_wrapped(|ui| {
             if show_title {
                 ui.label("Cuts");
@@ -429,6 +464,7 @@ impl Cuts {
                     .set_directory(self.cut_folder.clone().unwrap_or_default())
                     .pick_folder()
             {
+                remember_cut_dialog_directory(&path);
                 self.cut_folder = Some(path);
 
                 self.cuts = self.get_cuts_in_folder();
@@ -944,26 +980,48 @@ impl Cut2D {
     }
 
     pub fn save_cut_to_json(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(file_path) = rfd::FileDialog::new()
+        let mut dialog = rfd::FileDialog::new()
             .set_file_name(format!("{}.json", self.sanitized_file_name()))
-            .add_filter("JSON Files", &["json"]) // Add a filter for json files
-            .save_file()
+            .add_filter("JSON Files", &["json"]);
+
+        if let Some(default_directory) = self
+            .saved_path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .or_else(preferred_cut_dialog_directory)
         {
+            dialog = dialog.set_directory(default_directory);
+        }
+
+        if let Some(file_path) = dialog.save_file() {
             self.save_to_path(&file_path)?;
+            remember_cut_dialog_directory(&file_path);
             self.saved_path = Some(file_path);
         }
         Ok(())
     }
 
     pub fn load_cut_from_json(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(file_path) = rfd::FileDialog::new()
-            .set_file_name("cut.json") // Suggest a default file name for convenience
-            .add_filter("JSON Files", &["json"]) // Filter for json files
-            .pick_file()
+        let mut dialog = rfd::FileDialog::new()
+            .set_file_name("cut.json")
+            .add_filter("JSON Files", &["json"]);
+
+        if let Some(default_directory) = self
+            .saved_path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .or_else(preferred_cut_dialog_directory)
         {
+            dialog = dialog.set_directory(default_directory);
+        }
+
+        if let Some(file_path) = dialog.pick_file() {
             let file = File::open(&file_path)?;
             let reader = BufReader::new(file);
             let mut cut: Self = serde_json::from_reader(reader)?;
+            remember_cut_dialog_directory(&file_path);
             cut.saved_path = Some(file_path);
             cut.normalize_after_load();
             *self = cut;
@@ -1029,7 +1087,8 @@ impl Cut2D {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cut1D, Cut2D, sanitize_cut_file_name_component};
+    use super::{Cut1D, Cut2D, cut_dialog_directory_from_path, sanitize_cut_file_name_component};
+    use std::path::Path;
 
     #[test]
     fn loading_cut_disables_interactive_vertex_adding() {
@@ -1047,6 +1106,13 @@ mod tests {
             sanitize_cut_file_name_component(" alpha beta!! gamma. ", "cut"),
             "alpha_beta_gamma"
         );
+    }
+
+    #[test]
+    fn cut_dialog_directory_uses_file_parent_for_files() {
+        let directory = cut_dialog_directory_from_path(Path::new("/tmp/cuts/example_cut.json"));
+
+        assert_eq!(directory, Some(Path::new("/tmp/cuts").to_path_buf()));
     }
 
     #[test]
@@ -1637,26 +1703,48 @@ impl Cut1D {
     }
 
     pub fn save_cut_to_json(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(file_path) = rfd::FileDialog::new()
+        let mut dialog = rfd::FileDialog::new()
             .set_file_name(format!("{}.json", self.sanitized_file_name()))
-            .add_filter("JSON Files", &["json"])
-            .save_file()
+            .add_filter("JSON Files", &["json"]);
+
+        if let Some(default_directory) = self
+            .saved_path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .or_else(preferred_cut_dialog_directory)
         {
+            dialog = dialog.set_directory(default_directory);
+        }
+
+        if let Some(file_path) = dialog.save_file() {
             self.save_to_path(&file_path)?;
+            remember_cut_dialog_directory(&file_path);
             self.saved_path = Some(file_path);
         }
         Ok(())
     }
 
     pub fn load_cut_from_json(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(file_path) = rfd::FileDialog::new()
+        let mut dialog = rfd::FileDialog::new()
             .set_file_name("cut.json")
-            .add_filter("JSON Files", &["json"])
-            .pick_file()
+            .add_filter("JSON Files", &["json"]);
+
+        if let Some(default_directory) = self
+            .saved_path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .or_else(preferred_cut_dialog_directory)
         {
+            dialog = dialog.set_directory(default_directory);
+        }
+
+        if let Some(file_path) = dialog.pick_file() {
             let file = File::open(&file_path)?;
             let reader = BufReader::new(file);
             let mut cut: Self = serde_json::from_reader(reader)?;
+            remember_cut_dialog_directory(&file_path);
             cut.normalize_after_load();
             cut.saved_path = Some(file_path);
             *self = cut;
