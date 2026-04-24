@@ -455,13 +455,6 @@ fn default_x_bounds(x_min: f64, x_max: f64) -> bool {
     (bounds_match(x_min, -1.0) || bounds_match(x_min, 0.0)) && bounds_match(x_max, 1.0)
 }
 
-fn histogram_1d_has_default_x_bounds(histogram: &Histogram) -> bool {
-    histogram
-        .plot_settings
-        .current_plot_bounds
-        .is_some_and(|(x_min, x_max)| default_x_bounds(x_min, x_max))
-}
-
 fn histogram_2d_has_default_x_bounds(histogram: &Histogram2D) -> bool {
     histogram
         .plot_settings
@@ -470,12 +463,10 @@ fn histogram_2d_has_default_x_bounds(histogram: &Histogram2D) -> bool {
         .is_some_and(|((x_min, x_max), _)| default_x_bounds(x_min, x_max))
 }
 
-fn reset_default_histogram_axes_1d(histograms: &[Hist1DHandle]) {
+fn reset_histogram_axes_1d(histograms: &[Hist1DHandle]) {
     for histogram in histograms {
         let mut histogram = histogram.lock().expect("Failed to lock histogram");
-        if histogram_1d_has_default_x_bounds(&histogram) {
-            histogram.plot_settings.egui_settings.reset_axis = true;
-        }
+        histogram.plot_settings.egui_settings.reset_axis = true;
     }
 }
 
@@ -938,7 +929,7 @@ impl Histogrammer {
                     }
                 }
 
-                reset_default_histogram_axes_1d(&completed_hist1d_handles);
+                reset_histogram_axes_1d(&completed_hist1d_handles);
                 reset_default_histogram_axes_2d(&completed_hist2d_handles);
                 *progress.lock().expect("Failed to lock progress") = 1.0;
             }
@@ -2198,26 +2189,7 @@ fn tree_ui(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Histogram, Histogram2D, histogram_1d_has_default_x_bounds,
-        histogram_2d_has_default_x_bounds,
-    };
-
-    #[test]
-    fn detects_default_1d_plot_bounds() {
-        let mut histogram = Histogram::new("test", 32, (0.0, 32.0));
-        histogram.plot_settings.current_plot_bounds = Some((-1.0, 1.0));
-
-        assert!(histogram_1d_has_default_x_bounds(&histogram));
-
-        histogram.plot_settings.current_plot_bounds = Some((0.0, 1.0));
-
-        assert!(histogram_1d_has_default_x_bounds(&histogram));
-
-        histogram.plot_settings.current_plot_bounds = Some((0.0, 32.0));
-
-        assert!(!histogram_1d_has_default_x_bounds(&histogram));
-    }
+    use super::{Histogram2D, histogram_2d_has_default_x_bounds};
 
     #[test]
     fn detects_default_2d_plot_bounds() {
