@@ -447,6 +447,43 @@ fn apply_hist2d_source_metadata(histograms: &HashMap<usize, Hist2DSourceMetadata
     }
 }
 
+fn bounds_match(value: f64, expected: f64) -> bool {
+    (value - expected).abs() <= f64::EPSILON
+}
+
+fn histogram_1d_has_default_x_bounds(histogram: &Histogram) -> bool {
+    histogram
+        .plot_settings
+        .current_plot_bounds
+        .is_some_and(|(x_min, x_max)| bounds_match(x_min, -1.0) && bounds_match(x_max, 1.0))
+}
+
+fn histogram_2d_has_default_x_bounds(histogram: &Histogram2D) -> bool {
+    histogram
+        .plot_settings
+        .projections
+        .current_plot_bounds
+        .is_some_and(|((x_min, x_max), _)| bounds_match(x_min, -1.0) && bounds_match(x_max, 1.0))
+}
+
+fn reset_default_histogram_axes_1d(histograms: &[Hist1DHandle]) {
+    for histogram in histograms {
+        let mut histogram = histogram.lock().expect("Failed to lock histogram");
+        if histogram_1d_has_default_x_bounds(&histogram) {
+            histogram.plot_settings.egui_settings.reset_axis = true;
+        }
+    }
+}
+
+fn reset_default_histogram_axes_2d(histograms: &[Hist2DHandle]) {
+    for histogram in histograms {
+        let mut histogram = histogram.lock().expect("Failed to lock 2D histogram");
+        if histogram_2d_has_default_x_bounds(&histogram) {
+            histogram.plot_settings.egui_settings.reset_axis = true;
+        }
+    }
+}
+
 impl Histogrammer {
     pub fn find_existing_histogram(&self, name: &str) -> Option<TileId> {
         self.tree.tiles.iter().find_map(|(id, tile)| match tile {
@@ -788,6 +825,14 @@ impl Histogrammer {
         prepared_cut_groups.sort_by(|left, right| left.sort_key.cmp(&right.sort_key));
         apply_hist1d_source_metadata(&hist1d_source_metadata);
         apply_hist2d_source_metadata(&hist2d_source_metadata);
+        let completed_hist1d_handles = hist1d_source_metadata
+            .values()
+            .map(|metadata| Arc::clone(&metadata.histogram))
+            .collect::<Vec<_>>();
+        let completed_hist2d_handles = hist2d_source_metadata
+            .values()
+            .map(|metadata| Arc::clone(&metadata.histogram))
+            .collect::<Vec<_>>();
 
         std::thread::spawn({
             let calculating = Arc::clone(&calculating);
@@ -889,6 +934,8 @@ impl Histogrammer {
                     }
                 }
 
+                reset_default_histogram_axes_1d(&completed_hist1d_handles);
+                reset_default_histogram_axes_2d(&completed_hist2d_handles);
                 *progress.lock().expect("Failed to lock progress") = 1.0;
             }
         });
@@ -2144,3 +2191,35 @@ fn tree_ui(
 //         }
 //     });
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        Histogram, Histogram2D, histogram_1d_has_default_x_bounds,
+        histogram_2d_has_default_x_bounds,
+    };
+
+    #[test]
+    fn detects_default_1d_plot_bounds() {
+        let mut histogram = Histogram::new("test", 32, (0.0, 32.0));
+        histogram.plot_settings.current_plot_bounds = Some((-1.0, 1.0));
+
+        assert!(histogram_1d_has_default_x_bounds(&histogram));
+
+        histogram.plot_settings.current_plot_bounds = Some((0.0, 32.0));
+
+        assert!(!histogram_1d_has_default_x_bounds(&histogram));
+    }
+
+    #[test]
+    fn detects_default_2d_plot_bounds() {
+        let mut histogram = Histogram2D::new("test", (16, 16), ((0.0, 16.0), (0.0, 16.0)));
+        histogram.plot_settings.projections.current_plot_bounds = Some(((-1.0, 1.0), (0.0, 1.0)));
+
+        assert!(histogram_2d_has_default_x_bounds(&histogram));
+
+        histogram.plot_settings.projections.current_plot_bounds = Some(((0.0, 16.0), (0.0, 16.0)));
+
+        assert!(!histogram_2d_has_default_x_bounds(&histogram));
+    }
+}
