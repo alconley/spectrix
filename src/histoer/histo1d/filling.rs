@@ -2,15 +2,15 @@ use super::histogram1d::Histogram;
 use polars::prelude::*;
 use std::time::Instant;
 
-fn has_default_x_bounds(histogram: &Histogram) -> bool {
-    histogram
-        .plot_settings
-        .current_plot_bounds
-        .is_some_and(|(x_min, x_max)| {
-            ((x_min - -1.0).abs() <= f64::EPSILON || x_min.abs() <= f64::EPSILON)
-                && (x_max - 1.0).abs() <= f64::EPSILON
-        })
-}
+// fn has_default_x_bounds(histogram: &Histogram) -> bool {
+//     histogram
+//         .plot_settings
+//         .current_plot_bounds
+//         .is_some_and(|(x_min, x_max)| {
+//             ((x_min - -1.0).abs() <= f64::EPSILON || x_min.abs() <= f64::EPSILON)
+//                 && (x_max - 1.0).abs() <= f64::EPSILON
+//         })
+// }
 
 impl Histogram {
     pub fn fill(&mut self, value: f64) {
@@ -86,9 +86,7 @@ impl Histogram {
         for cut in &mut self.plot_settings.cuts {
             cut.set_column_name(column);
         }
-        if has_default_x_bounds(self) {
-            self.plot_settings.egui_settings.reset_axis = true;
-        }
+        self.plot_settings.egui_settings.reset_axis = true;
 
         Ok(())
     }
