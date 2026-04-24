@@ -7,7 +7,8 @@ fn has_default_x_bounds(histogram: &Histogram) -> bool {
         .plot_settings
         .current_plot_bounds
         .is_some_and(|(x_min, x_max)| {
-            (x_min - -1.0).abs() <= f64::EPSILON && (x_max - 1.0).abs() <= f64::EPSILON
+            ((x_min - -1.0).abs() <= f64::EPSILON || x_min.abs() <= f64::EPSILON)
+                && (x_max - 1.0).abs() <= f64::EPSILON
         })
 }
 
@@ -127,5 +128,18 @@ mod tests {
             .expect("Failed to fill histogram");
 
         assert!(!histogram.plot_settings.egui_settings.reset_axis);
+    }
+
+    #[test]
+    fn lazyframe_fill_resets_zero_to_one_bounds() {
+        let mut histogram = Histogram::new("test", 4, (0.0, 4.0));
+        histogram.plot_settings.current_plot_bounds = Some((0.0, 1.0));
+
+        let df = df!("value" => &[0.5_f64, 1.5, 2.5]).expect("Failed to build dataframe");
+        histogram
+            .fill_from_lazyframe(df.lazy(), "value", -1e6)
+            .expect("Failed to fill histogram");
+
+        assert!(histogram.plot_settings.egui_settings.reset_axis);
     }
 }

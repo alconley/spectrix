@@ -451,11 +451,15 @@ fn bounds_match(value: f64, expected: f64) -> bool {
     (value - expected).abs() <= f64::EPSILON
 }
 
+fn default_x_bounds(x_min: f64, x_max: f64) -> bool {
+    (bounds_match(x_min, -1.0) || bounds_match(x_min, 0.0)) && bounds_match(x_max, 1.0)
+}
+
 fn histogram_1d_has_default_x_bounds(histogram: &Histogram) -> bool {
     histogram
         .plot_settings
         .current_plot_bounds
-        .is_some_and(|(x_min, x_max)| bounds_match(x_min, -1.0) && bounds_match(x_max, 1.0))
+        .is_some_and(|(x_min, x_max)| default_x_bounds(x_min, x_max))
 }
 
 fn histogram_2d_has_default_x_bounds(histogram: &Histogram2D) -> bool {
@@ -463,7 +467,7 @@ fn histogram_2d_has_default_x_bounds(histogram: &Histogram2D) -> bool {
         .plot_settings
         .projections
         .current_plot_bounds
-        .is_some_and(|((x_min, x_max), _)| bounds_match(x_min, -1.0) && bounds_match(x_max, 1.0))
+        .is_some_and(|((x_min, x_max), _)| default_x_bounds(x_min, x_max))
 }
 
 fn reset_default_histogram_axes_1d(histograms: &[Hist1DHandle]) {
@@ -2206,6 +2210,10 @@ mod tests {
 
         assert!(histogram_1d_has_default_x_bounds(&histogram));
 
+        histogram.plot_settings.current_plot_bounds = Some((0.0, 1.0));
+
+        assert!(histogram_1d_has_default_x_bounds(&histogram));
+
         histogram.plot_settings.current_plot_bounds = Some((0.0, 32.0));
 
         assert!(!histogram_1d_has_default_x_bounds(&histogram));
@@ -2215,6 +2223,10 @@ mod tests {
     fn detects_default_2d_plot_bounds() {
         let mut histogram = Histogram2D::new("test", (16, 16), ((0.0, 16.0), (0.0, 16.0)));
         histogram.plot_settings.projections.current_plot_bounds = Some(((-1.0, 1.0), (0.0, 1.0)));
+
+        assert!(histogram_2d_has_default_x_bounds(&histogram));
+
+        histogram.plot_settings.projections.current_plot_bounds = Some(((0.0, 1.0), (0.0, 1.0)));
 
         assert!(histogram_2d_has_default_x_bounds(&histogram));
 
