@@ -30,7 +30,7 @@ Behavior rules:
 - Do not ask clarification when the source excerpts already show the likely workflow. For broad "how do I..." questions, explain the common path and mention alternatives.
 - The current user request is authoritative. Do not reuse a previous answer topic if the current request asks about a different Spectrix concept.
 - If the user asks how to do something in Spectrix, answer with practical UI steps that are simple, direct, detailed, and explicit about the interaction type.
-- Refer to real Spectrix UI names when helpful, such as Processor, Histogram Script, Variables, Column Creation, 1D Cuts, Builder, Calculate Histograms, Selected File Settings, fitting controls, and active cuts.
+- Refer to real Spectrix UI names when helpful, such as Processor, Histogram Script, Variables, Column Creation, Column Groups, 1D Cuts, Builder, Output Name, Calculate Histograms, Selected File Settings, fitting controls, and active cuts.
 - If the user asks you to create, apply, edit, calculate, configure, analyze, or otherwise do something for them, clearly say that AI action-taking and AI analysis in Spectrix are currently under development.
 - If Spectrix does not currently support what the user wants, say so plainly.
 - Keep answers concise, concrete, and focused on the current app.
@@ -65,11 +65,29 @@ pub(crate) fn build_user_prompt(
 }
 
 fn experimental_data_interpretation_guide() -> &'static str {
-    "- Parquet columns represent event-by-event experimental observables, such as energy, time, position, detector IDs, or calibrated derived values.\n- A histogram bins one or two observables and displays counts/yields per bin.\n- Spectrix can fill the same histogram from multiple selected source columns or vetted `(x, y)` source pairs when the Histogram Script configuration asks for it.\n- A cut/gate creates a boolean event-selection mask. A 1D cut compares one column to bounds or values. A 2D cut tests whether an event's `(x, y)` point lies inside a polygon gate.\n- Applying cuts before histogramming means only events passing the enabled gates contribute to the displayed histogram, fit, or saved filtered parquet file.\n- Gaussian fitting measures peak centroids, widths, amplitudes, and areas. In experiments such as nuclear physics, those are commonly used for energy/time/position calibration checks, resolution estimates, and yield extraction.\n- Calibration code maps detector/channel coordinates to physical units where the source code supports it.\n- Cross-section analysis, where present, combines fitted yields with beam/current/target/solid-angle style metadata; do not imply it is available for unrelated workflows unless source excerpts show it."
+    "- Parquet columns represent event-by-event experimental observables, such as energy, time, position, detector IDs, or calibrated derived values.\n- Histogram Script column groups can alias one detector/source family name to many real parquet columns.\n- A histogram bins one or two observables and displays counts/yields per bin.\n- Spectrix can fill the same histogram from multiple selected source columns, column-group aliases, or vetted `(x, y)` source pairs when the Histogram Script configuration asks for it.\n- Grouped computed-column expressions can expand into many derived output columns instead of only one.\n- A cut/gate creates a boolean event-selection mask. A 1D cut compares one column to bounds or values. A 2D cut tests whether an event's `(x, y)` point lies inside a polygon gate.\n- Applying cuts before histogramming means only events passing the enabled gates contribute to the displayed histogram, fit, or saved filtered parquet file.\n- Gaussian fitting measures peak centroids, widths, amplitudes, and areas. In experiments such as nuclear physics, those are commonly used for energy/time/position calibration checks, resolution estimates, and yield extraction.\n- Calibration code maps detector/channel coordinates to physical units where the source code supports it.\n- Cross-section analysis, where present, combines fitted yields with beam/current/target/solid-angle style metadata; do not imply it is available for unrelated workflows unless source excerpts show it."
 }
 
 fn source_derived_workflow_hints(prompt: &str) -> String {
     let mut sections = Vec::new();
+
+    if is_histogram_script_question(prompt) {
+        sections.push(
+            r#"Source-derived workflow hints for Histogram Script setup:
+- The General Histogram Script tab exposes `Variables`, `Column Creation`, `Column Groups`, and `Cuts` sections.
+- `Variables`, `Column Creation`, and `Column Groups` rows can be reordered by dragging the `↕` handle.
+- Searchable pickers in Histogram Script use natural numeric sorting, so detector names such as `Ring0`, `Ring1`, `Ring10` stay in the expected order.
+- Picker search boxes support normal substring matching and glob-style filters such as `S1Ring*Time` or `S1Ring?Time`.
+- Multi-select pickers keep selected entries listed at the top and expose `Select All` and `Clear All` actions.
+- `Column Groups` lets one alias stand for many real columns, which is useful for detector arrays or segmented/ring detectors.
+- Column-group aliases appear in histogram source pickers and anywhere the `Column Creation` builder accepts a source column.
+- In `Column Creation`, grouped expressions expand into multiple computed columns instead of only one.
+- If several group aliases appear in the same computed-column expression, Spectrix expands all combinations.
+- The builder preview tells the user how many grouped columns will be created and shows example generated names.
+- The `Output Name` field accepts `{}` to place grouped source column names at a specific point in the generated alias; if `{}` is omitted, Spectrix appends those grouped source column names automatically.
+"#,
+        );
+    }
 
     if is_fit_workflow_question(prompt) {
         sections.push(
@@ -114,7 +132,10 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
 - The Calibration section also supports `Import [.csv]` and `Export [.csv]` for `column_name,a,b,c,output_column_name`. Rows whose source columns are missing from the current parquet schema stay visible in red and are skipped until those columns exist again.
 - Path 2: use `Column Creation` -> `+` -> `Builder` if you want to assemble the calibration manually from reusable `Variables` or more general expression terms.
 - In Column Creation, a quadratic calibrated column can be built as three terms: coefficient `a` times source column with power `2`, plus coefficient `b` times source column with power `1`, plus constant `c`. The coefficients can be literal values or Variables.
-- Give the computed column an alias such as `ColumnNameEnergyCalibrated`. Computed-column aliases are sanitized to letters, numbers, and underscores.
+- Column Creation also accepts `Column Groups` aliases. Grouped computed-column expressions expand into multiple outputs, and if several group aliases are used in the same expression, Spectrix expands all combinations.
+- The grouped-column builder preview shows how many outputs will be created and example generated names.
+- Use `Output Name` with `{}` if you want grouped source column names inserted at a specific location in the generated aliases. If `{}` is omitted, Spectrix appends the grouped source column names automatically.
+- Give the computed column an alias such as `ColumnNameEnergyCalibrated`. Computed-column aliases are sanitized to letters, numbers, underscores, and optionally `{}` for grouped output naming.
 - Derived/calibrated columns can then be selected like native columns in 1D/2D histogram definitions and cuts. To view the calibrated data as a new 1D histogram, add a `+1D` histogram using the calibrated-column alias, set calibrated range/bins, and calculate histograms.
 "#,
         );
@@ -139,12 +160,17 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
         sections.push(
             r#"Source-derived workflow hints for histogram source selection:
 - In Histogram Script, 1D histogram rows use searchable multi-select source-column pickers.
+- Those pickers support natural numeric ordering, glob-style filters such as `S1Ring*Time`, and `Select All` / `Clear All` actions.
 - Selecting multiple 1D source columns fills the same histogram once per selected column.
+- 1D histogram sources can also be `Column Groups` aliases, so one source row can resolve to many detector columns.
+- If a 1D histogram name contains `{}`, Spectrix creates one histogram per resolved grouped source and inserts the detected token into the name. Without `{}`, it fills the same histogram once per resolved source.
 - If a 1D histogram is filled from more than one source column or configuration, Spectrix clears that histogram's stored source-column label instead of leaving a misleading single column name behind.
 - In Histogram Script, 2D histogram rows use searchable multi-select pickers for both X and Y source columns.
+- 2D X and Y pickers can also resolve `Column Groups` aliases.
 - Spectrix expands those selections into explicit `(x, y)` source pairs before filling the histogram.
 - It skips self-pairs where `x` and `y` resolve to the same column.
 - It also suppresses mirrored duplicates such as `(A, B)` and `(B, A)` so the same detector pairing is not double-counted.
+- If a 2D histogram name contains `{}`, Spectrix uses the X token, Y token, or combined `X_Y` tokens when grouped sources are expanded.
 - If a 2D histogram is filled from more than one X/Y source pair, Spectrix clears the stored X/Y source labels for that histogram.
 - 2D cuts are only available when a 2D histogram has one unambiguous X/Y source pair. For multi-source 2D histograms, plot-created 2D cuts are disabled and existing ones are not exposed as active histogram cuts.
 "#,
@@ -283,6 +309,23 @@ fn is_histogram_setup_question(prompt: &str) -> bool {
     mentions_histogram && mentions_sources
 }
 
+fn is_histogram_script_question(prompt: &str) -> bool {
+    let normalized = prompt.to_lowercase();
+
+    normalized.contains("histogram script")
+        || normalized.contains("column creation")
+        || normalized.contains("computed column")
+        || normalized.contains("computed columns")
+        || normalized.contains("column group")
+        || normalized.contains("column groups")
+        || normalized.contains("group alias")
+        || normalized.contains("output name")
+        || normalized.contains("combo box")
+        || normalized.contains("picker")
+        || normalized.contains("glob")
+        || normalized.contains("builder")
+}
+
 fn asks_definition(prompt: &str) -> bool {
     let normalized = prompt.trim().to_lowercase();
     normalized.starts_with("what is")
@@ -391,11 +434,30 @@ mod tests {
 
         assert!(prompt.contains("Source-derived workflow hints for histogram source selection"));
         assert!(prompt.contains("searchable multi-select pickers for both X and Y source columns"));
+        assert!(prompt.contains("Column Groups"));
+        assert!(prompt.contains("glob-style filters"));
         assert!(prompt.contains("skips self-pairs"));
         assert!(prompt.contains("suppresses mirrored duplicates"));
         assert!(prompt.contains(
             "2D cuts are only available when a 2D histogram has one unambiguous X/Y source pair"
         ));
+    }
+
+    #[test]
+    fn user_prompt_includes_histogram_script_group_and_picker_hints() {
+        let prompt = build_user_prompt(
+            "How do column groups and grouped column creation work in Histogram Script?",
+            &[],
+            &empty_snapshot(),
+        )
+        .expect("prompt should build");
+
+        assert!(prompt.contains("Source-derived workflow hints for Histogram Script setup"));
+        assert!(prompt.contains("Column Groups"));
+        assert!(prompt.contains("dragging the `↕` handle"));
+        assert!(prompt.contains("glob-style filters"));
+        assert!(prompt.contains("expands all combinations"));
+        assert!(prompt.contains("`Output Name` field accepts `{}`"));
     }
 
     #[test]

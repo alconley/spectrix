@@ -5,6 +5,7 @@ use super::ui_helpers::{
 };
 
 use egui_extras::{Column, TableBuilder};
+use std::hash::{Hash, Hasher as _};
 
 // Enum to encapsulate 1D and 2D histogram configurations
 #[derive(Clone, serde::Deserialize, serde::Serialize, Debug)]
@@ -18,11 +19,22 @@ pub struct Configs {
     pub columns: Vec<(String, String)>,
     #[serde(default)]
     pub variables: Vec<(String, f64)>,
+    #[serde(default)]
+    pub column_groups: Vec<ColumnGroup>,
     pub cuts: Cuts,
     #[serde(skip)]
     column_ui_state: Vec<ComputedColumnUiState>,
     #[serde(skip)]
     selected_column_index: Option<usize>,
+    #[serde(skip)]
+    expanded_column_ui_cache: ExpandedColumnUiCache,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct ColumnGroup {
+    pub alias: String,
+    #[serde(default)]
+    pub column_names: Vec<String>,
 }
 
 type Hist1DShapeLock = Option<((f64, f64), usize)>;
@@ -103,6 +115,35 @@ struct ComputedColumnTerm {
     power: f64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ResolvedSourceSelection {
+    column_name: String,
+    name_token: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct SourceGroupResolver {
+    groups: std::collections::HashMap<String, Vec<ResolvedSourceSelection>>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ExpandedColumnUiCache {
+    key: u64,
+    expanded_alias_prefix_lengths: Vec<usize>,
+    all_expanded_aliases: Vec<String>,
+    available_columns: Vec<String>,
+    available_source_names: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct VariableRowDragPayload(usize);
+
+#[derive(Clone, Copy, Debug)]
+struct ColumnGroupRowDragPayload(usize);
+
+#[derive(Clone, Copy, Debug)]
+struct ComputedColumnRowDragPayload(usize);
+
 impl Default for ComputedColumnTerm {
     fn default() -> Self {
         Self {
@@ -123,6 +164,40 @@ impl Default for ComputedColumnBuilder {
             terms: vec![ComputedColumnTerm::default()],
         }
     }
+}
+
+fn reorder_vec_item<T>(items: &mut Vec<T>, from: usize, to: usize) -> Option<usize> {
+    let len = items.len();
+    if from >= len || to > len {
+        return None;
+    }
+
+    let target = if from < to { to.saturating_sub(1) } else { to };
+    if from == target {
+        return None;
+    }
+
+    let item = items.remove(from);
+    items.insert(target, item);
+    Some(target)
+}
+
+fn reordered_selected_index(selected: Option<usize>, from: usize, target: usize) -> Option<usize> {
+    let selected_index = selected?;
+
+    if selected_index == from {
+        return Some(target);
+    }
+
+    if from < target && selected_index > from && selected_index <= target {
+        return Some(selected_index - 1);
+    }
+
+    if target < from && selected_index >= target && selected_index < from {
+        return Some(selected_index + 1);
+    }
+
+    Some(selected_index)
 }
 
 impl Configs {
@@ -261,6 +336,30 @@ impl Configs {
             }
         }
 
+        for other_group in other.column_groups {
+            let normalized_other_columns = other_group.normalized_column_names();
+
+            if let Some(existing) = self
+                .column_groups
+                .iter()
+                .find(|group| group.alias == other_group.alias)
+            {
+                if existing.normalized_column_names() != normalized_other_columns {
+                    log::error!(
+                        "Conflict detected for column group alias '{}': Existing members '{:?}', New members '{:?}'.",
+                        other_group.alias,
+                        existing.normalized_column_names(),
+                        normalized_other_columns
+                    );
+                }
+            } else {
+                self.column_groups.push(ColumnGroup {
+                    alias: other_group.alias,
+                    column_names: normalized_other_columns,
+                });
+            }
+        }
+
         // Merge cuts
         self.cuts.merge(&other.cuts);
 
@@ -307,12 +406,15 @@ impl Configs {
 
         let mut valid_variables = Vec::new();
         let mut variable_aliases = std::collections::BTreeSet::new();
-        let future_computed_aliases = self
-            .columns
-            .iter()
-            .map(|(_, alias)| alias.clone())
-            .filter(|alias| !alias.trim().is_empty())
-            .collect::<std::collections::BTreeSet<_>>();
+        let future_computed_aliases = collect_expanded_computed_column_aliases(
+            &column_names,
+            &self.columns,
+            &self.column_groups,
+            &self.variables,
+        )
+        .1
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
 
         for (name, value) in &self.variables {
             if !is_valid_identifier_name(name) {
@@ -335,13 +437,19 @@ impl Configs {
             valid_variables.push((name.clone(), *value));
         }
 
-        apply_computed_columns_to_lazyframe(lf, &mut column_names, &self.columns, &valid_variables);
+        apply_computed_columns_to_lazyframe(
+            lf,
+            &mut column_names,
+            &self.columns,
+            &self.column_groups,
+            &valid_variables,
+        );
 
         // Ensure 1D cuts have their expressions parsed
         self.cuts.parse_conditions();
 
         // Expand the configurations (to account for patterns)
-        let expanded_configs = self.expand();
+        let expanded_configs = self.expand(&column_names);
 
         // Validate configurations and cuts
         let mut valid_configs = Vec::new();
@@ -477,9 +585,11 @@ impl Configs {
             configs: valid_configs,
             columns: self.columns.clone(),
             variables: valid_variables,
+            column_groups: self.column_groups.clone(),
             cuts: valid_cuts,
             column_ui_state: self.column_ui_state.clone(),
             selected_column_index: self.selected_column_index,
+            expanded_column_ui_cache: ExpandedColumnUiCache::default(),
         }
     }
 
@@ -527,19 +637,20 @@ impl Configs {
         used_column_names
     }
 
-    fn expand(&self) -> Self {
+    fn expand(&self, available_columns: &[String]) -> Self {
+        let source_group_resolver = self.build_source_group_resolver(available_columns);
         let mut expanded_configs: Vec<Config> = Vec::new();
 
         for config in &self.configs {
             match config {
                 Config::Hist1D(config) => {
-                    let expanded_1d = config.expand();
+                    let expanded_1d = config.expand(&source_group_resolver);
                     for expanded_config in expanded_1d {
                         expanded_configs.push(Config::Hist1D(expanded_config));
                     }
                 }
                 Config::Hist2D(config) => {
-                    let expanded_2d = config.expand();
+                    let expanded_2d = config.expand(&source_group_resolver);
                     for expanded_config in expanded_2d {
                         expanded_configs.push(Config::Hist2D(expanded_config));
                     }
@@ -551,9 +662,11 @@ impl Configs {
             configs: expanded_configs,
             columns: self.columns.clone(),
             variables: self.variables.clone(),
+            column_groups: self.column_groups.clone(),
             cuts: self.cuts.clone(),
             column_ui_state: self.column_ui_state.clone(),
             selected_column_index: self.selected_column_index,
+            expanded_column_ui_cache: ExpandedColumnUiCache::default(),
         }
     }
 
@@ -605,17 +718,60 @@ impl Configs {
         }
     }
 
-    fn available_columns_for_ui(&self, base_columns: &[String]) -> Vec<String> {
+    fn ui_expansion_cache_key(&self, base_columns: &[String]) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        base_columns.hash(&mut hasher);
+        self.columns.hash(&mut hasher);
+        self.column_groups.hash(&mut hasher);
+        for (name, value) in &self.variables {
+            name.hash(&mut hasher);
+            value.to_bits().hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
+    fn ensure_expanded_column_ui_cache(&mut self, base_columns: &[String]) {
+        let key = self.ui_expansion_cache_key(base_columns);
+        if self.expanded_column_ui_cache.key == key {
+            return;
+        }
+
+        let (expanded_alias_prefix_lengths, all_expanded_aliases) =
+            collect_expanded_computed_column_aliases(
+                base_columns,
+                &self.columns,
+                &self.column_groups,
+                &self.variables,
+            );
+
         let mut available_columns = base_columns.to_vec();
-        available_columns.extend(
-            self.columns
-                .iter()
-                .map(|(_, alias)| alias.clone())
-                .filter(|alias| !alias.trim().is_empty()),
-        );
+        available_columns.extend(all_expanded_aliases.iter().cloned());
         available_columns.sort();
         available_columns.dedup();
-        available_columns
+
+        let mut available_source_names = available_columns.clone();
+        available_source_names
+            .extend(self.available_column_group_aliases_for_available_columns(&available_columns));
+        available_source_names.sort();
+        available_source_names.dedup();
+
+        self.expanded_column_ui_cache = ExpandedColumnUiCache {
+            key,
+            expanded_alias_prefix_lengths,
+            all_expanded_aliases,
+            available_columns,
+            available_source_names,
+        };
+    }
+
+    fn available_columns_for_ui(&mut self, base_columns: &[String]) -> Vec<String> {
+        self.ensure_expanded_column_ui_cache(base_columns);
+        self.expanded_column_ui_cache.available_columns.clone()
+    }
+
+    fn available_histogram_source_names_for_ui(&mut self, base_columns: &[String]) -> Vec<String> {
+        self.ensure_expanded_column_ui_cache(base_columns);
+        self.expanded_column_ui_cache.available_source_names.clone()
     }
 
     fn available_variables_for_ui(&self) -> Vec<String> {
@@ -631,21 +787,84 @@ impl Configs {
     }
 
     fn available_columns_for_builder_row(
-        &self,
+        &mut self,
         base_columns: &[String],
         row_index: usize,
     ) -> Vec<String> {
+        self.ensure_expanded_column_ui_cache(base_columns);
         let mut available_columns = base_columns.to_vec();
+        let expanded_alias_count = self
+            .expanded_column_ui_cache
+            .expanded_alias_prefix_lengths
+            .get(row_index)
+            .copied()
+            .unwrap_or(self.expanded_column_ui_cache.all_expanded_aliases.len());
         available_columns.extend(
-            self.columns
+            self.expanded_column_ui_cache
+                .all_expanded_aliases
                 .iter()
-                .take(row_index)
-                .map(|(_, alias)| alias.clone())
-                .filter(|alias| !alias.trim().is_empty()),
+                .take(expanded_alias_count)
+                .cloned(),
         );
+        available_columns
+            .extend(self.available_column_group_aliases_for_available_columns(&available_columns));
         available_columns.sort();
         available_columns.dedup();
         available_columns
+    }
+
+    fn grouped_computed_column_preview_for_row(
+        &mut self,
+        base_columns: &[String],
+        row_index: usize,
+    ) -> Vec<String> {
+        let available_columns = self.available_columns_for_builder_row(base_columns, row_index);
+        let Some((expression, alias)) = self.columns.get(row_index) else {
+            return Vec::new();
+        };
+
+        expand_grouped_computed_columns_for_available_columns(
+            expression,
+            alias,
+            &available_columns,
+            &self.column_groups,
+            &self.variables,
+        )
+        .into_iter()
+        .map(|(_, expanded_alias)| expanded_alias)
+        .collect()
+    }
+
+    fn available_column_group_aliases_for_available_columns(
+        &self,
+        available_columns: &[String],
+    ) -> Vec<String> {
+        let available_column_names = available_columns
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        let mut seen_aliases = std::collections::HashSet::new();
+        let mut aliases = Vec::new();
+
+        for group in &self.column_groups {
+            let alias = group.alias.trim();
+            if alias.is_empty()
+                || !is_valid_identifier_name(alias)
+                || available_column_names.contains(alias)
+                || !seen_aliases.insert(alias.to_owned())
+                || group.normalized_column_names().is_empty()
+            {
+                continue;
+            }
+
+            aliases.push(alias.to_owned());
+        }
+
+        aliases
+    }
+
+    fn build_source_group_resolver(&self, available_columns: &[String]) -> SourceGroupResolver {
+        build_source_group_resolver_for_columns(&self.column_groups, available_columns)
     }
 
     pub fn variable_ui(&mut self, ui: &mut egui::Ui, base_columns: &[String]) {
@@ -672,15 +891,20 @@ impl Configs {
             .filter(|alias| !alias.trim().is_empty())
             .collect::<std::collections::BTreeSet<_>>();
         let mut indices_to_remove = Vec::new();
+        let mut pending_move = None;
 
         TableBuilder::new(ui)
             .id_salt("named_variables")
+            .column(Column::auto())
             .column(Column::auto())
             .column(Column::auto())
             .column(Column::remainder())
             .striped(true)
             .vscroll(false)
             .header(20.0, |mut header| {
+                header.col(|ui| {
+                    ui.label(" ↕ ");
+                });
                 header.col(|ui| {
                     ui.label("Name");
                 });
@@ -691,6 +915,30 @@ impl Configs {
             .body(|mut body| {
                 for (index, (name, value)) in self.variables.iter_mut().enumerate() {
                     body.row(28.0, |mut row| {
+                        row.col(|ui| {
+                            let response = ui
+                                .add(
+                                    egui::Button::new(format!("↕ {index}"))
+                                        .sense(egui::Sense::click_and_drag()),
+                                )
+                                .on_hover_text("Drag to reorder this variable");
+
+                            response.dnd_set_drag_payload(VariableRowDragPayload(index));
+
+                            if let Some(dragged_payload) =
+                                response.dnd_release_payload::<VariableRowDragPayload>()
+                            {
+                                let insert_index = ui.pointer_interact_pos().map_or(index, |pos| {
+                                    if pos.y >= response.rect.center().y {
+                                        index + 1
+                                    } else {
+                                        index
+                                    }
+                                });
+                                pending_move = Some((dragged_payload.0, insert_index));
+                            }
+                        });
+
                         row.col(|ui| {
                             let response = ui.add(
                                 egui::TextEdit::singleline(name)
@@ -711,7 +959,7 @@ impl Configs {
                                     || existing_column_aliases.contains(trimmed))
                             {
                                 ui.colored_label(
-                                    egui::Color32::LIGHT_YELLOW,
+                                    egui::Color32::RED,
                                     "Conflicts with a column name.",
                                 );
                             }
@@ -730,8 +978,164 @@ impl Configs {
                 }
             });
 
-        for &index in indices_to_remove.iter().rev() {
-            self.variables.remove(index);
+        if !indices_to_remove.is_empty() {
+            for &index in indices_to_remove.iter().rev() {
+                self.variables.remove(index);
+            }
+        } else if let Some((from, to)) = pending_move {
+            let _reordered_index: Option<usize> = reorder_vec_item(&mut self.variables, from, to);
+        }
+    }
+
+    pub fn column_group_ui(&mut self, ui: &mut egui::Ui, base_columns: &[String]) {
+        let available_columns = self.available_columns_for_ui(base_columns);
+        let existing_columns = available_columns
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        let duplicate_alias_counts = self
+            .column_groups
+            .iter()
+            .map(|group| group.alias.trim())
+            .filter(|alias| !alias.is_empty())
+            .fold(
+                std::collections::HashMap::<String, usize>::new(),
+                |mut counts, alias| {
+                    *counts.entry(alias.to_owned()).or_insert(0) += 1;
+                    counts
+                },
+            );
+
+        ui.horizontal(|ui| {
+            if ui.button("+").clicked() {
+                self.column_groups.push(ColumnGroup::default());
+            }
+
+            ui.separator();
+
+            if ui.button("Remove All").clicked() {
+                self.column_groups.clear();
+            }
+        });
+
+        if self.column_groups.is_empty() {
+            return;
+        }
+
+        let mut indices_to_remove = Vec::new();
+        let mut pending_move = None;
+
+        TableBuilder::new(ui)
+            .id_salt("column_groups")
+            .column(Column::auto())
+            .column(Column::auto())
+            .column(Column::remainder())
+            .column(Column::auto())
+            .striped(true)
+            .vscroll(false)
+            .header(20.0, |mut header| {
+                header.col(|ui| {
+                    ui.label(" ↕ ");
+                });
+                header.col(|ui| {
+                    ui.label("Alias");
+                });
+                header.col(|ui| {
+                    ui.label("Columns");
+                });
+                header.col(|ui| {
+                    ui.label("");
+                });
+            })
+            .body(|mut body| {
+                for (index, group) in self.column_groups.iter_mut().enumerate() {
+                    body.row(36.0, |mut row| {
+                        row.col(|ui| {
+                            let response = ui
+                                .add(
+                                    egui::Button::new(format!("↕ {index}"))
+                                        .sense(egui::Sense::click_and_drag()),
+                                )
+                                .on_hover_text("Drag to reorder this column group");
+
+                            response.dnd_set_drag_payload(ColumnGroupRowDragPayload(index));
+
+                            if let Some(dragged_payload) =
+                                response.dnd_release_payload::<ColumnGroupRowDragPayload>()
+                            {
+                                let insert_index = ui.pointer_interact_pos().map_or(index, |pos| {
+                                    if pos.y >= response.rect.center().y {
+                                        index + 1
+                                    } else {
+                                        index
+                                    }
+                                });
+                                pending_move = Some((dragged_payload.0, insert_index));
+                            }
+                        });
+
+                        row.col(|ui| {
+                            let response = ui.add(
+                                egui::TextEdit::singleline(&mut group.alias)
+                                    .hint_text("Group Alias")
+                                    .clip_text(false),
+                            );
+                            let changed = response.changed();
+                            response.on_hover_text(
+                                "Group aliases may only contain letters, numbers, and underscores.",
+                            );
+                            if changed {
+                                group.alias = sanitize_identifier_name(&group.alias);
+                            }
+
+                            let trimmed = group.alias.trim();
+                            if !trimmed.is_empty() {
+                                if existing_columns.contains(trimmed) {
+                                    ui.colored_label(
+                                        egui::Color32::RED,
+                                        "Conflicts with a column name.",
+                                    );
+                                } else if duplicate_alias_counts
+                                    .get(trimmed)
+                                    .copied()
+                                    .unwrap_or_default()
+                                    > 1
+                                {
+                                    ui.colored_label(egui::Color32::RED, "Duplicate group alias.");
+                                }
+                            }
+                        });
+
+                        row.col(|ui| {
+                            let mut selected_columns = group.normalized_column_names();
+                            if searchable_multi_column_picker_ui(
+                                ui,
+                                format!("column_group_picker_{index}"),
+                                &mut selected_columns,
+                                &available_columns,
+                                "Columns",
+                                true,
+                            ) {
+                                group.set_column_names(selected_columns);
+                            }
+                        });
+
+                        row.col(|ui| {
+                            if ui.button("X").clicked() {
+                                indices_to_remove.push(index);
+                            }
+                        });
+                    });
+                }
+            });
+
+        if !indices_to_remove.is_empty() {
+            for &index in indices_to_remove.iter().rev() {
+                self.column_groups.remove(index);
+            }
+        } else if let Some((from, to)) = pending_move {
+            let _reordered_index: Option<usize> =
+                reorder_vec_item(&mut self.column_groups, from, to);
         }
     }
 
@@ -739,7 +1143,7 @@ impl Configs {
         &mut self,
         ui: &mut egui::Ui,
         available_cuts: &mut Cuts,
-        available_columns: &[String],
+        available_source_names: &[String],
     ) {
         ui.horizontal(|ui| {
             ui.label("Histograms");
@@ -892,7 +1296,7 @@ impl Configs {
                                     &mut row,
                                     available_cuts,
                                     hist1d_lock,
-                                    available_columns,
+                                    available_source_names,
                                     index,
                                 );
                             }
@@ -901,7 +1305,7 @@ impl Configs {
                                     &mut row,
                                     available_cuts,
                                     hist2d_lock,
-                                    available_columns,
+                                    available_source_names,
                                     index,
                                 );
                             }
@@ -976,15 +1380,20 @@ impl Configs {
         if !self.columns.is_empty() {
             let mut indices_to_remove_column = Vec::new();
             let mut pending_selected_column = None;
+            let mut pending_move = None;
 
             TableBuilder::new(ui)
                 .id_salt("new_columns")
+                .column(Column::auto()) // reorder
                 .column(Column::auto()) // alias
                 .column(Column::remainder()) // expression
                 .column(Column::auto()) // actions
                 .striped(true)
                 .vscroll(false)
                 .header(20.0, |mut header| {
+                    header.col(|ui| {
+                        ui.label(" ↕ ");
+                    });
                     header.col(|ui| {
                         ui.label("Alias");
                     });
@@ -1003,6 +1412,31 @@ impl Configs {
 
                         body.row(ComputedColumnBuilder::table_row_height(), |mut row| {
                             row.col(|ui| {
+                                let response = ui
+                                    .add(
+                                        egui::Button::new(format!("↕ {index}"))
+                                            .sense(egui::Sense::click_and_drag()),
+                                    )
+                                    .on_hover_text("Drag to reorder this computed column");
+
+                                response.dnd_set_drag_payload(ComputedColumnRowDragPayload(index));
+
+                                if let Some(dragged_payload) =
+                                    response.dnd_release_payload::<ComputedColumnRowDragPayload>()
+                                {
+                                    let insert_index =
+                                        ui.pointer_interact_pos().map_or(index, |pos| {
+                                            if pos.y >= response.rect.center().y {
+                                                index + 1
+                                            } else {
+                                                index
+                                            }
+                                        });
+                                    pending_move = Some((dragged_payload.0, insert_index));
+                                }
+                            });
+
+                            row.col(|ui| {
                                 let response = ui.add(
                                     egui::TextEdit::singleline(alias)
                                         .hint_text("Alias")
@@ -1010,7 +1444,7 @@ impl Configs {
                                 );
                                 let changed = response.changed();
                                 response.on_hover_text(
-                                    "Aliases may only contain letters, numbers, and underscores.",
+                                    "Aliases may only contain letters, numbers, and underscores. Grouped column creation also supports {} to place the grouped source column names in the generated name.",
                                 );
                                 if changed {
                                     *alias = sanitize_computed_column_alias(alias);
@@ -1074,10 +1508,22 @@ impl Configs {
                 }
             }
 
+            if indices_to_remove_column.is_empty()
+                && let Some((from, to)) = pending_move
+                && let Some(target) = reorder_vec_item(&mut self.columns, from, to)
+            {
+                let state = self.column_ui_state.remove(from);
+                self.column_ui_state.insert(target, state);
+                self.selected_column_index =
+                    reordered_selected_index(self.selected_column_index, from, target);
+            }
+
             if let Some(selected_index) = self.selected_column_index
                 && selected_index < self.columns.len()
                 && selected_index < self.column_ui_state.len()
             {
+                let grouped_column_preview =
+                    self.grouped_computed_column_preview_for_row(base_columns, selected_index);
                 ui.separator();
                 ui.group(|ui| {
                     let alias = self.columns[selected_index].1.trim();
@@ -1104,6 +1550,35 @@ impl Configs {
                         .weak()
                         .small(),
                     );
+                    if grouped_column_preview.len() > 1 {
+                        let preview_limit = 6usize;
+                        ui.separator();
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "This grouped expression will create {} columns.",
+                                grouped_column_preview.len()
+                            ))
+                            .strong(),
+                        );
+                        ui.label(
+                            egui::RichText::new(
+                                "Change the output name template below if you want different generated names. Use {} to insert the grouped source column names directly.",
+                            )
+                            .weak()
+                            .small(),
+                        );
+                        ui.horizontal_wrapped(|ui| {
+                            for output_name in grouped_column_preview.iter().take(preview_limit) {
+                                ui.monospace(output_name);
+                            }
+                            if grouped_column_preview.len() > preview_limit {
+                                ui.label(format!(
+                                    "… and {} more",
+                                    grouped_column_preview.len() - preview_limit
+                                ));
+                            }
+                        });
+                    }
                     ui.separator();
                     self.column_builder_editor_ui(ui, base_columns, selected_index);
                 });
@@ -1125,7 +1600,7 @@ impl Configs {
     ) {
         let available_columns = self.available_columns_for_builder_row(base_columns, index);
         let available_variables = self.available_variables_for_ui();
-        let Some((expression, _alias)) = self.columns.get_mut(index) else {
+        let Some((expression, alias)) = self.columns.get_mut(index) else {
             return;
         };
         let Some(state) = self.column_ui_state.get_mut(index) else {
@@ -1138,6 +1613,30 @@ impl Configs {
         let mut term_indices_to_remove = Vec::new();
         let total_terms = state.builder.terms.len();
 
+        ui.horizontal(|ui| {
+            ui.label("Output Name");
+            let response = ui.add(
+                egui::TextEdit::singleline(alias)
+                    .hint_text("Alias")
+                    .clip_text(false),
+            );
+            let alias_changed = response.changed();
+            response.on_hover_text(
+                "Use letters, numbers, and underscores. For grouped columns, you can also use {} to place the grouped source column names in the generated names.",
+            );
+            if alias_changed {
+                *alias = sanitize_computed_column_alias(alias);
+                ui.ctx().request_repaint();
+            }
+        });
+        ui.label(
+            egui::RichText::new(
+                "Grouped expressions can use {} in the output name. If you leave {} out, Spectrix appends the grouped source column names automatically.",
+            )
+            .weak()
+            .small(),
+        );
+        ui.separator();
         ui.label(format!("Terms: {}", state.builder.active_term_count()));
         ui.separator();
 
@@ -1294,7 +1793,7 @@ impl Configs {
 
         if let Some(unsupported_expression) = &state.unsupported_expression {
             ui.colored_label(
-                egui::Color32::LIGHT_YELLOW,
+                egui::Color32::RED,
                 "Existing expression is not builder-compatible yet. Changing builder fields will replace it.",
             );
             ui.monospace(unsupported_expression);
@@ -1379,6 +1878,7 @@ impl Configs {
     ) {
         let mut merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
         let available_columns = self.available_columns_for_ui(base_columns);
+        let available_source_names = self.available_histogram_source_names_for_ui(base_columns);
 
         egui::CollapsingHeader::new("Variables")
             .id_salt("general_variables_section")
@@ -1398,6 +1898,15 @@ impl Configs {
 
         ui.separator();
 
+        egui::CollapsingHeader::new("Column Groups")
+            .id_salt("general_column_groups_section")
+            .default_open(false)
+            .show(ui, |ui| {
+                self.column_group_ui(ui, base_columns);
+            });
+
+        ui.separator();
+
         egui::CollapsingHeader::new("Cuts")
             .id_salt("general_cuts_section")
             .default_open(true)
@@ -1407,7 +1916,7 @@ impl Configs {
 
         ui.separator();
 
-        self.config_ui(ui, &mut merged_cuts, &available_columns);
+        self.config_ui(ui, &mut merged_cuts, &available_source_names);
     }
 
     pub fn set_prefix(&mut self, prefix: &str) {
@@ -1423,6 +1932,137 @@ impl Configs {
         }
     }
 }
+
+impl ColumnGroup {
+    fn normalized_column_names(&self) -> Vec<String> {
+        let mut normalized_columns = Vec::new();
+        let mut seen_columns = std::collections::HashSet::new();
+
+        for column_name in &self.column_names {
+            let trimmed = column_name.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let normalized = trimmed.to_owned();
+            if seen_columns.insert(normalized.clone()) {
+                normalized_columns.push(normalized);
+            }
+        }
+
+        normalized_columns
+    }
+
+    fn set_column_names(&mut self, column_names: Vec<String>) {
+        self.column_names = column_names
+            .into_iter()
+            .map(|column_name| column_name.trim().to_owned())
+            .filter(|column_name| !column_name.is_empty())
+            .fold(
+                (Vec::new(), std::collections::HashSet::<String>::new()),
+                |(mut normalized_columns, mut seen_columns), column_name| {
+                    if seen_columns.insert(column_name.clone()) {
+                        normalized_columns.push(column_name);
+                    }
+                    (normalized_columns, seen_columns)
+                },
+            )
+            .0;
+    }
+}
+
+impl SourceGroupResolver {
+    fn resolve_selection(&self, selection: &str) -> Vec<ResolvedSourceSelection> {
+        let trimmed = selection.trim();
+        if trimmed.is_empty() {
+            return Vec::new();
+        }
+
+        if let Some(group_members) = self.groups.get(trimmed) {
+            return group_members.clone();
+        }
+
+        expand_pattern_source_selection(trimmed)
+    }
+}
+
+fn build_source_group_resolver_for_columns(
+    column_groups: &[ColumnGroup],
+    available_columns: &[String],
+) -> SourceGroupResolver {
+    let available_column_names = available_columns
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::HashSet<_>>();
+    let mut resolver = SourceGroupResolver::default();
+    let mut seen_aliases = std::collections::HashSet::new();
+
+    for group in column_groups {
+        let alias = group.alias.trim();
+        if alias.is_empty() {
+            continue;
+        }
+
+        if !is_valid_identifier_name(alias) {
+            log::warn!("Skipping invalid column group alias '{alias}'.");
+            continue;
+        }
+
+        if available_column_names.contains(alias) {
+            log::warn!(
+                "Skipping column group alias '{alias}' because it conflicts with an existing column name."
+            );
+            continue;
+        }
+
+        if !seen_aliases.insert(alias.to_owned()) {
+            log::warn!("Skipping duplicate column group alias '{alias}'.");
+            continue;
+        }
+
+        let mut resolved_columns = Vec::new();
+        let mut seen_columns = std::collections::HashSet::new();
+
+        for member in group.normalized_column_names() {
+            for resolved_member in expand_pattern_source_selection(member.as_str()) {
+                if !available_column_names.contains(resolved_member.column_name.as_str()) {
+                    log::warn!(
+                        "Skipping missing column '{}' in column group '{}'.",
+                        resolved_member.column_name,
+                        alias
+                    );
+                    continue;
+                }
+
+                if seen_columns.insert(resolved_member.column_name.clone()) {
+                    resolved_columns.push(resolved_member.column_name);
+                }
+            }
+        }
+
+        if resolved_columns.is_empty() {
+            log::warn!(
+                "Skipping column group alias '{alias}' because it does not resolve to any available columns."
+            );
+            continue;
+        }
+
+        let name_tokens = derive_group_name_tokens(&resolved_columns);
+        let resolved_group = resolved_columns
+            .into_iter()
+            .zip(name_tokens)
+            .map(|(column_name, name_token)| ResolvedSourceSelection {
+                column_name,
+                name_token,
+            })
+            .collect::<Vec<_>>();
+
+        resolver.groups.insert(alias.to_owned(), resolved_group);
+    }
+
+    resolver
+}
+
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 pub struct Hist1DConfig {
     pub name: String,        // Histogram display name
@@ -1596,68 +2236,38 @@ impl Hist1DConfig {
         });
     }
 
-    pub fn expand(&self) -> Vec<Self> {
-        // Regex for range pattern `{start-end}`
-        let range_re = regex::Regex::new(r"\{(\d+)-(\d+)\}").expect("Failed to create range regex");
-
-        // Regex for discrete comma-separated values `{val1,val2,...}`
-        let list_re = regex::Regex::new(r"\{([\d,]+)\}").expect("Failed to create list regex");
-
+    fn expand(&self, source_group_resolver: &SourceGroupResolver) -> Vec<Self> {
         let mut configs = Vec::new();
 
         if self.calculate {
-            for fill_column in self.fill_columns() {
-                if self.name.contains("{}") {
-                    if let Some(caps) = range_re.captures(&fill_column) {
-                        let start: usize = caps[1].parse().expect("Failed to parse start range");
-                        let end: usize = caps[2].parse().expect("Failed to parse end range");
+            let mut seen_columns = std::collections::HashSet::new();
 
-                        for i in start..=end {
-                            let mut new_config = self.clone();
-                            new_config.name = self.name.replace("{}", &i.to_string());
-                            new_config.column_name =
-                                range_re.replace(&fill_column, i.to_string()).to_string();
-                            new_config.additional_column_names.clear();
-                            configs.push(new_config);
-                        }
-                    } else if let Some(caps) = list_re.captures(&fill_column) {
-                        let values: Vec<&str> = caps[1].split(',').collect();
-                        for val in values {
-                            let mut new_config = self.clone();
-                            new_config.name = self.name.replace("{}", val);
-                            new_config.column_name = list_re.replace(&fill_column, val).to_string();
-                            new_config.additional_column_names.clear();
-                            configs.push(new_config);
-                        }
+            for resolved_source in self
+                .fill_columns()
+                .into_iter()
+                .flat_map(|fill_column| source_group_resolver.resolve_selection(&fill_column))
+            {
+                if !seen_columns.insert(resolved_source.column_name.clone()) {
+                    continue;
+                }
+
+                if self.name.contains("{}") {
+                    if let Some(name_token) = resolved_source.name_token.as_deref() {
+                        let mut new_config = self.clone();
+                        new_config.name = self.name.replace("{}", name_token);
+                        new_config.column_name = resolved_source.column_name;
+                        new_config.additional_column_names.clear();
+                        configs.push(new_config);
                     } else {
                         log::error!(
                             "Warning: Unsupported pattern for 1D histogram with name '{}', column '{}'",
                             self.name,
-                            fill_column
+                            resolved_source.column_name
                         );
-                    }
-                } else if let Some(caps) = range_re.captures(&fill_column) {
-                    let start: usize = caps[1].parse().expect("Failed to parse start range");
-                    let end: usize = caps[2].parse().expect("Failed to parse end range");
-
-                    for i in start..=end {
-                        let mut new_config = self.clone();
-                        new_config.column_name =
-                            range_re.replace(&fill_column, i.to_string()).to_string();
-                        new_config.additional_column_names.clear();
-                        configs.push(new_config);
-                    }
-                } else if let Some(caps) = list_re.captures(&fill_column) {
-                    let values: Vec<&str> = caps[1].split(',').collect();
-                    for val in values {
-                        let mut new_config = self.clone();
-                        new_config.column_name = list_re.replace(&fill_column, val).to_string();
-                        new_config.additional_column_names.clear();
-                        configs.push(new_config);
                     }
                 } else {
                     let mut new_config = self.clone();
-                    new_config.column_name = fill_column;
+                    new_config.column_name = resolved_source.column_name;
                     new_config.additional_column_names.clear();
                     configs.push(new_config);
                 }
@@ -1772,40 +2382,6 @@ impl Hist2DConfig {
 
         self.y_column_name = columns.remove(0);
         self.additional_y_column_names = columns;
-    }
-
-    fn expanded_axis_columns(
-        columns: Vec<String>,
-        range_re: &regex::Regex,
-        list_re: &regex::Regex,
-    ) -> Vec<(String, Option<String>)> {
-        let mut expanded_columns = Vec::new();
-
-        for column_name in columns {
-            if let Some(caps) = range_re.captures(&column_name) {
-                let start: usize = caps[1].parse().expect("Failed to parse start range");
-                let end: usize = caps[2].parse().expect("Failed to parse end range");
-
-                for i in start..=end {
-                    expanded_columns.push((
-                        range_re.replace(&column_name, i.to_string()).to_string(),
-                        Some(i.to_string()),
-                    ));
-                }
-            } else if let Some(caps) = list_re.captures(&column_name) {
-                let values: Vec<&str> = caps[1].split(',').collect();
-                for value in values {
-                    expanded_columns.push((
-                        list_re.replace(&column_name, value).to_string(),
-                        Some(value.to_owned()),
-                    ));
-                }
-            } else {
-                expanded_columns.push((column_name, None));
-            }
-        }
-
-        expanded_columns
     }
 
     fn fill_pairs_for_merge(&self) -> Vec<(String, String)> {
@@ -2005,38 +2581,38 @@ impl Hist2DConfig {
         });
     }
 
-    pub fn expand(&self) -> Vec<Self> {
-        // Regex for range pattern `{start-end}`
-        let range_re = regex::Regex::new(r"\{(\d+)-(\d+)\}").expect("Failed to create range regex");
-
-        // Regex for discrete comma-separated values `{val1,val2,...}`
-        let list_re = regex::Regex::new(r"\{([\d,]+)\}").expect("Failed to create list regex");
-
+    fn expand(&self, source_group_resolver: &SourceGroupResolver) -> Vec<Self> {
         let mut configs = Vec::new();
 
         if self.calculate {
-            let expanded_x_columns =
-                Self::expanded_axis_columns(self.x_fill_columns(), &range_re, &list_re);
-            let expanded_y_columns =
-                Self::expanded_axis_columns(self.y_fill_columns(), &range_re, &list_re);
+            let expanded_x_columns = self
+                .x_fill_columns()
+                .into_iter()
+                .flat_map(|column_name| source_group_resolver.resolve_selection(&column_name))
+                .collect::<Vec<_>>();
+            let expanded_y_columns = self
+                .y_fill_columns()
+                .into_iter()
+                .flat_map(|column_name| source_group_resolver.resolve_selection(&column_name))
+                .collect::<Vec<_>>();
             let mut seen_pairs = std::collections::HashSet::new();
             let mut seen_unordered_pairs = std::collections::HashSet::new();
 
-            for (x_column_name, x_name_token) in &expanded_x_columns {
-                for (y_column_name, y_name_token) in &expanded_y_columns {
-                    if x_column_name == y_column_name {
+            for x_source in &expanded_x_columns {
+                for y_source in &expanded_y_columns {
+                    if x_source.column_name == y_source.column_name {
                         continue;
                     }
 
-                    let pair = (x_column_name.clone(), y_column_name.clone());
+                    let pair = (x_source.column_name.clone(), y_source.column_name.clone());
                     if !seen_pairs.insert(pair.clone()) {
                         continue;
                     }
 
-                    let unordered_pair = if x_column_name <= y_column_name {
-                        (x_column_name.clone(), y_column_name.clone())
+                    let unordered_pair = if x_source.column_name <= y_source.column_name {
+                        (x_source.column_name.clone(), y_source.column_name.clone())
                     } else {
-                        (y_column_name.clone(), x_column_name.clone())
+                        (y_source.column_name.clone(), x_source.column_name.clone())
                     };
 
                     if !seen_unordered_pairs.insert(unordered_pair) {
@@ -2044,13 +2620,16 @@ impl Hist2DConfig {
                     }
 
                     let mut new_config = self.clone();
-                    new_config.x_column_name = x_column_name.clone();
-                    new_config.y_column_name = y_column_name.clone();
+                    new_config.x_column_name = x_source.column_name.clone();
+                    new_config.y_column_name = y_source.column_name.clone();
                     new_config.additional_x_column_names.clear();
                     new_config.additional_y_column_names.clear();
 
                     if self.name.contains("{}") {
-                        match (x_name_token.as_deref(), y_name_token.as_deref()) {
+                        match (
+                            x_source.name_token.as_deref(),
+                            y_source.name_token.as_deref(),
+                        ) {
                             (Some(x_token), None) => {
                                 new_config.name = self.name.replace("{}", x_token);
                             }
@@ -2083,6 +2662,154 @@ impl Hist2DConfig {
 
 use polars::prelude::*;
 use regex::Regex;
+
+fn expand_pattern_source_selection(selection: &str) -> Vec<ResolvedSourceSelection> {
+    let trimmed = selection.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let range_re = regex::Regex::new(r"\{(\d+)-(\d+)\}").expect("Failed to create range regex");
+    let list_re = regex::Regex::new(r"\{([\d,]+)\}").expect("Failed to create list regex");
+
+    if let Some(caps) = range_re.captures(trimmed) {
+        let start: usize = caps[1].parse().expect("Failed to parse start range");
+        let end: usize = caps[2].parse().expect("Failed to parse end range");
+
+        return (start..=end)
+            .map(|index| ResolvedSourceSelection {
+                column_name: range_re.replace(trimmed, index.to_string()).to_string(),
+                name_token: Some(index.to_string()),
+            })
+            .collect();
+    }
+
+    if let Some(caps) = list_re.captures(trimmed) {
+        return caps[1]
+            .split(',')
+            .map(|value| ResolvedSourceSelection {
+                column_name: list_re.replace(trimmed, value).to_string(),
+                name_token: Some(value.to_owned()),
+            })
+            .collect();
+    }
+
+    vec![ResolvedSourceSelection {
+        column_name: trimmed.to_owned(),
+        name_token: None,
+    }]
+}
+
+fn longest_common_prefix(values: &[String]) -> String {
+    let Some(first) = values.first() else {
+        return String::new();
+    };
+
+    let first_chars = first.chars().collect::<Vec<_>>();
+    let mut prefix_len = first_chars.len();
+
+    for value in values.iter().skip(1) {
+        let shared = first_chars
+            .iter()
+            .zip(value.chars())
+            .take_while(|(left, right)| left == &right)
+            .count();
+        prefix_len = prefix_len.min(shared);
+    }
+
+    first_chars.into_iter().take(prefix_len).collect()
+}
+
+fn longest_common_suffix(values: &[String], prefix: &str) -> String {
+    let Some(first) = values.first() else {
+        return String::new();
+    };
+
+    let prefix_chars = prefix.chars().count();
+    let max_suffix_len = values
+        .iter()
+        .map(|value| value.chars().count().saturating_sub(prefix_chars))
+        .min()
+        .unwrap_or(0);
+
+    let first_reversed = first.chars().rev().collect::<Vec<_>>();
+    let mut suffix_len = max_suffix_len.min(first_reversed.len());
+
+    for value in values.iter().skip(1) {
+        let shared = first_reversed
+            .iter()
+            .zip(value.chars().rev())
+            .take_while(|(left, right)| left == &right)
+            .count();
+        suffix_len = suffix_len.min(shared).min(max_suffix_len);
+    }
+
+    first_reversed
+        .into_iter()
+        .take(suffix_len)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+fn extract_middle_token(value: &str, prefix: &str, suffix: &str) -> Option<String> {
+    let total_chars = value.chars().count();
+    let prefix_chars = prefix.chars().count();
+    let suffix_chars = suffix.chars().count();
+
+    if prefix_chars + suffix_chars > total_chars {
+        return None;
+    }
+
+    let middle = value
+        .chars()
+        .skip(prefix_chars)
+        .take(total_chars.saturating_sub(prefix_chars + suffix_chars))
+        .collect::<String>();
+
+    if middle.is_empty() {
+        None
+    } else {
+        Some(middle)
+    }
+}
+
+fn derive_group_name_tokens(column_names: &[String]) -> Vec<Option<String>> {
+    if column_names.is_empty() {
+        return Vec::new();
+    }
+
+    let prefix = longest_common_prefix(column_names);
+    let suffix = longest_common_suffix(column_names, &prefix);
+    let mut tokens = column_names
+        .iter()
+        .map(|column_name| extract_middle_token(column_name, &prefix, &suffix))
+        .collect::<Vec<_>>();
+
+    let unique_tokens = tokens
+        .iter()
+        .all(|token| token.as_ref().is_some_and(|value| !value.is_empty()))
+        && tokens
+            .iter()
+            .flatten()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            == tokens.len();
+
+    if unique_tokens {
+        return tokens;
+    }
+
+    tokens.clear();
+    tokens.extend(
+        column_names
+            .iter()
+            .map(|column_name| Some(column_name.clone())),
+    );
+    tokens
+}
 
 impl ComputedColumnBuilder {
     fn table_row_height() -> f32 {
@@ -2263,11 +2990,60 @@ fn sanitize_identifier_name(name: &str) -> String {
 }
 
 fn is_valid_computed_column_alias(alias: &str) -> bool {
-    is_valid_identifier_name(alias)
+    let trimmed = alias.trim();
+    !trimmed.is_empty()
+        && (is_valid_identifier_name(trimmed)
+            || is_valid_identifier_name(&trimmed.replace("{}", "GroupToken")))
 }
 
 fn sanitize_computed_column_alias(alias: &str) -> String {
-    sanitize_identifier_name(alias)
+    let trimmed = alias.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let mut sanitized = String::with_capacity(trimmed.len());
+    let mut previous_was_underscore = false;
+    let mut characters = trimmed.chars().peekable();
+
+    while let Some(character) = characters.next() {
+        if character == '{' && characters.peek().is_some_and(|next| *next == '}') {
+            characters.next();
+            sanitized.push_str("{}");
+            previous_was_underscore = false;
+            continue;
+        }
+
+        let mapped = if character.is_ascii_alphanumeric() || character == '_' {
+            character
+        } else {
+            '_'
+        };
+
+        if mapped == '_' {
+            if !previous_was_underscore {
+                sanitized.push(mapped);
+            }
+            previous_was_underscore = true;
+        } else {
+            sanitized.push(mapped);
+            previous_was_underscore = false;
+        }
+    }
+
+    if sanitized.is_empty() {
+        return String::new();
+    }
+
+    if sanitized
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_digit())
+    {
+        sanitized.insert(0, '_');
+    }
+
+    sanitized
 }
 
 fn trim_wrapping_parentheses(expression: &str) -> String {
@@ -2654,8 +3430,9 @@ fn computed_column_dependencies(expression: &str, variables: &[(String, f64)]) -
         .iter()
         .map(|(name, _)| name.as_str())
         .collect::<std::collections::HashSet<_>>();
+    let mut seen_dependencies = std::collections::HashSet::new();
 
-    let mut dependencies = token_re
+    token_re
         .find_iter(expression)
         .map(|token| token.as_str())
         .filter(|token| identifier_re.is_match(token))
@@ -2663,18 +3440,198 @@ fn computed_column_dependencies(expression: &str, variables: &[(String, f64)]) -
             !variable_names.contains(token)
                 && !matches!(token.to_ascii_lowercase().as_str(), "inf" | "nan")
         })
+        .filter(|token| seen_dependencies.insert((*token).to_owned()))
         .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn replace_group_alias_in_expression(expression: &str, alias: &str, column_name: &str) -> String {
+    let pattern = regex::Regex::new(&format!(r"\b{}\b", regex::escape(alias)))
+        .expect("failed to create grouped computed-column replacement regex");
+    pattern.replace_all(expression, column_name).to_string()
+}
+
+fn sanitize_identifier_fragment(name: &str) -> String {
+    let mut sanitized = String::with_capacity(name.len());
+    let mut previous_was_underscore = false;
+
+    for character in name.chars() {
+        let mapped = if character.is_ascii_alphanumeric() || character == '_' {
+            character
+        } else {
+            '_'
+        };
+
+        if mapped == '_' {
+            if !previous_was_underscore {
+                sanitized.push(mapped);
+            }
+            previous_was_underscore = true;
+        } else {
+            sanitized.push(mapped);
+            previous_was_underscore = false;
+        }
+    }
+
+    sanitized.trim_matches('_').to_owned()
+}
+
+fn expanded_computed_column_alias(
+    alias: &str,
+    grouped_column_names: &[String],
+    expansion_count: usize,
+) -> String {
+    let trimmed_alias = alias.trim();
+    let sanitized_token = grouped_column_names
+        .iter()
+        .map(|column_name| sanitize_identifier_fragment(column_name))
+        .filter(|fragment| !fragment.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
+    let expanded_alias = if trimmed_alias.contains("{}") {
+        trimmed_alias.replace("{}", &sanitized_token)
+    } else if expansion_count > 1 && !sanitized_token.is_empty() {
+        format!("{trimmed_alias}_{sanitized_token}")
+    } else {
+        trimmed_alias.to_owned()
+    };
+
+    sanitize_identifier_name(&expanded_alias)
+}
+
+fn expand_grouped_computed_columns(
+    expression: &str,
+    alias: &str,
+    variables: &[(String, f64)],
+    source_group_resolver: &SourceGroupResolver,
+) -> Vec<(String, String)> {
+    let grouped_dependencies = computed_column_dependencies(expression, variables)
+        .into_iter()
+        .filter_map(|dependency| {
+            source_group_resolver
+                .groups
+                .get(&dependency)
+                .cloned()
+                .map(|members| (dependency, members))
+        })
         .collect::<Vec<_>>();
 
-    dependencies.sort();
-    dependencies.dedup();
-    dependencies
+    if grouped_dependencies.is_empty() {
+        return vec![(expression.to_owned(), alias.to_owned())];
+    }
+
+    let mut expanded_variants = vec![(expression.to_owned(), Vec::<String>::new())];
+
+    for (group_alias, members) in &grouped_dependencies {
+        if members.is_empty() {
+            return Vec::new();
+        }
+
+        let mut next_variants = Vec::new();
+        for (current_expression, current_grouped_column_names) in expanded_variants {
+            for member in members {
+                let mut grouped_column_names = current_grouped_column_names.clone();
+                grouped_column_names.push(member.column_name.clone());
+                next_variants.push((
+                    replace_group_alias_in_expression(
+                        &current_expression,
+                        group_alias,
+                        &member.column_name,
+                    ),
+                    grouped_column_names,
+                ));
+            }
+        }
+
+        expanded_variants = next_variants;
+    }
+
+    let expansion_count = expanded_variants.len();
+    expanded_variants
+        .iter()
+        .enumerate()
+        .map(|(index, (expanded_expression, grouped_column_names))| {
+            let expanded_alias =
+                expanded_computed_column_alias(alias, grouped_column_names, expansion_count);
+            let expanded_alias = if expanded_alias.trim().is_empty() {
+                format!("{alias}_{index}")
+            } else {
+                expanded_alias
+            };
+
+            (expanded_expression.clone(), expanded_alias)
+        })
+        .collect()
+}
+
+fn expand_grouped_computed_columns_for_available_columns(
+    expression: &str,
+    alias: &str,
+    available_columns: &[String],
+    column_groups: &[ColumnGroup],
+    variables: &[(String, f64)],
+) -> Vec<(String, String)> {
+    let available_column_names = available_columns
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::HashSet<_>>();
+    let source_group_resolver =
+        build_source_group_resolver_for_columns(column_groups, available_columns);
+
+    expand_grouped_computed_columns(expression, alias, variables, &source_group_resolver)
+        .into_iter()
+        .filter(|(expanded_expression, expanded_alias)| {
+            !expanded_alias.trim().is_empty()
+                && computed_column_dependencies(expanded_expression, variables)
+                    .iter()
+                    .all(|dependency| available_column_names.contains(dependency.as_str()))
+        })
+        .collect()
+}
+
+fn collect_expanded_computed_column_aliases(
+    base_columns: &[String],
+    computed_columns: &[(String, String)],
+    column_groups: &[ColumnGroup],
+    variables: &[(String, f64)],
+) -> (Vec<usize>, Vec<String>) {
+    let mut current_columns = base_columns.to_vec();
+    let mut current_column_names = current_columns
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
+    let mut expanded_alias_prefix_lengths = Vec::with_capacity(computed_columns.len());
+    let mut all_expanded_aliases = Vec::new();
+    let mut seen_aliases = std::collections::HashSet::new();
+
+    for (expression, alias) in computed_columns {
+        expanded_alias_prefix_lengths.push(all_expanded_aliases.len());
+
+        for (_, expanded_alias) in expand_grouped_computed_columns_for_available_columns(
+            expression,
+            alias,
+            &current_columns,
+            column_groups,
+            variables,
+        ) {
+            if seen_aliases.insert(expanded_alias.clone()) {
+                all_expanded_aliases.push(expanded_alias.clone());
+            }
+
+            if current_column_names.insert(expanded_alias.clone()) {
+                current_columns.push(expanded_alias);
+            }
+        }
+    }
+
+    (expanded_alias_prefix_lengths, all_expanded_aliases)
 }
 
 pub(crate) fn apply_computed_columns_to_lazyframe(
     lf: &mut LazyFrame,
     column_names: &mut Vec<String>,
     computed_columns: &[(String, String)],
+    column_groups: &[ColumnGroup],
     variables: &[(String, f64)],
 ) {
     for (expression, alias) in computed_columns {
@@ -2683,27 +3640,48 @@ pub(crate) fn apply_computed_columns_to_lazyframe(
             continue;
         }
 
-        let replacing_existing = column_names.iter().any(|column_name| column_name == alias);
-        if replacing_existing {
-            log::info!("Overwriting existing column '{alias}' with a computed expression.");
-        }
+        let source_group_resolver =
+            build_source_group_resolver_for_columns(column_groups, column_names);
+        let expanded_columns =
+            expand_grouped_computed_columns(expression, alias, variables, &source_group_resolver);
 
-        let missing_dependencies = computed_column_dependencies(expression, variables)
-            .into_iter()
-            .filter(|dependency| !column_names.contains(dependency))
-            .collect::<Vec<_>>();
-        if !missing_dependencies.is_empty() {
+        if expanded_columns.is_empty() {
             log::warn!(
-                "Skipping computed column '{alias}': missing dependency column(s): {}",
-                missing_dependencies.join(", ")
+                "Skipping computed column '{alias}': grouped dependencies did not resolve to any columns."
             );
             continue;
         }
 
-        if let Err(error) = add_computed_column(lf, expression, alias, variables) {
-            log::error!("Error adding computed column '{alias}': {error}");
-        } else if !replacing_existing {
-            column_names.push(alias.clone());
+        for (expanded_expression, expanded_alias) in expanded_columns {
+            let replacing_existing = column_names
+                .iter()
+                .any(|column_name| column_name == &expanded_alias);
+            if replacing_existing {
+                log::info!(
+                    "Overwriting existing column '{expanded_alias}' with a computed expression."
+                );
+            }
+
+            let missing_dependencies =
+                computed_column_dependencies(&expanded_expression, variables)
+                    .into_iter()
+                    .filter(|dependency| !column_names.contains(dependency))
+                    .collect::<Vec<_>>();
+            if !missing_dependencies.is_empty() {
+                log::warn!(
+                    "Skipping computed column '{expanded_alias}': missing dependency column(s): {}",
+                    missing_dependencies.join(", ")
+                );
+                continue;
+            }
+
+            if let Err(error) =
+                add_computed_column(lf, &expanded_expression, &expanded_alias, variables)
+            {
+                log::error!("Error adding computed column '{expanded_alias}': {error}");
+            } else if !replacing_existing {
+                column_names.push(expanded_alias.clone());
+            }
         }
     }
 }
@@ -2837,7 +3815,331 @@ mod tests {
             "_12_bad_alias_"
         );
         assert!(is_valid_computed_column_alias("_12_bad_alias_"));
+        assert_eq!(
+            sanitize_computed_column_alias(" RF Minus Ring {} "),
+            "RF_Minus_Ring_{}"
+        );
+        assert!(is_valid_computed_column_alias("RFMinusRing{}"));
         assert!(!is_valid_computed_column_alias("bad-alias"));
+    }
+
+    #[test]
+    fn reorder_selected_index_tracks_dragged_row() {
+        assert_eq!(reordered_selected_index(Some(2), 2, 0), Some(0));
+        assert_eq!(reordered_selected_index(Some(1), 1, 3), Some(3));
+    }
+
+    #[test]
+    fn reorder_selected_index_tracks_rows_around_dragged_row() {
+        assert_eq!(reordered_selected_index(Some(2), 0, 2), Some(1));
+        assert_eq!(reordered_selected_index(Some(1), 3, 0), Some(2));
+    }
+
+    #[test]
+    fn column_group_alias_expands_into_many_1d_histograms() {
+        let mut configs = Configs::default();
+        configs.column_groups.push(ColumnGroup {
+            alias: "S1RingEnergy".to_owned(),
+            column_names: vec!["S1Ring0Energy".to_owned(), "S1Ring1Energy".to_owned()],
+        });
+        configs.configs.push(Config::Hist1D(Hist1DConfig {
+            name: "S1/Ring {}".to_owned(),
+            column_name: "S1RingEnergy".to_owned(),
+            additional_column_names: Vec::new(),
+            range: (0.0, 4096.0),
+            bins: 512,
+            cuts: Cuts::default(),
+            calculate: true,
+            enabled: true,
+        }));
+
+        let expanded = configs.expand(&["S1Ring0Energy".to_owned(), "S1Ring1Energy".to_owned()]);
+
+        let expanded_histograms = expanded
+            .configs
+            .iter()
+            .filter_map(|config| match config {
+                Config::Hist1D(hist) => Some((hist.name.as_str(), hist.column_name.as_str())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            expanded_histograms,
+            vec![
+                ("S1/Ring 0", "S1Ring0Energy"),
+                ("S1/Ring 1", "S1Ring1Energy"),
+            ]
+        );
+    }
+
+    #[test]
+    fn column_group_alias_fills_one_1d_histogram_from_many_columns() {
+        let mut configs = Configs::default();
+        configs.column_groups.push(ColumnGroup {
+            alias: "S1RingEnergy".to_owned(),
+            column_names: vec!["S1Ring0Energy".to_owned(), "S1Ring1Energy".to_owned()],
+        });
+        configs.configs.push(Config::Hist1D(Hist1DConfig {
+            name: "S1/Combined".to_owned(),
+            column_name: "S1RingEnergy".to_owned(),
+            additional_column_names: Vec::new(),
+            range: (0.0, 4096.0),
+            bins: 512,
+            cuts: Cuts::default(),
+            calculate: true,
+            enabled: true,
+        }));
+
+        let expanded = configs.expand(&["S1Ring0Energy".to_owned(), "S1Ring1Energy".to_owned()]);
+
+        let expanded_histograms = expanded
+            .configs
+            .iter()
+            .filter_map(|config| match config {
+                Config::Hist1D(hist) => Some((hist.name.as_str(), hist.column_name.as_str())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            expanded_histograms,
+            vec![
+                ("S1/Combined", "S1Ring0Energy"),
+                ("S1/Combined", "S1Ring1Energy"),
+            ]
+        );
+    }
+
+    #[test]
+    fn column_group_alias_expands_2d_histograms_from_grouped_x_columns() {
+        let mut configs = Configs::default();
+        configs.column_groups.push(ColumnGroup {
+            alias: "S1RingEnergy".to_owned(),
+            column_names: vec!["S1Ring0Energy".to_owned(), "S1Ring1Energy".to_owned()],
+        });
+        configs.configs.push(Config::Hist2D(Hist2DConfig {
+            name: "S1/ToF {}".to_owned(),
+            x_column_name: "S1RingEnergy".to_owned(),
+            y_column_name: "ToF".to_owned(),
+            additional_x_column_names: Vec::new(),
+            additional_y_column_names: Vec::new(),
+            x_range: (0.0, 4096.0),
+            y_range: (-1000.0, 1000.0),
+            bins: (512, 512),
+            cuts: Cuts::default(),
+            calculate: true,
+            enabled: true,
+        }));
+
+        let expanded = configs.expand(&[
+            "S1Ring0Energy".to_owned(),
+            "S1Ring1Energy".to_owned(),
+            "ToF".to_owned(),
+        ]);
+
+        let expanded_histograms = expanded
+            .configs
+            .iter()
+            .filter_map(|config| match config {
+                Config::Hist2D(hist) => Some((
+                    hist.name.as_str(),
+                    hist.x_column_name.as_str(),
+                    hist.y_column_name.as_str(),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            expanded_histograms,
+            vec![
+                ("S1/ToF 0", "S1Ring0Energy", "ToF"),
+                ("S1/ToF 1", "S1Ring1Energy", "ToF"),
+            ]
+        );
+    }
+
+    #[test]
+    fn grouped_computed_column_expression_expands_to_many_columns() {
+        let resolver = build_source_group_resolver_for_columns(
+            &[ColumnGroup {
+                alias: "S1RingTime".to_owned(),
+                column_names: vec!["S1Ring0Time".to_owned(), "S1Ring1Time".to_owned()],
+            }],
+            &[
+                "RF".to_owned(),
+                "S1Ring0Time".to_owned(),
+                "S1Ring1Time".to_owned(),
+            ],
+        );
+
+        let expanded_columns =
+            expand_grouped_computed_columns("RF - S1RingTime", "RFMinusS1RingTime", &[], &resolver);
+
+        assert_eq!(
+            expanded_columns,
+            vec![
+                (
+                    "RF - S1Ring0Time".to_owned(),
+                    "RFMinusS1RingTime_S1Ring0Time".to_owned(),
+                ),
+                (
+                    "RF - S1Ring1Time".to_owned(),
+                    "RFMinusS1RingTime_S1Ring1Time".to_owned(),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn grouped_computed_column_alias_template_uses_group_token() {
+        let resolver = build_source_group_resolver_for_columns(
+            &[ColumnGroup {
+                alias: "S1RingTime".to_owned(),
+                column_names: vec!["S1Ring0Time".to_owned(), "S1Ring1Time".to_owned()],
+            }],
+            &[
+                "RF".to_owned(),
+                "S1Ring0Time".to_owned(),
+                "S1Ring1Time".to_owned(),
+            ],
+        );
+
+        let expanded_columns =
+            expand_grouped_computed_columns("RF - S1RingTime", "RFMinusRing{}", &[], &resolver);
+
+        assert_eq!(
+            expanded_columns,
+            vec![
+                (
+                    "RF - S1Ring0Time".to_owned(),
+                    "RFMinusRingS1Ring0Time".to_owned(),
+                ),
+                (
+                    "RF - S1Ring1Time".to_owned(),
+                    "RFMinusRingS1Ring1Time".to_owned(),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn grouped_computed_columns_expand_across_all_group_combinations() {
+        let resolver = build_source_group_resolver_for_columns(
+            &[
+                ColumnGroup {
+                    alias: "S1RingTime".to_owned(),
+                    column_names: vec!["S1Ring0Time".to_owned(), "S1Ring1Time".to_owned()],
+                },
+                ColumnGroup {
+                    alias: "S1RingEnergy".to_owned(),
+                    column_names: vec!["S1Ring0Energy".to_owned(), "S1Ring1Energy".to_owned()],
+                },
+            ],
+            &[
+                "S1Ring0Time".to_owned(),
+                "S1Ring1Time".to_owned(),
+                "S1Ring0Energy".to_owned(),
+                "S1Ring1Energy".to_owned(),
+            ],
+        );
+
+        let expanded_columns = expand_grouped_computed_columns(
+            "S1RingTime - S1RingEnergy",
+            "S1RingDelta",
+            &[],
+            &resolver,
+        );
+
+        assert_eq!(
+            expanded_columns,
+            vec![
+                (
+                    "S1Ring0Time - S1Ring0Energy".to_owned(),
+                    "S1RingDelta_S1Ring0Time_S1Ring0Energy".to_owned(),
+                ),
+                (
+                    "S1Ring0Time - S1Ring1Energy".to_owned(),
+                    "S1RingDelta_S1Ring0Time_S1Ring1Energy".to_owned(),
+                ),
+                (
+                    "S1Ring1Time - S1Ring0Energy".to_owned(),
+                    "S1RingDelta_S1Ring1Time_S1Ring0Energy".to_owned(),
+                ),
+                (
+                    "S1Ring1Time - S1Ring1Energy".to_owned(),
+                    "S1RingDelta_S1Ring1Time_S1Ring1Energy".to_owned(),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn grouped_computed_columns_appear_as_expanded_outputs_in_available_columns() {
+        let mut configs = Configs::default();
+        configs.column_groups.push(ColumnGroup {
+            alias: "S1RingTime".to_owned(),
+            column_names: vec!["S1Ring0Time".to_owned(), "S1Ring1Time".to_owned()],
+        });
+        configs
+            .columns
+            .push(("RF - S1RingTime".to_owned(), "RFMinusS1RingTime".to_owned()));
+
+        let available_columns = configs.available_columns_for_ui(&[
+            "RF".to_owned(),
+            "S1Ring0Time".to_owned(),
+            "S1Ring1Time".to_owned(),
+        ]);
+
+        assert!(available_columns.contains(&"RFMinusS1RingTime_S1Ring0Time".to_owned()));
+        assert!(available_columns.contains(&"RFMinusS1RingTime_S1Ring1Time".to_owned()));
+    }
+
+    #[test]
+    fn apply_grouped_computed_columns_to_lazyframe_creates_expanded_columns() {
+        let dataframe = df!(
+            "RF" => &[10.0, 20.0],
+            "S1Ring0Time" => &[1.0, 2.0],
+            "S1Ring1Time" => &[3.0, 4.0]
+        )
+        .expect("failed to create test dataframe");
+        let mut lazyframe = dataframe.lazy();
+        let mut column_names = get_column_names_from_lazyframe(&lazyframe)
+            .expect("failed to collect initial test column names");
+
+        apply_computed_columns_to_lazyframe(
+            &mut lazyframe,
+            &mut column_names,
+            &[("RF - S1RingTime".to_owned(), "RFMinusS1RingTime".to_owned())],
+            &[ColumnGroup {
+                alias: "S1RingTime".to_owned(),
+                column_names: vec!["S1Ring0Time".to_owned(), "S1Ring1Time".to_owned()],
+            }],
+            &[],
+        );
+
+        let collected = lazyframe
+            .collect()
+            .expect("failed to collect grouped computed columns");
+
+        let ring0 = collected
+            .column("RFMinusS1RingTime_S1Ring0Time")
+            .expect("missing expanded grouped computed column 0")
+            .f64()
+            .expect("column 0 should be f64")
+            .into_no_null_iter()
+            .collect::<Vec<_>>();
+        let ring1 = collected
+            .column("RFMinusS1RingTime_S1Ring1Time")
+            .expect("missing expanded grouped computed column 1")
+            .f64()
+            .expect("column 1 should be f64")
+            .into_no_null_iter()
+            .collect::<Vec<_>>();
+
+        assert_eq!(ring0, vec![9.0, 18.0]);
+        assert_eq!(ring1, vec![7.0, 16.0]);
     }
 
     #[test]

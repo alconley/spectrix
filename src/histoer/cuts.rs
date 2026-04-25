@@ -1508,10 +1508,7 @@ impl Cut1D {
                             available_columns,
                             "Select column",
                             true,
-                            SearchableColumnPickerSize {
-                                closed_width: 220.0,
-                                open_width: 420.0,
-                            },
+                            SearchableColumnPickerSize::default(),
                         );
 
                         ui.label("Operator");

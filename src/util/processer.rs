@@ -981,6 +981,7 @@ def get_2d_histograms(file_name):
                                 &mut current_column_names,
                                 &calibration_columns,
                                 &[],
+                                &[],
                             );
 
                             match lf.collect() {

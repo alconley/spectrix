@@ -18,12 +18,15 @@ Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting 
 - Combine matching ROOT histograms across multiple files, or load them separately with per-file prefixes  
 - Interactive histogramming (1D & 2D)  
 - Multi-select 1D/2D histogram source pickers, with safe 2D pair expansion and de-duplication  
+- Column-group aliases for detector families, histogram sources, and grouped computed-column creation  
+- Searchable picker improvements including natural numeric sorting, glob-style filtering, and bulk select/clear actions  
 - Interactive histogram-created cuts for 1D and 2D views  
 - Gaussian fitting with Python’s lmfit, including total-fit uncertainty bands  
 - Visible-range auto-Y scaling for 1D histograms, with log-Y support  
 - UUID peak labels with configurable size/lift and optional guide lines  
 - UI-based histogram and cut definition  
 - Custom histogram scripting  
+- Drag-to-reorder rows in Variables, Column Creation, and Column Groups  
 - Spectrix AI assistant for source-grounded usage questions, UI workflow help, and event-data explanations  
 - Built-in screenshot capture from the top bar  
 - Integration with Polars for high-performance data processing  
@@ -184,6 +187,7 @@ The **Histogram Script** panel can be opened or closed using the **“Histograms
 
 This tool allows you to:
 - Define reusable numeric **variables**.
+- Define reusable **column groups** that alias one name to many detector/source columns.
 - Define new analysis columns from existing parquet columns.
 - Define calibration/gain-match/shift transforms with a dedicated **Calibration** table.
 - Define and manage **1D and 2D cuts**.
@@ -194,10 +198,11 @@ This tool allows you to:
 
 1. Load one or more parquet files and make sure the column names are available.
 2. Add reusable variables if you want named constants such as calibration coefficients.
-3. Create any derived columns you need with the computed-column builder and/or the Calibration table.
-4. Define cuts with the 1D cut builder and/or 2D graphical cuts.
-5. Create histogram definitions and attach active cuts.
-6. Save the configuration to JSON so the same analysis can be reused.
+3. Add column groups if you want one alias to stand for a detector family such as `S1RingTime`.
+4. Create any derived columns you need with the computed-column builder and/or the Calibration table.
+5. Define cuts with the 1D cut builder and/or 2D graphical cuts.
+6. Create histogram definitions and attach active cuts.
+7. Save the configuration to JSON so the same analysis can be reused.
 
 ---
 
@@ -227,13 +232,25 @@ The computed-column UI now uses a dedicated **Builder** panel:
 
 - The table row shows the column alias, a **Builder** button, the term count, and a one-line expression summary.
 - The builder opens below the table and edits one computed column at a time.
-- Aliases are sanitized automatically so they only contain letters, numbers, and underscores.
-- Column and variable selection uses searchable combo boxes.
+- The builder includes an **Output Name** field. Aliases are sanitized automatically so they only contain letters, numbers, underscores, and optionally `{}` for grouped output naming.
+- Column and variable selection uses searchable combo boxes with natural numeric ordering, so detector names such as `Ring0`, `Ring1`, `Ring10` sort in the expected order.
+- Search boxes support normal substring matching and glob-style filters such as `S1Ring*Time` or `S1Ring?Time`.
+- Multi-select pickers keep the selected entries listed at the top and provide **Select All** / **Clear All** actions, which is useful after a good glob filter.
+- Rows in **Column Creation** can be reordered with the `↕` drag handle.
 - Each term can be:
   - `Column` or `Constant`
   - added or subtracted from the expression
   - multiplied by a coefficient that is a `Value`, `Variable`, or another `Column`
   - raised to a power, including fractional powers such as `0.5`
+
+Column groups also work inside **Column Creation**:
+
+- Group aliases defined in **Column Groups** appear anywhere the builder accepts a source column.
+- If one group alias is used in an expression, Spectrix creates one computed column per resolved group member.
+- If multiple group aliases are used in the same expression, Spectrix expands **all combinations**.
+- The builder tells you how many grouped columns will be created and previews the generated output names.
+- If the **Output Name** contains `{}`, Spectrix replaces it with the grouped source column names.
+- If `{}` is omitted, Spectrix appends the grouped source column names automatically.
 
 ### Variables
 
@@ -242,6 +259,7 @@ The **Variables** section lets you define reusable named constants such as `a`, 
 - Variable names follow the same identifier rules as column aliases: letters, numbers, and underscores only.
 - Variable names cannot safely overlap with real or computed column names.
 - Variables can be reused in any computed-column term where the coefficient type is set to **Variable**.
+- Variable rows can be reordered with the `↕` drag handle.
 
 Example:
 
@@ -250,6 +268,28 @@ Example:
 - `c = 15.0`
 
 You can then reuse those values in multiple computed columns without retyping them each time.
+
+### Column Groups
+
+The **Column Groups** section lets you define one alias that stands for many real columns.
+
+This is especially useful for detector arrays or ring/segment families such as:
+
+- `S1RingTime -> S1Ring0Time, S1Ring1Time, S1Ring2Time, ...`
+- `S1RingEnergy -> S1Ring0Energy, S1Ring1Energy, S1Ring2Energy, ...`
+
+Column-group aliases can then be reused in both histogram definitions and computed-column expressions.
+
+- Group aliases follow the normal identifier rules: letters, numbers, and underscores.
+- Group members are chosen with the same searchable multi-select picker used elsewhere in Histogram Script.
+- Group rows can be reordered with the `↕` drag handle.
+- Group aliases appear in histogram source pickers and in the **Column Creation** builder anywhere a source column can be selected.
+
+For histograms:
+
+- If a 1D histogram source resolves to a group alias and the histogram name does **not** contain `{}`, Spectrix fills that same histogram once per resolved member column.
+- If the 1D histogram name **does** contain `{}`, Spectrix creates one histogram per resolved member and inserts the detected group token into the name.
+- Group aliases can also be used on the X and/or Y side of 2D histograms.
 
 ### Computed Column Examples
 
@@ -280,6 +320,22 @@ This produces:
 
 ```text
 (a * Xavg ** 0.5) + (c)
+```
+
+**Grouped time-difference columns**
+
+1. In **Column Groups**, define `S1RingTime` using members such as `S1Ring0Time`, `S1Ring1Time`, and `S1Ring2Time`.
+2. In **Column Creation**, add a new row and set the expression to `RF - S1RingTime`.
+3. Set **Output Name** to either:
+   - `RFMinusS1RingTime` if you want Spectrix to append the grouped source names automatically, or
+   - `RFMinus{}` if you want the grouped source names inserted at the `{}` location.
+
+This creates outputs such as:
+
+```text
+RFMinusS1RingTime_S1Ring0Time
+RFMinusS1RingTime_S1Ring1Time
+RFMinusS1RingTime_S1Ring2Time
 ```
 
 ### Calibration
@@ -421,14 +477,24 @@ Enter the histogram name and select the input column(s), bin count, and axis ran
 
 Using slashes (`/`) in histogram names automatically groups plots into nested containers.
 
-The histogram source-column fields use searchable pickers, so source columns can be chosen directly from the loaded parquet columns or previously created aliases. Then specify range, binning, and which active cuts should be applied.
+The histogram source-column fields use searchable pickers, so source columns can be chosen directly from the loaded parquet columns, computed aliases, or **Column Groups** aliases. Then specify range, binning, and which active cuts should be applied.
+
+Picker behavior in histogram rows matches the rest of Histogram Script:
+
+- Natural numeric sorting keeps detector names such as `Ring0`, `Ring1`, `Ring10` in the expected order.
+- Search boxes support substring filtering and glob-style patterns such as `S1Ring*Time`.
+- Multi-select pickers show selected entries at the top and provide **Select All** / **Clear All** actions.
 
 - **1D histograms** support selecting multiple source columns in a single histogram row. Spectrix fills the same 1D histogram once per selected source column.
+- A 1D source can also be a **Column Group** alias, so one histogram row can stand in for many detector columns.
+- If a 1D histogram name contains `{}`, Spectrix creates one histogram per resolved grouped source and inserts the detected token into the name.
 - If a 1D histogram is filled from more than one source column or configuration, its displayed source-column metadata is cleared instead of pointing at only one of the inputs.
 - **2D histograms** support selecting multiple X columns and multiple Y columns in a single histogram row.
 - Spectrix expands those selections into explicit `(x, y)` source pairs before filling.
+- X and Y selections can also include **Column Group** aliases.
 - Self-pairs where `x` and `y` resolve to the same column are skipped.
 - Mirrored pairs such as `(A, B)` and `(B, A)` are only filled once, so the same detector pairing is not double-counted.
+- If a 2D histogram name contains `{}`, Spectrix uses the detected X token, Y token, or `X_Y` combination when expanding grouped names.
 - If a 2D histogram is filled from more than one X/Y source pair, its stored axis-source metadata is cleared and plot-created 2D cuts are disabled for that histogram.
 
 If a cut is defined but not enabled, it will not affect that histogram.
