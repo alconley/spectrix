@@ -185,6 +185,8 @@ impl Default for SearchableColumnPickerSize {
     }
 }
 
+const SEARCHABLE_PICKER_RESULTS_MIN_HEIGHT: f32 = 120.0;
+
 pub fn searchable_column_picker_with_width_ui(
     ui: &mut egui::Ui,
     id_source: impl Hash,
@@ -196,12 +198,6 @@ pub fn searchable_column_picker_with_width_ui(
 ) -> bool {
     let picker_id = ui.make_persistent_id(id_source);
     let search_id = picker_id.with("search");
-    let popup_open = egui::ComboBox::is_open(ui.ctx(), picker_id);
-    let popup_width = if popup_open {
-        size.open_width
-    } else {
-        size.closed_width
-    };
     let selected_text = if selected.trim().is_empty() {
         hint_text.to_owned()
     } else {
@@ -213,10 +209,12 @@ pub fn searchable_column_picker_with_width_ui(
     ui.add_enabled_ui(enabled, |ui| {
         egui::ComboBox::from_id_salt(picker_id)
             .selected_text(selected_text)
-            .width(popup_width)
+            .width(size.closed_width)
             .truncate()
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .show_ui(ui, |ui| {
+                ui.set_min_width(size.open_width);
+
                 let mut search = ui
                     .data(|data| data.get_temp::<String>(search_id))
                     .unwrap_or_default();
@@ -240,6 +238,8 @@ pub fn searchable_column_picker_with_width_ui(
                 egui::ScrollArea::vertical()
                     .max_height(420.0)
                     .show(ui, |ui| {
+                        ui.set_min_height(SEARCHABLE_PICKER_RESULTS_MIN_HEIGHT);
+
                         if matches.is_empty() {
                             ui.label("No matching names.");
                         } else {
@@ -299,12 +299,6 @@ pub fn searchable_multi_column_picker_with_width_ui(
 ) -> bool {
     let picker_id = ui.make_persistent_id(id_source);
     let search_id = picker_id.with("search");
-    let popup_open = egui::ComboBox::is_open(ui.ctx(), picker_id);
-    let popup_width = if popup_open {
-        size.open_width
-    } else {
-        size.closed_width
-    };
     let selected_text = match selected.len() {
         0 => hint_text.to_owned(),
         1 => selected[0].clone(),
@@ -317,10 +311,12 @@ pub fn searchable_multi_column_picker_with_width_ui(
     ui.add_enabled_ui(enabled, |ui| {
         egui::ComboBox::from_id_salt(picker_id)
             .selected_text(selected_text)
-            .width(popup_width)
+            .width(size.closed_width)
             .truncate()
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .show_ui(ui, |ui| {
+                ui.set_min_width(size.open_width);
+
                 let mut search = ui
                     .data(|data| data.get_temp::<String>(search_id))
                     .unwrap_or_default();
@@ -350,6 +346,8 @@ pub fn searchable_multi_column_picker_with_width_ui(
                 egui::ScrollArea::vertical()
                     .max_height(420.0)
                     .show(ui, |ui| {
+                        ui.set_min_height(SEARCHABLE_PICKER_RESULTS_MIN_HEIGHT);
+
                         if !selected_columns.is_empty() {
                             ui.horizontal(|ui| {
                                 ui.label(egui::RichText::new("Selected").small().strong());
