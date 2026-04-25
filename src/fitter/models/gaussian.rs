@@ -477,11 +477,7 @@ impl GaussianFitter {
         let mut decimated_ys = Vec::with_capacity(Self::MAX_COMPOSITION_POINTS);
         let mut decimated_uncertainties = Vec::with_capacity(Self::MAX_COMPOSITION_POINTS);
 
-        for (index, ((x, y), uncertainty)) in xs
-            .into_iter()
-            .zip(ys.into_iter())
-            .zip(uncertainties.into_iter())
-            .enumerate()
+        for (index, ((x, y), uncertainty)) in xs.into_iter().zip(ys).zip(uncertainties).enumerate()
         {
             if index == 0 || index == last_index || index % stride == 0 {
                 decimated_xs.push(x);
