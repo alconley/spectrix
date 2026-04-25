@@ -97,6 +97,17 @@ struct Prepared1DSourceGroup {
     histograms: Vec<Prepared1DTarget>,
 }
 
+struct Prepared1DHistogramColumn {
+    column_name: String,
+    multiplicity: usize,
+}
+
+struct Prepared1DHistogramGroup {
+    histogram: Hist1DHandle,
+    histogram_name: String,
+    columns: Vec<Prepared1DHistogramColumn>,
+}
+
 #[derive(Clone)]
 struct Prepared2DTarget {
     histogram: Hist2DHandle,
@@ -109,12 +120,38 @@ struct Prepared2DSourceGroup {
     histograms: Vec<Prepared2DTarget>,
 }
 
+struct Prepared2DHistogramColumnPair {
+    x_column_name: String,
+    y_column_name: String,
+    multiplicity: usize,
+}
+
+struct Prepared2DHistogramGroup {
+    histogram: Hist2DHandle,
+    histogram_name: String,
+    column_pairs: Vec<Prepared2DHistogramColumnPair>,
+}
+
 struct PreparedCutGroup {
     sort_key: String,
     cuts: Cuts,
     histogram_names: Vec<String>,
+    hist1d_histograms: Vec<Prepared1DHistogramGroup>,
     hist1d_sources: Vec<Prepared1DSourceGroup>,
+    hist2d_histograms: Vec<Prepared2DHistogramGroup>,
     hist2d_sources: Vec<Prepared2DSourceGroup>,
+}
+
+struct Prepared1DHistogramGroupBuilder {
+    histogram: Hist1DHandle,
+    histogram_name: String,
+    columns: HashMap<String, usize>,
+}
+
+struct Prepared2DHistogramGroupBuilder {
+    histogram: Hist2DHandle,
+    histogram_name: String,
+    column_pairs: HashMap<(String, String), usize>,
 }
 
 struct Hist1DSourceMetadata {
@@ -133,8 +170,8 @@ struct Hist2DSourceMetadata {
 struct CutGroupBuilder {
     cuts: Cuts,
     histogram_names: Vec<String>,
-    hist1d_entries: Vec<(Hist1DHandle, String)>,
-    hist2d_entries: Vec<(Hist2DHandle, String, String)>,
+    hist1d_entries: Vec<(Hist1DHandle, String, String)>,
+    hist2d_entries: Vec<(Hist2DHandle, String, String, String)>,
 }
 
 impl CutGroupBuilder {
@@ -148,8 +185,9 @@ impl CutGroupBuilder {
     }
 
     fn add_hist1d(&mut self, histogram: Hist1DHandle, histogram_name: String, column_name: String) {
-        self.histogram_names.push(histogram_name);
-        self.hist1d_entries.push((histogram, column_name));
+        self.histogram_names.push(histogram_name.clone());
+        self.hist1d_entries
+            .push((histogram, histogram_name, column_name));
     }
 
     fn add_hist2d(
@@ -159,17 +197,42 @@ impl CutGroupBuilder {
         x_column_name: String,
         y_column_name: String,
     ) {
-        self.histogram_names.push(histogram_name);
+        self.histogram_names.push(histogram_name.clone());
         self.hist2d_entries
-            .push((histogram, x_column_name, y_column_name));
+            .push((histogram, histogram_name, x_column_name, y_column_name));
     }
 
     fn into_prepared(mut self, sort_key: String) -> PreparedCutGroup {
         self.histogram_names.sort();
         self.histogram_names.dedup();
 
+        let mut hist1d_histogram_builders =
+            HashMap::<usize, Prepared1DHistogramGroupBuilder>::new();
+        for (histogram, histogram_name, column_name) in &self.hist1d_entries {
+            let histogram_key = Arc::as_ptr(histogram) as usize;
+            let builder = hist1d_histogram_builders
+                .entry(histogram_key)
+                .or_insert_with(|| Prepared1DHistogramGroupBuilder {
+                    histogram: Arc::clone(histogram),
+                    histogram_name: histogram_name.clone(),
+                    columns: HashMap::new(),
+                });
+            *builder.columns.entry(column_name.clone()).or_insert(0) += 1;
+        }
+
+        let merged_hist1d_keys = hist1d_histogram_builders
+            .iter()
+            .filter_map(|(histogram_key, builder)| {
+                (builder.columns.len() > 1).then_some(*histogram_key)
+            })
+            .collect::<HashSet<_>>();
+
         let mut hist1d_sources = HashMap::<String, Vec<Prepared1DTarget>>::new();
-        for (histogram, column_name) in self.hist1d_entries {
+        for (histogram, _histogram_name, column_name) in self.hist1d_entries {
+            if merged_hist1d_keys.contains(&(Arc::as_ptr(&histogram) as usize)) {
+                continue;
+            }
+
             let targets = hist1d_sources.entry(column_name).or_default();
             if let Some(existing) = targets
                 .iter_mut()
@@ -184,6 +247,30 @@ impl CutGroupBuilder {
             }
         }
 
+        let mut hist1d_histograms = hist1d_histogram_builders
+            .into_iter()
+            .filter_map(|(histogram_key, builder)| {
+                merged_hist1d_keys.contains(&histogram_key).then(|| {
+                    let mut columns = builder
+                        .columns
+                        .into_iter()
+                        .map(|(column_name, multiplicity)| Prepared1DHistogramColumn {
+                            column_name,
+                            multiplicity,
+                        })
+                        .collect::<Vec<_>>();
+                    columns.sort_by(|left, right| left.column_name.cmp(&right.column_name));
+
+                    Prepared1DHistogramGroup {
+                        histogram: builder.histogram,
+                        histogram_name: builder.histogram_name,
+                        columns,
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        hist1d_histograms.sort_by(|left, right| left.histogram_name.cmp(&right.histogram_name));
+
         let mut hist1d_sources = hist1d_sources
             .into_iter()
             .map(|(column_name, histograms)| Prepared1DSourceGroup {
@@ -193,8 +280,36 @@ impl CutGroupBuilder {
             .collect::<Vec<_>>();
         hist1d_sources.sort_by(|left, right| left.column_name.cmp(&right.column_name));
 
+        let mut hist2d_histogram_builders =
+            HashMap::<usize, Prepared2DHistogramGroupBuilder>::new();
+        for (histogram, histogram_name, x_column_name, y_column_name) in &self.hist2d_entries {
+            let histogram_key = Arc::as_ptr(histogram) as usize;
+            let builder = hist2d_histogram_builders
+                .entry(histogram_key)
+                .or_insert_with(|| Prepared2DHistogramGroupBuilder {
+                    histogram: Arc::clone(histogram),
+                    histogram_name: histogram_name.clone(),
+                    column_pairs: HashMap::new(),
+                });
+            *builder
+                .column_pairs
+                .entry((x_column_name.clone(), y_column_name.clone()))
+                .or_insert(0) += 1;
+        }
+
+        let merged_hist2d_keys = hist2d_histogram_builders
+            .iter()
+            .filter_map(|(histogram_key, builder)| {
+                (builder.column_pairs.len() > 1).then_some(*histogram_key)
+            })
+            .collect::<HashSet<_>>();
+
         let mut hist2d_sources = HashMap::<(String, String), Vec<Prepared2DTarget>>::new();
-        for (histogram, x_column_name, y_column_name) in self.hist2d_entries {
+        for (histogram, _histogram_name, x_column_name, y_column_name) in self.hist2d_entries {
+            if merged_hist2d_keys.contains(&(Arc::as_ptr(&histogram) as usize)) {
+                continue;
+            }
+
             let targets = hist2d_sources
                 .entry((x_column_name, y_column_name))
                 .or_default();
@@ -210,6 +325,37 @@ impl CutGroupBuilder {
                 });
             }
         }
+
+        let mut hist2d_histograms = hist2d_histogram_builders
+            .into_iter()
+            .filter_map(|(histogram_key, builder)| {
+                merged_hist2d_keys.contains(&histogram_key).then(|| {
+                    let mut column_pairs = builder
+                        .column_pairs
+                        .into_iter()
+                        .map(|((x_column_name, y_column_name), multiplicity)| {
+                            Prepared2DHistogramColumnPair {
+                                x_column_name,
+                                y_column_name,
+                                multiplicity,
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    column_pairs.sort_by(|left, right| {
+                        left.x_column_name
+                            .cmp(&right.x_column_name)
+                            .then_with(|| left.y_column_name.cmp(&right.y_column_name))
+                    });
+
+                    Prepared2DHistogramGroup {
+                        histogram: builder.histogram,
+                        histogram_name: builder.histogram_name,
+                        column_pairs,
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        hist2d_histograms.sort_by(|left, right| left.histogram_name.cmp(&right.histogram_name));
 
         let mut hist2d_sources = hist2d_sources
             .into_iter()
@@ -231,7 +377,9 @@ impl CutGroupBuilder {
             sort_key,
             cuts: self.cuts,
             histogram_names: self.histogram_names,
+            hist1d_histograms,
             hist1d_sources,
+            hist2d_histograms,
             hist2d_sources,
         }
     }
@@ -295,6 +443,22 @@ fn lazyframe_row_count(lf: &LazyFrame) -> Option<u64> {
         })
 }
 
+fn append_repeated_dataframe(
+    stacked_df: &mut Option<DataFrame>,
+    source_df: &DataFrame,
+    multiplicity: usize,
+) -> PolarsResult<()> {
+    for _ in 0..multiplicity {
+        if let Some(stacked) = stacked_df {
+            stacked.vstack_mut(source_df)?;
+        } else {
+            *stacked_df = Some(source_df.clone());
+        }
+    }
+
+    Ok(())
+}
+
 fn fill_1d_source_group(
     filtered_df: &DataFrame,
     source_group: &Prepared1DSourceGroup,
@@ -328,6 +492,84 @@ fn fill_1d_source_group(
         for (multiplicity, histogram) in &mut histogram_guards {
             for _ in 0..*multiplicity {
                 histogram.fill(value);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn fill_1d_histogram_group(
+    filtered_df: &DataFrame,
+    histogram_group: &Prepared1DHistogramGroup,
+    invalid_value: f64,
+) -> PolarsResult<()> {
+    let mut stacked_df = None;
+    for column in &histogram_group.columns {
+        let values_column = filtered_df
+            .column(&column.column_name)?
+            .cast(&DataType::Float64)?;
+        let mut values_series = values_column.as_materialized_series().clone();
+        values_series.rename("value".into());
+        let source_df = DataFrame::new(values_series.len(), vec![values_series.into()])?;
+        append_repeated_dataframe(&mut stacked_df, &source_df, column.multiplicity)?;
+    }
+
+    let Some(stacked_df) = stacked_df else {
+        return Ok(());
+    };
+
+    let (range, bin_width, bin_count) = {
+        let histogram = histogram_group
+            .histogram
+            .lock()
+            .expect("Failed to lock histogram");
+        (histogram.range, histogram.bin_width, histogram.bins.len())
+    };
+
+    if bin_count == 0 {
+        return Ok(());
+    }
+
+    let raw_bin = ((col("value") - lit(range.0)) / lit(bin_width)).cast(DataType::Int32);
+    let valid_values = col("value")
+        .neq(lit(invalid_value))
+        .and(col("value").is_not_nan());
+    let bin_index = when(col("value").lt(lit(range.0)))
+        .then(lit(-2))
+        .when(col("value").gt_eq(lit(range.1)))
+        .then(lit(-1))
+        .otherwise(raw_bin)
+        .alias("bin_index");
+
+    let counts_df = stacked_df
+        .lazy()
+        .filter(valid_values)
+        .with_columns([bin_index])
+        .group_by([col("bin_index")])
+        .agg([len().alias("count")])
+        .sort(["bin_index"], Default::default())
+        .collect()?;
+
+    let mut histogram = histogram_group
+        .histogram
+        .lock()
+        .expect("Failed to lock histogram");
+    let bin_indices = counts_df.column("bin_index")?.i32()?;
+    let counts = counts_df.column("count")?.u32()?;
+
+    for (bin_opt, count_opt) in bin_indices.into_iter().zip(counts) {
+        if let (Some(bin), Some(count)) = (bin_opt, count_opt) {
+            match bin {
+                -2 => histogram.underflow = histogram.underflow.saturating_add(count as u64),
+                -1 => histogram.overflow = histogram.overflow.saturating_add(count as u64),
+                i if i >= 0 && (i as usize) < histogram.bins.len() => {
+                    let index = i as usize;
+                    histogram.bins[index] = histogram.bins[index].saturating_add(count as u64);
+                    histogram.original_bins[index] =
+                        histogram.original_bins[index].saturating_add(count as u64);
+                }
+                _ => {}
             }
         }
     }
@@ -386,6 +628,137 @@ fn fill_2d_source_group(
     for (_multiplicity, histogram) in &mut histogram_guards {
         histogram.plot_settings.recalculate_image = true;
     }
+
+    Ok(())
+}
+
+fn fill_2d_histogram_group(
+    filtered_df: &DataFrame,
+    histogram_group: &Prepared2DHistogramGroup,
+    invalid_value: f64,
+) -> PolarsResult<()> {
+    let mut stacked_df = None;
+    for column_pair in &histogram_group.column_pairs {
+        let x_values_column = filtered_df
+            .column(&column_pair.x_column_name)?
+            .cast(&DataType::Float64)?;
+        let y_values_column = filtered_df
+            .column(&column_pair.y_column_name)?
+            .cast(&DataType::Float64)?;
+
+        let mut x_values_series = x_values_column.as_materialized_series().clone();
+        x_values_series.rename("x_value".into());
+        let mut y_values_series = y_values_column.as_materialized_series().clone();
+        y_values_series.rename("y_value".into());
+
+        let source_df = DataFrame::new(
+            x_values_series.len(),
+            vec![x_values_series.into(), y_values_series.into()],
+        )?;
+        append_repeated_dataframe(&mut stacked_df, &source_df, column_pair.multiplicity)?;
+    }
+
+    let Some(stacked_df) = stacked_df else {
+        return Ok(());
+    };
+
+    let (x_range, y_range, x_width, y_width, x_bins, y_bins) = {
+        let histogram = histogram_group
+            .histogram
+            .lock()
+            .expect("Failed to lock 2D histogram");
+        (
+            (histogram.range.x.min, histogram.range.x.max),
+            (histogram.range.y.min, histogram.range.y.max),
+            histogram.bins.x_width,
+            histogram.bins.y_width,
+            histogram.bins.x,
+            histogram.bins.y,
+        )
+    };
+
+    if x_bins == 0 || y_bins == 0 {
+        return Ok(());
+    }
+
+    let raw_x = ((col("x_value") - lit(x_range.0)) / lit(x_width)).cast(DataType::Int32);
+    let raw_y = ((col("y_value") - lit(y_range.0)) / lit(y_width)).cast(DataType::Int32);
+    let valid_values = col("x_value")
+        .neq(lit(invalid_value))
+        .and(col("x_value").is_not_nan())
+        .and(col("y_value").neq(lit(invalid_value)))
+        .and(col("y_value").is_not_nan());
+
+    let x_bin = when(col("x_value").lt(lit(x_range.0)))
+        .then(lit(-2))
+        .when(col("x_value").gt_eq(lit(x_range.1)))
+        .then(lit(-1))
+        .otherwise(raw_x)
+        .alias("x_bin");
+    let y_bin = when(col("y_value").lt(lit(y_range.0)))
+        .then(lit(-2))
+        .when(col("y_value").gt_eq(lit(y_range.1)))
+        .then(lit(-1))
+        .otherwise(raw_y)
+        .alias("y_bin");
+
+    let counts_df = stacked_df
+        .lazy()
+        .filter(valid_values)
+        .with_columns([x_bin, y_bin])
+        .group_by([col("x_bin"), col("y_bin")])
+        .agg([len().alias("count")])
+        .sort(["x_bin", "y_bin"], Default::default())
+        .collect()?;
+
+    let mut histogram = histogram_group
+        .histogram
+        .lock()
+        .expect("Failed to lock 2D histogram");
+    let x_bins_column = counts_df.column("x_bin")?.i32()?;
+    let y_bins_column = counts_df.column("y_bin")?.i32()?;
+    let counts = counts_df.column("count")?.u32()?;
+
+    for ((x_opt, y_opt), count_opt) in x_bins_column.into_iter().zip(y_bins_column).zip(counts) {
+        if let ((Some(x_bin), Some(y_bin)), Some(count)) = ((x_opt, y_opt), count_opt) {
+            match (x_bin, y_bin) {
+                (-2, _) | (_, -2) => {
+                    histogram.underflow = histogram.underflow.saturating_add(count as u64);
+                }
+                (-1, _) | (_, -1) => {
+                    histogram.overflow = histogram.overflow.saturating_add(count as u64);
+                }
+                (x_bin, y_bin) if x_bin >= 0 && y_bin >= 0 => {
+                    let bin = histogram
+                        .bins
+                        .counts
+                        .entry((x_bin as usize, y_bin as usize))
+                        .or_insert(0);
+                    *bin = bin.saturating_add(count as u64);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if histogram.bins.counts.is_empty() {
+        histogram.bins.min_count = 0;
+        histogram.bins.max_count = 0;
+    } else {
+        let (min_count, max_count) = histogram
+            .bins
+            .counts
+            .values()
+            .copied()
+            .fold((u64::MAX, 0), |(min_count, max_count), count| {
+                (min_count.min(count), max_count.max(count))
+            });
+        histogram.bins.min_count = min_count;
+        histogram.bins.max_count = max_count;
+    }
+
+    histogram.plot_settings.recalculate_image = true;
+    histogram.mark_stats_dirty();
 
     Ok(())
 }
@@ -892,6 +1265,22 @@ impl Histogrammer {
                             }
                         };
 
+                        for histogram_group in &cut_group.hist1d_histograms {
+                            if abort_flag.load(Ordering::SeqCst) {
+                                log::info!("Histogram calculation aborted by user.");
+                                return;
+                            }
+
+                            if let Err(e) =
+                                fill_1d_histogram_group(&filtered_df, histogram_group, -1e6)
+                            {
+                                log::error!(
+                                    "Failed to fill grouped 1D histogram '{}': {e:?}",
+                                    histogram_group.histogram_name
+                                );
+                            }
+                        }
+
                         for source_group in &cut_group.hist1d_sources {
                             if abort_flag.load(Ordering::SeqCst) {
                                 log::info!("Histogram calculation aborted by user.");
@@ -902,6 +1291,22 @@ impl Histogrammer {
                                 log::error!(
                                     "Failed to fill 1D histograms for column '{}': {e:?}",
                                     source_group.column_name
+                                );
+                            }
+                        }
+
+                        for histogram_group in &cut_group.hist2d_histograms {
+                            if abort_flag.load(Ordering::SeqCst) {
+                                log::info!("Histogram calculation aborted by user.");
+                                return;
+                            }
+
+                            if let Err(e) =
+                                fill_2d_histogram_group(&filtered_df, histogram_group, -1e6)
+                            {
+                                log::error!(
+                                    "Failed to fill grouped 2D histogram '{}': {e:?}",
+                                    histogram_group.histogram_name
                                 );
                             }
                         }
@@ -2189,7 +2594,13 @@ fn tree_ui(
 
 #[cfg(test)]
 mod tests {
-    use super::{Histogram2D, histogram_2d_has_default_x_bounds};
+    use super::{
+        CutGroupBuilder, Histogram, Histogram2D, Prepared1DHistogramColumn,
+        Prepared1DHistogramGroup, fill_1d_histogram_group, histogram_2d_has_default_x_bounds,
+    };
+    use crate::histoer::cuts::Cuts;
+    use polars::df;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn detects_default_2d_plot_bounds() {
@@ -2205,5 +2616,68 @@ mod tests {
         histogram.plot_settings.projections.current_plot_bounds = Some(((0.0, 16.0), (0.0, 16.0)));
 
         assert!(!histogram_2d_has_default_x_bounds(&histogram));
+    }
+
+    #[test]
+    fn cut_group_builder_merges_multi_column_same_histogram() {
+        let histogram = Arc::new(Mutex::new(Box::new(Histogram::new(
+            "grouped",
+            4,
+            (0.0, 4.0),
+        ))));
+        let mut builder = CutGroupBuilder::new(Cuts::default());
+
+        builder.add_hist1d(Arc::clone(&histogram), "grouped".to_owned(), "a".to_owned());
+        builder.add_hist1d(Arc::clone(&histogram), "grouped".to_owned(), "b".to_owned());
+
+        let prepared = builder.into_prepared("cuts".to_owned());
+
+        assert_eq!(prepared.hist1d_histograms.len(), 1);
+        assert!(prepared.hist1d_sources.is_empty());
+        assert_eq!(
+            prepared.hist1d_histograms[0]
+                .columns
+                .iter()
+                .map(|column| column.column_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+    }
+
+    #[test]
+    fn merged_1d_histogram_group_accumulates_multiple_columns() {
+        let dataframe = df!(
+            "a" => &[0.5_f64, 1.5, -1e6],
+            "b" => &[2.5_f64, 3.5, 0.5]
+        )
+        .expect("failed to create dataframe");
+        let histogram = Arc::new(Mutex::new(Box::new(Histogram::new(
+            "grouped",
+            4,
+            (0.0, 4.0),
+        ))));
+        let histogram_group = Prepared1DHistogramGroup {
+            histogram: Arc::clone(&histogram),
+            histogram_name: "grouped".to_owned(),
+            columns: vec![
+                Prepared1DHistogramColumn {
+                    column_name: "a".to_owned(),
+                    multiplicity: 1,
+                },
+                Prepared1DHistogramColumn {
+                    column_name: "b".to_owned(),
+                    multiplicity: 1,
+                },
+            ],
+        };
+
+        fill_1d_histogram_group(&dataframe, &histogram_group, -1e6)
+            .expect("failed to fill merged histogram group");
+
+        let histogram = histogram.lock().expect("failed to lock histogram");
+        assert_eq!(histogram.bins, vec![2, 1, 1, 1]);
+        assert_eq!(histogram.original_bins, vec![2, 1, 1, 1]);
+        assert_eq!(histogram.underflow, 0);
+        assert_eq!(histogram.overflow, 0);
     }
 }
