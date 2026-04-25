@@ -129,10 +129,9 @@ struct SourceGroupResolver {
 #[derive(Clone, Debug, Default)]
 struct ExpandedColumnUiCache {
     key: u64,
-    expanded_alias_prefix_lengths: Vec<usize>,
-    all_expanded_aliases: Vec<String>,
     available_columns: Vec<String>,
     available_source_names: Vec<String>,
+    builder_row_available_columns: Vec<Vec<String>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -675,6 +674,7 @@ impl Configs {
     }
 
     fn sync_column_ui_state(&mut self, base_columns: &[String]) {
+        self.ensure_expanded_column_ui_cache(base_columns);
         self.column_ui_state
             .resize_with(self.columns.len(), ComputedColumnUiState::default);
 
@@ -683,9 +683,8 @@ impl Configs {
         }
 
         let available_variables = self.available_variables_for_ui();
-        let available_columns_per_row = (0..self.columns.len())
-            .map(|index| self.available_columns_for_builder_row(base_columns, index))
-            .collect::<Vec<_>>();
+        let available_columns_per_row =
+            &self.expanded_column_ui_cache.builder_row_available_columns;
 
         for (index, ((expression, _), state)) in self
             .columns
@@ -699,7 +698,10 @@ impl Configs {
 
             if let Some(builder) = parse_simple_computed_column_builder(
                 expression,
-                &available_columns_per_row[index],
+                available_columns_per_row
+                    .get(index)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
                 &available_variables,
             ) {
                 state.builder = builder;
@@ -755,12 +757,28 @@ impl Configs {
         available_source_names.sort();
         available_source_names.dedup();
 
+        let mut builder_row_available_columns = Vec::with_capacity(self.columns.len());
+        for &expanded_alias_count in &expanded_alias_prefix_lengths {
+            let mut row_available_columns = base_columns.to_vec();
+            row_available_columns.extend(
+                all_expanded_aliases
+                    .iter()
+                    .take(expanded_alias_count)
+                    .cloned(),
+            );
+            row_available_columns.extend(
+                self.available_column_group_aliases_for_available_columns(&row_available_columns),
+            );
+            row_available_columns.sort();
+            row_available_columns.dedup();
+            builder_row_available_columns.push(row_available_columns);
+        }
+
         self.expanded_column_ui_cache = ExpandedColumnUiCache {
             key,
-            expanded_alias_prefix_lengths,
-            all_expanded_aliases,
             available_columns,
             available_source_names,
+            builder_row_available_columns,
         };
     }
 
@@ -786,39 +804,18 @@ impl Configs {
         available_variables
     }
 
-    fn available_columns_for_builder_row(
-        &mut self,
-        base_columns: &[String],
-        row_index: usize,
-    ) -> Vec<String> {
-        self.ensure_expanded_column_ui_cache(base_columns);
-        let mut available_columns = base_columns.to_vec();
-        let expanded_alias_count = self
-            .expanded_column_ui_cache
-            .expanded_alias_prefix_lengths
-            .get(row_index)
-            .copied()
-            .unwrap_or(self.expanded_column_ui_cache.all_expanded_aliases.len());
-        available_columns.extend(
-            self.expanded_column_ui_cache
-                .all_expanded_aliases
-                .iter()
-                .take(expanded_alias_count)
-                .cloned(),
-        );
-        available_columns
-            .extend(self.available_column_group_aliases_for_available_columns(&available_columns));
-        available_columns.sort();
-        available_columns.dedup();
-        available_columns
-    }
-
     fn grouped_computed_column_preview_for_row(
         &mut self,
         base_columns: &[String],
         row_index: usize,
     ) -> Vec<String> {
-        let available_columns = self.available_columns_for_builder_row(base_columns, row_index);
+        self.ensure_expanded_column_ui_cache(base_columns);
+        let available_columns = self
+            .expanded_column_ui_cache
+            .builder_row_available_columns
+            .get(row_index)
+            .map(Vec::as_slice)
+            .unwrap_or(&self.expanded_column_ui_cache.available_source_names);
         let Some((expression, alias)) = self.columns.get(row_index) else {
             return Vec::new();
         };
@@ -826,7 +823,7 @@ impl Configs {
         expand_grouped_computed_columns_for_available_columns(
             expression,
             alias,
-            &available_columns,
+            available_columns,
             &self.column_groups,
             &self.variables,
         )
@@ -1598,7 +1595,13 @@ impl Configs {
         base_columns: &[String],
         index: usize,
     ) {
-        let available_columns = self.available_columns_for_builder_row(base_columns, index);
+        self.ensure_expanded_column_ui_cache(base_columns);
+        let available_columns = self
+            .expanded_column_ui_cache
+            .builder_row_available_columns
+            .get(index)
+            .map(Vec::as_slice)
+            .unwrap_or(&self.expanded_column_ui_cache.available_source_names);
         let available_variables = self.available_variables_for_ui();
         let Some((expression, alias)) = self.columns.get_mut(index) else {
             return;
@@ -1746,7 +1749,7 @@ impl Configs {
                                 ui,
                                 format!("computed_column_coeff_column_{index}_{term_index}"),
                                 &mut term.coefficient_column,
-                                &available_columns,
+                                available_columns,
                                 "Coeff Column",
                                 true,
                             );
@@ -1759,7 +1762,7 @@ impl Configs {
                             ui,
                             format!("computed_column_term_column_{index}_{term_index}"),
                             &mut term.column,
-                            &available_columns,
+                            available_columns,
                             "Column",
                             true,
                         );
