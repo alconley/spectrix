@@ -7,8 +7,12 @@ use egui::PopupCloseBehavior;
 use egui::containers::menu::{MenuConfig, SubMenuButton};
 
 impl Histogram2D {
-    fn next_cut_name(&self, x_column: &str, y_column: &str) -> String {
-        let base_name = Cut2D::default_name(x_column, y_column);
+    fn next_cut_name(&self, x_column: &str, y_column: &str, source_pair_count: usize) -> String {
+        let base_name = if source_pair_count > 1 {
+            Cut2D::default_group_name(&self.name)
+        } else {
+            Cut2D::default_name(x_column, y_column)
+        };
         let mut next_index = 1;
 
         while self
@@ -77,22 +81,33 @@ impl Histogram2D {
                     ui.label(self.plot_settings.cuts_unavailable_reason());
                 }
 
+                let source_pairs = self.plot_settings.cut_source_pairs();
                 ui.add_enabled_ui(cuts_available, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("X: ");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.plot_settings.x_column)
-                                .hint_text("X Column Name"),
-                        );
-                    });
+                    if source_pairs.len() <= 1 {
+                        ui.horizontal(|ui| {
+                            ui.label("X: ");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.plot_settings.x_column)
+                                    .hint_text("X Column Name"),
+                            );
+                        });
 
-                    ui.horizontal(|ui| {
-                        ui.label("Y: ");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.plot_settings.y_column)
-                                .hint_text("Y Column Name"),
-                        );
-                    });
+                        ui.horizontal(|ui| {
+                            ui.label("Y: ");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.plot_settings.y_column)
+                                    .hint_text("Y Column Name"),
+                            );
+                        });
+                    } else {
+                        ui.label(format!("Source pairs: {}", source_pairs.len()));
+                        for (x_column, y_column) in source_pairs.iter().take(6) {
+                            ui.label(format!("{y_column} vs {x_column}"));
+                        }
+                        if source_pairs.len() > 6 {
+                            ui.label(format!("...and {} more", source_pairs.len() - 6));
+                        }
+                    }
                 });
 
                 let mut to_remove = None;
@@ -161,9 +176,10 @@ impl Histogram2D {
     }
 
     pub fn new_cut(&mut self) {
-        if !self.plot_settings.cuts_available() {
+        let source_pairs = self.plot_settings.cut_source_pairs();
+        if source_pairs.is_empty() {
             log::warn!(
-                "Cannot add a 2D cut to histogram '{}' because it has multiple source pairs.",
+                "Cannot add a 2D cut to histogram '{}' because no source pairs are available.",
                 self.name
             );
             return;
@@ -174,12 +190,9 @@ impl Histogram2D {
             cut.polygon.interactive_dragging = false;
         }
 
-        let mut cut = Cut2D {
-            x_column: self.plot_settings.x_column.clone(),
-            y_column: self.plot_settings.y_column.clone(),
-            ..Default::default()
-        };
-        cut.polygon.name = self.next_cut_name(&cut.x_column, &cut.y_column);
+        let mut cut = Cut2D::default();
+        cut.set_source_pairs(&source_pairs);
+        cut.polygon.name = self.next_cut_name(&cut.x_column, &cut.y_column, source_pairs.len());
         cut.polygon.set_color(self.next_cut_color());
 
         cut.polygon.interactive_clicking = true;

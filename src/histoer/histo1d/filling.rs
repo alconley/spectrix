@@ -73,8 +73,9 @@ impl Histogram {
         let duration = start.elapsed();
         log::info!("Filled histogram {} in {:?}", self.name, duration);
         self.plot_settings.column_name = column.to_owned();
+        self.plot_settings.source_columns = vec![column.to_owned()];
         for cut in &mut self.plot_settings.cuts {
-            cut.set_column_name(column);
+            cut.set_source_columns(&self.plot_settings.source_columns);
         }
         self.plot_settings.egui_settings.reset_axis = true;
 

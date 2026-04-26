@@ -743,6 +743,8 @@ pub struct Cut2D {
     pub polygon: EguiPolygon,
     pub x_column: String,
     pub y_column: String,
+    #[serde(default)]
+    pub additional_column_pairs: Vec<(String, String)>,
     pub active: bool,
     #[serde(skip)]
     pub saved_path: Option<PathBuf>,
@@ -766,6 +768,7 @@ impl PartialEq for Cut2D {
             && self.polygon.interactive_dragging == other.polygon.interactive_dragging
             && self.x_column == other.x_column
             && self.y_column == other.y_column
+            && self.additional_column_pairs == other.additional_column_pairs
             && self.active == other.active
     }
 }
@@ -776,6 +779,7 @@ impl Default for Cut2D {
             polygon: EguiPolygon::default(),
             x_column: String::new(),
             y_column: String::new(),
+            additional_column_pairs: Vec::new(),
             active: true,
             saved_path: None,
         }
@@ -789,6 +793,10 @@ impl Cut2D {
 
     pub fn default_name(x_column: &str, y_column: &str) -> String {
         format!("{y_column} v {x_column} Cut")
+    }
+
+    pub fn default_group_name(histogram_name: &str) -> String {
+        format!("{histogram_name} Group Cut")
     }
 
     pub fn sanitized_file_name(&self) -> String {
@@ -821,6 +829,7 @@ impl Cut2D {
         self.polygon.name != previous.polygon.name
             || self.x_column != previous.x_column
             || self.y_column != previous.y_column
+            || self.additional_column_pairs != previous.additional_column_pairs
             || self.polygon.vertices != previous.polygon.vertices
     }
 
@@ -900,8 +909,19 @@ impl Cut2D {
             ui.label(histogram_description);
             ui.separator();
         }
-        ui.label(format!("X Column: {}", self.x_column));
-        ui.label(format!("Y Column: {}", self.y_column));
+        let source_pairs = self.source_pairs();
+        if source_pairs.len() <= 1 {
+            ui.label(format!("X Column: {}", self.x_column));
+            ui.label(format!("Y Column: {}", self.y_column));
+        } else {
+            ui.label(format!("Source pairs: {}", source_pairs.len()));
+            for (x_column, y_column) in source_pairs.iter().take(6) {
+                ui.label(format!("{y_column} vs {x_column}"));
+            }
+            if source_pairs.len() > 6 {
+                ui.label(format!("...and {} more", source_pairs.len() - 6));
+            }
+        }
         ui.label(format!("Vertices: {}", self.polygon.vertices.len()));
         ui.label("Saved Path:");
         ui.monospace(self.saved_path_display());
@@ -947,36 +967,94 @@ impl Cut2D {
         if !self.active {
             return false; // If the cut is not active, it is not valid
         }
-        // Attempt to retrieve the x and y column values for the specified row
-        if let (Ok(cut_x_values), Ok(cut_y_values)) = (
-            df.column(&self.x_column).and_then(|c| c.f64()),
-            df.column(&self.y_column).and_then(|c| c.f64()),
-        ) {
-            // Retrieve the x and y values for the given row index
-            if let (Some(cut_x), Some(cut_y)) =
+        for (x_column, y_column) in self.source_pairs() {
+            if let (Ok(cut_x_values), Ok(cut_y_values)) = (
+                df.column(&x_column).and_then(|c| c.f64()),
+                df.column(&y_column).and_then(|c| c.f64()),
+            ) && let (Some(cut_x), Some(cut_y)) =
                 (cut_x_values.get(row_idx), cut_y_values.get(row_idx))
+                && self.is_inside(cut_x, cut_y)
             {
-                // Check if the point (cut_x, cut_y) is inside the polygon
-                return self.is_inside(cut_x, cut_y);
+                return true;
             }
         }
-        // Return false if columns or row data were not found or if point is not inside polygon
+
         false
     }
 
-    pub fn create_mask(&self, df: &DataFrame) -> Result<BooleanChunked, PolarsError> {
+    fn create_mask_for_pair(
+        &self,
+        df: &DataFrame,
+        x_column: &str,
+        y_column: &str,
+    ) -> Result<BooleanChunked, PolarsError> {
         let polygon = self.to_geo_polygon();
-        let x_col = df.column(&self.x_column)?.f64()?;
-        let y_col = df.column(&self.y_column)?.f64()?;
+        let x_col = df.column(x_column)?.f64()?;
+        let y_col = df.column(y_column)?.f64()?;
 
-        // Create mask by checking if each point is inside the polygon
-        let mask = x_col
-            .into_no_null_iter()
-            .zip(y_col.into_no_null_iter())
-            .map(|(x, y)| polygon.contains(&geo::Point::new(x, y)))
-            .collect::<BooleanChunked>();
+        Ok(x_col
+            .into_iter()
+            .zip(y_col)
+            .map(|(x_value, y_value)| {
+                x_value.zip(y_value).is_some_and(|(x_value, y_value)| {
+                    polygon.contains(&geo::Point::new(x_value, y_value))
+                })
+            })
+            .collect::<BooleanChunked>())
+    }
 
-        Ok(mask)
+    pub fn create_mask(&self, df: &DataFrame) -> Result<BooleanChunked, PolarsError> {
+        Ok(self
+            .source_pairs()
+            .into_iter()
+            .map(|(x_column, y_column)| self.create_mask_for_pair(df, &x_column, &y_column))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .reduce(|left, right| left.bitor(right))
+            .unwrap_or_else(|| BooleanChunked::from_slice("".into(), &vec![false; df.height()])))
+    }
+
+    pub fn create_mask_for_source_pair(
+        &self,
+        df: &DataFrame,
+        x_column: &str,
+        y_column: &str,
+    ) -> Result<Option<BooleanChunked>, PolarsError> {
+        let source_pairs = self.source_pairs();
+        if source_pairs.len() <= 1
+            || !source_pairs.iter().any(|(cut_x_column, cut_y_column)| {
+                cut_x_column == x_column && cut_y_column == y_column
+            })
+        {
+            return Ok(None);
+        }
+
+        self.create_mask_for_pair(df, x_column, y_column).map(Some)
+    }
+
+    pub fn create_mask_for_source_column(
+        &self,
+        df: &DataFrame,
+        source_column: &str,
+    ) -> Result<Option<BooleanChunked>, PolarsError> {
+        let source_pairs = self.source_pairs();
+        if source_pairs.len() <= 1
+            || !source_pairs
+                .iter()
+                .any(|(x_column, y_column)| x_column == source_column || y_column == source_column)
+        {
+            return Ok(None);
+        }
+
+        let matching_masks = source_pairs
+            .into_iter()
+            .filter(|(x_column, y_column)| x_column == source_column || y_column == source_column)
+            .map(|(x_column, y_column)| self.create_mask_for_pair(df, &x_column, &y_column))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(matching_masks
+            .into_iter()
+            .reduce(|left, right| left.bitor(right)))
     }
 
     pub fn save_cut_to_json(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -1066,8 +1144,71 @@ impl Cut2D {
         self.polygon.interactive_clicking
     }
 
+    pub fn source_pairs(&self) -> Vec<(String, String)> {
+        let mut source_pairs = Vec::new();
+        let mut seen_pairs = HashSet::new();
+
+        for (x_column, y_column) in std::iter::once((&self.x_column, &self.y_column)).chain(
+            self.additional_column_pairs
+                .iter()
+                .map(|(x_column, y_column)| (x_column, y_column)),
+        ) {
+            let x_column = x_column.trim();
+            let y_column = y_column.trim();
+            if x_column.is_empty() || y_column.is_empty() {
+                continue;
+            }
+
+            let pair = (x_column.to_owned(), y_column.to_owned());
+            if seen_pairs.insert(pair.clone()) {
+                source_pairs.push(pair);
+            }
+        }
+
+        source_pairs
+    }
+
+    pub fn set_source_pairs(&mut self, source_pairs: &[(String, String)]) {
+        let mut normalized_pairs = source_pairs
+            .iter()
+            .filter_map(|(x_column, y_column)| {
+                let x_column = x_column.trim();
+                let y_column = y_column.trim();
+                if x_column.is_empty() || y_column.is_empty() {
+                    None
+                } else {
+                    Some((x_column.to_owned(), y_column.to_owned()))
+                }
+            })
+            .collect::<Vec<_>>();
+
+        if normalized_pairs.is_empty() {
+            self.x_column.clear();
+            self.y_column.clear();
+            self.additional_column_pairs.clear();
+            return;
+        }
+
+        let (x_column, y_column) = normalized_pairs.remove(0);
+        self.x_column = x_column;
+        self.y_column = y_column;
+        self.additional_column_pairs = normalized_pairs;
+    }
+
     pub fn required_columns(&self) -> Vec<String> {
-        vec![self.x_column.clone(), self.y_column.clone()]
+        let mut required_columns = Vec::new();
+        let mut seen_columns = HashSet::new();
+
+        for (x_column, y_column) in self.source_pairs() {
+            if seen_columns.insert(x_column.clone()) {
+                required_columns.push(x_column);
+            }
+            if seen_columns.insert(y_column.clone()) {
+                required_columns.push(y_column);
+            }
+        }
+
+        required_columns
     }
 
     // pub fn filter_df_and_save(
@@ -1088,6 +1229,7 @@ impl Cut2D {
 #[cfg(test)]
 mod tests {
     use super::{Cut1D, Cut2D, cut_dialog_directory_from_path, sanitize_cut_file_name_component};
+    use polars::df;
     use std::path::Path;
 
     #[test]
@@ -1155,6 +1297,37 @@ mod tests {
             .expect("grouped expression should parse");
         assert_eq!(parsed_groups.len(), 1);
         assert_eq!(parsed_groups[0].conditions.len(), 2);
+    }
+
+    #[test]
+    fn cut2d_group_default_name_uses_histogram_name() {
+        assert_eq!(
+            Cut2D::default_group_name("Ring Energy"),
+            "Ring Energy Group Cut"
+        );
+    }
+
+    #[test]
+    fn grouped_cut2d_mask_ors_across_source_pairs() {
+        let df = df!(
+            "x0" => &[1.0_f64, 4.0, 9.0],
+            "y0" => &[1.0_f64, 4.0, 9.0],
+            "x1" => &[9.0_f64, 1.0, 9.0],
+            "y1" => &[9.0_f64, 1.0, 9.0]
+        )
+        .expect("failed to build dataframe");
+
+        let mut cut = Cut2D::default();
+        cut.polygon.vertices = vec![[0.0, 0.0], [5.0, 0.0], [5.0, 5.0], [0.0, 5.0]];
+        cut.set_source_pairs(&[
+            ("x0".to_owned(), "y0".to_owned()),
+            ("x1".to_owned(), "y1".to_owned()),
+        ]);
+
+        let mask = cut.create_mask(&df).expect("failed to build cut mask");
+        let values = mask.into_iter().collect::<Vec<_>>();
+
+        assert_eq!(values, vec![Some(true), Some(true), Some(false)]);
     }
 }
 
@@ -1242,6 +1415,8 @@ pub struct Cut1D {
     pub expression: String, // Logical expression to evaluate, e.g., "X1 != -1e6 & X2 == -1e6"
     pub active: bool,
     #[serde(default)]
+    pub source_columns: Vec<String>,
+    #[serde(default)]
     pub edit_mode: Cut1DEditMode,
     #[serde(default)]
     pub builder_groups: Vec<Cut1DBuilderGroup>,
@@ -1256,6 +1431,7 @@ impl PartialEq for Cut1D {
         self.name == other.name
             && self.expression == other.expression
             && self.active == other.active
+            && self.source_columns == other.source_columns
     }
 }
 
@@ -1265,6 +1441,7 @@ impl Cut1D {
             name: name.to_owned(),
             expression: expression.to_owned(),
             active: true,
+            source_columns: Vec::new(),
             edit_mode: Cut1DEditMode::Builder,
             builder_groups: vec![Cut1DBuilderGroup {
                 conditions: vec![Cut1DBuilderCondition::default()],
@@ -1808,6 +1985,27 @@ impl Cut1D {
         })
     }
 
+    pub fn normalized_source_columns(&self) -> Vec<String> {
+        self.source_columns
+            .iter()
+            .map(|column_name| column_name.trim().to_owned())
+            .filter(|column_name| !column_name.is_empty())
+            .fold(
+                (Vec::new(), HashSet::new()),
+                |(mut normalized_columns, mut seen_columns), column_name| {
+                    if seen_columns.insert(column_name.clone()) {
+                        normalized_columns.push(column_name);
+                    }
+                    (normalized_columns, seen_columns)
+                },
+            )
+            .0
+    }
+
+    pub fn set_source_columns(&mut self, source_columns: &[String]) {
+        self.source_columns = source_columns.to_vec();
+    }
+
     fn trim_wrapping_parentheses(expression: &str) -> String {
         let mut trimmed = expression.trim().to_owned();
 
@@ -2065,5 +2263,54 @@ impl Cut1D {
                 "Conditions not parsed for Cut1D".into(),
             ))
         }
+    }
+
+    pub fn create_mask_for_source_column(
+        &self,
+        df: &DataFrame,
+        source_column: &str,
+    ) -> Result<Option<BooleanChunked>, PolarsError> {
+        let normalized_source_columns = self.normalized_source_columns();
+        if normalized_source_columns.len() <= 1
+            || !normalized_source_columns
+                .iter()
+                .any(|column| column == source_column)
+        {
+            return Ok(None);
+        }
+
+        let Some(groups) = &self.parsed_groups else {
+            return Err(PolarsError::ComputeError(
+                "Conditions not parsed for Cut1D".into(),
+            ));
+        };
+
+        let mut group_masks = Vec::new();
+        for group in groups {
+            if !group
+                .conditions
+                .iter()
+                .all(|condition| condition.column_name == source_column)
+            {
+                continue;
+            }
+
+            let mut condition_masks = Vec::new();
+            for condition in &group.conditions {
+                condition_masks.push(Self::mask_for_condition(df, condition)?);
+            }
+
+            let group_mask = condition_masks
+                .into_iter()
+                .reduce(|left, right| left.bitand(right))
+                .unwrap_or_else(|| {
+                    BooleanChunked::from_slice("".into(), &vec![false; df.height()])
+                });
+            group_masks.push(group_mask);
+        }
+
+        Ok(group_masks
+            .into_iter()
+            .reduce(|left, right| left.bitor(right)))
     }
 }

@@ -6,6 +6,7 @@ use pyo3::{prelude::*, types::PyModule};
 
 // Standard library
 use std::collections::{HashMap, HashSet};
+use std::ops::BitAnd as _;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -156,15 +157,12 @@ struct Prepared2DHistogramGroupBuilder {
 
 struct Hist1DSourceMetadata {
     histogram: Hist1DHandle,
-    fill_count: usize,
-    column_name: Option<String>,
+    source_columns: Vec<String>,
 }
 
 struct Hist2DSourceMetadata {
     histogram: Hist2DHandle,
-    fill_count: usize,
-    x_column_name: Option<String>,
-    y_column_name: Option<String>,
+    source_pairs: Vec<(String, String)>,
 }
 
 struct CutGroupBuilder {
@@ -420,6 +418,66 @@ fn filtered_batch(cuts: &Cuts, df: &DataFrame) -> PolarsResult<DataFrame> {
     df.filter(&mask)
 }
 
+fn has_grouped_source_cuts(active_cuts: &[&Cut]) -> bool {
+    active_cuts.iter().any(|cut| match cut {
+        Cut::Cut1D(cut1d) => cut1d.normalized_source_columns().len() > 1,
+        Cut::Cut2D(cut2d) => cut2d.source_pairs().len() > 1,
+    })
+}
+
+fn grouped_1d_source_mask(
+    active_cuts: &[&Cut],
+    df: &DataFrame,
+    source_column: &str,
+) -> Result<Option<BooleanChunked>, PolarsError> {
+    let mut combined_mask: Option<BooleanChunked> = None;
+
+    for cut in active_cuts {
+        let source_mask = match cut {
+            Cut::Cut1D(cut1d) => cut1d.create_mask_for_source_column(df, source_column)?,
+            Cut::Cut2D(cut2d) => cut2d.create_mask_for_source_column(df, source_column)?,
+        };
+
+        if let Some(source_mask) = source_mask {
+            combined_mask = Some(match combined_mask {
+                Some(existing_mask) => existing_mask.bitand(source_mask),
+                None => source_mask,
+            });
+        }
+    }
+
+    Ok(combined_mask)
+}
+
+fn grouped_2d_pair_mask(
+    active_cuts: &[&Cut],
+    df: &DataFrame,
+    x_column: &str,
+    y_column: &str,
+) -> Result<Option<BooleanChunked>, PolarsError> {
+    let mut combined_mask: Option<BooleanChunked> = None;
+
+    for cut in active_cuts {
+        if let Cut::Cut2D(cut2d) = cut
+            && let Some(source_mask) = cut2d.create_mask_for_source_pair(df, x_column, y_column)?
+        {
+            combined_mask = Some(match combined_mask {
+                Some(existing_mask) => existing_mask.bitand(source_mask),
+                None => source_mask,
+            });
+        }
+    }
+
+    Ok(combined_mask)
+}
+
+fn combined_source_mask(masks: Vec<Option<BooleanChunked>>) -> Option<BooleanChunked> {
+    masks
+        .into_iter()
+        .flatten()
+        .reduce(|left, right| left.bitand(right))
+}
+
 fn lazyframe_row_count(lf: &LazyFrame) -> Option<u64> {
     let count_df = lf.clone().select([len().alias("count")]).collect().ok()?;
     let count_column = count_df.column("count").ok()?;
@@ -501,15 +559,32 @@ fn fill_1d_source_group(
 
 fn fill_1d_histogram_group(
     filtered_df: &DataFrame,
+    cuts: &Cuts,
     histogram_group: &Prepared1DHistogramGroup,
     invalid_value: f64,
 ) -> PolarsResult<()> {
+    let active_cuts = active_cut_refs(cuts);
+    let use_grouped_masks = has_grouped_source_cuts(&active_cuts);
     let mut stacked_df = None;
+
     for column in &histogram_group.columns {
         let values_column = filtered_df
             .column(&column.column_name)?
             .cast(&DataType::Float64)?;
-        let mut values_series = values_column.as_materialized_series().clone();
+
+        let mut values_series = if use_grouped_masks {
+            if let Some(source_mask) =
+                grouped_1d_source_mask(&active_cuts, filtered_df, &column.column_name)?
+            {
+                values_column
+                    .as_materialized_series()
+                    .filter(&source_mask)?
+            } else {
+                values_column.as_materialized_series().clone()
+            }
+        } else {
+            values_column.as_materialized_series().clone()
+        };
         values_series.rename("value".into());
         let source_df = DataFrame::new(values_series.len(), vec![values_series.into()])?;
         append_repeated_dataframe(&mut stacked_df, &source_df, column.multiplicity)?;
@@ -634,10 +709,15 @@ fn fill_2d_source_group(
 
 fn fill_2d_histogram_group(
     filtered_df: &DataFrame,
+    cuts: &Cuts,
     histogram_group: &Prepared2DHistogramGroup,
     invalid_value: f64,
 ) -> PolarsResult<()> {
+    let active_cuts = active_cut_refs(cuts);
+    let use_grouped_masks = has_grouped_source_cuts(&active_cuts);
+    let mut grouped_1d_mask_cache = HashMap::<String, Option<BooleanChunked>>::new();
     let mut stacked_df = None;
+
     for column_pair in &histogram_group.column_pairs {
         let x_values_column = filtered_df
             .column(&column_pair.x_column_name)?
@@ -646,9 +726,58 @@ fn fill_2d_histogram_group(
             .column(&column_pair.y_column_name)?
             .cast(&DataType::Float64)?;
 
-        let mut x_values_series = x_values_column.as_materialized_series().clone();
+        let source_mask = if use_grouped_masks {
+            let x_source_mask = if let Some(existing_mask) =
+                grouped_1d_mask_cache.get(&column_pair.x_column_name)
+            {
+                existing_mask.clone()
+            } else {
+                let computed_mask =
+                    grouped_1d_source_mask(&active_cuts, filtered_df, &column_pair.x_column_name)?;
+                grouped_1d_mask_cache
+                    .insert(column_pair.x_column_name.clone(), computed_mask.clone());
+                computed_mask
+            };
+
+            let y_source_mask = if let Some(existing_mask) =
+                grouped_1d_mask_cache.get(&column_pair.y_column_name)
+            {
+                existing_mask.clone()
+            } else {
+                let computed_mask =
+                    grouped_1d_source_mask(&active_cuts, filtered_df, &column_pair.y_column_name)?;
+                grouped_1d_mask_cache
+                    .insert(column_pair.y_column_name.clone(), computed_mask.clone());
+                computed_mask
+            };
+
+            let pair_mask = grouped_2d_pair_mask(
+                &active_cuts,
+                filtered_df,
+                &column_pair.x_column_name,
+                &column_pair.y_column_name,
+            )?;
+
+            combined_source_mask(vec![x_source_mask, y_source_mask, pair_mask])
+        } else {
+            None
+        };
+
+        let mut x_values_series = if let Some(source_mask) = &source_mask {
+            x_values_column
+                .as_materialized_series()
+                .filter(source_mask)?
+        } else {
+            x_values_column.as_materialized_series().clone()
+        };
         x_values_series.rename("x_value".into());
-        let mut y_values_series = y_values_column.as_materialized_series().clone();
+        let mut y_values_series = if let Some(source_mask) = &source_mask {
+            y_values_column
+                .as_materialized_series()
+                .filter(source_mask)?
+        } else {
+            y_values_column.as_materialized_series().clone()
+        };
         y_values_series.rename("y_value".into());
 
         let source_df = DataFrame::new(
@@ -773,17 +902,16 @@ fn apply_hist1d_source_metadata(histograms: &HashMap<usize, Hist1DSourceMetadata
             .expect("Missing 1D histogram metadata");
         let mut histogram = metadata.histogram.lock().expect("Failed to lock histogram");
 
-        if metadata.fill_count == 1 {
-            if let Some(column_name) = &metadata.column_name {
-                histogram.plot_settings.column_name.clone_from(column_name);
-                for cut in &mut histogram.plot_settings.cuts {
-                    cut.set_column_name(column_name);
-                }
-            } else {
-                histogram.plot_settings.column_name.clear();
-            }
+        histogram.plot_settings.source_columns = metadata.source_columns.clone();
+
+        if metadata.source_columns.len() == 1 {
+            histogram.plot_settings.column_name = metadata.source_columns[0].clone();
         } else {
             histogram.plot_settings.column_name.clear();
+        }
+
+        for cut in &mut histogram.plot_settings.cuts {
+            cut.set_source_columns(&metadata.source_columns);
         }
     }
 }
@@ -802,20 +930,19 @@ fn apply_hist2d_source_metadata(histograms: &HashMap<usize, Hist2DSourceMetadata
             .expect("Failed to lock 2D histogram");
 
         histogram.plot_settings.recalculate_image = true;
+        histogram.plot_settings.source_pairs = metadata.source_pairs.clone();
 
-        if metadata.fill_count == 1 {
-            if let (Some(x_column_name), Some(y_column_name)) =
-                (&metadata.x_column_name, &metadata.y_column_name)
-            {
-                histogram.plot_settings.x_column.clone_from(x_column_name);
-                histogram.plot_settings.y_column.clone_from(y_column_name);
-            } else {
-                histogram.plot_settings.x_column.clear();
-                histogram.plot_settings.y_column.clear();
-            }
+        if metadata.source_pairs.len() == 1 {
+            let (x_column_name, y_column_name) = &metadata.source_pairs[0];
+            histogram.plot_settings.x_column.clone_from(x_column_name);
+            histogram.plot_settings.y_column.clone_from(y_column_name);
         } else {
             histogram.plot_settings.x_column.clear();
             histogram.plot_settings.y_column.clear();
+        }
+
+        for cut in &mut histogram.plot_settings.cuts {
+            cut.set_source_pairs(&metadata.source_pairs);
         }
     }
 }
@@ -1116,14 +1243,10 @@ impl Histogrammer {
                                 .entry(histogram_key)
                                 .or_insert_with(|| Hist1DSourceMetadata {
                                     histogram: Arc::clone(&hist),
-                                    fill_count: 0,
-                                    column_name: None,
+                                    source_columns: Vec::new(),
                                 });
-                        metadata.fill_count += 1;
-                        if metadata.fill_count == 1 {
-                            metadata.column_name = Some(hist1d.column_name.clone());
-                        } else {
-                            metadata.column_name = None;
+                        if !metadata.source_columns.contains(&hist1d.column_name) {
+                            metadata.source_columns.push(hist1d.column_name.clone());
                         }
 
                         let key = hist1d.cuts.generate_key();
@@ -1149,17 +1272,12 @@ impl Histogrammer {
                                 .entry(histogram_key)
                                 .or_insert_with(|| Hist2DSourceMetadata {
                                     histogram: Arc::clone(&hist),
-                                    fill_count: 0,
-                                    x_column_name: None,
-                                    y_column_name: None,
+                                    source_pairs: Vec::new(),
                                 });
-                        metadata.fill_count += 1;
-                        if metadata.fill_count == 1 {
-                            metadata.x_column_name = Some(hist2d.x_column_name.clone());
-                            metadata.y_column_name = Some(hist2d.y_column_name.clone());
-                        } else {
-                            metadata.x_column_name = None;
-                            metadata.y_column_name = None;
+                        let source_pair =
+                            (hist2d.x_column_name.clone(), hist2d.y_column_name.clone());
+                        if !metadata.source_pairs.contains(&source_pair) {
+                            metadata.source_pairs.push(source_pair);
                         }
 
                         let key = hist2d.cuts.generate_key();
@@ -1271,9 +1389,12 @@ impl Histogrammer {
                                 return;
                             }
 
-                            if let Err(e) =
-                                fill_1d_histogram_group(&filtered_df, histogram_group, -1e6)
-                            {
+                            if let Err(e) = fill_1d_histogram_group(
+                                &filtered_df,
+                                &cut_group.cuts,
+                                histogram_group,
+                                -1e6,
+                            ) {
                                 log::error!(
                                     "Failed to fill grouped 1D histogram '{}': {e:?}",
                                     histogram_group.histogram_name
@@ -1301,9 +1422,12 @@ impl Histogrammer {
                                 return;
                             }
 
-                            if let Err(e) =
-                                fill_2d_histogram_group(&filtered_df, histogram_group, -1e6)
-                            {
+                            if let Err(e) = fill_2d_histogram_group(
+                                &filtered_df,
+                                &cut_group.cuts,
+                                histogram_group,
+                                -1e6,
+                            ) {
                                 log::error!(
                                     "Failed to fill grouped 2D histogram '{}': {e:?}",
                                     histogram_group.histogram_name
@@ -2596,9 +2720,10 @@ fn tree_ui(
 mod tests {
     use super::{
         CutGroupBuilder, Histogram, Histogram2D, Prepared1DHistogramColumn,
-        Prepared1DHistogramGroup, fill_1d_histogram_group, histogram_2d_has_default_x_bounds,
+        Prepared1DHistogramGroup, Prepared2DHistogramColumnPair, Prepared2DHistogramGroup,
+        fill_1d_histogram_group, fill_2d_histogram_group, histogram_2d_has_default_x_bounds,
     };
-    use crate::histoer::cuts::Cuts;
+    use crate::histoer::cuts::{Cut, Cut1D, Cut2D, Cuts};
     use polars::df;
     use std::sync::{Arc, Mutex};
 
@@ -2671,7 +2796,7 @@ mod tests {
             ],
         };
 
-        fill_1d_histogram_group(&dataframe, &histogram_group, -1e6)
+        fill_1d_histogram_group(&dataframe, &Cuts::default(), &histogram_group, -1e6)
             .expect("failed to fill merged histogram group");
 
         let histogram = histogram.lock().expect("failed to lock histogram");
@@ -2679,5 +2804,96 @@ mod tests {
         assert_eq!(histogram.original_bins, vec![2, 1, 1, 1]);
         assert_eq!(histogram.underflow, 0);
         assert_eq!(histogram.overflow, 0);
+    }
+
+    #[test]
+    fn merged_1d_histogram_group_applies_grouped_cut_per_source_column() {
+        let dataframe = df!(
+            "a" => &[0.5_f64, 3.5],
+            "b" => &[3.5_f64, 0.5]
+        )
+        .expect("failed to create dataframe");
+        let histogram = Arc::new(Mutex::new(Box::new(Histogram::new(
+            "grouped",
+            4,
+            (0.0, 4.0),
+        ))));
+        let histogram_group = Prepared1DHistogramGroup {
+            histogram: Arc::clone(&histogram),
+            histogram_name: "grouped".to_owned(),
+            columns: vec![
+                Prepared1DHistogramColumn {
+                    column_name: "a".to_owned(),
+                    multiplicity: 1,
+                },
+                Prepared1DHistogramColumn {
+                    column_name: "b".to_owned(),
+                    multiplicity: 1,
+                },
+            ],
+        };
+
+        let mut cut = Cut1D::new(
+            "grouped cut",
+            "((a >= 0) & (a <= 1)) | ((b >= 0) & (b <= 1))",
+        );
+        cut.set_source_columns(&["a".to_owned(), "b".to_owned()]);
+        cut.parse_conditions();
+        let cuts = Cuts::new(vec![Cut::Cut1D(cut)]);
+
+        fill_1d_histogram_group(&dataframe, &cuts, &histogram_group, -1e6)
+            .expect("failed to fill merged histogram group with grouped cut");
+
+        let histogram = histogram.lock().expect("failed to lock histogram");
+        assert_eq!(histogram.bins, vec![2, 0, 0, 0]);
+        assert_eq!(histogram.original_bins, vec![2, 0, 0, 0]);
+    }
+
+    #[test]
+    fn merged_2d_histogram_group_applies_grouped_cut_per_source_pair() {
+        let dataframe = df!(
+            "x0" => &[1.0_f64, 9.0],
+            "y0" => &[1.0_f64, 9.0],
+            "x1" => &[9.0_f64, 1.0],
+            "y1" => &[9.0_f64, 1.0]
+        )
+        .expect("failed to create dataframe");
+        let histogram = Arc::new(Mutex::new(Box::new(Histogram2D::new(
+            "grouped2d",
+            (10, 10),
+            ((0.0, 10.0), (0.0, 10.0)),
+        ))));
+        let histogram_group = Prepared2DHistogramGroup {
+            histogram: Arc::clone(&histogram),
+            histogram_name: "grouped2d".to_owned(),
+            column_pairs: vec![
+                Prepared2DHistogramColumnPair {
+                    x_column_name: "x0".to_owned(),
+                    y_column_name: "y0".to_owned(),
+                    multiplicity: 1,
+                },
+                Prepared2DHistogramColumnPair {
+                    x_column_name: "x1".to_owned(),
+                    y_column_name: "y1".to_owned(),
+                    multiplicity: 1,
+                },
+            ],
+        };
+
+        let mut cut = Cut2D::default();
+        cut.polygon.vertices = vec![[0.0, 0.0], [5.0, 0.0], [5.0, 5.0], [0.0, 5.0]];
+        cut.set_source_pairs(&[
+            ("x0".to_owned(), "y0".to_owned()),
+            ("x1".to_owned(), "y1".to_owned()),
+        ]);
+        let cuts = Cuts::new(vec![Cut::Cut2D(cut)]);
+
+        fill_2d_histogram_group(&dataframe, &cuts, &histogram_group, -1e6)
+            .expect("failed to fill merged 2d histogram group");
+
+        let histogram = histogram.lock().expect("failed to lock 2d histogram");
+        assert_eq!(histogram.bins.counts.len(), 1);
+        assert_eq!(histogram.bins.counts.get(&(1, 1)), Some(&2));
+        assert_eq!(histogram.bins.counts.get(&(9, 9)), None);
     }
 }

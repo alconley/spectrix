@@ -7,6 +7,8 @@ use crate::histoer::cuts::Cut1D;
 pub struct InteractiveCut1D {
     pub cut: Cut1D,
     pub column_name: String,
+    #[serde(default)]
+    pub source_columns: Vec<String>,
     pub axis_range: (f64, f64),
     pub line_1: EguiVerticalLine,
     pub line_2: EguiVerticalLine,
@@ -22,14 +24,17 @@ impl InteractiveCut1D {
 
     pub fn new(
         name: &str,
-        column_name: &str,
+        source_columns: &[String],
         axis_range: (f64, f64),
         visible_range: (f64, f64),
         color: egui::Color32,
     ) -> Self {
+        let primary_column = source_columns.first().cloned().unwrap_or_default();
+        let source_columns = source_columns.to_vec();
         let mut cut = Self {
             cut: Cut1D::new(name, ""),
-            column_name: column_name.to_owned(),
+            column_name: primary_column,
+            source_columns,
             axis_range,
             line_1: EguiVerticalLine {
                 name: format!("{name} Left"),
@@ -61,6 +66,20 @@ impl InteractiveCut1D {
         cut.initialize_lines(visible_range);
         cut.sync_definition();
         cut
+    }
+
+    fn normalized_source_columns(&self) -> Vec<String> {
+        if !self.source_columns.is_empty() {
+            self.source_columns
+                .iter()
+                .map(|column_name| column_name.trim().to_owned())
+                .filter(|column_name| !column_name.is_empty())
+                .collect()
+        } else if self.column_name.trim().is_empty() {
+            Vec::new()
+        } else {
+            vec![self.column_name.trim().to_owned()]
+        }
     }
 
     fn axis_offset(min: f64, max: f64) -> f64 {
@@ -152,18 +171,33 @@ impl InteractiveCut1D {
     fn sync_definition(&mut self) {
         self.clamp_line_positions(self.axis_range);
         let (x1, x2) = self.ordered_limits();
-        self.cut.expression = format!(
-            "(({} >= {}) & ({} <= {}))",
-            self.column_name,
-            Self::format_value(x1),
-            self.column_name,
-            Self::format_value(x2)
-        );
+        let source_columns = self.normalized_source_columns();
+        self.cut.set_source_columns(&source_columns);
+        self.cut.expression = source_columns
+            .iter()
+            .map(|column_name| {
+                format!(
+                    "(({} >= {}) & ({} <= {}))",
+                    column_name,
+                    Self::format_value(x1),
+                    column_name,
+                    Self::format_value(x2)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
         self.cut.parse_conditions();
     }
 
     pub fn set_column_name(&mut self, column_name: &str) {
         self.column_name = column_name.to_owned();
+        self.source_columns = vec![column_name.to_owned()];
+        self.sync_definition();
+    }
+
+    pub fn set_source_columns(&mut self, source_columns: &[String]) {
+        self.source_columns = source_columns.to_vec();
+        self.column_name = source_columns.first().cloned().unwrap_or_default();
         self.sync_definition();
     }
 
@@ -369,8 +403,13 @@ impl InteractiveCut1D {
                     log::error!("Error saving 1D cut: {error:?}");
                 }
 
-                self.cut
-                    .info_button(ui, Some(format!("Histogram Column: {}", self.column_name)));
+                let source_columns = self.normalized_source_columns();
+                let histogram_description = if source_columns.len() <= 1 {
+                    format!("Histogram Column: {}", self.column_name)
+                } else {
+                    format!("Histogram Columns: {}", source_columns.join(", "))
+                };
+                self.cut.info_button(ui, Some(histogram_description));
             });
 
             ui.horizontal(|ui| {
@@ -409,5 +448,31 @@ impl InteractiveCut1D {
             self.sync_definition();
             self.cut.autosave_to_saved_path();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InteractiveCut1D;
+
+    #[test]
+    fn grouped_cut_expression_uses_or_across_source_columns() {
+        let cut = InteractiveCut1D::new(
+            "Grouped",
+            &["S1Ring0Time".to_owned(), "S1Ring1Time".to_owned()],
+            (0.0, 10.0),
+            (2.0, 8.0),
+            egui::Color32::RED,
+        );
+
+        assert!(cut.cut.expression.contains("S1Ring0Time"));
+        assert!(cut.cut.expression.contains("S1Ring1Time"));
+        assert!(cut.cut.expression.contains(" | "));
+        let parsed_groups = cut
+            .cut
+            .parsed_groups
+            .as_ref()
+            .expect("grouped cut should parse");
+        assert_eq!(parsed_groups.len(), 2);
     }
 }

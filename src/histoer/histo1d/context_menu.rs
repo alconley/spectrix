@@ -34,9 +34,10 @@ impl Histogram {
     }
 
     pub fn new_cut(&mut self) {
-        if self.plot_settings.column_name.trim().is_empty() {
+        let source_columns = self.plot_settings.cut_source_columns();
+        if source_columns.is_empty() {
             log::error!(
-                "Cannot add a 1D cut to histogram '{}' because no source column is available.",
+                "Cannot add a 1D cut to histogram '{}' because no source columns are available.",
                 self.name
             );
             return;
@@ -46,7 +47,7 @@ impl Histogram {
 
         self.plot_settings.cuts.push(InteractiveCut1D::new(
             &self.next_cut_name(),
-            &self.plot_settings.column_name,
+            &source_columns,
             self.range,
             visible_range,
             self.next_cut_color(),
@@ -70,7 +71,7 @@ impl Histogram {
         SubMenuButton::new("Cuts")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
             .ui(ui, |ui| {
-                let can_add_cut = !self.plot_settings.column_name.trim().is_empty();
+                let can_add_cut = !self.plot_settings.cut_source_columns().is_empty();
 
                 ui.horizontal(|ui| {
                     ui.heading("Cuts");
@@ -86,7 +87,7 @@ impl Histogram {
                 });
 
                 if !can_add_cut {
-                    ui.label("No source column is available for this histogram.");
+                    ui.label("No source columns are available for this histogram.");
                 }
 
                 let mut to_remove = None;

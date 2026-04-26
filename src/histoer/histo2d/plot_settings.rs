@@ -15,6 +15,8 @@ pub struct PlotSettings {
     pub egui_settings: EguiPlotSettings,
     pub x_column: String,
     pub y_column: String,
+    #[serde(default)]
+    pub source_pairs: Vec<(String, String)>,
     pub cuts: Vec<Cut2D>,
     pub stats_info: bool,
     pub colormap: ColorMap,
@@ -32,6 +34,7 @@ impl Default for PlotSettings {
             egui_settings: EguiPlotSettings::default(),
             x_column: String::new(),
             y_column: String::new(),
+            source_pairs: Vec::new(),
             cuts: vec![],
             stats_info: false,
             colormap: ColorMap::default(),
@@ -44,12 +47,25 @@ impl Default for PlotSettings {
     }
 }
 impl PlotSettings {
+    pub fn cut_source_pairs(&self) -> Vec<(String, String)> {
+        if !self.source_pairs.is_empty() {
+            self.source_pairs.clone()
+        } else if self.x_column.trim().is_empty() || self.y_column.trim().is_empty() {
+            Vec::new()
+        } else {
+            vec![(
+                self.x_column.trim().to_owned(),
+                self.y_column.trim().to_owned(),
+            )]
+        }
+    }
+
     pub fn cuts_available(&self) -> bool {
-        !self.x_column.trim().is_empty() && !self.y_column.trim().is_empty()
+        !self.cut_source_pairs().is_empty()
     }
 
     pub fn cuts_unavailable_reason(&self) -> &'static str {
-        "2D cuts are disabled when a histogram is filled from multiple X/Y source pairs."
+        "No X/Y source pairs are available for this histogram."
     }
 
     pub fn settings_ui(

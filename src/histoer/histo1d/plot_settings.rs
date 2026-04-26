@@ -16,6 +16,8 @@ pub struct PlotSettings {
     pub current_plot_bounds: Option<(f64, f64)>,
     pub egui_settings: EguiPlotSettings,
     pub column_name: String,
+    #[serde(default)]
+    pub source_columns: Vec<String>,
     pub cuts: Vec<InteractiveCut1D>,
     pub stats_info: bool,
     pub auto_fit_y_to_visible_range: bool,
@@ -36,6 +38,7 @@ impl Default for PlotSettings {
             current_plot_bounds: None,
             egui_settings: EguiPlotSettings::default(),
             column_name: String::new(),
+            source_columns: Vec::new(),
             cuts: vec![],
             stats_info: false,
             auto_fit_y_to_visible_range: true,
@@ -49,6 +52,16 @@ impl Default for PlotSettings {
     }
 }
 impl PlotSettings {
+    pub fn cut_source_columns(&self) -> Vec<String> {
+        if !self.source_columns.is_empty() {
+            self.source_columns.clone()
+        } else if self.column_name.trim().is_empty() {
+            Vec::new()
+        } else {
+            vec![self.column_name.trim().to_owned()]
+        }
+    }
+
     pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
         ui.checkbox(&mut self.stats_info, "Show Statistics");
 
