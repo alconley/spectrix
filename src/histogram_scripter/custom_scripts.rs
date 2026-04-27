@@ -1,7 +1,5 @@
-use crate::histoer::{
-    configs::Configs,
-    cuts::{ActiveHistogramCut, Cuts},
-};
+use crate::histoer::{configs::Configs, cuts::Cuts};
+use crate::histogram_scripter::fsu_custom_script::se_sps::SPSOptions;
 
 use super::fsu_custom_script::catrina::CATRiNAConfig;
 use super::fsu_custom_script::cebra::CeBrAConfig;
@@ -11,19 +9,12 @@ use super::fsu_custom_script::icespice::ICESPICEConfig;
 use super::fsu_custom_script::se_sps::SPSConfig;
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
-pub struct Options {
-    pub calculate_no_cut_histograms: bool,
-}
-
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct CustomConfigs {
     pub sps: SPSConfig,
     pub cebra: CeBrAConfig,
-    #[serde(default)]
     pub catrina: CATRiNAConfig,
     pub icespice: ICESPICEConfig,
-    pub cuts: Cuts,
-    pub options: Options,
 }
 
 impl Default for CustomConfigs {
@@ -33,29 +24,28 @@ impl Default for CustomConfigs {
             cebra: CeBrAConfig::default(),
             catrina: CATRiNAConfig::default(),
             icespice: ICESPICEConfig::default(),
-            cuts: Cuts::default(),
-            options: Options {
-                calculate_no_cut_histograms: true,
-            },
         }
     }
 }
 
 impl CustomConfigs {
-    pub fn ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        active_cuts: Option<&mut [ActiveHistogramCut]>,
-        column_names: &[String],
-    ) {
-        let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts.as_deref());
+    pub fn active_filter_cuts(&self) -> Cuts {
+        let mut cuts = Cuts::default();
 
+        if self.sps.active {
+            cuts.merge(&self.sps.sps_cuts.get_active_cuts());
+        }
+
+        cuts
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui, available_cuts: &Cuts, column_names: &[String]) {
         ui.horizontal_wrapped(|ui| {
             ui.label("Custom Configs: ");
             ui.checkbox(&mut self.sps.active, "SPS");
             ui.checkbox(&mut self.cebra.active, "CeBrA");
             ui.checkbox(&mut self.catrina.active, "CATRiNA");
-            ui.checkbox(&mut self.icespice.active, "ICESPICE");
+            // ui.checkbox(&mut self.icespice.active, "ICESPICE");
         });
 
         ui.separator();
@@ -69,165 +59,95 @@ impl CustomConfigs {
 
         // ui.separator();
 
-        self.cuts.ui(ui, active_cuts, column_names, "custom", true);
-
-        ui.separator();
-
-        if !merged_cuts.is_empty() {
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Options: ");
-                ui.checkbox(
-                    &mut self.options.calculate_no_cut_histograms,
-                    "Calculate No Cut Histograms",
-                );
-            });
-        } else {
-            // make sure to reset the no-cut option if no cuts are defined
-            self.options.calculate_no_cut_histograms = true;
-        }
-
         if self.sps.active {
             ui.collapsing("SE-SPS", |ui| {
-                self.sps.ui(ui);
-                ui.horizontal(|ui| {
-                    if ui.button("Reset").clicked() {
-                        self.sps = SPSConfig::new();
-                        self.sps.active = true;
-                    }
-                });
+                self.sps.ui(ui, available_cuts);
             });
         }
 
         if self.cebra.active {
             ui.collapsing("CeBrA", |ui| {
                 self.cebra.ui(ui, &self.sps, column_names);
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button("Reset").clicked() {
-                        self.cebra = CeBrAConfig::default();
-                        self.cebra.active = true;
-                    }
-                });
             });
         }
 
         if self.catrina.active {
             ui.collapsing("CATRiNA", |ui| {
                 self.catrina.ui(ui, column_names);
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button("Reset").clicked() {
-                        self.catrina = CATRiNAConfig::default();
-                        self.catrina.active = true;
-                    }
-                });
             });
         }
 
-        if self.icespice.active {
-            ui.collapsing("ICESPICE", |ui| {
-                self.icespice.ui(ui, &mut self.cebra, &mut self.sps);
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button("Reset").clicked() {
-                        self.icespice = ICESPICEConfig::default();
-                        self.icespice.active = true;
-                    }
-                });
-            });
-        }
+        // if self.icespice.active {
+        //     ui.collapsing("ICESPICE", |ui| {
+        //         self.icespice.ui(ui, &mut self.cebra, &mut self.sps);
+        //         ui.horizontal_wrapped(|ui| {
+        //             if ui.button("Reset").clicked() {
+        //                 self.icespice = ICESPICEConfig::default();
+        //                 self.icespice.active = true;
+        //             }
+        //         });
+        //     });
+        // }
     }
 
     pub fn merge_active_configs(
         &mut self,
-        active_cuts: Option<&[ActiveHistogramCut]>,
+        available_cuts: &Cuts,
         column_names: &[String],
     ) -> Configs {
         let mut configs = Configs::default();
-        let merged_cuts = self.cuts.merged_with_active_cuts(active_cuts);
-        let should_calculate_cut_histograms = !merged_cuts.is_empty();
+        let sps_selected_cuts = if self.sps.active {
+            let selected_cuts = self
+                .sps
+                .resolved_selected_cuts(available_cuts, column_names);
+            (!selected_cuts.is_empty()).then_some(selected_cuts)
+        } else {
+            None
+        };
 
         if self.sps.active {
-            if should_calculate_cut_histograms {
-                let cuts = merged_cuts.clone();
-                let sps_configs = self.sps.sps_configs(&Some(cuts));
-                configs.merge(sps_configs.clone()); // Ensure `merge` handles in-place modifications
-            }
-
-            if self.options.calculate_no_cut_histograms {
-                let sps_configs = self.sps.sps_configs(&None);
-                configs.merge(sps_configs.clone()); // Ensure `merge` handles in-place modifications
-            }
+            configs.merge(self.sps.configs(available_cuts, column_names));
         }
 
         if self.cebra.active {
-            for det in &mut self.cebra.detectors {
-                if det.active {
-                    let sps_config = self.sps.clone();
+            configs.merge(self.cebra.configs(column_names, &self.sps, &None));
 
-                    if should_calculate_cut_histograms {
-                        let cuts = merged_cuts.clone();
-                        let cebr3_configs =
-                            det.cebr3_configs(&sps_config.clone(), &Some(cuts.clone()));
-                        configs.merge(cebr3_configs.clone()); // Ensure `merge` handles in-place modifications
-                    }
-
-                    if self.options.calculate_no_cut_histograms {
-                        let cebr3_configs = det.cebr3_configs(&sps_config.clone(), &None);
-                        configs.merge(cebr3_configs.clone()); // Ensure `merge` handles in-place modifications
-                    }
-                }
+            if let Some(selected_cuts) = sps_selected_cuts {
+                configs.merge(
+                    self.cebra
+                        .configs(column_names, &self.sps, &Some(selected_cuts)),
+                );
             }
         }
 
         if self.catrina.active {
-            if should_calculate_cut_histograms {
-                let cuts = merged_cuts.clone();
-                let catrina_configs = self.catrina.configs(column_names, &Some(cuts.clone()));
-                configs.merge(catrina_configs.clone());
-            }
-
-            if self.options.calculate_no_cut_histograms {
-                let catrina_configs = self.catrina.configs(column_names, &None);
-                configs.merge(catrina_configs.clone());
-            }
+            configs.merge(self.catrina.configs(column_names, &None));
         }
 
-        if self.icespice.active {
-            let sps_config = self.sps.clone();
-            let cebr_config = self.cebra.clone();
+        // if self.icespice.active {
+        //     let sps_config = self.sps.clone();
+        //     let cebr_config = self.cebra.clone();
 
-            if should_calculate_cut_histograms {
-                let cuts = merged_cuts.clone();
-                let icespice_configs =
-                    self.icespice
-                        .icespice_configs(&cebr_config, &sps_config, &Some(cuts));
-                configs.merge(icespice_configs.clone()); // Ensure `merge` handles in-place modifications
-            }
-
-            if self.options.calculate_no_cut_histograms {
-                let icespice_configs =
-                    self.icespice
-                        .icespice_configs(&cebr_config, &sps_config, &None);
-                configs.merge(icespice_configs.clone()); // Ensure `merge` handles in-place modifications
-            }
-        }
+        //     if should_calculate_cut_histograms {
+        //         let cuts = merged_sps_cuts.clone();
+        //         let icespice_configs =
+        //             self.icespice
+        //                 .icespice_configs(&cebr_config, &sps_config, &Some(cuts));
+        //         configs.merge(icespice_configs.clone()); // Ensure `merge` handles in-place modifications
+        //     }
+        // }
 
         configs
     }
 
-    // pub fn cr52dp_experiment(&mut self) {
-    //     self.sps = SPSConfig {
-    //         active: true,
-    //         xavg: Calibration {
-    //             a: -0.0023904378617156377,
-    //             b: -18.49776562220117,
-    //             c: 1357.4874219091237,
-    //             bins: 500,
-    //             range: (-100.0, 5500.0),
-    //             active: true,
-    //         },
-    //         options: SPSOptions::default(),
-    //     };
+    pub fn cr52dp_experiment(&mut self) {
+        self.sps = SPSConfig {
+            active: true,
+            options: SPSOptions::default(),
+            sps_cuts: Cuts::default(),
+        };
 
-    //     self.cebra.active = true;
-    //     self.cebra.cr52dp_experiment();
-    // }
+        self.cebra.active = true;
+        self.cebra.cr52dp_experiment();
+    }
 }

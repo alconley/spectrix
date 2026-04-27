@@ -355,7 +355,7 @@ impl Cuts {
                     };
                     let cut1d: Result<Cut1D, _> = serde_json::from_str(&content);
                     if let Ok(mut cut) = cut1d {
-                        cut.active = false; // Set active to false by default
+                        cut.active = true; // Set active to true by default
                         cut.normalize_after_load();
                         cut.saved_path = Some(path.clone());
                         cuts.push(Cut::Cut1D(cut));
@@ -364,7 +364,7 @@ impl Cuts {
 
                     let cut2d: Result<Cut2D, _> = serde_json::from_str(&content);
                     if let Ok(mut cut) = cut2d {
-                        cut.active = false; // Set active to false by default
+                        cut.active = true; // Set active to true by default
                         cut.saved_path = Some(path.clone());
                         cut.normalize_after_load();
                         cuts.push(Cut::Cut2D(cut));

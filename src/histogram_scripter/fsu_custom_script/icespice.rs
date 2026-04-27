@@ -188,11 +188,6 @@ impl PIPS {
             configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/{pips_rel_time_to_sps_column} v {pips_energy_column}"), &pips_rel_time_to_sps_column, &pips_energy_column, no_sps_tcut_time_range, pips_range, (no_sps_tcut_time_bins, pips_bins), &main_cuts);
             configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/{pips_rel_time_to_sps_column} v ScintLeftEnergy"), &pips_rel_time_to_sps_column, &format!("ScintLeftEnergy"), no_sps_tcut_time_range, (0.0, 4096.0), (no_sps_tcut_time_bins, 4096), &main_cuts);
 
-            if sps_config.xavg.active {
-                configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/{pips_rel_time_to_sps_column} v XavgEnergyCalibrated"), &pips_rel_time_to_sps_column, &format!("XavgEnergyCalibrated"), no_sps_tcut_time_range, sps_config.xavg.range, (no_sps_tcut_time_bins, sps_config.xavg.bins), &main_cuts);
-                configs.hist2d(&format!("{base_path}/PIPS{det}/SPS/{pips_energy_column} v XavgEnergyCalibrated"), &format!("XavgEnergyCalibrated"), &pips_energy_column, sps_config.xavg.range, pips_range, (pips_bins, sps_config.xavg.bins), &main_cuts);
-            }
-
             if self.sps_timecut.active {
 
                 // add column for the time cut to shift the time

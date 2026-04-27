@@ -1,35 +1,40 @@
-use super::general::Calibration;
 use crate::histoer::configs::Configs;
 use crate::histoer::cuts::{Cut, Cuts};
 use std::f64::consts::PI;
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct SPSOptions {
     pub focal_plane: bool,
+    pub focal_plane_checks: bool,
     pub particle_identification: bool,
     pub particle_identification_vs_focal_plane: bool,
     pub delay_lines_vs_focal_plane: bool,
     pub timing: bool,
+    pub calculate_no_cut_histograms: bool,
 }
 
 impl Default for SPSOptions {
     fn default() -> Self {
         Self {
             focal_plane: true,
+            focal_plane_checks: true,
             particle_identification: true,
             particle_identification_vs_focal_plane: true,
             delay_lines_vs_focal_plane: true,
-            timing: true,
+            timing: false,
+            calculate_no_cut_histograms: true,
         }
     }
 }
 
 /*************************** SE-SPS Custom Struct ***************************/
 #[derive(Default, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct SPSConfig {
     pub active: bool,
-    pub xavg: Calibration,
     pub options: SPSOptions,
+    pub sps_cuts: Cuts,
 }
 
 impl SPSConfig {
@@ -37,12 +42,107 @@ impl SPSConfig {
         Self::default()
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    fn selected_cut(cut: &Cut) -> Cut {
+        let mut cut = cut.clone();
+        match &mut cut {
+            Cut::Cut1D(cut1d) => cut1d.active = true,
+            Cut::Cut2D(cut2d) => cut2d.active = true,
+        }
+        cut
+    }
+
+    fn sync_selected_cuts_from_available(&mut self, available_cuts: &Cuts) {
+        self.sps_cuts.cuts = self
+            .sps_cuts
+            .cuts
+            .iter()
+            .filter_map(|selected_cut| {
+                available_cuts
+                    .cuts
+                    .iter()
+                    .find(|available_cut| available_cut.name() == selected_cut.name())
+                    .map(Self::selected_cut)
+            })
+            .collect();
+    }
+
+    pub fn resolved_selected_cuts(&self, available_cuts: &Cuts, column_names: &[String]) -> Cuts {
+        let selected_cuts = Cuts::new(
+            self.sps_cuts
+                .cuts
+                .iter()
+                .filter_map(|selected_cut| {
+                    available_cuts
+                        .cuts
+                        .iter()
+                        .find(|available_cut| available_cut.name() == selected_cut.name())
+                        .map(Self::selected_cut)
+                })
+                .collect(),
+        );
+        selected_cuts.active_cuts_valid_for_columns(column_names, "SE-SPS custom configs")
+    }
+
+    pub fn configs(&self, available_cuts: &Cuts, column_names: &[String]) -> Configs {
+        let selected_cuts = self.resolved_selected_cuts(available_cuts, column_names);
+        let should_calculate_cut_histograms = !selected_cuts.is_empty();
+        let mut configs = Configs::default();
+
+        if should_calculate_cut_histograms {
+            configs.merge(self.sps_configs(&Some(selected_cuts.clone())));
+        }
+
+        if self.options.calculate_no_cut_histograms || !should_calculate_cut_histograms {
+            configs.merge(self.sps_configs(&None));
+        }
+
+        configs
+    }
+
+    fn cut_selector_ui(&mut self, ui: &mut egui::Ui, available_cuts: &Cuts) {
+        ui.label("Global SE-SPS Cuts");
+        ui.label(
+            "Select the General cuts that should generate output under `SE-SPS/Cuts`. Selected cuts stay highlighted in the list below.",
+        );
+
+        if available_cuts.cuts.is_empty() {
+            ui.label("No cuts are available in the General section right now.");
+            return;
+        }
+
+        for available_cut in &available_cuts.cuts {
+            let is_selected = self
+                .sps_cuts
+                .cuts
+                .iter()
+                .any(|selected_cut| selected_cut.name() == available_cut.name());
+
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .selectable_label(is_selected, available_cut.name())
+                    .clicked()
+                {
+                    if is_selected {
+                        self.sps_cuts.remove_cut(available_cut.name());
+                    } else {
+                        self.sps_cuts.add_cut(Self::selected_cut(available_cut));
+                    }
+                }
+
+                available_cut.info_button(ui, None);
+            });
+        }
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui, available_cuts: &Cuts) {
+        self.sync_selected_cuts_from_available(available_cuts);
+
         ui.separator();
 
         ui.horizontal_wrapped(|ui| {
             ui.label("Histogram Options");
             ui.checkbox(&mut self.options.focal_plane, "Focal Plane");
+            ui.checkbox(&mut self.options.focal_plane_checks, "Focal Plane Checks");
             ui.checkbox(
                 &mut self.options.particle_identification,
                 "Particle Identification",
@@ -60,10 +160,17 @@ impl SPSConfig {
 
         ui.separator();
 
-        ui.horizontal(|ui| {
-            ui.label("Xavg Calibration: ");
-            self.xavg.ui(ui, true);
-        });
+        // check if there are cuts, if so show check box
+        if !available_cuts.cuts.is_empty() {
+            ui.checkbox(
+                &mut self.options.calculate_no_cut_histograms,
+                "Calculate No-Cut Histograms",
+            );
+        } else {
+            self.options.calculate_no_cut_histograms = true;
+        }
+
+        self.cut_selector_ui(ui, available_cuts);
     }
 
     #[rustfmt::skip]
@@ -71,11 +178,11 @@ impl SPSConfig {
     pub fn sps_configs(&self, main_cuts: &Option<Cuts>) -> Configs {
         let mut configs = Configs::default();
 
-        let base_path = if main_cuts.is_none() { "No Cuts/SE-SPS" } else { "Cuts/SE-SPS" };
-
-        if self.xavg.active {
-            configs.columns.push(self.xavg.new_column("Xavg", "XavgEnergyCalibrated"));
-        }
+        let base_path = if main_cuts.is_none() {
+            "SE-SPS/Histograms"
+        } else {
+            "SE-SPS/Cuts"
+        };
 
         let bothplanes_cut = Cut::new_1d("Both Planes", "X2 != -1e6 & X1 != -1e6");
         let only_x1_plane_cut = Cut::new_1d("Only X1 Plane", "X1 != -1e6 & X2 == -1e6");
@@ -132,19 +239,19 @@ impl SPSConfig {
             // configs.hist2d(&format!("{base_path}/Focal Plane/Both Planes- AnodeBack v ScintLeft"), "ScintLeftEnergy", "AnodeBackEnergy", range, range, (bins,bins), &cut_bothplanes);
             // configs.hist1d(&format!("{base_path}/Focal Plane/Xshap"), "Xshap", fp_range, fp_bins, main_cuts); //JCE 2026
 
-            if self.xavg.active {
-                configs.hist1d(&format!("{base_path}/Focal Plane/Xavg Energy Calibrated"), "XavgEnergyCalibrated", self.xavg.range, self.xavg.bins, main_cuts);
-            }
             configs.hist2d(&format!("{base_path}/Focal Plane/X2 v X1"), "X1", "X2", fp_range, fp_range, (fp_bins, fp_bins), main_cuts);
             // configs.hist2d(&format!("{base_path}/Focal Plane/Theta v Xavg"), "Xavg", "Theta", fp_range, (0.0, PI), (fp_bins, fp_bins), main_cuts);
             configs.hist2d(&format!("{base_path}/Focal Plane/Both Planes- AnodeBack v ScintLeft"), "ScintLeftEnergy", "AnodeBackEnergy", range, range, (bins,bins), &cut_bothplanes);
-            configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Xavg"), "Xavg", fp_range, fp_bins, main_cuts);
-            configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Raw- X1"), "X1", fp_range, fp_bins, main_cuts);
-            configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Both Planes- X1"), "X1", fp_range, fp_bins, &cut_bothplanes);
-            configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Only 1 Plane- X1"), "X1", fp_range, fp_bins, &cut_only_x1_plane);
-            configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Raw- X2"), "X2", fp_range, fp_bins, main_cuts);
-            configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Both Planes- X2"), "X2", fp_range, fp_bins, &cut_bothplanes);
-            configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Only 1 Plane- X2"), "X2", fp_range, fp_bins, &cut_only_x2_plane);
+
+            if self.options.focal_plane_checks {
+                configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Xavg"), "Xavg", fp_range, fp_bins, main_cuts);
+                configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Raw- X1"), "X1", fp_range, fp_bins, main_cuts);
+                configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Both Planes- X1"), "X1", fp_range, fp_bins, &cut_bothplanes);
+                configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Only 1 Plane- X1"), "X1", fp_range, fp_bins, &cut_only_x1_plane);
+                configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Raw- X2"), "X2", fp_range, fp_bins, main_cuts);
+                configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Both Planes- X2"), "X2", fp_range, fp_bins, &cut_bothplanes);
+                configs.hist1d(&format!("{base_path}/Focal Plane/Checks/Only 1 Plane- X2"), "X2", fp_range, fp_bins, &cut_only_x2_plane);
+            }
 
             //configs.hist1d(&format!("{base_path}/Monitor/MonitorEnergy"), "MonitorEnergy", range, bins, main_cuts);
 

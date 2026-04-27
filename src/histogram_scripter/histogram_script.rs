@@ -11,10 +11,10 @@ use std::fs::File;
 use std::io::{BufReader, Write as _};
 
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct HistogramScript {
     pub configs: Configs,
     pub custom_scripts: CustomConfigs,
-    #[serde(default)]
     pub calibration: CalibrationScript,
     pub active_cut_states: HashMap<String, bool>,
 }
@@ -139,7 +139,7 @@ impl HistogramScript {
             Self::upsert_cut(&mut merged_cuts.cuts, cut);
         }
 
-        for cut in self.custom_scripts.cuts.get_active_cuts().cuts {
+        for cut in self.custom_scripts.active_filter_cuts().cuts {
             Self::upsert_cut(&mut merged_cuts.cuts, cut);
         }
 
@@ -218,8 +218,12 @@ impl HistogramScript {
             egui::CollapsingHeader::new("Custom")
                 .default_open(false)
                 .show(ui, |ui| {
+                    let merged_general_cuts = self
+                        .configs
+                        .cuts
+                        .merged_with_active_cuts(Some(active_cuts.as_slice()));
                     self.custom_scripts
-                        .ui(ui, Some(active_cuts.as_mut_slice()), column_names);
+                        .ui(ui, &merged_general_cuts, &available_columns);
                 });
         });
 
@@ -239,14 +243,14 @@ impl HistogramScript {
             log::error!("Failed to retrieve column names for custom configs: {error}");
             Vec::new()
         });
-        let active_custom_configs = self
-            .custom_scripts
-            .merge_active_configs(Some(active_cuts.as_slice()), &column_names);
-
         let mut cloned_configs = self.configs.clone();
         let merged_general_cuts = cloned_configs
             .cuts
             .merged_with_active_cuts(Some(active_cuts.as_slice()));
+        let available_columns = self.available_column_names(&column_names);
+        let active_custom_configs = self
+            .custom_scripts
+            .merge_active_configs(&merged_general_cuts, &available_columns);
         cloned_configs.sync_histogram_cuts(&merged_general_cuts);
         cloned_configs.merge(active_custom_configs);
         cloned_configs.prepend_computed_columns(self.calibration.computed_columns(&column_names));

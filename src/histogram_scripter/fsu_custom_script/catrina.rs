@@ -96,9 +96,7 @@ impl CATRiNAConfig {
     }
 
     fn detector_management_ui(&mut self, ui: &mut egui::Ui, column_names: &[String]) {
-        let mut detector_to_remove = None;
-
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Detectors");
 
             let discover_response = ui
@@ -115,30 +113,17 @@ impl CATRiNAConfig {
             }
         });
 
-        ui.label("Checked detectors stay visible below. Remove deletes the CATRiNA detector configuration.");
-
-        if self.detectors.is_empty() {
-            ui.label("No CATRiNA detectors loaded yet.");
-        } else {
-            for (index, detector) in self.detectors.iter_mut().enumerate() {
-                ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Checked detectors stay visible below. Remove deletes the CATRiNA detector configuration.");
+            if self.detectors.is_empty() {
+                ui.label("No CATRiNA detectors loaded yet.");
+            } else {
+                for detector in &mut self.detectors {
                     ui.checkbox(&mut detector.active, format!("CATRINA{}", detector.number))
                         .on_hover_text("Show or hide this detector's histogram generation.");
-
-                    let remove_response = ui.small_button("X").on_hover_text(
-                        "Remove this detector and its saved CATRiNA-specific settings.",
-                    );
-
-                    if remove_response.clicked() {
-                        detector_to_remove = Some(index);
-                    }
-                });
+                }
             }
-        }
-
-        if let Some(index) = detector_to_remove {
-            self.detectors.remove(index);
-        }
+        });
     }
 
     fn histogram_settings_ui(&mut self, ui: &mut egui::Ui) {
