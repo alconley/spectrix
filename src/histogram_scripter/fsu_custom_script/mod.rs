@@ -1,4 +1,3 @@
-pub mod catrina;
 pub mod cebra;
 pub mod general;
 pub mod icespice;

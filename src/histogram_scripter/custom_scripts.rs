@@ -1,7 +1,6 @@
 use crate::histoer::{configs::Configs, cuts::Cuts};
 use crate::histogram_scripter::fsu_custom_script::se_sps::SPSOptions;
 
-use super::fsu_custom_script::catrina::CATRiNAConfig;
 use super::fsu_custom_script::cebra::CeBrAConfig;
 // use super::fsu_custom_script::general::Calibration;
 use super::fsu_custom_script::icespice::ICESPICEConfig;
@@ -13,7 +12,6 @@ use super::fsu_custom_script::se_sps::SPSConfig;
 pub struct CustomConfigs {
     pub sps: SPSConfig,
     pub cebra: CeBrAConfig,
-    pub catrina: CATRiNAConfig,
     pub icespice: ICESPICEConfig,
 }
 
@@ -22,7 +20,6 @@ impl Default for CustomConfigs {
         Self {
             sps: SPSConfig::new(),
             cebra: CeBrAConfig::default(),
-            catrina: CATRiNAConfig::default(),
             icespice: ICESPICEConfig::default(),
         }
     }
@@ -44,7 +41,6 @@ impl CustomConfigs {
             ui.label("Custom Configs: ");
             ui.checkbox(&mut self.sps.active, "SPS");
             ui.checkbox(&mut self.cebra.active, "CeBrA");
-            ui.checkbox(&mut self.catrina.active, "CATRiNA");
             // ui.checkbox(&mut self.icespice.active, "ICESPICE");
         });
 
@@ -68,12 +64,6 @@ impl CustomConfigs {
         if self.cebra.active {
             ui.collapsing("CeBrA", |ui| {
                 self.cebra.ui(ui, &self.sps, column_names);
-            });
-        }
-
-        if self.catrina.active {
-            ui.collapsing("CATRiNA", |ui| {
-                self.catrina.ui(ui, column_names);
             });
         }
 
@@ -118,10 +108,6 @@ impl CustomConfigs {
                         .configs(column_names, &self.sps, &Some(selected_cuts)),
                 );
             }
-        }
-
-        if self.catrina.active {
-            configs.merge(self.catrina.configs(column_names, &None));
         }
 
         // if self.icespice.active {
