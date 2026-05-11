@@ -68,6 +68,19 @@ impl Histogram {
                 self.plot_settings.settings_ui(ui);
             });
 
+        SubMenuButton::new("Export")
+            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
+            .ui(ui, |ui| {
+                if ui
+                    .button("Bin Counts [.csv]")
+                    .on_hover_text("Export one row per bin: bin_left, bin_right, count.")
+                    .clicked()
+                {
+                    self.export_bin_counts_csv_dialog();
+                    ui.close();
+                }
+            });
+
         SubMenuButton::new("Cuts")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
             .ui(ui, |ui| {
