@@ -331,7 +331,8 @@ impl Histogram2D {
             (scroll, i.pointer.primary_down(), i.modifiers)
         });
 
-        let mut plot = egui_plot::Plot::new(self.name.clone());
+        let plot_id = egui::Id::new(("histogram2d-plot", std::ptr::from_ref(self) as usize));
+        let mut plot = egui_plot::Plot::new(self.name.clone()).id(plot_id);
         plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
         if self.image.texture.is_none() {

@@ -112,12 +112,18 @@ impl PlotSettings {
     pub fn interactive_response(&mut self, plot_response: &egui_plot::PlotResponse<()>) {
         self.projections.interactive_dragging(plot_response);
 
+        let mut interactions_dragging = self.projections.currently_dragging();
+        let mut cuts_clicking = false;
+
         if self.cuts_available() {
             for cut in &mut self.cuts {
-                self.egui_settings.allow_drag = !cut.is_dragging();
-                self.egui_settings.allow_double_click_reset = !cut.is_clicking();
                 cut.interactions(plot_response);
+                interactions_dragging |= cut.is_dragging();
+                cuts_clicking |= cut.is_clicking();
             }
         }
+
+        self.egui_settings.allow_drag = !interactions_dragging;
+        self.egui_settings.allow_double_click_reset = !cuts_clicking;
     }
 }

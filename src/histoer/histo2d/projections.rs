@@ -402,15 +402,20 @@ impl Projections {
         }
     }
 
-    pub fn is_dragging(&mut self) {
-        self.dragging = (self.add_y_projection
+    pub fn currently_dragging(&self) -> bool {
+        (self.add_y_projection
             && (self.y_projection_line_1.is_dragging
                 || self.y_projection_line_2.is_dragging
                 || self.y_area_dragging))
             || (self.add_x_projection
                 && (self.x_projection_line_1.is_dragging
                     || self.x_projection_line_2.is_dragging
-                    || self.x_area_dragging));
+                    || self.x_area_dragging))
+    }
+
+    pub fn is_dragging(&mut self) -> bool {
+        self.dragging = self.currently_dragging();
+        self.dragging
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
@@ -455,6 +460,10 @@ impl Projections {
                 self.x_drag_anchor = None;
             }
             self.interactive_drag_x_projection_area(plot_response);
+        }
+
+        if self.currently_dragging() {
+            self.dragging = true;
         }
     }
 

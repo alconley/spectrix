@@ -219,7 +219,10 @@ impl Histogram {
         }
 
         let width = ui.available_width();
-        let mut plot = egui_plot::Plot::new(self.name.clone()).width(width);
+        let plot_id = egui::Id::new(("histogram1d-plot", std::ptr::from_ref(self) as usize));
+        let mut plot = egui_plot::Plot::new(self.name.clone())
+            .id(plot_id)
+            .width(width);
         plot = self.plot_settings.egui_settings.apply_to_plot(plot);
 
         let (scroll, _pointer_down, _modifiers) = ui.input(|i| {
