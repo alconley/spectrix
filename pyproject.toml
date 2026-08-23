@@ -1,0 +1,13 @@
+[project]
+name = "spectrix-python"
+version = "1.4.0"
+description = "Python runtime dependencies embedded by Spectrix"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "lmfit",
+    "numpy",
+    "uproot",
+]
+
+[tool.uv]
+package = false
