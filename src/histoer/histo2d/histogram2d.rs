@@ -155,7 +155,7 @@ impl Histogram2D {
         let y_bins = df.column("y_bin")?.i32()?;
         let counts = df.column("count")?.u32()?;
 
-        for ((x_opt, y_opt), count_opt) in x_bins.into_iter().zip(y_bins).zip(counts) {
+        for ((x_opt, y_opt), count_opt) in x_bins.iter().zip(y_bins.iter()).zip(counts.iter()) {
             if let ((Some(x), Some(y)), Some(count)) = ((x_opt, y_opt), count_opt) {
                 match (x, y) {
                     (-2, _) | (_, -2) => self.underflow += count as u64,

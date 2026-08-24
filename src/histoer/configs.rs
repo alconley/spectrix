@@ -3863,7 +3863,7 @@ mod tests {
             .iter()
             .filter_map(|config| match config {
                 Config::Hist1D(hist) => Some((hist.name.as_str(), hist.column_name.as_str())),
-                _ => None,
+                Config::Hist2D(_) => None,
             })
             .collect::<Vec<_>>();
 
@@ -3901,7 +3901,7 @@ mod tests {
             .iter()
             .filter_map(|config| match config {
                 Config::Hist1D(hist) => Some((hist.name.as_str(), hist.column_name.as_str())),
-                _ => None,
+                Config::Hist2D(_) => None,
             })
             .collect::<Vec<_>>();
 
@@ -3950,7 +3950,7 @@ mod tests {
                     hist.x_column_name.as_str(),
                     hist.y_column_name.as_str(),
                 )),
-                _ => None,
+                Config::Hist1D(_) => None,
             })
             .collect::<Vec<_>>();
 

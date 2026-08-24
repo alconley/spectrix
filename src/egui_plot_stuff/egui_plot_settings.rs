@@ -109,7 +109,15 @@ impl EguiPlotSettings {
             .allow_double_click_reset(self.allow_double_click_reset)
             .x_axis_label(self.x_label.clone())
             .y_axis_label(self.y_label.clone())
-            .label_formatter(move |name, value| {
+            .label_formatter(move |hover| {
+                let (name, value) = match hover {
+                    egui_plot::HoverPosition::NearDataPoint {
+                        plot_name,
+                        position,
+                        ..
+                    } => (*plot_name, *position),
+                    egui_plot::HoverPosition::Elsewhere { position } => ("", *position),
+                };
                 let x = if log_x {
                     10.0f64.powf(value.x)
                 } else {
@@ -121,9 +129,9 @@ impl EguiPlotSettings {
                     value.y
                 };
                 if !name.is_empty() {
-                    format!("{name}: {x:.2}, {y:.2}")
+                    Some(format!("{name}: {x:.2}, {y:.2}"))
                 } else {
-                    format!("{x:.2}, {y:.2}")
+                    Some(format!("{x:.2}, {y:.2}"))
                 }
             });
 

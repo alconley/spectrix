@@ -993,8 +993,8 @@ impl Cut2D {
         let y_col = df.column(y_column)?.f64()?;
 
         Ok(x_col
-            .into_iter()
-            .zip(y_col)
+            .iter()
+            .zip(y_col.iter())
             .map(|(x_value, y_value)| {
                 x_value.zip(y_value).is_some_and(|(x_value, y_value)| {
                     polygon.contains(&geo::Point::new(x_value, y_value))
@@ -1325,7 +1325,7 @@ mod tests {
         ]);
 
         let mask = cut.create_mask(&df).expect("failed to build cut mask");
-        let values = mask.into_iter().collect::<Vec<_>>();
+        let values = mask.iter().collect::<Vec<_>>();
 
         assert_eq!(values, vec![Some(true), Some(true), Some(false)]);
     }

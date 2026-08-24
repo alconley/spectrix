@@ -189,7 +189,7 @@ const SEARCHABLE_PICKER_RESULTS_MIN_HEIGHT: f32 = 120.0;
 
 pub fn searchable_column_picker_with_width_ui(
     ui: &mut egui::Ui,
-    id_source: impl Hash,
+    id_source: impl Hash + std::fmt::Debug,
     selected: &mut String,
     available_columns: &[String],
     hint_text: &str,
@@ -271,7 +271,7 @@ pub fn searchable_column_picker_with_width_ui(
 
 pub fn searchable_column_picker_ui(
     ui: &mut egui::Ui,
-    id_source: impl Hash,
+    id_source: impl Hash + std::fmt::Debug,
     selected: &mut String,
     available_columns: &[String],
     hint_text: &str,
@@ -290,7 +290,7 @@ pub fn searchable_column_picker_ui(
 
 pub fn searchable_multi_column_picker_with_width_ui(
     ui: &mut egui::Ui,
-    id_source: impl Hash,
+    id_source: impl Hash + std::fmt::Debug,
     selected: &mut Vec<String>,
     available_columns: &[String],
     hint_text: &str,
@@ -415,7 +415,7 @@ pub fn searchable_multi_column_picker_with_width_ui(
 
 pub fn searchable_multi_column_picker_ui(
     ui: &mut egui::Ui,
-    id_source: impl Hash,
+    id_source: impl Hash + std::fmt::Debug,
     selected: &mut Vec<String>,
     available_columns: &[String],
     hint_text: &str,

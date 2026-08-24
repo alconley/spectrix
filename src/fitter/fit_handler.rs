@@ -63,7 +63,7 @@ fn unique_value_count(values: &[f64]) -> usize {
 
 fn draw_plot_segment(
     plot_ui: &mut PlotUi<'_>,
-    id_source: impl std::hash::Hash,
+    id_source: impl std::hash::Hash + std::fmt::Debug,
     points: Vec<[f64; 2]>,
     color: Color32,
     width: f32,
@@ -813,11 +813,19 @@ impl Fits {
             .allow_boxed_zoom(false)
             .x_axis_label("Fit Mean")
             .y_axis_label("Energy")
-            .label_formatter(|name, value| {
+            .label_formatter(|hover| {
+                let (name, value) = match hover {
+                    egui_plot::HoverPosition::NearDataPoint {
+                        plot_name,
+                        position,
+                        ..
+                    } => (*plot_name, *position),
+                    egui_plot::HoverPosition::Elsewhere { position } => ("", *position),
+                };
                 if name.is_empty() {
-                    format!("x: {:.3}\ny: {:.3}", value.x, value.y)
+                    Some(format!("x: {:.3}\ny: {:.3}", value.x, value.y))
                 } else {
-                    name.to_owned()
+                    Some(name.to_owned())
                 }
             })
             .show(ui, |plot_ui| {
@@ -955,11 +963,19 @@ impl Fits {
             .allow_boxed_zoom(false)
             .x_axis_label("Fit Mean")
             .y_axis_label("Residual")
-            .label_formatter(|name, value| {
+            .label_formatter(|hover| {
+                let (name, value) = match hover {
+                    egui_plot::HoverPosition::NearDataPoint {
+                        plot_name,
+                        position,
+                        ..
+                    } => (*plot_name, *position),
+                    egui_plot::HoverPosition::Elsewhere { position } => ("", *position),
+                };
                 if name.is_empty() {
-                    format!("x: {:.3}\ny: {:.3}", value.x, value.y)
+                    Some(format!("x: {:.3}\ny: {:.3}", value.x, value.y))
                 } else {
-                    name.to_owned()
+                    Some(name.to_owned())
                 }
             })
             .show(ui, |plot_ui| {
@@ -1734,7 +1750,7 @@ impl Fits {
                             return;
                         }
 
-                        egui::CentralPanel::default().show_inside(ui, |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
                             egui::ScrollArea::both()
                                 .id_salt(scroll_id.as_str())
                                 .show(ui, |ui| {
@@ -1866,8 +1882,10 @@ mod tests {
         params.energy.uncertainty = Some(0.3);
         gaussian.fit_result.push(params);
 
-        let mut fitter = Fitter::default();
-        fitter.fit_result = Some(FitResult::Gaussian(gaussian));
+        let fitter = Fitter {
+            fit_result: Some(FitResult::Gaussian(gaussian)),
+            ..Fitter::default()
+        };
 
         let mut loaded = Fits::new();
         loaded.settings.calibrated = true;

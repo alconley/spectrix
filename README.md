@@ -37,13 +37,73 @@ Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting 
 
 ### Quick Start
 
-If you want the simplest launch path, use:
+The bootstrap launcher checks for native build tools, `uv`, Rust, and Python
+3.13. Missing prerequisites are installed before the locked environment is
+synchronized and Spectrix starts.
+
+On Linux or macOS, run:
 
 ```bash
-./spectrix.sh
+sh ./spectrix.sh
 ```
 
-This script creates/activates `.venv`, installs Python dependencies, sets the required PyO3 environment variables, and runs `cargo run --release`.
+On Windows PowerShell, run:
+
+```powershell
+.\spectrix.exe
+```
+
+The small Windows executable invokes `spectrix.ps1` from its own folder, so it
+still performs the prerequisite checks/installations and Python environment
+setup. If the prebuilt launcher is unavailable in a source checkout, its
+PowerShell equivalent is
+`powershell -ExecutionPolicy Bypass -File .\spectrix.ps1`.
+
+No preinstalled Python is required: `uv` provisions the version pinned in
+`.python-version`. Windows may show a UAC prompt when the Visual Studio C++
+Build Tools are missing. On macOS, complete the Xcode Command Line Tools prompt
+and rerun the command. Automatic Linux system-package installation currently
+supports `apt`-based distributions.
+
+To inspect the machine without installing or launching anything, use
+`sh ./spectrix.sh --check` or
+`powershell -ExecutionPolicy Bypass -File .\spectrix.ps1 -CheckOnly`.
+Maintainers can validate
+the complete platform plan without making changes with `--dry-run` on Linux and
+macOS or `-DryRun` on Windows.
+
+To show Rust logs in the launching terminal, select an explicit log level:
+
+```bash
+sh ./spectrix.sh --info
+sh ./spectrix.sh --debug
+```
+
+```powershell
+.\spectrix.exe --info
+.\spectrix.exe --debug
+```
+
+`--info` sets `RUST_LOG=info` and keeps the optimized release build. `--debug`
+sets `RUST_LOG=debug` and uses Cargo's debug build. Both modes keep the Windows
+console attached so logs written by `env_logger` are visible. Use
+`--debug-build` or `-DebugBuild` when you want an unoptimized build without
+changing an existing `RUST_LOG` filter.
+
+If Spectrix remains in Task Manager without showing a window, its persisted
+session may be too large or incompatible with the current version. Start once
+with the reset option:
+
+```bash
+sh ./spectrix.sh --reset-state
+```
+
+```powershell
+.\spectrix.exe --reset-state --info
+```
+
+The previous `app.ron` is renamed to `app.ron.backup` (or the next numbered
+backup) rather than deleted. Later launches can use the normal command.
 
 ---
 
@@ -53,8 +113,7 @@ This script creates/activates `.venv`, installs Python dependencies, sets the re
 - **Ubuntu 22.04.5 LTS**  
 - **Windows 10**
 
-> ⚠️ Tested with Python 3.13.  
-> On Windows, ensure that Python is downloaded from [python.org](https://www.python.org/downloads/).
+> Tested with Python 3.13, which the bootstrap launcher installs through `uv`.
 
 ---
 

@@ -535,86 +535,6 @@ pub struct Parameter {
     pub calibrated_uncertainty: Option<f64>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{Parameter, Value, fit_measurement_hover_text, format_fit_measurement};
-
-    #[test]
-    fn parameter_deserializes_null_min_max_as_infinities() {
-        let json = r#"{
-            "name":"slope",
-            "min":null,
-            "max":null,
-            "initial_guess":0.0,
-            "vary":true,
-            "value":null,
-            "uncertainty":null,
-            "calibrated_value":null,
-            "calibrated_uncertainty":null
-        }"#;
-
-        let p: Parameter = serde_json::from_str(json).expect("parameter should deserialize");
-        assert!(p.min.is_infinite() && p.min.is_sign_negative());
-        assert!(p.max.is_infinite() && p.max.is_sign_positive());
-    }
-
-    #[test]
-    fn value_deserializes_legacy_uncertainity_field() {
-        let json = r#"{"value": 42.0, "uncertainity": 0.5}"#;
-        let v: Value = serde_json::from_str(json).expect("value should deserialize");
-        assert_eq!(v.value, 42.0);
-        assert_eq!(v.uncertainty, 0.5);
-    }
-
-    #[test]
-    fn parameter_deserializes_ron_infinite_bounds() {
-        let ron = r#"(name:"slope",min:-inf,max:inf,initial_guess:0.0,vary:true,value:None,uncertainty:None,calibrated_value:None,calibrated_uncertainty:None)"#;
-        let p: Parameter = ron::from_str(ron).expect("parameter should deserialize from ron");
-        assert!(p.min.is_infinite() && p.min.is_sign_negative());
-        assert!(p.max.is_infinite() && p.max.is_sign_positive());
-    }
-
-    #[test]
-    fn format_fit_measurement_uses_sci_fmt_when_uncertainty_exists() {
-        assert_eq!(
-            format_fit_measurement(Some(12.345), Some(0.067)),
-            "12.35(7)"
-        );
-    }
-
-    #[test]
-    fn format_fit_measurement_falls_back_without_uncertainty() {
-        assert_eq!(format_fit_measurement(Some(12.345), None), "12.35");
-        assert_eq!(
-            format_fit_measurement(Some(12.345), Some(f64::NAN)),
-            "12.35"
-        );
-    }
-
-    #[test]
-    fn format_fit_measurement_uses_placeholder_for_missing_value() {
-        assert_eq!(format_fit_measurement(None, Some(0.067)), "—");
-        assert_eq!(format_fit_measurement(Some(f64::NAN), Some(0.067)), "—");
-    }
-
-    #[test]
-    fn fit_measurement_hover_text_shows_raw_value_and_uncertainty() {
-        assert_eq!(
-            fit_measurement_hover_text(Some(12.345), Some(0.067)).as_deref(),
-            Some("Value: 12.345\nUncertainty: 0.067")
-        );
-    }
-
-    #[test]
-    fn fit_measurement_hover_text_handles_missing_parts() {
-        assert_eq!(
-            fit_measurement_hover_text(Some(12.345), None).as_deref(),
-            Some("Value: 12.345\nUncertainty: —")
-        );
-        assert_eq!(fit_measurement_hover_text(None, Some(0.067)), None);
-    }
-}
-
 fn default_parameter_min() -> f64 {
     f64::NEG_INFINITY
 }
@@ -797,5 +717,85 @@ impl Parameter {
             ui.label(format!("{value:.3}"));
             ui.label(format!("{:.3}", self.uncertainty.unwrap_or(0.0)));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Parameter, Value, fit_measurement_hover_text, format_fit_measurement};
+
+    #[test]
+    fn parameter_deserializes_null_min_max_as_infinities() {
+        let json = r#"{
+            "name":"slope",
+            "min":null,
+            "max":null,
+            "initial_guess":0.0,
+            "vary":true,
+            "value":null,
+            "uncertainty":null,
+            "calibrated_value":null,
+            "calibrated_uncertainty":null
+        }"#;
+
+        let p: Parameter = serde_json::from_str(json).expect("parameter should deserialize");
+        assert!(p.min.is_infinite() && p.min.is_sign_negative());
+        assert!(p.max.is_infinite() && p.max.is_sign_positive());
+    }
+
+    #[test]
+    fn value_deserializes_legacy_uncertainity_field() {
+        let json = r#"{"value": 42.0, "uncertainity": 0.5}"#;
+        let v: Value = serde_json::from_str(json).expect("value should deserialize");
+        assert_eq!(v.value, 42.0);
+        assert_eq!(v.uncertainty, 0.5);
+    }
+
+    #[test]
+    fn parameter_deserializes_ron_infinite_bounds() {
+        let ron = r#"(name:"slope",min:-inf,max:inf,initial_guess:0.0,vary:true,value:None,uncertainty:None,calibrated_value:None,calibrated_uncertainty:None)"#;
+        let p: Parameter = ron::from_str(ron).expect("parameter should deserialize from ron");
+        assert!(p.min.is_infinite() && p.min.is_sign_negative());
+        assert!(p.max.is_infinite() && p.max.is_sign_positive());
+    }
+
+    #[test]
+    fn format_fit_measurement_uses_sci_fmt_when_uncertainty_exists() {
+        assert_eq!(
+            format_fit_measurement(Some(12.345), Some(0.067)),
+            "12.35(7)"
+        );
+    }
+
+    #[test]
+    fn format_fit_measurement_falls_back_without_uncertainty() {
+        assert_eq!(format_fit_measurement(Some(12.345), None), "12.35");
+        assert_eq!(
+            format_fit_measurement(Some(12.345), Some(f64::NAN)),
+            "12.35"
+        );
+    }
+
+    #[test]
+    fn format_fit_measurement_uses_placeholder_for_missing_value() {
+        assert_eq!(format_fit_measurement(None, Some(0.067)), "—");
+        assert_eq!(format_fit_measurement(Some(f64::NAN), Some(0.067)), "—");
+    }
+
+    #[test]
+    fn fit_measurement_hover_text_shows_raw_value_and_uncertainty() {
+        assert_eq!(
+            fit_measurement_hover_text(Some(12.345), Some(0.067)).as_deref(),
+            Some("Value: 12.345\nUncertainty: 0.067")
+        );
+    }
+
+    #[test]
+    fn fit_measurement_hover_text_handles_missing_parts() {
+        assert_eq!(
+            fit_measurement_hover_text(Some(12.345), None).as_deref(),
+            Some("Value: 12.345\nUncertainty: —")
+        );
+        assert_eq!(fit_measurement_hover_text(None, Some(0.067)), None);
     }
 }

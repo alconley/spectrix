@@ -1,0 +1,28 @@
+name: Bootstrap proof
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  proof:
+    name: ${{ matrix.platform }} bootstrap
+    strategy:
+      matrix:
+        include:
+          - platform: Linux
+            os: ubuntu-latest
+            command: bash ./spectrix.sh --dry-run --platform linux
+          - platform: macOS
+            os: macos-latest
+            command: bash ./spectrix.sh --dry-run --platform macos
+          - platform: Windows
+            os: windows-latest
+            command: rustc ./bootstrap/spectrix_launcher.rs --edition 2024 -C opt-level=s -C target-feature=+crt-static -C strip=symbols -o ./spectrix.exe; ./spectrix.exe --dry-run
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove bootstrap path
+        shell: pwsh
+        run: ${{ matrix.command }}

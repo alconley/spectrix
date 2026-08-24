@@ -1254,9 +1254,10 @@ def get_2d_histograms(file_name):
     }
 
     pub fn left_side_panels_ui(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::left("spectrix_processor_left_panel").show_animated_inside(
+        let mut left_panel_open = self.settings.left_panel_open;
+        egui::Panel::left("spectrix_processor_left_panel").show_collapsible(
             ui,
-            self.settings.left_panel_open,
+            &mut left_panel_open,
             |ui| {
                 if let Some(paths) = self.file_dialog.take_picked_multiple() {
                     for path in paths {
@@ -1325,9 +1326,11 @@ def get_2d_histograms(file_name):
             },
         );
 
-        egui::Panel::left("spectrix_histogram_panel").show_animated_inside(
+        let mut histogram_panel_open =
+            self.settings.histogram_script_open && self.settings.left_panel_open;
+        egui::Panel::left("spectrix_histogram_panel").show_collapsible(
             ui,
-            self.settings.histogram_script_open && self.settings.left_panel_open,
+            &mut histogram_panel_open,
             |ui| {
                 self.histogram_script
                     .ui(ui, &self.histogrammer, &self.settings.column_names);
@@ -1343,7 +1346,7 @@ def get_2d_histograms(file_name):
             .resizable(false)
             .show_separator_line(false)
             .min_size(1.0)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.add_space(ui.available_height() / 2.0 - 10.0); // Center the button vertically
                     if ui
@@ -1651,17 +1654,18 @@ def get_2d_histograms(file_name):
     }
 
     fn central_panel_ui(&mut self, ui: &mut egui::Ui) {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             self.histogrammer.ui(ui);
         });
     }
 
     fn ai_panel_ui(&mut self, ui: &mut egui::Ui) {
+        let mut ai_open = self.settings.ai_open;
         egui::Panel::right("spectrix_ai_panel")
             .resizable(true)
             .default_size(430.0)
             .size_range(320.0..=720.0)
-            .show_animated_inside(ui, self.settings.ai_open, |ui| {
+            .show_collapsible(ui, &mut ai_open, |ui| {
                 let snapshot = AiContextSnapshot::from_state(
                     &self.selected_files,
                     &self.settings.column_names,
@@ -1676,7 +1680,7 @@ def get_2d_histograms(file_name):
         egui::Panel::bottom("spectrix_histogram_progress_panel")
             .resizable(false)
             .show_separator_line(true)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 let progress = self.histogram_progress_fraction();
                 ui.horizontal(|ui| {
                     ui.label(self.histogram_progress_label());

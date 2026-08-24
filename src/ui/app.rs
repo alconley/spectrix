@@ -237,7 +237,7 @@ impl eframe::App for Spectrix {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         Self::handle_screenshot_events(ui.ctx());
 
-        egui::Panel::top("spectrix_top_panel").show_inside(ui, |ui| {
+        egui::Panel::top("spectrix_top_panel").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 egui::ScrollArea::horizontal()
                     .id_salt("spectrix_top_scroll")

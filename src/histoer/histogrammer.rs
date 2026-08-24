@@ -538,7 +538,7 @@ fn fill_1d_source_group(
         })
         .collect::<Vec<_>>();
 
-    for value_opt in values {
+    for value_opt in values.iter() {
         let Some(value) = value_opt else {
             continue;
         };
@@ -633,7 +633,7 @@ fn fill_1d_histogram_group(
     let bin_indices = counts_df.column("bin_index")?.i32()?;
     let counts = counts_df.column("count")?.u32()?;
 
-    for (bin_opt, count_opt) in bin_indices.into_iter().zip(counts) {
+    for (bin_opt, count_opt) in bin_indices.iter().zip(counts.iter()) {
         if let (Some(bin), Some(count)) = (bin_opt, count_opt) {
             match bin {
                 -2 => histogram.underflow = histogram.underflow.saturating_add(count as u64),
@@ -680,7 +680,7 @@ fn fill_2d_source_group(
         })
         .collect::<Vec<_>>();
 
-    for (x_opt, y_opt) in x_values.into_iter().zip(y_values) {
+    for (x_opt, y_opt) in x_values.iter().zip(y_values.iter()) {
         let (Some(x_value), Some(y_value)) = (x_opt, y_opt) else {
             continue;
         };
@@ -848,7 +848,11 @@ fn fill_2d_histogram_group(
     let y_bins_column = counts_df.column("y_bin")?.i32()?;
     let counts = counts_df.column("count")?.u32()?;
 
-    for ((x_opt, y_opt), count_opt) in x_bins_column.into_iter().zip(y_bins_column).zip(counts) {
+    for ((x_opt, y_opt), count_opt) in x_bins_column
+        .iter()
+        .zip(y_bins_column.iter())
+        .zip(counts.iter())
+    {
         if let ((Some(x_bin), Some(y_bin)), Some(count)) = ((x_opt, y_opt), count_opt) {
             match (x_bin, y_bin) {
                 (-2, _) | (_, -2) => {

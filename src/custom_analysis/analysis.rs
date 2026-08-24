@@ -35,7 +35,7 @@ impl AnalysisScripts {
 
         let mut requested_close = false;
         ui.show_viewport_immediate(id, builder, |ui, _class: ViewportClass| {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 self.se_sps.ui(ui, files, histogrammer);
             });
 

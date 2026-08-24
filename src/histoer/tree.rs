@@ -13,6 +13,8 @@ pub struct TreeBehavior {
     prune_single_child_containers: bool,
     all_panes_must_have_tabs: bool,
     join_nested_linear_containers: bool,
+    #[serde(default)]
+    flatten_tabs_in_tabs: bool,
     pub tile_map: std::collections::HashMap<egui_tiles::TileId, String>,
 }
 
@@ -29,6 +31,7 @@ impl Default for TreeBehavior {
             prune_single_child_containers: false,
             all_panes_must_have_tabs: false,
             join_nested_linear_containers: false,
+            flatten_tabs_in_tabs: false,
             tile_map: std::collections::HashMap::new(),
         }
     }
@@ -85,6 +88,7 @@ impl TreeBehavior {
                 &mut self.join_nested_linear_containers,
                 "Join nested linear containers",
             );
+            ui.checkbox(&mut self.flatten_tabs_in_tabs, "Flatten nested tabs");
         });
     }
 
@@ -149,6 +153,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
             prune_single_child_containers: self.prune_single_child_containers,
             all_panes_must_have_tabs: self.all_panes_must_have_tabs,
             join_nested_linear_containers: self.join_nested_linear_containers,
+            flatten_tabs_in_tabs: self.flatten_tabs_in_tabs,
         }
     }
 

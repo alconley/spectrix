@@ -55,7 +55,7 @@ impl Histogram {
         let bin_indices = df.column("bin_index")?.i32()?;
         let counts = df.column("count")?.u32()?;
 
-        for (bin_opt, count_opt) in bin_indices.into_iter().zip(counts) {
+        for (bin_opt, count_opt) in bin_indices.iter().zip(counts.iter()) {
             if let (Some(bin), Some(count)) = (bin_opt, count_opt) {
                 match bin {
                     -2 => self.underflow += count as u64,
@@ -91,7 +91,7 @@ impl Histogram {
 mod tests {
     use super::Histogram;
     use polars::df;
-    use polars::prelude::IntoLazy;
+    use polars::prelude::IntoLazy as _;
 
     #[test]
     fn lazyframe_fill_resets_axis_after_fill() {

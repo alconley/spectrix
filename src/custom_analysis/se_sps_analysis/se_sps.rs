@@ -59,10 +59,11 @@ impl SPSAnalysis {
         self.ensure_runs_for_files(files);
 
         // left panel
+        let mut panel_open = self.settings.panel_open;
         egui::Panel::left("sps_left_panel")
             .resizable(true)
             .default_size(300.0)
-            .show_animated_inside(ui, self.settings.panel_open, |ui| {
+            .show_collapsible(ui, &mut panel_open, |ui| {
                 egui::ScrollArea::both()
                     .id_salt("sps_left_scroll_area")
                     .show(ui, |ui| {
@@ -72,7 +73,7 @@ impl SPSAnalysis {
 
         self.panel_toggle_button(ui);
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             self.cross_section_ui(ui, histogrammer);
         });
     }
@@ -83,7 +84,7 @@ impl SPSAnalysis {
             .resizable(false)
             .show_separator_line(false)
             .min_size(1.0)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.add_space(ui.available_height() / 2.0 - 10.0); // Center the button vertically
                     if ui
@@ -581,7 +582,17 @@ impl SPSAnalysis {
                                 .auto_bounds(Vec2b::new(false, false))
                                 .label_formatter({
                                     let log_y = self.settings.log_scale;
-                                    move |name, value| {
+                                    move |hover| {
+                                        let (name, value) = match hover {
+                                            egui_plot::HoverPosition::NearDataPoint {
+                                                plot_name,
+                                                position,
+                                                ..
+                                            } => (*plot_name, *position),
+                                            egui_plot::HoverPosition::Elsewhere { position } => {
+                                                ("", *position)
+                                            }
+                                        };
                                         let x = value.x;
                                         let y = if log_y {
                                             10.0f64.powf(value.y)
@@ -589,9 +600,9 @@ impl SPSAnalysis {
                                             value.y
                                         };
                                         if !name.is_empty() {
-                                            name.to_owned()
+                                            Some(name.to_owned())
                                         } else {
-                                            format!("{x:.2}, {y:.2}")
+                                            Some(format!("{x:.2}, {y:.2}"))
                                         }
                                     }
                                 });
@@ -748,13 +759,23 @@ impl SPSAnalysis {
                                     .allow_double_click_reset(false)
                                     .auto_bounds(Vec2b::new(false, false))
                                     .label_formatter({
-                                        move |name, value| {
+                                        move |hover| {
+                                            let (name, value) = match hover {
+                                                egui_plot::HoverPosition::NearDataPoint {
+                                                    plot_name,
+                                                    position,
+                                                    ..
+                                                } => (*plot_name, *position),
+                                                egui_plot::HoverPosition::Elsewhere { position } => {
+                                                    ("", *position)
+                                                }
+                                            };
                                             let x = value.x;
                                             let y = value.y;
                                             if !name.is_empty() {
-                                                name.to_owned()
+                                                Some(name.to_owned())
                                             } else {
-                                                format!("{x:.2}, {y:.2}")
+                                                Some(format!("{x:.2}, {y:.2}"))
                                             }
                                         }
                                 });
