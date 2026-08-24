@@ -1297,37 +1297,14 @@ def get_2d_histograms(file_name):
                     self.calculate_histograms();
                 }
 
-                if ui
-                    .add(
-                        egui::Button::selectable(
-                            self.settings.histogram_script_open,
-                            "Open Histogram Script",
-                        )
-                        .min_size(egui::vec2(ui.available_width(), 0.0)),
-                    )
-                    .clicked()
-                {
-                    self.settings.histogram_script_open = !self.settings.histogram_script_open;
-                }
-
-                if ui
-                    .add(
-                        egui::Button::selectable(self.settings.ai_open, "Open AI Assistant")
-                            .min_size(egui::vec2(ui.available_width(), 0.0)),
-                    )
-                    .clicked()
-                {
-                    self.settings.ai_open = !self.settings.ai_open;
-                }
-
                 ui.separator();
 
                 self.selected_files_ui(ui);
             },
         );
+        self.settings.left_panel_open = left_panel_open;
 
-        let mut histogram_panel_open =
-            self.settings.histogram_script_open && self.settings.left_panel_open;
+        let mut histogram_panel_open = self.settings.histogram_script_open;
         egui::Panel::left("spectrix_histogram_panel").show_collapsible(
             ui,
             &mut histogram_panel_open,
@@ -1336,31 +1313,7 @@ def get_2d_histograms(file_name):
                     .ui(ui, &self.histogrammer, &self.settings.column_names);
             },
         );
-
-        self.panel_toggle_button(ui);
-    }
-
-    pub fn panel_toggle_button(&mut self, ui: &mut egui::Ui) {
-        // Secondary left panel for the toggle button
-        egui::Panel::left("spectrix_toggle_left_panel")
-            .resizable(false)
-            .show_separator_line(false)
-            .min_size(1.0)
-            .show(ui, |ui| {
-                ui.vertical(|ui| {
-                    ui.add_space(ui.available_height() / 2.0 - 10.0); // Center the button vertically
-                    if ui
-                        .small_button(if self.settings.left_panel_open {
-                            "◀"
-                        } else {
-                            "▶"
-                        })
-                        .clicked()
-                    {
-                        self.settings.left_panel_open = !self.settings.left_panel_open;
-                    }
-                });
-            });
+        self.settings.histogram_script_open = histogram_panel_open;
     }
 
     fn add_selected_file(&mut self, path: PathBuf, checked: bool) {
@@ -1674,6 +1627,7 @@ def get_2d_histograms(file_name):
                 );
                 self.ai.ui(ui, snapshot);
             });
+        self.settings.ai_open = ai_open;
     }
 
     fn histogram_progress_bottom_panel_ui(&self, ui: &mut egui::Ui) {

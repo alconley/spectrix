@@ -70,35 +70,11 @@ impl SPSAnalysis {
                         self.left_panel(ui, histogrammer);
                     });
             });
-
-        self.panel_toggle_button(ui);
+        self.settings.panel_open = panel_open;
 
         egui::CentralPanel::default().show(ui, |ui| {
             self.cross_section_ui(ui, histogrammer);
         });
-    }
-
-    pub fn panel_toggle_button(&mut self, ui: &mut egui::Ui) {
-        // Secondary left panel for the toggle button
-        egui::Panel::left("spectrix_toggle_left_panel")
-            .resizable(false)
-            .show_separator_line(false)
-            .min_size(1.0)
-            .show(ui, |ui| {
-                ui.vertical(|ui| {
-                    ui.add_space(ui.available_height() / 2.0 - 10.0); // Center the button vertically
-                    if ui
-                        .small_button(if self.settings.panel_open {
-                            "◀"
-                        } else {
-                            "▶"
-                        })
-                        .clicked()
-                    {
-                        self.settings.panel_open = !self.settings.panel_open;
-                    }
-                });
-            });
     }
 
     pub fn left_panel(&mut self, ui: &mut egui::Ui, histogrammer: &mut histogrammer::Histogrammer) {
