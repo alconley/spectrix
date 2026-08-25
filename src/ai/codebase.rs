@@ -707,7 +707,9 @@ fn synonyms_for(term: &str) -> Option<&'static [&'static str]> {
             "active histogram cuts",
         ]),
         "column" | "columns" => Some(&["column", "columns", "computed", "builder"]),
-        "fit" | "fits" | "fitting" => Some(&["fit", "fits", "fitter", "gaussian", "lmfit"]),
+        "fit" | "fits" | "fitting" => {
+            Some(&["fit", "fits", "fitter", "gaussian", "spectrix_fitting"])
+        }
         "root" => Some(&["root", "uproot"]),
         "parquet" => Some(&["parquet", "lazyframe", "polars"]),
         "click" | "clicked" => Some(&[
@@ -849,7 +851,7 @@ const DATA_SOURCE_PATTERNS: &[&str] = &[
     "histogram",
     "is_inside",
     "lazyframe",
-    "lmfit",
+    "spectrix_fitting",
     "mask",
     "mean",
     "parquet",

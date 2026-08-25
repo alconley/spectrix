@@ -342,7 +342,8 @@ impl InteractiveCut1D {
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>, calibration: Option<&Calibration>) {
         let plot_bounds = plot_ui.plot_bounds();
         let (x1, x2) = self.ordered_limits();
-        self.fill_line.points = vec![[x1, plot_bounds.max()[1]], [x2, plot_bounds.max()[1]]];
+        self.fill_line
+            .set_points(vec![[x1, plot_bounds.max()[1]], [x2, plot_bounds.max()[1]]]);
         self.fill_line.fill = plot_bounds.min()[1] as f32;
 
         self.fill_line.draw(plot_ui, calibration);

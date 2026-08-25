@@ -20,10 +20,6 @@ use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
 use super::tree::TreeBehavior;
-use crate::fitter::main_fitter::{FitResult, Fitter};
-use crate::fitter::models::gaussian::GaussianFitter;
-use std::path::Path;
-
 #[derive(serde::Deserialize, serde::Serialize, PartialEq, Eq, Debug)]
 pub enum ContainerType {
     Grid,
@@ -1658,30 +1654,6 @@ impl Histogrammer {
             }
         }
 
-        if ui.button("Export All lmfit Fits").clicked()
-            && let Some(dir_path) = rfd::FileDialog::new().pick_folder()
-        {
-            let dir_path = dir_path.clone();
-
-            for (_id, tile) in self.tree.tiles.iter() {
-                if let egui_tiles::Tile::Pane(Pane::Histogram(hist)) = tile {
-                    let hist = hist.lock().expect("Failed to lock histogram");
-                    let fits = &hist.fits;
-
-                    fits.export_lmfit(&dir_path);
-                }
-
-                log::info!("All lmfit results exported.");
-            }
-
-            ui.close();
-        }
-
-        if ui.button("Import All lmfit Fits to Histograms").clicked() {
-            self.import_all_lmfit_to_histograms_from_folder();
-            ui.close();
-        }
-
         ui.separator();
     }
 
@@ -2321,114 +2293,6 @@ def write_histograms(output_file, hist1d_data, hist2d_data):
 
             exporting.store(false, Ordering::Relaxed);
         });
-    }
-
-    pub fn import_all_lmfit_to_histograms_from_folder_path(&mut self, folder: &Path) {
-        fn sanitize_name_for_filename(s: &str) -> String {
-            s.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
-        }
-        fn stem_before_fit(stem: &str) -> &str {
-            stem.split_once("_fit").map(|(lhs, _)| lhs).unwrap_or(stem)
-        }
-
-        // Build a lookup of sanitized histogram names -> Arc<Mutex<Box<Histogram>>>
-        use std::collections::HashMap;
-        let mut lookup: HashMap<String, Arc<Mutex<Box<Histogram>>>> = HashMap::new();
-        for (_id, tile) in self.tree.tiles.iter_mut() {
-            if let egui_tiles::Tile::Pane(Pane::Histogram(h)) = tile {
-                let name = {
-                    let guard = h.lock().expect("Failed to lock histogram");
-                    guard.name.clone()
-                };
-                let key = sanitize_name_for_filename(&name);
-                lookup.insert(key, Arc::clone(h));
-            }
-        }
-
-        let read_dir = match std::fs::read_dir(folder) {
-            Ok(it) => it,
-            Err(e) => {
-                log::error!("Failed to read folder {}: {:?}", folder.display(), e);
-                return;
-            }
-        };
-
-        // Collect & sort .sav files for stable ordering
-        let mut sav_paths: Vec<_> = read_dir
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| {
-                p.extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("sav"))
-            })
-            .collect();
-        sav_paths.sort();
-
-        let mut imported = 0usize;
-
-        for path in sav_paths {
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or_default();
-            let base = stem_before_fit(stem).to_owned();
-
-            // primary: sanitized match; fallback: exact (unsanitized) match if export never sanitized
-            let target_hist = lookup
-                .get(&base)
-                .or_else(|| lookup.get(&sanitize_name_for_filename(&base)));
-
-            let Some(hist_arc) = target_hist.cloned() else {
-                log::warn!(
-                    "No matching histogram for '{}'; file '{}'",
-                    base,
-                    path.display()
-                );
-                continue;
-            };
-
-            let mut gaussian_fitter = GaussianFitter::default();
-            match gaussian_fitter.lmfit(Some(path.clone())) {
-                Ok(_) => {
-                    let mut new_fitter = Fitter::default();
-                    new_fitter.set_name(base.clone());
-
-                    new_fitter.apply_gaussian_fit_visuals(&gaussian_fitter);
-
-                    // Background
-                    if let Some(background_result) = &gaussian_fitter.background_result {
-                        new_fitter.background_result = Some(background_result.clone());
-                    }
-
-                    new_fitter.fit_result = Some(FitResult::Gaussian(gaussian_fitter.clone()));
-
-                    {
-                        let mut hist = hist_arc.lock().expect("Failed to lock histogram");
-                        hist.fits.stored_fits.push(new_fitter);
-                        hist.plot_settings.egui_settings.reset_axis = true;
-                    }
-
-                    imported += 1;
-                    log::info!("Imported lmfit for '{}' from {}", base, path.display());
-                }
-                Err(e) => {
-                    log::error!("Failed to import {}: {:?}", path.display(), e);
-                }
-            }
-        }
-
-        if imported == 0 {
-            log::warn!("No .sav files were imported; check filename ↔ histogram name mapping.");
-        } else {
-            log::info!("Imported {imported} lmfit file(s).");
-        }
-    }
-
-    // ADD: convenience wrapper that opens a folder picker
-    pub fn import_all_lmfit_to_histograms_from_folder(&mut self) {
-        if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-            self.import_all_lmfit_to_histograms_from_folder_path(&folder);
-        }
     }
 }
 

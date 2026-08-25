@@ -88,7 +88,7 @@ impl EguiFilledArea {
             FilledArea::new("", &xs, &lower, &upper)
                 .allow_hover(false)
                 .fill_color(line.color.linear_multiply(fill_alpha))
-                .id(egui::Id::new(name.to_owned())),
+                .id(egui::Id::new(name)),
         );
     }
 }

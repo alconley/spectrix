@@ -47,17 +47,18 @@ impl Histogram {
     }
 
     pub fn update_line_points(&mut self) {
-        self.line.points = self
-            .bins
-            .iter()
-            .enumerate()
-            .flat_map(|(index, &count)| {
-                let start = self.range.0 + index as f64 * self.bin_width;
-                let end = start + self.bin_width;
-                let y_value = count as f64;
-                vec![[start, y_value], [end, y_value]]
-            })
-            .collect();
+        self.line.set_points(
+            self.bins
+                .iter()
+                .enumerate()
+                .flat_map(|(index, &count)| {
+                    let start = self.range.0 + index as f64 * self.bin_width;
+                    let end = start + self.bin_width;
+                    let y_value = count as f64;
+                    [[start, y_value], [end, y_value]]
+                })
+                .collect(),
+        );
     }
 
     pub(crate) fn display_calibration(&self) -> Option<&Calibration> {

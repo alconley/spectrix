@@ -14,6 +14,7 @@ use crate::{
 pub struct EguiLine {
     pub draw: bool,
     pub name_in_legend: bool,
+    pub allow_hover: bool,
     pub log_y: bool,
     pub log_x: bool,
     pub name: String,
@@ -40,6 +41,7 @@ impl Default for EguiLine {
         Self {
             draw: true,
             name_in_legend: false,
+            allow_hover: true,
             log_y: false,
             log_x: false,
             name: "Line".to_owned(),
@@ -84,44 +86,81 @@ impl EguiLine {
         self.points.push([x, y]);
     }
 
+    pub fn set_points(&mut self, points: Vec<[f64; 2]>) {
+        self.points = points;
+    }
+
+    fn transform_x(&self, x: f64, calibration: Option<&Calibration>) -> Option<f64> {
+        let calibrated_x = if let Some(calibration) = calibration {
+            calibration.calibrate_checked(x)?
+        } else {
+            x
+        };
+        let transformed_x = if self.log_x && calibrated_x > 0.0 {
+            calibrated_x.log10().max(0.0001)
+        } else {
+            calibrated_x
+        };
+        transformed_x.is_finite().then_some(transformed_x)
+    }
+
+    fn transformed_x_extent(&self, calibration: Option<&Calibration>) -> Option<(f64, f64)> {
+        let first = self.points.first()?;
+        let last = self.points.last()?;
+        let first_x = self.transform_x(first[0], calibration)?;
+        let last_x = self.transform_x(last[0], calibration)?;
+        Some((first_x.min(last_x), first_x.max(last_x)))
+    }
+
+    pub fn overlaps_visible_x(
+        &self,
+        plot_ui: &PlotUi<'_>,
+        calibration: Option<&Calibration>,
+    ) -> bool {
+        let Some((line_min, line_max)) = self.transformed_x_extent(calibration) else {
+            // A non-monotonic or partially invalid calibration is handled by the
+            // normal point filter. Avoid incorrectly culling it here.
+            return !self.points.is_empty();
+        };
+        let bounds = plot_ui.plot_bounds();
+        let visible_min = bounds.min()[0];
+        let visible_max = bounds.max()[0];
+        !visible_min.is_finite()
+            || !visible_max.is_finite()
+            || (line_max >= visible_min && line_min <= visible_max)
+    }
+
     pub fn draw(&self, plot_ui: &mut PlotUi<'_>, calibration: Option<&Calibration>) {
         if self.draw {
-            let plot_points: Vec<PlotPoint> = self
+            let plot_points = self
                 .points
                 .iter()
                 .filter_map(|&[x, y]| {
-                    let calibrated_x = if let Some(cal) = calibration {
-                        cal.calibrate_checked(x)?
-                    } else {
-                        x
-                    };
-
-                    let x = if self.log_x && calibrated_x > 0.0 {
-                        calibrated_x.log10().max(0.0001)
-                    } else {
-                        calibrated_x
-                    };
-
+                    let x = self.transform_x(x, calibration)?;
                     let y = if self.log_y && y > 0.0 {
                         y.log10().max(0.0001)
                     } else {
                         y
                     };
-
-                    (x.is_finite() && y.is_finite()).then_some(PlotPoint::new(x, y))
+                    if y.is_finite() {
+                        Some(PlotPoint::new(x, y))
+                    } else {
+                        None
+                    }
                 })
-                .collect();
+                .collect::<Vec<_>>();
 
             if plot_points.len() < 2 {
                 return;
             }
 
             let mut line = Line::new("", PlotPoints::Owned(plot_points))
+                .allow_hover(self.allow_hover)
                 .highlight(self.highlighted)
                 .stroke(self.stroke)
                 .width(self.width)
                 .color(self.color)
-                .id(egui::Id::new(self.name.clone()));
+                .id(egui::Id::new(&self.name));
 
             if self.name_in_legend {
                 line = line.name(self.name.clone());
@@ -221,7 +260,7 @@ impl EguiLine {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.label("X, Y");
-                        for point in &mut self.points {
+                        for point in &self.points {
                             ui.horizontal(|ui| {
                                 ui.label(format!("{}, {}", point[0], point[1]));
                             });
@@ -306,5 +345,32 @@ impl EguiLine {
 
             self.stroke.color = self.stroke_rgb.to_color32();
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EguiLine;
+    use crate::fitter::common::Calibration;
+
+    #[test]
+    fn transformed_extent_tracks_calibration_and_log_scale() {
+        let mut line = EguiLine::new_with_points(vec![[2.0, 1.0], [8.0, 2.0]]);
+        assert_eq!(line.transformed_x_extent(None), Some((2.0, 8.0)));
+
+        let mut calibration = Calibration::default();
+        calibration.b.value = 2.0;
+        calibration.c.value = 1.0;
+        assert_eq!(
+            line.transformed_x_extent(Some(&calibration)),
+            Some((5.0, 17.0))
+        );
+
+        line.log_x = true;
+        let extent = line
+            .transformed_x_extent(Some(&calibration))
+            .expect("valid transformed extent");
+        assert!((extent.0 - 5.0_f64.log10()).abs() < 1.0e-12);
+        assert!((extent.1 - 17.0_f64.log10()).abs() < 1.0e-12);
     }
 }

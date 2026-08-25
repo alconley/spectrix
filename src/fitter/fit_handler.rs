@@ -1,6 +1,7 @@
 use rfd::FileDialog;
 
 use egui::{Align2, Color32};
+use egui_extras::{Column, TableBuilder};
 use egui_plot::{FilledArea, Line, MarkerShape, Plot, PlotUi, Points, Text};
 
 use std::fs::File;
@@ -10,7 +11,7 @@ use std::path::PathBuf;
 use super::fit_settings::FitSettings;
 use super::main_fitter::{FitResult, Fitter};
 
-use super::models::gaussian::{GaussianFitter, HistogramDrawContext, UuidDrawOptions};
+use super::models::gaussian::{HistogramDrawContext, UuidDrawOptions};
 
 use super::common::{Calibration, fit_measurement_label};
 
@@ -256,53 +257,6 @@ impl Fits {
         path
     }
 
-    fn sanitize_filename_component(name: &str) -> String {
-        let mut out = String::with_capacity(name.len());
-        let mut prev_was_underscore = false;
-
-        for ch in name.chars() {
-            let mapped = if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
-                || ch.is_whitespace()
-            {
-                '_'
-            } else {
-                ch
-            };
-
-            if mapped == '_' {
-                if !prev_was_underscore {
-                    out.push('_');
-                }
-                prev_was_underscore = true;
-            } else {
-                out.push(mapped);
-                prev_was_underscore = false;
-            }
-        }
-
-        let out = out.trim_matches('_').to_owned();
-        if out.is_empty() {
-            "fit".to_owned()
-        } else {
-            out
-        }
-    }
-
-    fn save_lmfit_result_with_dialog(text: &str, suggested_file_name: &str) {
-        if let Some(path) = FileDialog::new()
-            .add_filter("SAV", &["sav"])
-            .set_file_name(suggested_file_name)
-            .save_file()
-        {
-            let path = Self::ensure_extension_if_missing(path, "sav");
-            if let Err(e) = std::fs::write(&path, text) {
-                log::error!("Failed to save lmfit result to {}: {e}", path.display());
-            } else {
-                log::info!("Saved lmfit result to {path:?}");
-            }
-        }
-    }
-
     pub fn new() -> Self {
         Self {
             temp_fit: None,
@@ -324,7 +278,8 @@ impl Fits {
     }
 
     pub fn store_temp_fit(&mut self) {
-        if let Some(temp_fit) = &mut self.temp_fit.take() {
+        if let Some(mut temp_fit) = self.temp_fit.take() {
+            temp_fit.compact_display_data();
             temp_fit.set_background_color(egui::Color32::DARK_GREEN);
             temp_fit.set_composition_color(egui::Color32::DARK_BLUE);
             temp_fit.set_decomposition_color(egui::Color32::from_rgb(150, 0, 255));
@@ -335,7 +290,7 @@ impl Fits {
 
             temp_fit.set_name(name);
 
-            self.stored_fits.push(temp_fit.clone());
+            self.stored_fits.push(temp_fit);
         }
     }
 
@@ -423,7 +378,13 @@ impl Fits {
         }
     }
 
-    fn apply_loaded_fits(&mut self, loaded_fits: Self) {
+    fn apply_loaded_fits(&mut self, mut loaded_fits: Self) {
+        for fit in &mut loaded_fits.stored_fits {
+            fit.compact_display_data();
+        }
+        if let Some(temp_fit) = &mut loaded_fits.temp_fit {
+            temp_fit.compact_display_data();
+        }
         self.settings = loaded_fits.settings;
         self.calibration = loaded_fits.calibration;
         self.sort_state = loaded_fits.sort_state;
@@ -445,64 +406,6 @@ impl Fits {
                 },
                 Err(e) => {
                     log::error!("Error reading file: {e:?}");
-                }
-            }
-        }
-    }
-
-    pub fn export_all_lmfit_individual_files(&self) {
-        if let Some(folder_path) = rfd::FileDialog::new().pick_folder() {
-            for (i, fit) in self.stored_fits.iter().enumerate() {
-                if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result
-                    && let Some(text) = &gauss.lmfit_result
-                {
-                    let filename = format!(
-                        "{}_fit_{}.sav",
-                        Self::sanitize_filename_component(&fit.name),
-                        i
-                    );
-                    let full_path = PathBuf::from(&folder_path).join(filename);
-
-                    match File::create(&full_path) {
-                        Ok(mut file) => {
-                            if let Err(e) = file.write_all(text.as_bytes()) {
-                                log::error!(
-                                    "Failed to write file {}: {:?}",
-                                    full_path.display(),
-                                    e
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Error creating file {}: {:?}", full_path.display(), e);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn export_lmfit(&self, dir: &PathBuf) {
-        for (i, fit) in self.stored_fits.iter().enumerate() {
-            if let Some(FitResult::Gaussian(gauss)) = &fit.fit_result
-                && let Some(text) = &gauss.lmfit_result
-            {
-                let filename = format!(
-                    "{}_fit_{}.sav",
-                    Self::sanitize_filename_component(&fit.name),
-                    i
-                );
-                let full_path = PathBuf::from(&dir).join(filename);
-
-                match File::create(&full_path) {
-                    Ok(mut file) => {
-                        if let Err(e) = file.write_all(text.as_bytes()) {
-                            log::error!("Failed to write file {}: {:?}", full_path.display(), e);
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Error creating file {}: {:?}", full_path.display(), e);
-                    }
                 }
             }
         }
@@ -540,7 +443,7 @@ impl Fits {
                 y: energy.clone(),
             });
 
-            match fitter.lmfit() {
+            match fitter.fit() {
                 Ok(_) => {
                     let candidate = Calibration {
                         a: crate::fitter::common::Value {
@@ -585,7 +488,7 @@ impl Fits {
                 y: energy.clone(),
             });
 
-            match fitter.lmfit() {
+            match fitter.fit() {
                 Ok(_) => {
                     let candidate = Calibration {
                         a: crate::fitter::common::Value {
@@ -1081,66 +984,6 @@ impl Fits {
                 self.load_from_file();
             }
         });
-
-        ui.separator();
-
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .button("Export All lmfit Results")
-                .on_hover_text(
-                    "Export each stored fit as lmfit .sav.\n\
-                    Use this when you want to continue analysis in Python/lmfit.\n\
-                    For Spectrix-only workflows, 'Save Fits' is usually better.",
-                )
-                .clicked()
-            {
-                self.export_all_lmfit_individual_files();
-            }
-
-            ui.separator();
-
-            if ui
-                .button("Load lmfit .sav")
-                .on_hover_text(
-                    "Import lmfit .sav files (for example, generated by Python/lmfit or exported from Spectrix).\n\
-                    Use this to bring external lmfit results into Spectrix.",
-                )
-                .clicked()
-                && let Some(paths) = FileDialog::new().add_filter("SAV", &["sav"]).pick_files()
-            {
-                for path in paths {
-                    let mut gaussian_fitter = GaussianFitter::default();
-
-                    match gaussian_fitter.lmfit(Some(path.clone())) {
-                        Ok(_) => {
-                            let mut new_fitter = Fitter::default();
-                            new_fitter.set_name(
-                                path.file_stem()
-                                    .and_then(|s| s.to_str())
-                                    .unwrap_or("lmfit_result")
-                                    .to_owned(),
-                            );
-                            new_fitter.apply_gaussian_fit_visuals(&gaussian_fitter);
-
-                            if let Some(background_result) = &gaussian_fitter.background_result {
-                                new_fitter.background_result = Some(background_result.clone());
-                            }
-                            new_fitter.fit_result =
-                                Some(FitResult::Gaussian(gaussian_fitter.clone()));
-
-                            // new_fitter.fit_result =
-                            //     Some(FitResult::Gaussian(gaussian_fitter.clone()));
-
-                            self.stored_fits.push(new_fitter);
-                            log::info!("Loaded lmfit result from {path:?}");
-                        }
-                        Err(e) => {
-                            log::error!("Failed to load lmfit result: {e:?}");
-                        }
-                    }
-                }
-            }
-        });
     }
 
     pub fn remove_temp_fits(&mut self) {
@@ -1172,9 +1015,12 @@ impl Fits {
             bin_width: histogram_bin_width,
         };
         if let Some(temp_fit) = &self.temp_fit {
-            temp_fit.draw(plot_ui, calibration, self.settings.show_fit_lines_area);
+            let visible = temp_fit.overlaps_visible_x(plot_ui, calibration);
+            if visible {
+                temp_fit.draw(plot_ui, calibration, self.settings.show_fit_lines_area);
+            }
 
-            if let Some(FitResult::Gaussian(gauss)) = &temp_fit.fit_result {
+            if visible && let Some(FitResult::Gaussian(gauss)) = &temp_fit.fit_result {
                 gauss.draw_uuid(
                     plot_ui,
                     UuidDrawOptions {
@@ -1187,7 +1033,10 @@ impl Fits {
             }
         }
 
-        for fit in &mut self.stored_fits.iter() {
+        for fit in &self.stored_fits {
+            if !fit.overlaps_visible_x(plot_ui, calibration) {
+                continue;
+            }
             fit.draw(plot_ui, calibration, self.settings.show_fit_lines_area);
 
             // put the uuid above each peak if it is not 0
@@ -1373,8 +1222,6 @@ impl Fits {
             });
         };
 
-        sort_rows(&mut rows, current);
-
         let mut uuid_updates: Vec<(Option<usize>, usize, usize)> = Vec::new(); // (fit_idx, peak, new_uuid)
         let mut energy_updates: Vec<(Option<usize>, usize, f64, f64)> = Vec::new(); // (fit_idx, peak, energy, unc)
 
@@ -1427,152 +1274,161 @@ impl Fits {
             }
         });
 
-        egui::Grid::new("fit_params_grid_sortable")
+        sort_rows(&mut rows, current);
+        TableBuilder::new(ui)
+            .id_salt("fit_params_table_sortable")
             .striped(true)
-            .show(ui, |ui| {
-                // define these INSIDE this closure to avoid cross-borrows
-                let mut pending: Option<SortState> = None;
-
-                let mut header = |ui: &mut egui::Ui, label: &str, col: SortCol| {
-                    let arrow = if current.col == col {
-                        if current.asc { " ⬆" } else { " ⬇" }
-                    } else {
-                        ""
-                    };
-                    if ui.button(format!("{label}{arrow}")).clicked() {
-                        pending = Some(if current.col == col {
-                            SortState {
-                                col,
-                                asc: !current.asc,
+            .vscroll(true)
+            .min_scrolled_height(120.0)
+            .max_scroll_height(480.0)
+            .column(Column::exact(72.0))
+            .column(Column::exact(58.0))
+            .columns(Column::exact(118.0), 5)
+            .column(Column::exact(72.0))
+            .column(Column::exact(175.0))
+            .column(Column::remainder().at_least(88.0))
+            .header(24.0, |mut header| {
+                let mut add_header =
+                    |header: &mut egui_extras::TableRow<'_, '_>, label: &str, col: SortCol| {
+                        header.col(|ui| {
+                            let arrow = if current.col == col {
+                                if current.asc { " ⬆" } else { " ⬇" }
+                            } else {
+                                ""
+                            };
+                            if ui.button(format!("{label}{arrow}")).clicked() {
+                                new_state = if current.col == col {
+                                    SortState {
+                                        col,
+                                        asc: !current.asc,
+                                    }
+                                } else {
+                                    SortState { col, asc: true }
+                                };
                             }
-                        } else {
-                            SortState { col, asc: true }
+                        });
+                    };
+                add_header(&mut header, "Fit #", SortCol::Fit);
+                add_header(&mut header, "Peak #", SortCol::Peak);
+                add_header(&mut header, "Mean", SortCol::Mean);
+                add_header(&mut header, "FWHM", SortCol::Fwhm);
+                add_header(&mut header, "Area", SortCol::Area);
+                add_header(&mut header, "Amplitude", SortCol::Amplitude);
+                add_header(&mut header, "Sigma", SortCol::Sigma);
+                add_header(&mut header, "UUID", SortCol::Uuid);
+                add_header(&mut header, "Energy", SortCol::Energy);
+                header.col(|ui| {
+                    ui.label("Options");
+                });
+            })
+            .body(|body| {
+                body.rows(24.0, rows.len(), |mut row| {
+                    let r = &rows[row.index()];
+                    row.col(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(r.fit_idx.map_or_else(
+                                || "Temp".to_owned(),
+                                |fit_index| fit_index.to_string(),
+                            ));
+                            if let Some(fit_index) = r.fit_idx
+                                && ui.small_button("X").clicked()
+                            {
+                                to_remove = Some(fit_index);
+                            }
+                        });
+                    });
+                    row.col(|ui| {
+                        ui.label(r.peak.to_string());
+                    });
+                    for measurement in [r.mean, r.fwhm, r.area, r.amplitude, r.sigma] {
+                        row.col(|ui| {
+                            fit_measurement_label(ui, Some(measurement.0), Some(measurement.1));
                         });
                     }
-                };
-
-                // header row (sets `pending` if clicked)
-                header(ui, "Fit #", SortCol::Fit);
-                header(ui, "Peak #", SortCol::Peak);
-                header(ui, "Mean", SortCol::Mean);
-                header(ui, "FWHM", SortCol::Fwhm);
-                header(ui, "Area", SortCol::Area);
-                header(ui, "Amplitude", SortCol::Amplitude);
-                header(ui, "Sigma", SortCol::Sigma);
-                header(ui, "UUID", SortCol::Uuid);
-                header(ui, "Energy", SortCol::Energy);
-                ui.label("Options");
-                ui.end_row();
-
-                // decide effective sort *after* header clicks
-                let effective = pending.unwrap_or(current);
-                let sort_col = effective.col;
-                let asc = effective.asc;
-
-                // ADD THIS so the choice persists next frame
-                new_state = effective;
-
-                // apply sort
-                sort_rows(&mut rows, SortState { col: sort_col, asc });
-
-                // draw rows (your existing rendering code stays the same)
-                for r in &rows {
-                    // Fit cell: name + (X) button for stored fits
-                    ui.horizontal(|ui| {
-                        ui.label(match r.fit_idx {
-                            // Some(i) => format!("{i} ({})", r.fit_name),
-                            Some(i) => format!("{i}"),
-                            None => "Temp".to_owned(),
-                        });
-
-                        if let Some(i) = r.fit_idx {
-                            ui.separator();
-                            if ui.button("X").clicked() {
-                                to_remove = Some(i);
-                            }
+                    row.col(|ui| {
+                        let mut uuid_edit = r.uuid;
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut uuid_edit)
+                                    .speed(1)
+                                    .update_while_editing(false),
+                            )
+                            .changed()
+                        {
+                            uuid_updates.push((r.fit_idx, r.peak, uuid_edit));
                         }
                     });
-
-                    ui.label(format!("{}", r.peak));
-                    fit_measurement_label(ui, Some(r.mean.0), Some(r.mean.1));
-                    fit_measurement_label(ui, Some(r.fwhm.0), Some(r.fwhm.1));
-                    fit_measurement_label(ui, Some(r.area.0), Some(r.area.1));
-                    fit_measurement_label(ui, Some(r.amplitude.0), Some(r.amplitude.1));
-                    fit_measurement_label(ui, Some(r.sigma.0), Some(r.sigma.1));
-                    let mut uuid_edit = r.uuid;
-                    if ui
-                        .add(
-                            egui::DragValue::new(&mut uuid_edit)
-                                .speed(1)
-                                .update_while_editing(false),
-                        )
-                        .changed()
-                    {
-                        uuid_updates.push((r.fit_idx, r.peak, uuid_edit));
-                    }
-                    let mut e_val = if r.energy.0.is_finite() {
-                        r.energy.0
-                    } else {
-                        0.0
-                    };
-                    let mut e_unc = if r.energy.1.is_finite() {
-                        r.energy.1
-                    } else {
-                        0.0
-                    };
-                    let mut changed = false;
-                    ui.horizontal(|ui| {
-                        changed |= ui
-                            .add(
-                                egui::DragValue::new(&mut e_val)
-                                    .speed(0.1)
-                                    .update_while_editing(false),
-                            )
-                            .changed();
-                        ui.label("±");
-                        changed |= ui
-                            .add(
-                                egui::DragValue::new(&mut e_unc)
-                                    .speed(0.1)
-                                    .update_while_editing(false),
-                            )
-                            .changed();
+                    row.col(|ui| {
+                        let mut energy = if r.energy.0.is_finite() {
+                            r.energy.0
+                        } else {
+                            0.0
+                        };
+                        let mut uncertainty = if r.energy.1.is_finite() {
+                            r.energy.1
+                        } else {
+                            0.0
+                        };
+                        let mut changed = false;
+                        ui.horizontal(|ui| {
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut energy)
+                                        .speed(0.1)
+                                        .update_while_editing(false),
+                                )
+                                .changed();
+                            ui.label("±");
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut uncertainty)
+                                        .speed(0.1)
+                                        .update_while_editing(false),
+                                )
+                                .changed();
+                        });
+                        if changed {
+                            energy_updates.push((r.fit_idx, r.peak, energy, uncertainty));
+                        }
                     });
-                    if changed {
-                        energy_updates.push((r.fit_idx, r.peak, e_val, e_unc));
-                    }
-
-                    // options cell: show actions only on the first peak row of a fit
-                    if let Some(i) = r.fit_idx {
-                        // show actions on the first peak row of that fit
-                        let is_first_peak = r.peak == 0;
-                        if is_first_peak {
-                            if let Some(super::main_fitter::FitResult::Gaussian(g)) =
-                                &self.stored_fits[i].fit_result
-                            {
+                    row.col(|ui| {
+                        if r.peak != 0 {
+                            ui.label("—");
+                            return;
+                        }
+                        if let Some(fit_index) = r.fit_idx {
+                            if matches!(
+                                self.stored_fits[fit_index].fit_result,
+                                Some(super::main_fitter::FitResult::Gaussian(_))
+                            ) {
                                 ui.menu_button("Options", |ui| {
-                                    if let Some(ref text) = g.lmfit_result
-                                        && ui.button("Export lmfit").clicked()
-                                    {
-                                        let suggested_name = format!(
-                                            "{}_lmfit_result.sav",
-                                            Self::sanitize_filename_component(
-                                                &self.stored_fits[i].name
-                                            )
-                                        );
-                                        Self::save_lmfit_result_with_dialog(text, &suggested_name);
-                                        ui.close();
-                                    }
-
                                     if ui.button("Modify").clicked() {
-                                        to_modify = Some(i);
+                                        to_modify = Some(fit_index);
                                         ui.close();
                                     }
-
                                     ui.menu_button("Fit Report", |ui| {
                                         egui::ScrollArea::vertical().show(ui, |ui| {
                                             ui.horizontal_wrapped(|ui| {
-                                                ui.label(self.stored_fits[i].get_fit_report());
+                                                ui.label(
+                                                    self.stored_fits[fit_index].get_fit_report(),
+                                                );
+                                            });
+                                        });
+                                    });
+                                });
+                            } else {
+                                ui.label("—");
+                            }
+                        } else if let Some(temp) = &self.temp_fit {
+                            if matches!(
+                                temp.fit_result,
+                                Some(super::main_fitter::FitResult::Gaussian(_))
+                            ) {
+                                ui.menu_button("Options", |ui| {
+                                    ui.menu_button("Fit Report", |ui| {
+                                        egui::ScrollArea::vertical().show(ui, |ui| {
+                                            ui.horizontal_wrapped(|ui| {
+                                                ui.label(temp.get_fit_report());
                                             });
                                         });
                                     });
@@ -1583,45 +1439,8 @@ impl Fits {
                         } else {
                             ui.label("—");
                         }
-                    } else {
-                        // Temp fit options cell
-                        if let Some(temp) = &self.temp_fit {
-                            if let Some(super::main_fitter::FitResult::Gaussian(g)) =
-                                &temp.fit_result
-                            {
-                                if r.peak == 0 {
-                                    ui.menu_button("Options", |ui| {
-                                        if let Some(ref text) = g.lmfit_result
-                                            && ui.button("Export lmfit").clicked()
-                                        {
-                                            Self::save_lmfit_result_with_dialog(
-                                                text,
-                                                "temp_fit_lmfit_result.sav",
-                                            );
-                                            ui.close();
-                                        }
-
-                                        ui.menu_button("Fit Report", |ui| {
-                                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                                ui.horizontal_wrapped(|ui| {
-                                                    ui.label(temp.get_fit_report());
-                                                });
-                                            });
-                                        });
-                                    });
-                                } else {
-                                    ui.label("—");
-                                }
-                            } else {
-                                ui.label("—");
-                            }
-                        } else {
-                            ui.label("—");
-                        }
-                    }
-
-                    ui.end_row();
-                }
+                    });
+                });
             });
 
         self.sort_state = new_state;
@@ -1825,7 +1644,8 @@ impl Fits {
 mod tests {
     use super::*;
     use crate::fitter::common::Value;
-    use crate::fitter::models::gaussian::GaussianParameters;
+    use crate::fitter::models::gaussian::{GaussianFitter, GaussianParameters};
+    use spectrix_fitting::BackgroundCoupling;
 
     fn calibration(a: f64, b: f64, c: f64) -> Calibration {
         Calibration {
@@ -1851,6 +1671,7 @@ mod tests {
         let mut loaded = Fits::new();
         loaded.settings.calibrated = true;
         loaded.settings.show_fit_stats = true;
+        loaded.settings.background_coupling = BackgroundCoupling::PrefitJoint;
         loaded.calibration = calibration(0.02, 1.5, 8.0);
         loaded.sort_state = SortState {
             col: SortCol::Energy,
@@ -1861,6 +1682,10 @@ mod tests {
 
         assert!(current.settings.calibrated);
         assert!(current.settings.show_fit_stats);
+        assert_eq!(
+            current.settings.background_coupling,
+            BackgroundCoupling::PrefitJoint
+        );
         assert_eq!(current.calibration.a.value, 0.02);
         assert_eq!(current.calibration.b.value, 1.5);
         assert_eq!(current.calibration.c.value, 8.0);
@@ -1905,5 +1730,61 @@ mod tests {
         assert_eq!(params.sigma.calibrated_value, Some(6.0));
         assert_eq!(params.energy.calibrated_value, Some(42.0));
         assert_eq!(params.area.calibrated_value, Some(250.0));
+    }
+
+    #[test]
+    fn apply_loaded_fits_compacts_legacy_dense_display_curves() {
+        let point_count = 20_000;
+        let peak_index = 11_111;
+        let points = (0..point_count)
+            .map(|index| [index as f64, if index == peak_index { 100.0 } else { 0.0 }])
+            .collect::<Vec<_>>();
+        let mut gaussian = GaussianFitter {
+            fit_points: points.clone(),
+            uncertainty_band: crate::egui_plot_stuff::egui_filled_area::EguiFilledArea::new(
+                points.iter().map(|point| point[0]).collect(),
+                vec![0.0; point_count],
+                points.iter().map(|point| point[1] + 1.0).collect(),
+            ),
+            ..GaussianFitter::default()
+        };
+        let peak = GaussianParameters {
+            fit_points: points.clone(),
+            ..GaussianParameters::default()
+        };
+        gaussian.fit_result.push(peak);
+
+        let mut fitter = Fitter {
+            fit_result: Some(FitResult::Gaussian(gaussian)),
+            composition_line: crate::egui_plot_stuff::egui_line::EguiLine::new_with_points(
+                points.clone(),
+            ),
+            decomposition_lines: vec![
+                crate::egui_plot_stuff::egui_line::EguiLine::new_with_points(points),
+            ],
+            ..Fitter::default()
+        };
+        fitter.name = "dense legacy fit".to_owned();
+
+        let mut loaded = Fits::new();
+        loaded.stored_fits.push(fitter);
+        let mut current = Fits::new();
+        current.apply_loaded_fits(loaded);
+
+        let compacted = &current.stored_fits[0];
+        let Some(FitResult::Gaussian(gaussian)) = &compacted.fit_result else {
+            panic!("loaded fit should remain Gaussian");
+        };
+        assert!(gaussian.fit_points.len() <= 2048);
+        assert!(gaussian.fit_result[0].fit_points.len() <= 512);
+        assert!(gaussian.uncertainty_band.xs.len() <= 512);
+        assert!(compacted.composition_line.points.len() <= 2048);
+        assert!(compacted.decomposition_lines[0].points.len() <= 512);
+        assert!(
+            compacted.decomposition_lines[0]
+                .points
+                .iter()
+                .any(|point| point[1] == 100.0)
+        );
     }
 }

@@ -40,7 +40,7 @@ impl Histogram {
             .iter_mut()
             .zip(bin_indices.iter())
         {
-            bg_pair.histogram_line.points.clear(); // Clear previous points
+            bg_pair.histogram_line.clear_points(); // Clear previous points
 
             // Collect the **actual bin edges** and counts in the correct range
             for i in start_bin..=end_bin {
@@ -51,8 +51,8 @@ impl Histogram {
                     let y = bin_counts[i] as f64; // Bin count
 
                     // Add both edges of the bin to the histogram line
-                    bg_pair.histogram_line.points.push([x_start, y]);
-                    bg_pair.histogram_line.points.push([x_end, y]);
+                    bg_pair.histogram_line.add_point(x_start, y);
+                    bg_pair.histogram_line.add_point(x_end, y);
                 }
             }
         }
@@ -92,8 +92,8 @@ impl BackgroundPair {
         line.width = 0.0;
         line.fill_alpha = 0.05;
 
-        line.points.push([start.x_value, 0.0]);
-        line.points.push([end.x_value, 0.0]);
+        line.add_point(start.x_value, 0.0);
+        line.add_point(end.x_value, 0.0);
 
         Self {
             start,
@@ -150,7 +150,7 @@ impl BackgroundPair {
             line_points.push([*last_edge, last_count]);
         }
 
-        self.histogram_line.points = line_points;
+        self.histogram_line.set_points(line_points);
     }
 }
 

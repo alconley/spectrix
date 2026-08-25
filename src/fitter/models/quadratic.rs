@@ -1,5 +1,4 @@
 use crate::fitter::common::{Data, Parameter};
-use pyo3::{ffi::c_str, prelude::*, types::PyModule};
 
 #[derive(PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct QuadraticParameters {
@@ -11,18 +10,9 @@ pub struct QuadraticParameters {
 impl Default for QuadraticParameters {
     fn default() -> Self {
         Self {
-            a: Parameter {
-                name: "a".to_owned(),
-                ..Default::default()
-            },
-            b: Parameter {
-                name: "b".to_owned(),
-                ..Default::default()
-            },
-            c: Parameter {
-                name: "c".to_owned(),
-                ..Default::default()
-            },
+            a: named_parameter("a"),
+            b: named_parameter("b"),
+            c: named_parameter("c"),
         }
     }
 }
@@ -35,8 +25,7 @@ impl QuadraticParameters {
                 *self = Self::default();
             }
         });
-        // create a grid for the param
-        egui::Grid::new("linear_params_grid")
+        egui::Grid::new("quadratic_params_grid")
             .striped(true)
             .num_columns(5)
             .show(ui, |ui| {
@@ -61,7 +50,7 @@ pub struct QuadraticFitter {
     pub paramaters: QuadraticParameters,
     pub fit_points: Vec<[f64; 2]>,
     pub fit_report: String,
-    pub covar: Option<[[f64; 3]; 3]>, // NEW
+    pub covar: Option<[[f64; 3]; 3]>,
 }
 
 impl QuadraticFitter {
@@ -71,7 +60,7 @@ impl QuadraticFitter {
             paramaters: QuadraticParameters::default(),
             fit_points: Vec::new(),
             fit_report: String::new(),
-            covar: None, // NEW
+            covar: None,
         }
     }
 
@@ -84,224 +73,117 @@ impl QuadraticFitter {
     ) -> Self {
         let mut fitter = Self {
             data: Data::default(),
-            paramaters: QuadraticParameters::default(),
+            paramaters: QuadraticParameters {
+                a: fitted_parameter("a", a),
+                b: fitted_parameter("b", b),
+                c: fitted_parameter("c", c),
+            },
             fit_points: Vec::new(),
-            fit_report: "Fitted with other model".to_owned(),
-            covar: None, // NEW
+            fit_report: "Fitted with another native model".to_owned(),
+            covar: None,
         };
-
-        // Set the parameter values and uncertainties
-        fitter.paramaters.a.value = Some(a.0);
-        fitter.paramaters.a.uncertainty = Some(a.1);
-        fitter.paramaters.b.value = Some(b.0);
-        fitter.paramaters.b.uncertainty = Some(b.1);
-        fitter.paramaters.c.value = Some(c.0);
-        fitter.paramaters.c.uncertainty = Some(c.1);
-
-        // Generate fit points
-        let num_points = 100;
-        let step_size = (max_x - min_x) / (num_points as f64);
-        fitter.fit_points.clear();
-        for i in 0..=num_points {
-            let x = min_x + i as f64 * step_size;
-            let y = fitter.paramaters.a.value.unwrap_or(0.0) * x.powi(2)
-                + fitter.paramaters.b.value.unwrap_or(0.0) * x
-                + fitter.paramaters.c.value.unwrap_or(0.0);
-            fitter.fit_points.push([x, y]);
-        }
-
+        fitter.fit_points = sampled_points(min_x, max_x, |x| fitter.evaluate(x));
         fitter
     }
 
-    pub fn lmfit(&mut self) -> PyResult<()> {
-        log::info!("Fitting data with a linear line using `lmfit`.");
-        Python::attach(|py| {
-            // let sys = py.import("sys")?;
-            // let version: String = sys.getattr("version")?.extract()?;
-            // let executable: String = sys.getattr("executable")?.extract()?;
-            // println!("Using Python version: {}", version);
-            // println!("Python executable: {}", executable);
-
-            // Check if the `uproot` module can be imported
-            if py.import("lmfit").is_ok() {
-                // println!("Successfully imported `lmfit` module.");
-            } else {
-                eprintln!(
-                    "Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed."
-                );
-                return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                    "`lmfit` module not available",
-                ));
-            }
-
-            if py.import("numpy").is_ok() {
-                // println!("Successfully imported `numpy` module.");
-            } else {
-                eprintln!(
-                    "Error: `numpy` module could not be found. Make sure you are using the correct Python environment with `numpy` installed."
-                );
-                return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                    "`numpy` module not available",
-                ));
-            }
-
-            // Define the Python code as a module
-            let code = c_str!("
-import lmfit
-import numpy as np
-
-def QuadraticFit(x_data: list, y_data: list, a: list = ('a', -np.inf, np.inf, 0.0, True), b = ('b', -np.inf, np.inf, 0.0, True), c: list = ('c', -np.inf, np.inf, 0.0, True),):    
-    # params = [name, min, max, initial_guess, vary]
-    
-    model = lmfit.models.QuadraticModel()
-    params = model.make_params(a=a[3], b=b[3], c=c[3])
-    params['a'].set(min=a[1], max=a[2], value=a[3], vary=a[4])
-    params['b'].set(min=b[1], max=b[2], value=b[3], vary=b[4])
-    params['c'].set(min=c[1], max=c[2], value=c[3], vary=c[4])
-    result = model.fit(y_data, params, x=x_data)
-
-    print(result.fit_report())
-
-    # Extract Parameters
-    a = float(result.params['a'].value)
-    a_err = result.params['a'].stderr
-    if a_err is None:
-        a_err = float(0.0)
-    else:
-        a_err = float(a_err)
-
-    b = float(result.params['b'].value)
-    b_err = result.params['b'].stderr
-    if b_err is None:
-        b_err = float(0.0)
-    else:
-        b_err = float(b_err)
-
-    c = float(result.params['c'].value)
-    c_err = result.params['c'].stderr
-    if c_err is None:
-        c_err = float(0.0)
-    else:
-        c_err = float(c_err)
-
-
-    params = [
-        ('a', a, a_err),
-        ('b', b, b_err),
-        ('c', c, c_err)
-    ]
-
-    x = np.linspace(x_data[0], x_data[-1], 5 * len(x_data))
-    y = result.eval(x=x)
-
-    fit_report = str(result.fit_report())
-    cov = result.covar.tolist() if result.covar is not None else None
-
-
-    return params, x, y, fit_report, cov
-");
-
-            // Compile the Python code into a module
-            let module =
-                PyModule::from_code(py, code, c_str!("quadratic.py"), c_str!("quadratic"))?;
-
-            let x_data = self.data.x.clone();
-            let y_data = self.data.y.clone();
-            let a_para = (
-                self.paramaters.a.name.clone(),
-                self.paramaters.a.min,
-                self.paramaters.a.max,
+    pub fn fit(&mut self) -> Result<(), spectrix_fitting::FitError> {
+        let model = spectrix_fitting::QuadraticModel::new(
+            "",
+            [
                 self.paramaters.a.initial_guess,
-                self.paramaters.a.vary,
-            );
-            let b_para = (
-                self.paramaters.b.name.clone(),
-                self.paramaters.b.min,
-                self.paramaters.b.max,
                 self.paramaters.b.initial_guess,
-                self.paramaters.b.vary,
-            );
-            let c_para = (
-                self.paramaters.c.name.clone(),
-                self.paramaters.c.min,
-                self.paramaters.c.max,
                 self.paramaters.c.initial_guess,
-                self.paramaters.c.vary,
-            );
-
-            let result = module
-                .getattr("QuadraticFit")?
-                .call1((x_data, y_data, a_para, b_para, c_para))?;
-
-            let params = result.get_item(0)?.extract::<Vec<(String, f64, f64)>>()?;
-            let x = result.get_item(1)?.extract::<Vec<f64>>()?;
-            let y = result.get_item(2)?.extract::<Vec<f64>>()?;
-            let fit_report = result.get_item(3)?.extract::<String>()?;
-            let cov_opt = result.get_item(4)?.extract::<Option<Vec<Vec<f64>>>>()?;
-            self.covar = cov_opt.and_then(|m| {
-                if m.len() == 3 && m.iter().all(|r| r.len() == 3) {
-                    Some([
-                        [m[0][0], m[0][1], m[0][2]],
-                        [m[1][0], m[1][1], m[1][2]],
-                        [m[2][0], m[2][1], m[2][2]],
-                    ])
-                } else {
-                    None
-                }
-            });
-
-            self.paramaters.a.value = Some(params[0].1);
-            self.paramaters.a.uncertainty = Some(params[0].2);
-            self.paramaters.b.value = Some(params[1].1);
-            self.paramaters.b.uncertainty = Some(params[1].2);
-            self.paramaters.c.value = Some(params[2].1);
-            self.paramaters.c.uncertainty = Some(params[2].2);
-
-            self.fit_points = x.iter().zip(y.iter()).map(|(&x, &y)| [x, y]).collect();
-            self.fit_report = fit_report;
-
-            Ok(())
-        })
+            ],
+        )
+        .with_parameters([
+            crate::fitter::native::parameter_definition("a", &self.paramaters.a, None),
+            crate::fitter::native::parameter_definition("b", &self.paramaters.b, None),
+            crate::fitter::native::parameter_definition("c", &self.paramaters.c, None),
+        ]);
+        let result = spectrix_fitting::fit(
+            &spectrix_fitting::FitProblem::new(
+                Box::new(model),
+                self.data.x.clone(),
+                self.data.y.clone(),
+            ),
+            &spectrix_fitting::FitOptions::default(),
+        )?;
+        crate::fitter::native::apply_estimate(&mut self.paramaters.a, &result, "a");
+        crate::fitter::native::apply_estimate(&mut self.paramaters.b, &result, "b");
+        crate::fitter::native::apply_estimate(&mut self.paramaters.c, &result, "c");
+        self.covar = crate::fitter::native::covariance_3(&result, ["a", "b", "c"]);
+        self.fit_points = result
+            .evaluation_x
+            .iter()
+            .copied()
+            .zip(result.best_fit.iter().copied())
+            .map(Into::into)
+            .collect();
+        self.fit_report = crate::fitter::native::fit_report(&result);
+        Ok(())
     }
 
     pub fn evaluate(&self, x: f64) -> f64 {
-        self.paramaters.a.value.unwrap_or(0.0) * x.powi(2)
-            + self.paramaters.b.value.unwrap_or(0.0) * x
-            + self.paramaters.c.value.unwrap_or(0.0)
+        self.paramaters.a.value.unwrap_or(0.0).mul_add(
+            x * x,
+            self.paramaters
+                .b
+                .value
+                .unwrap_or(0.0)
+                .mul_add(x, self.paramaters.c.value.unwrap_or(0.0)),
+        )
     }
 
     pub fn ui(&self, ui: &mut egui::Ui) {
-        // add menu button for the fit report
         ui.horizontal(|ui| {
-            if let Some(a) = &self.paramaters.a.value {
-                ui.label(format!(
-                    "a: {:.3} ± {:.3}",
-                    a,
-                    self.paramaters.a.uncertainty.unwrap_or(0.0)
-                ));
-            }
+            parameter_label(ui, "a", &self.paramaters.a);
             ui.separator();
-            if let Some(b) = &self.paramaters.b.value {
-                ui.label(format!(
-                    "b: {:.3} ± {:.3}",
-                    b,
-                    self.paramaters.b.uncertainty.unwrap_or(0.0)
-                ));
-            }
+            parameter_label(ui, "b", &self.paramaters.b);
             ui.separator();
-            if let Some(c) = &self.paramaters.c.value {
-                ui.label(format!(
-                    "c: {:.3} ± {:.3}",
-                    c,
-                    self.paramaters.c.uncertainty.unwrap_or(0.0)
-                ));
-            }
+            parameter_label(ui, "c", &self.paramaters.c);
             ui.separator();
             ui.menu_button("Fit Report", |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(self.fit_report.clone());
-                });
+                ui.horizontal_wrapped(|ui| ui.label(&self.fit_report));
             });
         });
+    }
+}
+
+fn sampled_points(min_x: f64, max_x: f64, evaluate: impl Fn(f64) -> f64) -> Vec<[f64; 2]> {
+    (0..=100)
+        .map(|index| {
+            let x = (max_x - min_x).mul_add(index as f64 / 100.0, min_x);
+            [x, evaluate(x)]
+        })
+        .collect()
+}
+
+fn named_parameter(name: &str) -> Parameter {
+    Parameter {
+        name: name.to_owned(),
+        ..Default::default()
+    }
+}
+
+fn fitted_parameter(name: &str, estimate: (f64, f64)) -> Parameter {
+    Parameter {
+        name: name.to_owned(),
+        min: f64::NEG_INFINITY,
+        max: f64::INFINITY,
+        initial_guess: estimate.0,
+        vary: true,
+        value: Some(estimate.0),
+        uncertainty: Some(estimate.1),
+        calibrated_value: None,
+        calibrated_uncertainty: None,
+    }
+}
+
+fn parameter_label(ui: &mut egui::Ui, name: &str, parameter: &Parameter) {
+    if let Some(value) = parameter.value {
+        ui.label(format!(
+            "{name}: {value:.3} ± {:.3}",
+            parameter.uncertainty.unwrap_or(0.0)
+        ));
     }
 }

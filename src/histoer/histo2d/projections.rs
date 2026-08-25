@@ -92,10 +92,10 @@ impl Histogram2D {
                 }
             }
 
-            self.plot_settings.projections.fill_y_line.points = vec![
+            self.plot_settings.projections.fill_y_line.set_points(vec![
                 (min_x, self.range.y.max).into(),
                 (max_x, self.range.y.max).into(),
-            ];
+            ]);
 
             self.plot_settings.projections.fill_y_line.fill = self.range.y.min as f32;
         }
@@ -143,10 +143,10 @@ impl Histogram2D {
                 }
             }
 
-            self.plot_settings.projections.fill_x_line.points = vec![
+            self.plot_settings.projections.fill_x_line.set_points(vec![
                 (self.range.x.min, max_y).into(),
                 (self.range.x.max, max_y).into(),
-            ];
+            ]);
 
             self.plot_settings.projections.fill_x_line.fill = min_y as f32;
         }

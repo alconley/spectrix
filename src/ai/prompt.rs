@@ -100,16 +100,16 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
 - Press `G` to fit only the selected background model. `G` requires at least one background marker pair.
 - Press `P` to add peak markers manually. If you do not place peak markers, Spectrix still needs the two region markers, then it seeds one peak from the strongest bin inside that region.
 - Press `O` to run the peak finder. You can adjust the peak-finder settings from the 1D histogram right-click menu under `Peak Finder` before running it.
-- Press `F` to perform the Gaussian fit with `lmfit`. The Python environment Spectrix is using must have `lmfit` available.
+- Press `F` to perform the Gaussian fit with Spectrix's native Rust fitting engine.
 - If you run `F` with a background model selected but no background marker pairs, Spectrix does not use the whole region as background. It falls back to two tiny background windows at the left and right edges of the region.
-- The fit settings in the `Fits` panel include `Equal σ`, `Free Position`, optional `Constrain σ` bounds, and the fit-line display toggles `Decomposition`, `Composition`, `Background`, and `1σ Uncertainty`.
+- The fit settings in the `Fits` panel include `Equal σ`, `Free Position`, optional `Constrain σ` bounds, background coupling (`Prefit & Fix` by default or `Prefit & Refine Jointly`), and the fit-line display toggles `Decomposition`, `Composition`, `Background`, and `1σ Uncertainty`.
 - After a successful fit, the result appears in the Fit Panel as the `Temp` fit. Spectrix also replaces the peak markers with the fitted peak means when available.
-- Press `S` / `Store Fit` when you want to keep the temp fit as a stored fit for later comparison, calibration, saving, exporting, or refitting.
+- Press `S` / `Store Fit` when you want to keep the temp fit as a stored fit for later comparison, calibration, saving, or refitting.
 - In the Fit Panel you can assign per-peak UUID values and energies. `UUID = 0` is the default invalid UUID. `Energy = -1` means that peak is invalid for calibration.
 - UUID labels can be drawn above peaks and adjusted in the Fit Panel with `Size`, `Lift`, and `Guide`.
 - If you enable `Calibration` in the Fit Panel, you can type the coefficients manually and click `Calibrate`, or fit them from assigned energies with `Linear` or `Quadratic`.
-- Applying calibration updates all stored fits and the temp fit, and each Gaussian fit writes calibration metadata back into the lmfit result, so large fit collections can take a moment.
-- Use `Save Fits` / `Load Fits` for normal Spectrix workflows. Use `Export All lmfit Results` or `Load lmfit .sav` when you want to move fits to or from Python/lmfit.
+- Applying calibration updates all stored fits and the temp fit directly in Rust.
+- Use `Save Fits` / `Load Fits` for Spectrix JSON workflows. Legacy JSON remains loadable, but the old Python model-result payload is ignored and omitted from new saves.
 - After calibration, the Fit Panel also shows the calibration curve and residuals. If a quadratic calibration is not safely invertible over the relevant range, Spectrix warns and falls back to the raw X axis for display.
 "#,
         );
@@ -469,7 +469,9 @@ mod tests {
         assert!(prompt.contains("default background model is `None`"));
         assert!(prompt.contains("Press `B` to add a green background marker pair"));
         assert!(prompt.contains("Press `R` twice"));
-        assert!(prompt.contains("Press `F` to perform the Gaussian fit with `lmfit`"));
+        assert!(
+            prompt.contains("Press `F` to perform the Gaussian fit with Spectrix's native Rust")
+        );
         assert!(prompt.contains("`Temp` fit"));
         assert!(prompt.contains("`UUID = 0`"));
         assert!(prompt.contains("`Energy = -1`"));

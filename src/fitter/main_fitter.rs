@@ -6,6 +6,17 @@ use super::models::powerlaw::{PowerLawFitter, PowerLawParameters};
 use super::models::quadratic::{QuadraticFitter, QuadraticParameters};
 use crate::egui_plot_stuff::{egui_filled_area::EguiFilledArea, egui_line::EguiLine};
 use crate::fitter::common::Calibration;
+use crate::fitter::native;
+use spectrix_fitting::{
+    BackgroundCoupling, BackgroundFitRequest, FitOptions as NativeFitOptions,
+    FitResult as NativeFitResult, fit_background as fit_native_background,
+};
+
+fn fit_display_line(color: egui::Color32) -> EguiLine {
+    let mut line = EguiLine::new(color);
+    line.allow_hover = false;
+    line
+}
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
 pub enum FitModel {
@@ -94,6 +105,8 @@ pub struct Fitter {
 
     pub background_model: BackgroundModel,
     pub background_result: Option<BackgroundResult>,
+    pub native_background_result: Option<NativeFitResult>,
+    pub background_coupling: BackgroundCoupling,
 
     pub fit_model: FitModel,
     pub fit_result: Option<FitResult>,
@@ -114,12 +127,14 @@ impl Default for Fitter {
 
             background_model: BackgroundModel::None,
             background_result: None,
+            native_background_result: None,
+            background_coupling: BackgroundCoupling::PrefitFrozen,
 
             fit_model: FitModel::None,
             fit_result: None,
 
-            background_line: EguiLine::new(egui::Color32::GREEN),
-            composition_line: EguiLine::new(egui::Color32::BLUE),
+            background_line: fit_display_line(egui::Color32::GREEN),
+            composition_line: fit_display_line(egui::Color32::BLUE),
             decomposition_lines: Vec::new(),
 
             calibration: Calibration::default(),
@@ -137,12 +152,14 @@ impl Fitter {
 
             background_model: BackgroundModel::None,
             background_result: None,
+            native_background_result: None,
+            background_coupling: BackgroundCoupling::PrefitFrozen,
 
             fit_model: FitModel::None,
             fit_result: None,
 
-            background_line: EguiLine::new(egui::Color32::GREEN),
-            composition_line: EguiLine::new(egui::Color32::BLUE),
+            background_line: fit_display_line(egui::Color32::GREEN),
+            composition_line: fit_display_line(egui::Color32::BLUE),
             decomposition_lines: Vec::new(),
 
             calibration: Calibration::default(),
@@ -239,15 +256,17 @@ impl Fitter {
                 );
 
                 fit.sigma_bounds = sigma_bounds_x;
+                fit.background_coupling = self.background_coupling;
 
-                match fit.lmfit(None) {
+                match fit.fit_native() {
                     Ok(_) => {
                         self.apply_gaussian_fit_visuals(&fit);
 
                         if self.background_result.is_none()
                             && let Some(background_result) = &fit.background_result
                         {
-                            self.background_line.points = background_result.get_fit_points();
+                            self.background_line
+                                .set_points(background_result.get_fit_points());
                             self.background_result = Some(background_result.clone());
                         }
 
@@ -289,78 +308,56 @@ impl Fitter {
 
     pub fn fit_background(&mut self) {
         log::info!("Fitting background");
-        match &self.background_model {
-            BackgroundModel::Linear(params) => {
-                let mut fit = LinearFitter::new(self.data.clone());
+        if matches!(self.background_model, BackgroundModel::None) {
+            self.background_result = None;
+            self.native_background_result = None;
+            log::info!("No background fitting required for 'None'");
+            return;
+        }
 
-                // Copy the parameters from the background model to the LinearFitter
-                fit.paramaters = params.clone(); // Ensure LinearParameters are used
-
-                // Perform the fit
-                match fit.lmfit() {
-                    Ok(_) => {
-                        self.background_line.points = fit.fit_points.clone();
-                        self.background_result = Some(BackgroundResult::Linear(fit));
-                    }
-                    Err(e) => {
-                        eprintln!("Error: {e}");
-                    }
+        let Some(minimum) = self.data.x.iter().copied().reduce(f64::min) else {
+            log::error!("Cannot fit an empty background");
+            return;
+        };
+        let Some(maximum) = self.data.x.iter().copied().reduce(f64::max) else {
+            log::error!("Cannot fit an empty background");
+            return;
+        };
+        let bin_width = self
+            .data
+            .x
+            .windows(2)
+            .filter_map(|pair| {
+                let difference = (pair[1] - pair[0]).abs();
+                (difference > 0.0 && difference.is_finite()).then_some(difference)
+            })
+            .reduce(f64::min)
+            .unwrap_or(1.0);
+        let request = BackgroundFitRequest {
+            x: self.data.x.clone(),
+            y: self.data.y.clone(),
+            bin_width,
+            region: [minimum, maximum],
+            markers: vec![(minimum, maximum)],
+            kind: native::background_kind(&self.background_model),
+            seed: Some(native::background_seed(
+                &self.background_model,
+                self.background_result.as_ref(),
+            )),
+        };
+        match fit_native_background(&request, &NativeFitOptions::default()) {
+            Ok(result) => {
+                self.background_result = native::background_result_from_native(
+                    &self.background_model,
+                    &result,
+                    self.data.clone(),
+                );
+                if let Some(background) = &self.background_result {
+                    self.background_line.set_points(background.get_fit_points());
                 }
+                self.native_background_result = Some(result);
             }
-            BackgroundModel::Quadratic(params) => {
-                let mut fit = QuadraticFitter::new(self.data.clone());
-
-                // Copy the parameters from the background model to the QuadraticFitter
-                fit.paramaters = params.clone(); // Ensure QuadraticParameters are used
-
-                // Perform the fit
-                match fit.lmfit() {
-                    Ok(_) => {
-                        self.background_line.points = fit.fit_points.clone();
-                        self.background_result = Some(BackgroundResult::Quadratic(fit));
-                    }
-                    Err(e) => {
-                        eprintln!("Error: {e}");
-                    }
-                }
-            }
-            BackgroundModel::PowerLaw(params) => {
-                let mut fit = PowerLawFitter::new(self.data.clone());
-
-                // Copy the parameters from the background model to the PowerLawFitter
-                fit.paramaters = params.clone(); // Ensure PowerLawParameters are used
-
-                // Perform the fit
-                match fit.lmfit() {
-                    Ok(_) => {
-                        self.background_line.points = fit.fit_points.clone();
-                        self.background_result = Some(BackgroundResult::PowerLaw(fit));
-                    }
-                    Err(e) => {
-                        eprintln!("Error: {e}");
-                    }
-                }
-            }
-            BackgroundModel::Exponential(params) => {
-                let mut fit = ExponentialFitter::new(self.data.clone());
-
-                // Copy the parameters from the background model to the ExponentialFitter
-                fit.paramaters = params.clone(); // Ensure ExponentialParameters are used
-
-                // Perform the fit
-                match fit.lmfit() {
-                    Ok(_) => {
-                        self.background_line.points = fit.fit_points.clone();
-                        self.background_result = Some(BackgroundResult::Exponential(fit));
-                    }
-                    Err(e) => {
-                        eprintln!("Error: {e}");
-                    }
-                }
-            }
-            BackgroundModel::None => {
-                log::info!("No background fitting required for 'None'");
-            }
+            Err(error) => log::error!("Native background fit failed: {error}"),
         }
         log::info!("Finished fitting background");
     }
@@ -419,19 +416,44 @@ impl Fitter {
     }
 
     pub fn apply_gaussian_fit_visuals(&mut self, fit: &GaussianFitter) {
-        self.composition_line.points = fit.fit_points.clone();
+        self.composition_line.set_points(fit.fit_points.clone());
         self.decomposition_lines.clear();
 
         for gaussian in &fit.fit_result {
-            let mut line = EguiLine::new(egui::Color32::from_rgb(150, 0, 255));
-            line.points = gaussian.fit_points.clone();
+            let mut line = fit_display_line(egui::Color32::from_rgb(150, 0, 255));
+            line.set_points(gaussian.fit_points.clone());
             self.decomposition_lines.push(line);
         }
 
         if let Some(background_result) = &fit.background_result {
-            self.background_line.points = background_result.get_fit_points();
+            self.background_line
+                .set_points(background_result.get_fit_points());
         }
 
+        self.set_name(self.name.clone());
+    }
+
+    pub fn compact_display_data(&mut self) {
+        let Some(FitResult::Gaussian(fit)) = &mut self.fit_result else {
+            return;
+        };
+        fit.compact_display_data();
+        self.composition_line.allow_hover = false;
+        self.background_line.allow_hover = false;
+        self.composition_line.set_points(fit.fit_points.clone());
+        self.decomposition_lines.truncate(fit.fit_result.len());
+        while self.decomposition_lines.len() < fit.fit_result.len() {
+            self.decomposition_lines
+                .push(fit_display_line(egui::Color32::from_rgb(150, 0, 255)));
+        }
+        for (line, peak) in self.decomposition_lines.iter_mut().zip(&fit.fit_result) {
+            line.allow_hover = false;
+            line.set_points(peak.fit_points.clone());
+        }
+        if let Some(background_result) = &fit.background_result {
+            self.background_line
+                .set_points(background_result.get_fit_points());
+        }
         self.set_name(self.name.clone());
     }
 
@@ -512,6 +534,19 @@ impl Fitter {
         band.draw(plot_ui, calibration, name, line, fill_alpha);
     }
 
+    pub fn overlaps_visible_x(
+        &self,
+        plot_ui: &egui_plot::PlotUi<'_>,
+        calibration: Option<&Calibration>,
+    ) -> bool {
+        let primary = if self.composition_line.points.len() >= 2 {
+            &self.composition_line
+        } else {
+            &self.background_line
+        };
+        primary.overlaps_visible_x(plot_ui, calibration)
+    }
+
     pub fn draw(
         &self,
         plot_ui: &mut egui_plot::PlotUi<'_>,
@@ -521,6 +556,9 @@ impl Fitter {
         if show_fit_lines_area
             && let Some(FitResult::Gaussian(fit)) = &self.fit_result
             && self.composition_line.draw
+            && self
+                .composition_line
+                .overlaps_visible_x(plot_ui, calibration)
         {
             Self::draw_uncertainty_band(
                 plot_ui,

@@ -23,20 +23,26 @@ impl Histogram {
             return;
         };
 
-        let Some((metadata, metadata_found, fallback_background_model, mut moved_fit)) =
-            self.fits.stored_fits.get(fit_idx).and_then(|stored_fit| {
-                if let Some(FitResult::Gaussian(gaussian)) = &stored_fit.fit_result {
-                    let (metadata, metadata_found) = gaussian.fit_metadata_with_fallback();
-                    Some((
-                        metadata,
-                        metadata_found,
-                        stored_fit.background_model.clone(),
-                        stored_fit.clone(),
-                    ))
-                } else {
-                    None
-                }
-            })
+        let Some((
+            metadata,
+            metadata_found,
+            fallback_background_model,
+            background_coupling,
+            mut moved_fit,
+        )) = self.fits.stored_fits.get(fit_idx).and_then(|stored_fit| {
+            if let Some(FitResult::Gaussian(gaussian)) = &stored_fit.fit_result {
+                let (metadata, metadata_found) = gaussian.fit_metadata_with_fallback();
+                Some((
+                    metadata,
+                    metadata_found,
+                    stored_fit.background_model.clone(),
+                    gaussian.background_coupling,
+                    stored_fit.clone(),
+                ))
+            } else {
+                None
+            }
+        })
         else {
             log::warn!("Modify fit requested for non-Gaussian fit.");
             return;
@@ -67,6 +73,7 @@ impl Histogram {
             "None" => BackgroundModel::None,
             _ => fallback_background_model,
         };
+        self.fits.settings.background_coupling = background_coupling;
 
         if matches!(self.fits.settings.background_model, BackgroundModel::None) {
             self.plot_settings.markers.clear_background_markers();
@@ -180,6 +187,7 @@ impl Histogram {
 
         fitter.background_model = background_model;
         fitter.background_result = background_result;
+        fitter.background_coupling = self.fits.settings.background_coupling;
 
         // build optional σ-bounds from UI; when UI is “calibrated”, these are energy-bounds
         let sigma_bounds_ui = if self.fits.settings.constrain_sigma {

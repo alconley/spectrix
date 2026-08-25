@@ -1,22 +1,13 @@
 use crate::egui_plot_stuff::egui_filled_area::EguiFilledArea;
+use crate::fitter::common::Calibration;
 use crate::fitter::common::{Data, Parameter, fit_measurement_label};
 use crate::fitter::main_fitter::{BackgroundModel, BackgroundResult};
-use crate::fitter::models::exponential::ExponentialFitter;
-use crate::fitter::models::linear::LinearFitter;
-use crate::fitter::models::powerlaw::PowerLawFitter;
-use crate::fitter::models::quadratic::QuadraticFitter;
+use crate::fitter::native;
 
-use crate::fitter::common::Calibration;
-
-use pyo3::{
-    ffi::c_str,
-    prelude::*,
-    types::{PyDict, PyModule},
+use spectrix_fitting::{
+    BackgroundCoupling, FitError as NativeFitError, FitOptions as NativeFitOptions, PeakFitRequest,
+    SigmaBounds, SpectrumFitResult as NativeSpectrumFitResult, fit_peaks as fit_native_peaks,
 };
-
-use std::fs::File;
-use std::io::Write as _;
-use std::path::PathBuf;
 
 fn auto_fmt(value: Option<f64>, unc: Option<f64>, units: Option<&str>) -> String {
     match value {
@@ -343,13 +334,20 @@ pub struct GaussianFitter {
     pub fit_points: Vec<[f64; 2]>,
     pub uncertainty_band: EguiFilledArea,
     pub fit_report: String,
+    #[serde(default, skip_serializing)]
     pub lmfit_result: Option<String>,
+    pub native_result: Option<NativeSpectrumFitResult>,
+    pub background_coupling: BackgroundCoupling,
     pub sigma_bounds: Option<(Vec<f64>, Vec<f64>)>, // (mins_x, maxs_x)
     pub fit_metadata: Option<GaussianFitMetadata>,
 }
 
 impl GaussianFitter {
-    const MAX_COMPOSITION_POINTS: usize = 4096;
+    // Plotting more than roughly one point per horizontal screen pixel adds no
+    // visible detail, but it makes every stored fit expensive to tessellate.
+    const MAX_COMPOSITION_DISPLAY_POINTS: usize = 2048;
+    const MAX_COMPONENT_DISPLAY_POINTS: usize = 512;
+    const MAX_UNCERTAINTY_DISPLAY_POINTS: usize = 512;
 
     #[expect(clippy::too_many_arguments)]
     pub fn new(
@@ -379,6 +377,8 @@ impl GaussianFitter {
             uncertainty_band: EguiFilledArea::default(),
             fit_report: String::new(),
             lmfit_result: None,
+            native_result: None,
+            background_coupling: BackgroundCoupling::PrefitFrozen,
             sigma_bounds: None,
             fit_metadata: None,
         }
@@ -429,32 +429,102 @@ impl GaussianFitter {
             return None;
         }
 
-        let lower = ys
+        let sanitized_uncertainties = uncertainties
             .iter()
-            .zip(uncertainties)
-            .map(|(&y, &uncertainty)| {
-                let uncertainty = if uncertainty.is_finite() && uncertainty > 0.0 {
+            .map(|&uncertainty| {
+                if uncertainty.is_finite() && uncertainty > 0.0 {
                     uncertainty
                 } else {
                     0.0
-                };
-                (y - uncertainty).max(0.0)
+                }
             })
+            .collect::<Vec<_>>();
+        let upper_signal = ys
+            .iter()
+            .zip(&sanitized_uncertainties)
+            .map(|(&y, &uncertainty)| y + uncertainty)
+            .collect::<Vec<_>>();
+        let indices =
+            Self::display_sample_indices(xs, &upper_signal, Self::MAX_UNCERTAINTY_DISPLAY_POINTS);
+        let band_xs = indices.iter().map(|&index| xs[index]).collect();
+        let lower = indices
+            .iter()
+            .map(|&index| (ys[index] - sanitized_uncertainties[index]).max(0.0))
             .collect();
-        let upper = ys
+        let upper = indices
             .iter()
-            .zip(uncertainties)
-            .map(|(&y, &uncertainty)| {
-                let uncertainty = if uncertainty.is_finite() && uncertainty > 0.0 {
-                    uncertainty
-                } else {
-                    0.0
-                };
-                y + uncertainty
-            })
+            .map(|&index| ys[index] + sanitized_uncertainties[index])
             .collect();
 
-        Some(EguiFilledArea::new(xs.to_vec(), lower, upper))
+        Some(EguiFilledArea::new(band_xs, lower, upper))
+    }
+
+    fn display_sample_indices(xs: &[f64], ys: &[f64], limit: usize) -> Vec<usize> {
+        let point_count = xs.len();
+        if point_count <= limit || point_count != ys.len() || limit < 3 {
+            return (0..point_count).collect();
+        }
+
+        // Largest-Triangle-Three-Buckets retains sharp Gaussian maxima and
+        // shoulders much better than a fixed stride while bounding plot cost.
+        let bucket_width = (point_count - 2) as f64 / (limit - 2) as f64;
+        let mut sampled = Vec::with_capacity(limit);
+        sampled.push(0);
+        let mut anchor = 0;
+
+        for bucket in 0..(limit - 2) {
+            let average_start =
+                (((bucket + 1) as f64 * bucket_width).floor() as usize + 1).min(point_count - 1);
+            let average_end =
+                (((bucket + 2) as f64 * bucket_width).floor() as usize + 1).min(point_count);
+            let (average_x, average_y) = if average_start < average_end {
+                let count = (average_end - average_start) as f64;
+                (
+                    xs[average_start..average_end].iter().sum::<f64>() / count,
+                    ys[average_start..average_end].iter().sum::<f64>() / count,
+                )
+            } else {
+                (xs[point_count - 1], ys[point_count - 1])
+            };
+
+            let range_start =
+                ((bucket as f64 * bucket_width).floor() as usize + 1).min(point_count - 1);
+            let range_end = (((bucket + 1) as f64 * bucket_width).floor() as usize + 1)
+                .min(point_count - 1)
+                .max(range_start + 1);
+            let anchor_x = xs[anchor];
+            let anchor_y = ys[anchor];
+            let mut selected = range_start;
+            let mut largest_area = f64::NEG_INFINITY;
+            for index in range_start..range_end {
+                let area = ((anchor_x - average_x) * (ys[index] - anchor_y)
+                    - (anchor_x - xs[index]) * (average_y - anchor_y))
+                    .abs();
+                if area > largest_area {
+                    largest_area = area;
+                    selected = index;
+                }
+            }
+            sampled.push(selected);
+            anchor = selected;
+        }
+
+        sampled.push(point_count - 1);
+        sampled
+    }
+
+    fn decimate_curve(xs: &[f64], ys: &[f64]) -> Vec<[f64; 2]> {
+        Self::decimate_curve_to_limit(xs, ys, Self::MAX_COMPONENT_DISPLAY_POINTS)
+    }
+
+    fn decimate_curve_to_limit(xs: &[f64], ys: &[f64], limit: usize) -> Vec<[f64; 2]> {
+        if xs.len() != ys.len() {
+            return Vec::new();
+        }
+        Self::display_sample_indices(xs, ys, limit)
+            .into_iter()
+            .map(|index| [xs[index], ys[index]])
+            .collect()
     }
 
     fn decimate_composition_arrays(
@@ -462,31 +532,94 @@ impl GaussianFitter {
         ys: Vec<f64>,
         uncertainties: Vec<f64>,
     ) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-        if xs.len() <= Self::MAX_COMPOSITION_POINTS
-            || xs.len() != ys.len()
-            || xs.len() != uncertainties.len()
-        {
+        if xs.len() != ys.len() || xs.len() != uncertainties.len() {
             return (xs, ys, uncertainties);
         }
+        let indices = Self::display_sample_indices(&xs, &ys, Self::MAX_COMPOSITION_DISPLAY_POINTS);
+        (
+            indices.iter().map(|&index| xs[index]).collect(),
+            indices.iter().map(|&index| ys[index]).collect(),
+            indices.iter().map(|&index| uncertainties[index]).collect(),
+        )
+    }
 
-        let last_index = xs.len().saturating_sub(1);
-        let stride =
-            ((last_index as f64) / ((Self::MAX_COMPOSITION_POINTS - 1) as f64)).ceil() as usize;
+    fn select_display_values(values: &mut Vec<f64>, indices: &[usize], expected_length: usize) {
+        if values.len() == expected_length {
+            *values = indices.iter().map(|&index| values[index]).collect();
+        }
+    }
 
-        let mut decimated_xs = Vec::with_capacity(Self::MAX_COMPOSITION_POINTS);
-        let mut decimated_ys = Vec::with_capacity(Self::MAX_COMPOSITION_POINTS);
-        let mut decimated_uncertainties = Vec::with_capacity(Self::MAX_COMPOSITION_POINTS);
-
-        for (index, ((x, y), uncertainty)) in xs.into_iter().zip(ys).zip(uncertainties).enumerate()
+    fn compact_native_evaluation(result: &mut NativeSpectrumFitResult) {
+        let expected_length = result.fit.evaluation_x.len();
+        if expected_length <= Self::MAX_COMPOSITION_DISPLAY_POINTS
+            || result.fit.best_fit.len() != expected_length
         {
-            if index == 0 || index == last_index || index % stride == 0 {
-                decimated_xs.push(x);
-                decimated_ys.push(y);
-                decimated_uncertainties.push(uncertainty);
+            return;
+        }
+        let indices = Self::display_sample_indices(
+            &result.fit.evaluation_x,
+            &result.fit.best_fit,
+            Self::MAX_COMPOSITION_DISPLAY_POINTS,
+        );
+
+        Self::select_display_values(&mut result.fit.evaluation_x, &indices, expected_length);
+        Self::select_display_values(&mut result.fit.best_fit, &indices, expected_length);
+        for component in &mut result.fit.components {
+            Self::select_display_values(&mut component.values, &indices, expected_length);
+        }
+        if let Some(band) = &mut result.fit.confidence_band {
+            Self::select_display_values(&mut band.x, &indices, expected_length);
+            Self::select_display_values(&mut band.best_fit, &indices, expected_length);
+            Self::select_display_values(&mut band.uncertainty, &indices, expected_length);
+            Self::select_display_values(&mut band.lower, &indices, expected_length);
+            Self::select_display_values(&mut band.upper, &indices, expected_length);
+        }
+        for (_, band) in &mut result.fit.component_bands {
+            Self::select_display_values(&mut band.x, &indices, expected_length);
+            Self::select_display_values(&mut band.best_fit, &indices, expected_length);
+            Self::select_display_values(&mut band.uncertainty, &indices, expected_length);
+            Self::select_display_values(&mut band.lower, &indices, expected_length);
+            Self::select_display_values(&mut band.upper, &indices, expected_length);
+        }
+    }
+
+    pub(crate) fn compact_display_data(&mut self) {
+        if self.fit_points.len() > Self::MAX_COMPOSITION_DISPLAY_POINTS {
+            let (xs, ys): (Vec<_>, Vec<_>) = self
+                .fit_points
+                .iter()
+                .map(|point| (point[0], point[1]))
+                .unzip();
+            self.fit_points =
+                Self::decimate_curve_to_limit(&xs, &ys, Self::MAX_COMPOSITION_DISPLAY_POINTS);
+        }
+        for peak in &mut self.fit_result {
+            if peak.fit_points.len() > Self::MAX_COMPONENT_DISPLAY_POINTS {
+                let (xs, ys): (Vec<_>, Vec<_>) = peak
+                    .fit_points
+                    .iter()
+                    .map(|point| (point[0], point[1]))
+                    .unzip();
+                peak.fit_points = Self::decimate_curve(&xs, &ys);
             }
         }
-
-        (decimated_xs, decimated_ys, decimated_uncertainties)
+        let band = &mut self.uncertainty_band;
+        if band.xs.len() > Self::MAX_UNCERTAINTY_DISPLAY_POINTS
+            && band.xs.len() == band.lower.len()
+            && band.xs.len() == band.upper.len()
+        {
+            let indices = Self::display_sample_indices(
+                &band.xs,
+                &band.upper,
+                Self::MAX_UNCERTAINTY_DISPLAY_POINTS,
+            );
+            band.xs = indices.iter().map(|&index| band.xs[index]).collect();
+            band.lower = indices.iter().map(|&index| band.lower[index]).collect();
+            band.upper = indices.iter().map(|&index| band.upper[index]).collect();
+        }
+        if let Some(native_result) = &mut self.native_result {
+            Self::compact_native_evaluation(native_result);
+        }
     }
 
     pub fn get_calibration_data(&self) -> Vec<(f64, f64, f64, f64)> {
@@ -535,1435 +668,172 @@ impl GaussianFitter {
 
     pub fn calibrate(&mut self, calibration: &Calibration) {
         log::info!("Calibrating");
-        // Calibration logic goes here
-
-        // calibrate the parameters
         self.calibrate_parameters(calibration);
-
-        // add calibration to result file
-        if let Err(e) = self.add_calibration_to_result(calibration) {
-            log::error!("Failed to add calibration to lmfit result: {e:?}");
-        }
     }
 
-    pub fn lmfit(&mut self, load_result_path: Option<PathBuf>) -> PyResult<()> {
-        Python::attach(|py| {
-            // let sys = py.import("sys")?;
-            // let version: String = sys.getattr("version")?.extract()?;
-            // let executable: String = sys.getattr("executable")?.extract()?;
-            // println!("Using Python version: {}", version);
-            // println!("Python executable: {}", executable);
-
-            // Check if the `uproot` module can be imported
-            if py.import("lmfit").is_ok() {
-                // println!("Successfully imported `lmfit` module.");
-            } else {
-                eprintln!(
-                    "Error: `lmfit` module could not be found. Make sure you are using the correct Python environment with `lmfit` installed."
-                );
-                return Err(PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                    "`lmfit` module not available",
-                ));
-            }
-
-            // Define the Python code as a module
-            let code = c_str!("
-import numpy as np
-import lmfit
-from lmfit.model import load_modelresult, save_modelresult
-
-def _bg_type_to_code(bg_type: str) -> int:
-    mapping = {'None': 0, 'linear': 1, 'quadratic': 2, 'exponential': 3, 'powerlaw': 4}
-    return mapping.get(bg_type, 0)
-
-def _code_to_bg_type(code: float) -> str:
-    mapping = {0: 'None', 1: 'linear', 2: 'quadratic', 3: 'exponential', 4: 'powerlaw'}
-    return mapping.get(int(code), 'None')
-
-def _inject_spectrix_metadata(result, region_markers, peak_markers, background_markers, bg_type, equal_sigma, free_position):
-    params = result.params
-    # Python-friendly marker parameter names for external tools/scripts
-    params.add('region_marker_count', value=len(region_markers), vary=False)
-    for i, val in enumerate(region_markers):
-        params.add(f'region_marker_{i}', value=float(val), vary=False)
-
-    params.add('peak_marker_count', value=len(peak_markers), vary=False)
-    for i, val in enumerate(peak_markers):
-        params.add(f'peak_marker_{i}', value=float(val), vary=False)
-
-    params.add('bg_marker_count', value=len(background_markers), vary=False)
-    for i, (start, end) in enumerate(background_markers):
-        params.add(f'bg_marker_start_{i}', value=float(start), vary=False)
-        params.add(f'bg_marker_end_{i}', value=float(end), vary=False)
-
-    params.add('bg_model_type', value=float(_bg_type_to_code(bg_type)), vary=False)
-    params.add('fit_equal_sigma', value=1.0 if equal_sigma else 0.0, vary=False)
-    params.add('fit_free_position', value=1.0 if free_position else 0.0, vary=False)
-
-def _extract_spectrix_metadata(result):
-    params = result.params
-    # Preferred: python-friendly marker parameter names
-    if 'region_marker_count' in params or 'peak_marker_count' in params or 'bg_marker_count' in params:
-        region_count = int(params['region_marker_count'].value) if 'region_marker_count' in params else 0
-        peak_count = int(params['peak_marker_count'].value) if 'peak_marker_count' in params else 0
-        bg_pair_count = int(params['bg_marker_count'].value) if 'bg_marker_count' in params else 0
-
-        region_markers = [
-            float(params[f'region_marker_{i}'].value)
-            for i in range(region_count)
-            if f'region_marker_{i}' in params
-        ]
-        peak_markers = [
-            float(params[f'peak_marker_{i}'].value)
-            for i in range(peak_count)
-            if f'peak_marker_{i}' in params
-        ]
-
-        background_markers = []
-        for i in range(bg_pair_count):
-            start_key = f'bg_marker_start_{i}'
-            end_key = f'bg_marker_end_{i}'
-            if start_key in params and end_key in params:
-                start = float(params[start_key].value)
-                end = float(params[end_key].value)
-                background_markers.append((start, end))
-
-        bg_type_code = float(params['bg_model_type'].value) if 'bg_model_type' in params else 0.0
-        equal_sigma = (float(params['fit_equal_sigma'].value) > 0.5) if 'fit_equal_sigma' in params else True
-        free_position = (float(params['fit_free_position'].value) > 0.5) if 'fit_free_position' in params else True
-
-        return (
-            region_markers,
-            peak_markers,
-            background_markers,
-            _code_to_bg_type(bg_type_code),
-            equal_sigma,
-            free_position,
-            True,
-        )
-
-    # Legacy SpectriX names
-    if 'spectrix_meta_version' not in params:
-        return None
-
-    region_count = int(params['spectrix_meta_region_count'].value) if 'spectrix_meta_region_count' in params else 0
-    peak_count = int(params['spectrix_meta_peak_count'].value) if 'spectrix_meta_peak_count' in params else 0
-    bg_pair_count = int(params['spectrix_meta_bg_pair_count'].value) if 'spectrix_meta_bg_pair_count' in params else 0
-
-    region_markers = [float(params[f'spectrix_meta_region_{i}'].value) for i in range(region_count)]
-    peak_markers = [float(params[f'spectrix_meta_peak_{i}'].value) for i in range(peak_count)]
-
-    background_markers = []
-    for i in range(bg_pair_count):
-        start = float(params[f'spectrix_meta_bg_start_{i}'].value)
-        end = float(params[f'spectrix_meta_bg_end_{i}'].value)
-        background_markers.append((start, end))
-
-    bg_type_code = float(params['spectrix_meta_bg_type'].value) if 'spectrix_meta_bg_type' in params else 0.0
-    equal_sigma = (float(params['spectrix_meta_equal_sigma'].value) > 0.5) if 'spectrix_meta_equal_sigma' in params else True
-    free_position = (float(params['spectrix_meta_free_position'].value) > 0.5) if 'spectrix_meta_free_position' in params else True
-
-    return (
-        region_markers,
-        peak_markers,
-        background_markers,
-        _code_to_bg_type(bg_type_code),
-        equal_sigma,
-        free_position,
-        True,
-    )
-
-def _approx_eval_uncertainty(result, x):
-    x = np.asarray(x, dtype=float)
-    try:
-        y_nominal = np.asarray(result.eval(x=x), dtype=float)
-    except Exception:
-        return np.zeros_like(x, dtype=float)
-
-    variance = np.zeros_like(y_nominal, dtype=float)
-
-    for name, par in result.params.items():
-        stderr = getattr(par, 'stderr', None)
-        expr = getattr(par, 'expr', None)
-        value = getattr(par, 'value', None)
-
-        if expr is not None or stderr is None or value is None:
-            continue
-
-        try:
-            stderr = float(stderr)
-            value = float(value)
-        except Exception:
-            continue
-
-        if not np.isfinite(stderr) or stderr <= 0.0 or not np.isfinite(value):
-            continue
-
-        params_plus = result.params.copy()
-        params_minus = result.params.copy()
-
-        try:
-            params_plus[name].set(value=value + stderr)
-            params_minus[name].set(value=value - stderr)
-            y_plus = np.asarray(result.model.eval(params_plus, x=x), dtype=float)
-            y_minus = np.asarray(result.model.eval(params_minus, x=x), dtype=float)
-        except Exception:
-            continue
-
-        if y_plus.shape != y_nominal.shape or y_minus.shape != y_nominal.shape:
-            continue
-
-        deriv = (y_plus - y_minus) / (2.0 * stderr)
-        variance += (deriv * stderr) ** 2
-
-    return np.sqrt(np.maximum(variance, 0.0))
-
-def _compute_uncertainty(result, x):
-    x = np.asarray(x, dtype=float)
-
-    try:
-        uncertainty = np.asarray(result.eval_uncertainty(x=x, sigma=1), dtype=float)
-    except Exception:
-        uncertainty = None
-
-    if (
-        uncertainty is None
-        or uncertainty.shape != x.shape
-        or not np.any(np.isfinite(uncertainty) & (uncertainty > 0.0))
-    ):
-        uncertainty = _approx_eval_uncertainty(result, x)
-
-    if uncertainty.shape != x.shape:
-        return np.zeros_like(x, dtype=float)
-
-    return np.where(np.isfinite(uncertainty) & (uncertainty > 0.0), uncertainty, 0.0)
-
-def GaussianFit(counts: list, centers: list,
-                region_markers: list, peak_markers: list = [], background_markers: list = [],
-                equal_sigma: bool = True, free_position: bool = True,                 
-                background_params: dict = {'bg_type': 'linear', 
-                                            'slope': (0, -np.inf, np.inf, 1.0, True), 
-                                            'intercept': (0, -np.inf, np.inf, 0.0, True),
-                                            'a': (0, -np.inf, np.inf, 0.0, True),
-                                            'b': (0, -np.inf, np.inf, 1.0, True),
-                                            'c': (0, -np.inf, np.inf, 0.0, True),
-                                            'amplitude': (0, -np.inf, np.inf, 1.0, True),
-                                            'decay': (0, -np.inf, np.inf, 1.0, True),
-                                            'exponent': (0, -np.inf, np.inf, 1.0, True)
-                                            },
-                sigma_bounds: tuple | None = None):
-
-    # ensure the edges is the same length as counts + 1
-    if len(centers) != len(counts):
-        raise ValueError('The length of edges must be one more than the length of counts.')
-    
-    centers = np.array(centers)
-    counts = np.array(counts)
-    
-    bin_width = centers[1] - centers[0]
-    
-    # Ensure there are 2 region markers
-    if len(region_markers) != 2:
-        raise ValueError('Region markers must have exactly 2 values.')
-    
-    # sort the region markers
-    region_markers = sorted(region_markers)
-
-    # ensure there are only 2 region markers
-    if len(region_markers) != 2:
-        raise ValueError('Region markers must have exactly 2 values.')
-    
-    # Extract fitting region
-    region_mask = (centers >= region_markers[0]) & (centers <= region_markers[1])
-
-    x_data = centers[region_mask]
-    y_data = counts[region_mask]
-
-    # If there is not a peak marker, set it to the max bin value in the region
-    if len(peak_markers) == 0:
-        # find the bin with the max value in the region
-        max_bin_idx = np.argmax(y_data)
-        peak_markers = [x_data[max_bin_idx]]
-
-    # sort the peak markers
-    peak_markers = sorted(peak_markers)
-
-    # Remove any peak markers that are outside the region
-    peak_markers = [peak for peak in peak_markers if peak >= region_markers[0] and peak <= region_markers[1]]
-
-    bg_type = background_params.get('bg_type', 'linear')
-    
-    if bg_type == 'linear':
-        bg_model = lmfit.models.LinearModel(prefix='bg_')
-        params = bg_model.make_params(slope=background_params['slope'][3], intercept=background_params['intercept'][3])
-        params['bg_slope'].set(vary=background_params['slope'][4])
-        params['bg_intercept'].set(vary=background_params['intercept'][4])
-    elif bg_type == 'quadratic':
-        bg_model = lmfit.models.QuadraticModel(prefix='bg_')
-        params = bg_model.make_params(a=background_params['a'][3], b=background_params['b'][3], c=background_params['c'][3])
-        params['bg_a'].set(vary=background_params['a'][4])
-        params['bg_b'].set(vary=background_params['b'][4])
-        params['bg_c'].set(vary=background_params['c'][4])
-    elif bg_type == 'exponential':
-        bg_model = lmfit.models.ExponentialModel(prefix='bg_')
-        params = bg_model.make_params(amplitude=background_params['amplitude'][3], decay=background_params['decay'][3])
-        params['bg_amplitude'].set(vary=background_params['amplitude'][4])
-        params['bg_decay'].set(vary=background_params['decay'][4])
-    elif bg_type == 'powerlaw':
-        bg_model = lmfit.models.PowerLawModel(prefix='bg_')
-        params = bg_model.make_params(amplitude=background_params['amplitude'][3], exponent=background_params['exponent'][3])
-        params['bg_amplitude'].set(vary=background_params['amplitude'][4])
-        params['bg_exponent'].set(vary=background_params['exponent'][4])
-    elif bg_type == 'None':
-        bg_model = lmfit.models.ConstantModel(prefix='bg_')
-        params = bg_model.make_params(c=0)
-        params['bg_c'].set(vary=False)
-    else:
-        raise ValueError('Unsupported background model')
-    
-    # Fit the background model to the data of the background markers before fitting the peaks
-    if len(background_markers) == 0:
-        # put marker at the start and end of the region
-        background_markers = [(region_markers[0]-bin_width, region_markers[0]), (region_markers[1], region_markers[1]+bin_width)]
-
-    bg_x = []
-    bg_y = []
-    for bg_start, bg_end in background_markers:
-        # sort the background markers
-        bg_start, bg_end = sorted([bg_start, bg_end])
-
-        bg_mask = (centers >= bg_start) & (centers <= bg_end)
-        bg_x.extend(centers[bg_mask])
-        bg_y.extend(counts[bg_mask])
-
-    bg_x = np.array(bg_x)
-    bg_y = np.array(bg_y)
-    
-    bg_result = bg_model.fit(bg_y, params, x=bg_x)
-
-    # print intial parameter guesses
-    print('Initial Background Parameter Guesses:')
-    params.pretty_print()
-
-    # print fit report
-    print('Background Fit Report:')
-    print(bg_result.fit_report())
-
-    # **Adjust background parameters based on their errors**
-    for param in bg_result.params:
-        params[param].set(value=bg_result.params[param].value, vary=False)
-
-    # Add background model to overall model
-    model = bg_model
-
-    # Estimate sigma
-    # **Find the peak marker with the highest bin count**
-    peak_max_idx = np.argmax([y_data[np.abs(x_data - peak).argmin()] for peak in peak_markers])
-    peak_with_max_count = peak_markers[peak_max_idx]
-
-    # **Estimate sigma using FWHM method**
-    def estimate_sigma(x_data, y_data, peak):
-        peak_idx = np.abs(x_data - peak).argmin()
-        peak_height = y_data[peak_idx]
-        half_max = peak_height / 2
-
-        # Find indices where y is closest to half the peak height
-        left_idx = np.where(y_data[:peak_idx] <= half_max)[0]
-        right_idx = np.where(y_data[peak_idx:] <= half_max)[0] + peak_idx
-
-        if len(left_idx) == 0 or len(right_idx) == 0:
-            return (x_data[1] - x_data[0]) * 2  # Fallback: Use bin width * 2
-
-        left_fwhm = x_data[left_idx[-1]]
-        right_fwhm = x_data[right_idx[0]]
-
-        fwhm = right_fwhm - left_fwhm
-        return max(fwhm / 2.3548, (x_data[1] - x_data[0]) * 2)  # Convert FWHM to sigma
-
-    # **Get the estimated sigma from the strongest peak**
-    estimated_sigma = estimate_sigma(x_data, y_data, peak_with_max_count)
-
-    # --- NEW: per-peak auto-estimated sigmas (one per peak) ---
-    per_peak_sigma_est = [estimate_sigma(x_data, y_data, pk) for pk in peak_markers]
-
-    # --- NEW: normalize user-provided sigma bounds ---
-    def _as_list(v, n):
-        if v is None:
-            return None
-        if isinstance(v, (int, float)):
-            return [float(v)] * n
-        if len(v) != n:
-            raise ValueError(f'sigma_bounds list length must match number of peaks ({n}).')
-        return [float(x) for x in v]
-
-    n_peaks = len(peak_markers)
-    if sigma_bounds is not None:
-        min_in, max_in = sigma_bounds
-        if equal_sigma:
-            # only expect 1 value for min/max (float or 1-element list); use first if list given
-            min_list = _as_list(min_in, 1)
-            max_list = _as_list(max_in, 1)
-        else:
-            # expect as many values as peak markers (or a single float to broadcast)
-            min_list = _as_list(min_in, n_peaks)
-            max_list = _as_list(max_in, n_peaks)
-    else:
-        min_list = None
-        max_list = None
-
-    # **Estimate Amplitude for Each Peak**
-    estimated_amplitude = []
-    for peak in peak_markers:
-        # Find closest bin index
-        closest_idx = np.abs(x_data - peak).argmin()
-        height = y_data[closest_idx]
-
-        if bg_result is not None:
-            # Estimate background contribution at this point if there is an background model
-            bg_at_peak = bg_result.eval(x=peak)
-        else:
-            bg_at_peak = 0
-        
-        # Subtract background to get height
-        adjusted_height = height - bg_at_peak
-        estimated_amplitude.append(adjusted_height * estimated_sigma/ 0.3989423)
-
-    # Add Gaussian peaks
-    peak_markers = sorted(peak_markers)
-    for i, peak in enumerate(peak_markers):
-        # g = lmfit.Model(gaussian, prefix=f'g{i}_')
-        g = lmfit.models.GaussianModel(prefix=f'g{i}_')
-        model += g
-
-        params.update(g.make_params(amplitude=estimated_amplitude[i], mean=peak, sigma=estimated_sigma))
-
-        # if equal_sigma and i > 0:
-        #     params[f'g{i}_sigma'].set(expr='g0_sigma')
-        # else:
-        #     params[f'g{i}_sigma'].set(min=0)
-
-        # Set sigma value and (optional) bounds
-        if equal_sigma:
-            if i == 0:
-                # initial guess for the shared sigma = auto estimate from the strongest peak
-                params['g0_sigma'].set(value=estimated_sigma)
-                # apply optional bounds (single value expected)
-                if min_list is not None:
-                    params['g0_sigma'].set(min=min_list[0])
-                else:
-                    params['g0_sigma'].set(min=0)  # default behavior
-                if max_list is not None:
-                    params['g0_sigma'].set(max=max_list[0])
-            else:
-                params[f'g{i}_sigma'].set(expr='g0_sigma')
-        else:
-            # per-peak sigma: auto-estimated unless user constrains with bounds
-            params[f'g{i}_sigma'].set(value=per_peak_sigma_est[i])
-            if min_list is not None:
-                params[f'g{i}_sigma'].set(min=min_list[i])
-            else:
-                params[f'g{i}_sigma'].set(min=0)
-            if max_list is not None:
-                params[f'g{i}_sigma'].set(max=max_list[i])
-
-
-
-
-        params.add(f'g{i}_area', expr=f'g{i}_amplitude / {bin_width}')
-        params[f'g{i}_area'].set(min=0)  # Use estimated area
-        params[f'g{i}_amplitude'].set(min=0)  # Use estimated area
-
-
-        if not free_position:
-            params[f'g{i}_center'].set(vary=False)
-
-        if len(peak_markers) == 1:
-            params[f'g{i}_center'].set(value=peak, min=region_markers[0], max=region_markers[1])  
-        else:
-            # Default to using neighboring peaks
-            prev_peak = region_markers[0] if i == 0 else peak_markers[i - 1]
-            next_peak = region_markers[1] if i == len(peak_markers) - 1 else peak_markers[i + 1]
-
-            # Calculate distance to previous and next peaks
-            prev_dist = abs(peak - prev_peak)
-            next_dist = abs(peak - next_peak)
-
-            # Adjust min/max based 1 sigma of peak
-            sigma_range = 1
-
-            min_val = prev_peak if prev_dist <= sigma_range * estimated_sigma else peak - sigma_range * estimated_sigma
-            max_val = next_peak if next_dist <= sigma_range * estimated_sigma else peak + sigma_range * estimated_sigma
-
-            # Ensure bounds are within the region
-            min_val = max(region_markers[0], min_val)
-            max_val = min(region_markers[1], max_val)
-
-            params[f'g{i}_center'].set(value=peak, min=min_val, max=max_val)
-
-    # Fit the model to the data
-    result = model.fit(y_data, params, x=x_data)
-
-    x_data_line = np.linspace(x_data[0], x_data[-1], 50 * len(x_data))
-    y_data_line = result.eval(x=x_data_line)
-    y_data_uncertainty = _compute_uncertainty(result, x_data_line)
-
-    _inject_spectrix_metadata(
-        result,
-        region_markers,
-        peak_markers,
-        [] if bg_type == 'None' else background_markers,
-        bg_type,
-        equal_sigma,
-        free_position,
-    )
-
-    # Print initial parameter guesses
-    print('Initial Parameter Guesses:')
-    params.pretty_print()
-
-    # Print fit report
-    print('Fit Report:')
-
-    fit_report = result.fit_report()
-    print(fit_report)
-
-    # Extract Gaussian and background parameters
-    gaussian_params = []
-    additional_params = []
-    for i in range(len(peak_markers)):
-        amplitude = float(result.params[f'g{i}_amplitude'].value)
-        amplitude_uncertainty = result.params[f'g{i}_amplitude'].stderr or 0.0
-        mean = float(result.params[f'g{i}_center'].value)
-        mean_uncertainty = result.params[f'g{i}_center'].stderr or 0.0
-        sigma = float(result.params[f'g{i}_sigma'].value)
-        sigma_uncertainty = result.params[f'g{i}_sigma'].stderr or 0.0
-        fwhm = float(result.params[f'g{i}_fwhm'].value)
-        fwhm_uncertainty = result.params[f'g{i}_fwhm'].stderr or 0.0
-        area = float(result.params[f'g{i}_area'].value)
-        area_uncertainty = result.params[f'g{i}_area'].stderr or 0.0
-
-        # default
-        uuid = 0
-        energy = -1.0
-        energy_uncertainty = 0.0
-
-        gaussian_params.append((
-            amplitude, amplitude_uncertainty, mean, mean_uncertainty,
-            sigma, sigma_uncertainty, fwhm, fwhm_uncertainty, area, area_uncertainty, uuid
-        ))
-
-        additional_params.append((
-            energy, energy_uncertainty,
-        ))
-
-        # Extract background parameters
-        background_params = []
-        if bg_type != 'None':
-            for key in result.params:
-                if 'bg_' in key:
-                    value = float(result.params[key].value)
-                    uncertainty = result.params[key].stderr or 0.0
-                    background_params.append((key, value, uncertainty))
-
-    fit_metadata = (
-        list(region_markers),
-        list(peak_markers),
-        [] if bg_type == 'None' else list(background_markers),
-        bg_type,
-        equal_sigma,
-        free_position,
-        True,
-    )
-
-    # save the fit result to a temp file
-    save_modelresult(result, 'temp_fit.sav')
-
-    return gaussian_params, background_params, x_data_line, y_data_line, y_data_uncertainty, fit_report, additional_params, fit_metadata, result
-
-def load_result(filename: str):
-    result = load_modelresult(filename)
-
-    x_min = result.userkws['x'].min()
-    x_max = result.userkws['x'].max()
-    x_data = np.linspace(x_min, x_max, 1000)
-
-    # Create smooth fit line
-    x_data_line = np.linspace(x_data[0], x_data[-1], 50 * len(x_data))
-    y_data_line = result.eval(x=x_data_line)
-    y_data_uncertainty = _compute_uncertainty(result, x_data_line)
-
-    params = result.params
-
-    peak_markers = []
-    for key in params:
-        if 'g' in key and '_center' in key:
-            peak_markers.append(params[key].value)
-
-
-
-    # Print initial parameter guesses
-    print('Initial Parameter Guesses:')
-    params.pretty_print()
-
-    # Print fit report
-    print('Fit Report:')
-
-    fit_report = result.fit_report()
-    print(fit_report)
-
-    # Extract Gaussian and background parameters
-    gaussian_params = []
-    additional_params = []
-    background_params = []
-    for key in result.params:
-        if 'bg_' in key:
-            value = float(result.params[key].value)
-            uncertainty = result.params[key].stderr or 0.0
-            background_params.append((key, value, uncertainty))
-
-    for i in range(len(peak_markers)):
-        keys = [f'g{i}_amplitude', f'g{i}_center', f'g{i}_sigma', f'g{i}_fwhm', f'g{i}_area']
-        if not all(k in result.params for k in keys):
-            print(f'Skipping peak g{i} due to missing parameters.')
-            continue
-
-        amplitude = float(result.params[f'g{i}_amplitude'].value)
-        amplitude_uncertainty = result.params[f'g{i}_amplitude'].stderr or 0.0
-        mean = float(result.params[f'g{i}_center'].value)
-        mean_uncertainty = result.params[f'g{i}_center'].stderr or 0.0
-        sigma = float(result.params[f'g{i}_sigma'].value)
-        sigma_uncertainty = result.params[f'g{i}_sigma'].stderr or 0.0
-        fwhm = float(result.params[f'g{i}_fwhm'].value)
-        fwhm_uncertainty = result.params[f'g{i}_fwhm'].stderr or 0.0
-        area = float(result.params[f'g{i}_area'].value)
-        area_uncertainty = result.params[f'g{i}_area'].stderr or 0.0
-
-        uuid = float(result.params[f'g{i}_uuid'].value) if f'g{i}_uuid' in result.params else 0.0
-
-        # check if energy parameter exists
-        if f'g{i}_energy' in result.params:
-            energy = float(result.params[f'g{i}_energy'].value)
-        else:
-            energy = -1.0  # Default value if not present
-
-        # check if energy uncertainty parameter exists
-        if f'g{i}_energy_uncertainty' in result.params:
-            energy_uncertainty = result.params[f'g{i}_energy_uncertainty'].value
-        else:
-            energy_uncertainty = 0.0  # Default value if not present
-
-        gaussian_params.append((
-            amplitude, amplitude_uncertainty, mean, mean_uncertainty,
-            sigma, sigma_uncertainty, fwhm, fwhm_uncertainty, area, area_uncertainty, uuid
-        ))
-
-        additional_params.append((
-            energy, energy_uncertainty,
-        ))
-
-
-
-    fit_metadata = _extract_spectrix_metadata(result)
-    if fit_metadata is None:
-        if len(centers := result.userkws['x']) > 1:
-            bin_width = float(centers[1] - centers[0])
-        else:
-            bin_width = 1.0
-
-        fitted_means = [float(g[2]) for g in gaussian_params]
-        if len(fitted_means) >= 2:
-            fallback_region = [min(fitted_means), max(fitted_means)]
-        else:
-            fallback_region = [float(x_min), float(x_max)]
-        fallback_peak_markers = fitted_means if fitted_means else [float(p) for p in peak_markers]
-        fallback_background = []
-        fit_metadata = (
-            fallback_region,
-            fallback_peak_markers,
-            fallback_background,
-            'None',
-            True,
-            True,
-            False,
-        )
-
-    # save the fit result to a temp file
-    save_modelresult(result, 'temp_fit.sav')
-
-    return gaussian_params, background_params, x_data_line, y_data_line, y_data_uncertainty, fit_report, additional_params, fit_metadata
-
-");
-
-            // Compile the Python code into a module
-            let module = PyModule::from_code(py, code, c_str!("gaussian.py"), c_str!("gaussian"))?;
-
-            let y_data = self.data.y.clone();
-            let x_data = self.data.x.clone();
-            let region_markers = self.region_markers.clone();
-            let peak_markers = self.peak_markers.clone();
-            let background_markers = self.background_markers.clone();
-
-            let equal_sigma = self.fit_settings.equal_stdev;
-            let free_position = self.fit_settings.free_position;
-
-            // replace the old builder if you had one; now just forward what's stored
-            let sigma_bounds_arg = self.sigma_bounds.clone(); // Option<(Vec<f64>, Vec<f64>)>
-
-            // Form the `background_params` dictionary
-            let background_params = PyDict::new(py);
-
-            match self.background_model {
-                BackgroundModel::Linear(ref params) => {
-                    if let Some(BackgroundResult::Linear(fitter)) = &self.background_result {
-                        // Use fitted values for slope and intercept and set `vary` to false
-                        let fitted_slope = fitter
-                            .paramaters
-                            .slope
-                            .value
-                            .unwrap_or(fitter.paramaters.slope.initial_guess);
-                        let fitted_intercept = fitter
-                            .paramaters
-                            .intercept
-                            .value
-                            .unwrap_or(fitter.paramaters.intercept.initial_guess);
-
-                        background_params.set_item("bg_type", "linear")?;
-                        background_params.set_item(
-                            "slope",
-                            (
-                                "slope".to_owned(),
-                                params.slope.min,
-                                params.slope.max,
-                                fitted_slope,
-                                false,
-                            ),
-                        )?;
-                        background_params.set_item(
-                            "intercept",
-                            (
-                                "intercept".to_owned(),
-                                params.intercept.min,
-                                params.intercept.max,
-                                fitted_intercept,
-                                false,
-                            ),
-                        )?;
-                    } else {
-                        // Use the initial guesses and allow them to vary
-                        background_params.set_item("bg_type", "linear")?;
-                        background_params.set_item(
-                            "slope",
-                            (
-                                "slope".to_owned(),
-                                params.slope.min,
-                                params.slope.max,
-                                params.slope.initial_guess,
-                                params.slope.vary,
-                            ),
-                        )?;
-                        background_params.set_item(
-                            "intercept",
-                            (
-                                "intercept".to_owned(),
-                                params.intercept.min,
-                                params.intercept.max,
-                                params.intercept.initial_guess,
-                                params.intercept.vary,
-                            ),
-                        )?;
-                    }
-                }
-                BackgroundModel::Quadratic(ref params) => {
-                    if let Some(BackgroundResult::Quadratic(fitter)) = &self.background_result {
-                        // Use fitted values for a, b, and c, set `vary` to false
-                        let fitted_a = fitter
-                            .paramaters
-                            .a
-                            .value
-                            .unwrap_or(fitter.paramaters.a.initial_guess);
-                        let fitted_b = fitter
-                            .paramaters
-                            .b
-                            .value
-                            .unwrap_or(fitter.paramaters.b.initial_guess);
-                        let fitted_c = fitter
-                            .paramaters
-                            .c
-                            .value
-                            .unwrap_or(fitter.paramaters.c.initial_guess);
-
-                        background_params.set_item("bg_type", "quadratic")?;
-                        background_params.set_item(
-                            "a",
-                            ("a".to_owned(), params.a.min, params.a.max, fitted_a, false),
-                        )?;
-                        background_params.set_item(
-                            "b",
-                            ("b".to_owned(), params.b.min, params.b.max, fitted_b, false),
-                        )?;
-                        background_params.set_item(
-                            "c",
-                            ("c".to_owned(), params.c.min, params.c.max, fitted_c, false),
-                        )?;
-                    } else {
-                        // Use the initial guesses and allow them to vary
-                        background_params.set_item("bg_type", "quadratic")?;
-                        background_params.set_item(
-                            "a",
-                            (
-                                "a".to_owned(),
-                                params.a.min,
-                                params.a.max,
-                                params.a.initial_guess,
-                                params.a.vary,
-                            ),
-                        )?;
-                        background_params.set_item(
-                            "b",
-                            (
-                                "b".to_owned(),
-                                params.b.min,
-                                params.b.max,
-                                params.b.initial_guess,
-                                params.b.vary,
-                            ),
-                        )?;
-                        background_params.set_item(
-                            "c",
-                            (
-                                "c".to_owned(),
-                                params.c.min,
-                                params.c.max,
-                                params.c.initial_guess,
-                                params.c.vary,
-                            ),
-                        )?;
-                    }
-                }
-                BackgroundModel::Exponential(ref params) => {
-                    if let Some(BackgroundResult::Exponential(fitter)) = &self.background_result {
-                        // Use fitted values for amplitude and decay, set `vary` to false
-                        let fitted_amplitude = fitter
-                            .paramaters
-                            .amplitude
-                            .value
-                            .unwrap_or(fitter.paramaters.amplitude.initial_guess);
-                        let fitted_decay = fitter
-                            .paramaters
-                            .decay
-                            .value
-                            .unwrap_or(fitter.paramaters.decay.initial_guess);
-
-                        background_params.set_item("bg_type", "exponential")?;
-                        background_params.set_item(
-                            "amplitude",
-                            (
-                                "amplitude".to_owned(),
-                                params.amplitude.min,
-                                params.amplitude.max,
-                                fitted_amplitude,
-                                false,
-                            ),
-                        )?;
-                        background_params.set_item(
-                            "decay",
-                            (
-                                "decay".to_owned(),
-                                params.decay.min,
-                                params.decay.max,
-                                fitted_decay,
-                                false,
-                            ),
-                        )?;
-                    } else {
-                        // Use the initial guesses and allow them to vary
-                        background_params.set_item("bg_type", "exponential")?;
-                        background_params.set_item(
-                            "amplitude",
-                            (
-                                "amplitude".to_owned(),
-                                params.amplitude.min,
-                                params.amplitude.max,
-                                params.amplitude.initial_guess,
-                                params.amplitude.vary,
-                            ),
-                        )?;
-                        background_params.set_item(
-                            "decay",
-                            (
-                                "decay".to_owned(),
-                                params.decay.min,
-                                params.decay.max,
-                                params.decay.initial_guess,
-                                params.decay.vary,
-                            ),
-                        )?;
-                    }
-                }
-                BackgroundModel::PowerLaw(ref params) => {
-                    if let Some(BackgroundResult::PowerLaw(fitter)) = &self.background_result {
-                        // Use fitted values for amplitude and exponent, set `vary` to false
-                        let fitted_amplitude = fitter
-                            .paramaters
-                            .amplitude
-                            .value
-                            .unwrap_or(fitter.paramaters.amplitude.initial_guess);
-                        let fitted_exponent = fitter
-                            .paramaters
-                            .exponent
-                            .value
-                            .unwrap_or(fitter.paramaters.exponent.initial_guess);
-
-                        background_params.set_item("bg_type", "powerlaw")?;
-                        background_params.set_item(
-                            "amplitude",
-                            (
-                                "amplitude".to_owned(),
-                                params.amplitude.min,
-                                params.amplitude.max,
-                                fitted_amplitude,
-                                false,
-                            ),
-                        )?;
-                        background_params.set_item(
-                            "exponent",
-                            (
-                                "exponent".to_owned(),
-                                params.exponent.min,
-                                params.exponent.max,
-                                fitted_exponent,
-                                false,
-                            ),
-                        )?;
-                    } else {
-                        // Use the initial guesses and allow them to vary
-                        background_params.set_item("bg_type", "powerlaw")?;
-                        background_params.set_item(
-                            "amplitude",
-                            (
-                                "amplitude".to_owned(),
-                                params.amplitude.min,
-                                params.amplitude.max,
-                                params.amplitude.initial_guess,
-                                params.amplitude.vary,
-                            ),
-                        )?;
-                        background_params.set_item(
-                            "exponent",
-                            (
-                                "exponent".to_owned(),
-                                params.exponent.min,
-                                params.exponent.max,
-                                params.exponent.initial_guess,
-                                params.exponent.vary,
-                            ),
-                        )?;
-                    }
-                }
-                BackgroundModel::None => {
-                    background_params.set_item("bg_type", "None")?;
-                }
-            }
-
-            log::info!("Fitting Gaussian model");
-
-            let result = if let Some(path) = load_result_path {
-                // Load the lmfit result from the file
-                module.getattr("load_result")?.call1((path,))?
-            } else {
-                // Call the GaussianFit function
-                module.getattr("GaussianFit")?.call1((
-                    y_data,
-                    x_data.clone(),
-                    region_markers,
-                    peak_markers,
-                    background_markers,
-                    equal_sigma,
-                    free_position,
-                    background_params,
-                    sigma_bounds_arg,
-                ))?
-            };
-
-            let gaussian_params =
-                result
-                    .get_item(0)?
-                    .extract::<Vec<(f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64)>>()?;
-            let background_params = result.get_item(1)?.extract::<Vec<(String, f64, f64)>>()?;
-            let x_composition = result.get_item(2)?.extract::<Vec<f64>>()?;
-            let y_composition = result.get_item(3)?.extract::<Vec<f64>>()?;
-            let y_composition_uncertainty = result.get_item(4)?.extract::<Vec<f64>>()?;
-            let (x_composition, y_composition, y_composition_uncertainty) =
-                Self::decimate_composition_arrays(
-                    x_composition,
-                    y_composition,
-                    y_composition_uncertainty,
-                );
-            let fit_report = result.get_item(5)?.extract::<String>()?;
-            let additional_params = result.get_item(6)?.extract::<Vec<(f64, f64)>>()?;
-            let fit_metadata = result.get_item(7).ok().and_then(|item| {
-                item.extract::<(
-                    Vec<f64>,
-                    Vec<f64>,
-                    Vec<(f64, f64)>,
-                    String,
-                    bool,
-                    bool,
-                    bool,
-                )>()
-                .ok()
+    /// Fits the configured Gaussian/background model using the native Rust backend.
+    pub fn fit_native(&mut self) -> Result<(), NativeFitError> {
+        if self.region_markers.len() != 2 {
+            return Err(NativeFitError::InvalidRegion);
+        }
+        let sigma_bounds = self
+            .sigma_bounds
+            .as_ref()
+            .map(|(minima, maxima)| SigmaBounds {
+                minima: minima.clone(),
+                maxima: maxima.clone(),
             });
-
-            // get the temp fit result, store the text in the struct
-            let fit_text = std::fs::read_to_string("temp_fit.sav")
-                .unwrap_or_else(|_| "Failed to read fit result file.".to_owned());
-
-            self.lmfit_result = Some(fit_text);
-
-            // remove the temp file
-            std::fs::remove_file("temp_fit.sav").unwrap_or_else(|_| {
-                log::warn!("Failed to remove temp fit result file.");
-            });
-
-            self.peak_markers.clear();
-            self.fit_result.clear();
-            self.uncertainty_band.clear();
-
-            for (
-                (
-                    amp,
-                    amp_err,
-                    mean,
-                    mean_err,
-                    sigma,
-                    sigma_err,
-                    fwhm,
-                    fwhm_err,
-                    area,
-                    area_err,
-                    uuid,
-                ),
-                (energy, energy_err),
-            ) in gaussian_params.iter().zip(additional_params.iter())
-            {
-                log::info!(
-                    "Amplitude: {amp:.3} ± {amp_err:.3}, Mean: {mean:.3} ± {mean_err:.3}, Sigma: {sigma:.3} ± {sigma_err:.3}, FWHM: {fwhm:.3} ± {fwhm_err:.3}, Area: {area:.3} ± {area_err:.3}"
-                );
-
-                self.peak_markers.push(*mean);
-
-                // Create the GaussianParameters for each set of values
-                let mut gaussian_param = GaussianParameters::new(
-                    (*amp, *amp_err),
-                    (*mean, *mean_err),
-                    (*sigma, *sigma_err),
-                    (*fwhm, *fwhm_err),
-                    (*area, *area_err),
-                );
-
-                gaussian_param.uuid = *uuid as usize;
-
-                gaussian_param.energy.value = Some(*energy);
-                gaussian_param.energy.uncertainty = Some(*energy_err);
-
-                // Generate the fit points for this Gaussian, using 100 points (or as many as needed)
-                gaussian_param.generate_fit_points(100);
-
-                self.fit_result.push(gaussian_param);
+        let mut background_seed =
+            native::background_seed(&self.background_model, self.background_result.as_ref());
+        // A background fitted explicitly with G is the prefit for the default
+        // Prefit & Fix workflow. Preserve the lmfit behavior by keeping those
+        // fitted values fixed instead of trying to estimate them again from the
+        // automatic region-edge bins. Joint mode deliberately leaves enabled
+        // parameters variable so it can refine the background with the peaks.
+        if self.background_result.is_some()
+            && self.background_coupling == BackgroundCoupling::PrefitFrozen
+        {
+            for parameter in &mut background_seed.parameters {
+                parameter.vary = false;
             }
+        }
+        let request = PeakFitRequest {
+            x: self.data.x.clone(),
+            y: self.data.y.clone(),
+            bin_width: self
+                .data
+                .x
+                .windows(2)
+                .next()
+                .map_or(1.0, |pair| (pair[1] - pair[0]).abs()),
+            region: [self.region_markers[0], self.region_markers[1]],
+            peak_markers: self.peak_markers.clone(),
+            background_markers: self.background_markers.clone(),
+            background: native::background_kind(&self.background_model),
+            background_seed: Some(background_seed),
+            background_coupling: self.background_coupling,
+            equal_sigma: self.fit_settings.equal_stdev,
+            free_centers: self.fit_settings.free_position,
+            sigma_bounds,
+        };
+        let mut native_result = fit_native_peaks(&request, &NativeFitOptions::default())?;
 
-            if let Some((
-                region_markers,
-                peak_markers,
-                background_markers,
-                background_model,
-                equal_stdev,
-                free_position,
-                metadata_found,
-            )) = fit_metadata
-            {
-                let fitted_peak_markers = self.peak_markers.clone();
-                self.region_markers = region_markers.clone();
-                self.background_markers = background_markers.clone();
-                self.fit_settings.equal_stdev = equal_stdev;
-                self.fit_settings.free_position = free_position;
-
-                self.fit_metadata = Some(GaussianFitMetadata {
-                    region_markers,
-                    peak_markers: if peak_markers.is_empty() {
-                        fitted_peak_markers.clone()
-                    } else {
-                        peak_markers
-                    },
-                    background_markers,
-                    background_model,
-                });
-
-                self.peak_markers = fitted_peak_markers;
-
-                if !metadata_found {
-                    log::warn!(
-                        "No SpectriX fit metadata found in lmfit result; generated fallback metadata from existing Gaussian parameters."
-                    );
-                }
-            } else {
-                let (metadata, _) = self.fit_metadata_with_fallback();
-                self.fit_metadata = Some(metadata);
-                log::warn!(
-                    "Unable to read fit metadata from lmfit result; generated fallback metadata from Gaussian fit."
-                );
-            }
-
-            if self.background_result.is_none() && !background_params.is_empty() {
-                let bg_type = background_params[0].0.as_str();
-
-                let min_x = x_composition.iter().copied().fold(f64::INFINITY, f64::min);
-                let max_x = x_composition
-                    .iter()
-                    .copied()
-                    .fold(f64::NEG_INFINITY, f64::max);
-
-                match bg_type {
-                    "bg_slope" | "bg_intercept" => {
-                        // assume Linear
-                        self.background_model = BackgroundModel::Linear(Default::default());
-
-                        let slope = background_params
-                            .iter()
-                            .find(|(name, _, _)| name == "bg_slope")
-                            .map(|(_, val, unc)| (*val, *unc))
-                            .unwrap_or((0.0, 0.0));
-
-                        let intercept = background_params
-                            .iter()
-                            .find(|(name, _, _)| name == "bg_intercept")
-                            .map(|(_, val, unc)| (*val, *unc))
-                            .unwrap_or((0.0, 0.0));
-
-                        let linear =
-                            LinearFitter::new_from_parameters(slope, intercept, min_x, max_x);
-                        self.background_result = Some(BackgroundResult::Linear(linear));
-                    }
-
-                    "bg_a" | "bg_b" | "bg_c" => {
-                        self.background_model = BackgroundModel::Quadratic(Default::default());
-
-                        let a = background_params
-                            .iter()
-                            .find(|(name, _, _)| name == "bg_a")
-                            .map(|(_, val, unc)| (*val, *unc))
-                            .unwrap_or((0.0, 0.0));
-                        let b = background_params
-                            .iter()
-                            .find(|(name, _, _)| name == "bg_b")
-                            .map(|(_, val, unc)| (*val, *unc))
-                            .unwrap_or((0.0, 0.0));
-                        let c = background_params
-                            .iter()
-                            .find(|(name, _, _)| name == "bg_c")
-                            .map(|(_, val, unc)| (*val, *unc))
-                            .unwrap_or((0.0, 0.0));
-
-                        let quad = QuadraticFitter::new_from_parameters(a, b, c, min_x, max_x);
-                        self.background_result = Some(BackgroundResult::Quadratic(quad));
-                    }
-
-                    "bg_amplitude"
-                        if background_params
-                            .iter()
-                            .any(|(k, _, _)| k.contains("decay")) =>
-                    {
-                        self.background_model = BackgroundModel::Exponential(Default::default());
-
-                        let amplitude = background_params
-                            .iter()
-                            .find(|(name, _, _)| name == "bg_amplitude")
-                            .map(|(_, val, unc)| (*val, *unc))
-                            .unwrap_or((0.0, 0.0));
-                        let decay = background_params
-                            .iter()
-                            .find(|(name, _, _)| name == "bg_decay")
-                            .map(|(_, val, unc)| (*val, *unc))
-                            .unwrap_or((0.0, 0.0));
-
-                        let expo =
-                            ExponentialFitter::new_from_parameters(amplitude, decay, min_x, max_x);
-                        self.background_result = Some(BackgroundResult::Exponential(expo));
-                    }
-
-                    "bg_amplitude"
-                        if background_params
-                            .iter()
-                            .any(|(k, _, _)| k.contains("exponent")) =>
-                    {
-                        self.background_model = BackgroundModel::PowerLaw(Default::default());
-
-                        let amplitude = background_params
-                            .iter()
-                            .find(|(name, _, _)| name == "bg_amplitude")
-                            .map(|(_, val, unc)| (*val, *unc))
-                            .unwrap_or((0.0, 0.0));
-                        let exponent = background_params
-                            .iter()
-                            .find(|(name, _, _)| name == "bg_exponent")
-                            .map(|(_, val, unc)| (*val, *unc))
-                            .unwrap_or((0.0, 0.0));
-
-                        let powerlaw =
-                            PowerLawFitter::new_from_parameters(amplitude, exponent, min_x, max_x);
-                        self.background_result = Some(BackgroundResult::PowerLaw(powerlaw));
-                    }
-
-                    _ => {
-                        self.background_model = BackgroundModel::None;
-                        self.background_result = None;
-                    }
-                }
-            }
-
-            self.uncertainty_band = Self::build_uncertainty_band(
-                &x_composition,
-                &y_composition,
-                &y_composition_uncertainty,
-            )
-            .unwrap_or_default();
-
-            // Create the composition line
-            let fit_points = x_composition
+        let estimate = |name: &str| {
+            native_result
+                .fit
+                .parameters
                 .iter()
-                .zip(y_composition.iter())
-                .map(|(&x, &y)| [x, y])
-                .collect();
-            self.fit_points = fit_points;
+                .find(|parameter| parameter.name == name)
+        };
+        self.fit_result.clear();
+        self.peak_markers.clear();
+        for index in 0..native_result.peak_markers.len() {
+            let prefix = format!("g{index}_");
+            let amplitude = estimate(&format!("{prefix}amplitude")).ok_or_else(|| {
+                NativeFitError::InvalidParameter {
+                    parameter: format!("{prefix}amplitude"),
+                }
+            })?;
+            let center = estimate(&format!("{prefix}center")).ok_or_else(|| {
+                NativeFitError::InvalidParameter {
+                    parameter: format!("{prefix}center"),
+                }
+            })?;
+            let sigma = estimate(&format!("{prefix}sigma")).ok_or_else(|| {
+                NativeFitError::InvalidParameter {
+                    parameter: format!("{prefix}sigma"),
+                }
+            })?;
+            let fwhm = estimate(&format!("{prefix}fwhm")).ok_or_else(|| {
+                NativeFitError::InvalidParameter {
+                    parameter: format!("{prefix}fwhm"),
+                }
+            })?;
+            let area = estimate(&format!("{prefix}area")).ok_or_else(|| {
+                NativeFitError::InvalidParameter {
+                    parameter: format!("{prefix}area"),
+                }
+            })?;
 
-            self.fit_report = fit_report;
-
-            Ok(())
-        })
-    }
-
-    pub fn update_uuid_for_peak(&mut self, peak_index: usize, new_uuid: usize) -> PyResult<()> {
-        // Step 1: Write current lmfit_result to a temp file
-        let temp_path = PathBuf::from("temp_fit_uuid_update.sav");
-        if let Some(ref lmfit) = self.lmfit_result {
-            let mut file = File::create(&temp_path)?;
-            file.write_all(lmfit.as_bytes())?;
-        } else {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "No lmfit_result to update.",
-            ));
+            let mut parameters = GaussianParameters::default();
+            parameters.amplitude.value = Some(amplitude.value);
+            parameters.amplitude.uncertainty = amplitude.standard_error;
+            parameters.mean.value = Some(center.value);
+            parameters.mean.uncertainty = center.standard_error;
+            parameters.sigma.value = Some(sigma.value);
+            parameters.sigma.uncertainty = sigma.standard_error;
+            parameters.fwhm.value = Some(fwhm.value);
+            parameters.fwhm.uncertainty = fwhm.standard_error;
+            parameters.area.value = Some(area.value);
+            parameters.area.uncertainty = area.standard_error;
+            parameters.fit_points = native_result
+                .fit
+                .components
+                .iter()
+                .find(|component| component.name == prefix)
+                .map(|component| {
+                    Self::decimate_curve(&native_result.fit.evaluation_x, &component.values)
+                })
+                .unwrap_or_default();
+            self.peak_markers.push(center.value);
+            self.fit_result.push(parameters);
         }
 
-        // Step 2: Python call to update UUID
-        Python::attach(|py| {
-            let module = PyModule::from_code(
-                py,
-                c_str!(
-                    "
-from lmfit.model import load_modelresult, save_modelresult
-
-def Add_UUID_to_Result(file_path: str, peak_number: int, uuid: int):
-    result = load_modelresult(file_path)
-
-    if f'g{peak_number}_uuid' not in result.params:
-        result.params.add(f'g{peak_number}_uuid', value=uuid, vary=False)
-    else:
-        result.params[f'g{peak_number}_uuid'].set(value=uuid, vary=False)
-    save_modelresult(result, file_path)
-
-    fit_report = result.fit_report()
-
-    return result.fit_report()
-"
-                ),
-                c_str!("uuid_patch.py"),
-                c_str!("uuid_patch"),
-            )?;
-
-            let fit_report: String = module
-                .getattr("Add_UUID_to_Result")?
-                .call1((temp_path.to_string_lossy().as_ref(), peak_index, new_uuid))?
-                .extract()?;
-
-            // Step 3: Reload updated file into lmfit_result
-            let updated_lmfit = std::fs::read_to_string(&temp_path)
-                .unwrap_or_else(|_| "Failed to read updated fit.".to_owned());
-
-            std::fs::remove_file(&temp_path).unwrap_or_else(|err| {
-                eprintln!("Warning: failed to remove temp fit file: {err}");
-            });
-
-            self.fit_result[peak_index].uuid = new_uuid;
-            self.lmfit_result = Some(updated_lmfit);
-            self.fit_report = fit_report;
-
-            Ok(())
-        })
+        let uncertainties = native_result.fit.confidence_band.as_ref().map_or_else(
+            || vec![0.0; native_result.fit.best_fit.len()],
+            |band| band.uncertainty.clone(),
+        );
+        let (composition_x, composition_y, composition_uncertainty) =
+            Self::decimate_composition_arrays(
+                native_result.fit.evaluation_x.clone(),
+                native_result.fit.best_fit.clone(),
+                uncertainties,
+            );
+        self.fit_points = composition_x
+            .iter()
+            .copied()
+            .zip(composition_y.iter().copied())
+            .map(Into::into)
+            .collect();
+        self.uncertainty_band =
+            Self::build_uncertainty_band(&composition_x, &composition_y, &composition_uncertainty)
+                .unwrap_or_default();
+        self.fit_report = native::fit_report(&native_result.fit);
+        self.background_result = native::background_result_from_native(
+            &self.background_model,
+            &native_result.background_prefit,
+            self.data.clone(),
+        );
+        self.fit_metadata = Some(GaussianFitMetadata {
+            region_markers: native_result.region.to_vec(),
+            peak_markers: native_result.peak_markers.clone(),
+            background_markers: if matches!(self.background_model, BackgroundModel::None) {
+                Vec::new()
+            } else {
+                self.background_markers.clone()
+            },
+            background_model: self.background_model.type_name(),
+        });
+        self.lmfit_result = None;
+        // The full parameter covariance, residuals, and statistics are retained.
+        // Dense evaluation/component grids are display payload, so keeping hundreds
+        // of thousands of redundant samples per stored fit only wastes memory.
+        Self::compact_native_evaluation(&mut native_result);
+        self.native_result = Some(native_result);
+        Ok(())
     }
 
-    pub fn add_calibration_to_result(&mut self, calibration: &Calibration) -> PyResult<()> {
-        // Step 1: Write current lmfit_result to a temp file
-        let temp_path = PathBuf::from("temp_fit_energy_calibration_update.sav");
-        if let Some(ref lmfit) = self.lmfit_result {
-            let mut file = File::create(&temp_path)?;
-            file.write_all(lmfit.as_bytes())?;
-        } else {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "No lmfit_result to update.",
-            ));
-        }
-
-        // Step 2: Python call to update energy
-        Python::attach(|py| {
-            let module = PyModule::from_code(
-                py,
-                c_str!("
-from lmfit.model import load_modelresult, save_modelresult
-import numpy as np
-
-def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: float, b_uncertainty: float, c: float, c_uncertainty: float, cov: list | None = None):
-    result = load_modelresult(file_path)
-
-    def set_param(name, value, uncertainty):
-        if name not in result.params:
-            result.params.add(name, value=value, vary=False)
-        else:
-            result.params[name].set(value=value, vary=False)
-
-        unc_name = f'{name}_uncertainty'
-        if unc_name not in result.params:
-            result.params.add(unc_name, value=uncertainty, vary=False)
-        else:
-            result.params[unc_name].set(value=uncertainty, vary=False)
-
-    # Store calibration values as constants
-    set_param('calibration_a', a, a_uncertainty)
-    set_param('calibration_b', b, b_uncertainty)
-    set_param('calibration_c', c, c_uncertainty)
-
-    if cov is None:
-        Sigma = np.array([[a_uncertainty**2, 0.0, 0.0],
-                          [0.0, b_uncertainty**2, 0.0],
-                          [0.0, 0.0, c_uncertainty**2]], dtype=float)
-    else:
-        Sigma = np.array(cov, dtype=float).reshape(3,3)
-
-    i = 0
-    while f'g{i}_center' in result.params:
-        # Add expression-based parameters
-        result.params.add(
-            f'g{i}_center_calibrated',
-            expr=f'calibration_a * g{i}_center**2 + calibration_b * g{i}_center + calibration_c',
-            vary=False,
-        )
-        result.params.add(
-            f'g{i}_sigma_calibrated',
-            expr=f'abs((2 * calibration_a * g{i}_center + calibration_b) * g{i}_sigma)',
-            vary=False,
-        )
-        result.params.add(
-            f'g{i}_fwhm_calibrated',
-            expr=f'2.3548200 * g{i}_sigma_calibrated',
-            vary=False,
-        )
-
-        # Direct copies of uncalibrated
-        for param in ['area', 'amplitude', 'height']:
-            name = f'g{i}_{param}_calibrated'
-            if name not in result.params:
-                result.params.add(name, expr=f'g{i}_{param}', vary=False)
-            else:
-                result.params[name].set(expr=f'g{i}_{param}', vary=False)
-
-        # Evaluate expressions and set stderr manually
-        center = result.params[f'g{i}_center'].value
-        center_unc = result.params[f'g{i}_center'].stderr or 0.0
-        sigma = result.params[f'g{i}_sigma'].value
-        sigma_unc = result.params[f'g{i}_sigma'].stderr or 0.0
-
-        # dE/dx and Jacobians
-        dEdx = 2*a*center + b
-
-        # --- NEW: Var(E_center) = J Σ J^T + (dE/dx)^2 Var(x)
-        J = np.array([center**2, center, 1.0], dtype=float)
-        var_center_params = float(J @ Sigma @ J.T)
-        var_center_x = (dEdx * center_unc)**2
-        d_center_cal = np.sqrt(var_center_params + var_center_x)
-
-        # --- NEW: Sigma for energy resolution
-        # sigma_E = |(2 a x + b)| * sigma_x  with covariance in (a,b,c) and x
-        M = dEdx
-        Mabs = abs(M)
-        # gradient of M wrt (a,b,c) is [2x, 1, 0]
-        H = np.array([2.0*center, 1.0, 0.0], dtype=float)
-        var_M_params = float(H @ Sigma @ H.T)
-        var_M_x = (2.0*a * center_unc)**2
-        var_M = var_M_params + var_M_x
-
-        var_sigmaE = (sigma**2) * var_M + (Mabs**2) * (sigma_unc**2)
-        d_sigma_cal = np.sqrt(var_sigmaE)
-
-        d_fwhm_cal = 2.3548200 * d_sigma_cal
-
-        result.params[f'g{i}_center_calibrated'].stderr = d_center_cal
-        result.params[f'g{i}_sigma_calibrated'].stderr = d_sigma_cal
-        result.params[f'g{i}_fwhm_calibrated'].stderr = d_fwhm_cal
-
-        i += 1
-
-    save_modelresult(result, file_path)
-
-    print('Post Fit Report:')
-    fit_report = result.fit_report()
-    print(fit_report)
-
-    return result.fit_report()
-"),
-                c_str!("energy_patch.py"),
-                c_str!("energy_patch"),
-            )?;
-
-            let a = calibration.a.value;
-            let a_uncertainty = calibration.a.uncertainty;
-            let b = calibration.b.value;
-            let b_uncertainty = calibration.b.uncertainty;
-            let c = calibration.c.value;
-            let c_uncertainty = calibration.c.uncertainty;
-            let cov_arg: Option<Vec<Vec<f64>>> = calibration.cov.as_ref().map(|m| {
-                vec![
-                    vec![m[0][0], m[0][1], m[0][2]],
-                    vec![m[1][0], m[1][1], m[1][2]],
-                    vec![m[2][0], m[2][1], m[2][2]],
-                ]
-            });
-
-            let fit_report: String = module
-                .getattr("Update_EnergyCalibration")?
-                .call1((
-                    temp_path.to_string_lossy().as_ref(),
-                    a,
-                    a_uncertainty,
-                    b,
-                    b_uncertainty,
-                    c,
-                    c_uncertainty,
-                    cov_arg,
-                ))?
-                .extract()?;
-
-            // Step 3: Reload updated file into lmfit_result
-            let updated_lmfit = std::fs::read_to_string(&temp_path)
-                .unwrap_or_else(|_| "Failed to read updated fit.".to_owned());
-
-            std::fs::remove_file(&temp_path).unwrap_or_else(|err| {
-                eprintln!("Warning: failed to remove temp fit file: {err}");
-            });
-
-            self.lmfit_result = Some(updated_lmfit);
-            self.fit_report = fit_report;
-
-            Ok(())
-        })
+    pub fn update_uuid_for_peak(
+        &mut self,
+        peak_index: usize,
+        new_uuid: usize,
+    ) -> Result<(), String> {
+        let peak = self
+            .fit_result
+            .get_mut(peak_index)
+            .ok_or_else(|| format!("peak index {peak_index} is out of range"))?;
+        peak.uuid = new_uuid;
+        Ok(())
     }
 
     pub fn update_energy_for_peak(
@@ -1971,75 +841,21 @@ def Update_EnergyCalibration(file_path: str, a: float, a_uncertainty: float, b: 
         peak_index: usize,
         new_energy: f64,
         new_uncertainty: f64,
-    ) -> PyResult<()> {
-        // Step 1: Write current lmfit_result to a temp file
-        let temp_path = PathBuf::from("temp_fit_energy_update.sav");
-        if let Some(ref lmfit) = self.lmfit_result {
-            let mut file = File::create(&temp_path)?;
-            file.write_all(lmfit.as_bytes())?;
-        } else {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "No lmfit_result to update.",
-            ));
+    ) -> Result<(), String> {
+        if !new_energy.is_finite() || !new_uncertainty.is_finite() || new_uncertainty < 0.0 {
+            return Err(
+                "energy must be finite and uncertainty must be finite and non-negative".to_owned(),
+            );
         }
-
-        // Step 2: Python call to update energy
-        Python::attach(|py| {
-            let module = PyModule::from_code(
-                py,
-                c_str!(
-                    "
-from lmfit.model import load_modelresult, save_modelresult
-
-def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: float):
-    result = load_modelresult(file_path)
-
-    if f'g{peak_number}_energy' not in result.params:
-        result.params.add(f'g{peak_number}_energy', value=energy, vary=False)
-    else:
-        result.params[f'g{peak_number}_energy'].set(value=energy, vary=False)
-
-    if f'g{peak_number}_energy_uncertainty' not in result.params:
-        result.params.add(f'g{peak_number}_energy_uncertainty', value=uncertainty, vary=False)
-    else:
-        result.params[f'g{peak_number}_energy_uncertainty'].set(value=uncertainty, vary=False)
-
-    save_modelresult(result, file_path)
-
-    fit_report = result.fit_report()
-
-    return result.fit_report()
-"
-                ),
-                c_str!("energy_patch.py"),
-                c_str!("energy_patch"),
-            )?;
-
-            let fit_report: String = module
-                .getattr("Update_Energy")?
-                .call1((
-                    temp_path.to_string_lossy().as_ref(),
-                    peak_index,
-                    new_energy,
-                    new_uncertainty,
-                ))?
-                .extract()?;
-
-            // Step 3: Reload updated file into lmfit_result
-            let updated_lmfit = std::fs::read_to_string(&temp_path)
-                .unwrap_or_else(|_| "Failed to read updated fit.".to_owned());
-
-            std::fs::remove_file(&temp_path).unwrap_or_else(|err| {
-                eprintln!("Warning: failed to remove temp fit file: {err}");
-            });
-
-            self.fit_result[peak_index].energy.value = Some(new_energy);
-            self.fit_result[peak_index].energy.uncertainty = Some(new_uncertainty);
-            self.lmfit_result = Some(updated_lmfit);
-            self.fit_report = fit_report;
-
-            Ok(())
-        })
+        let peak = self
+            .fit_result
+            .get_mut(peak_index)
+            .ok_or_else(|| format!("peak index {peak_index} is out of range"))?;
+        peak.energy.value = Some(new_energy);
+        peak.energy.uncertainty = Some(new_uncertainty);
+        peak.energy.calibrated_value = Some(new_energy);
+        peak.energy.calibrated_uncertainty = Some(new_uncertainty);
+        Ok(())
     }
 
     fn composition_height_at_raw_x(&self, raw_x: f64) -> Option<f64> {
@@ -2243,19 +1059,6 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
             });
 
             if i == 0 {
-                if let Some(ref text) = self.lmfit_result
-                    && ui.button("Export").clicked()
-                    && let Some(path) = rfd::FileDialog::new()
-                        .set_file_name("fit_result.txt")
-                        .save_file()
-                {
-                    if let Err(e) = std::fs::write(&path, text) {
-                        eprintln!("Failed to save lmfit result: {e}");
-                    } else {
-                        log::info!("Saved lmfit result to {path:?}");
-                    }
-                }
-
                 ui.menu_button("Fit Report", |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
@@ -2292,11 +1095,17 @@ def Update_Energy(file_path: str, peak_number: int, energy: float, uncertainty: 
 
 #[cfg(test)]
 mod tests {
-    use super::GaussianFitter;
+    use super::{GaussianFitter, GaussianParameters};
+    use crate::fitter::{
+        common::{Calibration, Data},
+        main_fitter::{BackgroundModel, BackgroundResult},
+        models::linear::LinearFitter,
+    };
+    use spectrix_fitting::{BackgroundCoupling, ParameterKind};
 
     #[test]
     fn decimate_composition_arrays_limits_density_and_keeps_endpoints() {
-        let point_count = GaussianFitter::MAX_COMPOSITION_POINTS + 5000;
+        let point_count = GaussianFitter::MAX_COMPOSITION_DISPLAY_POINTS + 5000;
         let xs = (0..point_count).map(|i| i as f64).collect::<Vec<_>>();
         let ys = xs.iter().map(|x| x * 2.0).collect::<Vec<_>>();
         let uncertainties = xs.iter().map(|x| x * 0.1).collect::<Vec<_>>();
@@ -2304,7 +1113,7 @@ mod tests {
         let (xs, ys, uncertainties) =
             GaussianFitter::decimate_composition_arrays(xs, ys, uncertainties);
 
-        assert!(xs.len() <= GaussianFitter::MAX_COMPOSITION_POINTS);
+        assert!(xs.len() <= GaussianFitter::MAX_COMPOSITION_DISPLAY_POINTS);
         assert_eq!(xs.len(), ys.len());
         assert_eq!(xs.len(), uncertainties.len());
         assert_eq!(xs.first().copied(), Some(0.0));
@@ -2316,5 +1125,191 @@ mod tests {
             uncertainties.last().copied(),
             Some(((point_count - 1) as f64) * 0.1)
         );
+    }
+
+    #[test]
+    fn display_decimation_preserves_narrow_peak_and_limits_component_and_band_density() {
+        let point_count = 20_000;
+        let peak_index = 12_345;
+        let xs = (0..point_count)
+            .map(|index| index as f64)
+            .collect::<Vec<_>>();
+        let mut ys = vec![0.0; point_count];
+        ys[peak_index] = 100.0;
+
+        let curve = GaussianFitter::decimate_curve(&xs, &ys);
+        assert!(curve.len() <= GaussianFitter::MAX_COMPONENT_DISPLAY_POINTS);
+        assert_eq!(curve.first().copied(), Some([0.0, 0.0]));
+        assert_eq!(curve.last().copied(), Some([(point_count - 1) as f64, 0.0]));
+        assert!(curve.iter().any(|point| point[1] == 100.0));
+
+        let uncertainties = vec![1.0; point_count];
+        let band = GaussianFitter::build_uncertainty_band(&xs, &ys, &uncertainties)
+            .expect("valid uncertainty band");
+        assert!(band.xs.len() <= GaussianFitter::MAX_UNCERTAINTY_DISPLAY_POINTS);
+        assert!(
+            band.xs
+                .iter()
+                .zip(&band.upper)
+                .any(|(&x, &upper)| x == peak_index as f64 && upper == 101.0)
+        );
+    }
+
+    #[test]
+    fn legacy_lmfit_payload_loads_but_is_omitted_from_new_json() {
+        let legacy = serde_json::json!({
+            "fit_result": [GaussianParameters::default()],
+            "fit_points": [[1.0, 2.0], [2.0, 3.0]],
+            "lmfit_result": "legacy model result"
+        });
+        let decoded: GaussianFitter =
+            serde_json::from_value(legacy).expect("legacy Gaussian fit should load");
+        assert_eq!(decoded.lmfit_result.as_deref(), Some("legacy model result"));
+        assert_eq!(decoded.fit_points, vec![[1.0, 2.0], [2.0, 3.0]]);
+
+        let encoded = serde_json::to_value(&decoded).expect("native Gaussian fit should save");
+        assert!(encoded.get("lmfit_result").is_none());
+        assert!(encoded.get("fit_points").is_some());
+    }
+
+    #[test]
+    fn native_fit_preserves_workflow_metadata_uncertainty_and_assignments() {
+        let x = (0..=100)
+            .map(|index| index as f64 * 0.1)
+            .collect::<Vec<_>>();
+        let y = x
+            .iter()
+            .enumerate()
+            .map(|(index, independent)| {
+                1.5 + 0.25 * independent
+                    + 85.0 / ((2.0 * std::f64::consts::PI).sqrt() * 0.32)
+                        * (-0.5 * ((*independent - 5.0) / 0.32).powi(2)).exp()
+                    + 0.01 * (index as f64).sin()
+            })
+            .collect();
+        let mut fitter = GaussianFitter::new(
+            Data { x, y },
+            vec![2.0, 8.0],
+            vec![5.0],
+            vec![(2.0, 3.0), (7.0, 8.0)],
+            BackgroundModel::Linear(Default::default()),
+            None,
+            true,
+            true,
+        );
+        fitter.background_coupling = BackgroundCoupling::PrefitJoint;
+        fitter.fit_native().expect("native Gaussian fit");
+
+        let native = fitter.native_result.as_ref().expect("native payload");
+        assert!(native.fit.termination.success);
+        assert!(native.fit.covariance.is_some());
+        assert!(native.fit.confidence_band.is_some());
+        assert!(native.fit.evaluation_x.len() <= GaussianFitter::MAX_COMPOSITION_DISPLAY_POINTS);
+        assert_eq!(native.fit.best_fit.len(), native.fit.evaluation_x.len());
+        assert!(
+            native
+                .fit
+                .components
+                .iter()
+                .all(|component| component.values.len() == native.fit.evaluation_x.len())
+        );
+        assert!(
+            native
+                .fit
+                .component_bands
+                .iter()
+                .all(|(_, band)| band.x.len() == native.fit.evaluation_x.len())
+        );
+        assert!(fitter.uncertainty_band.xs.len() <= GaussianFitter::MAX_UNCERTAINTY_DISPLAY_POINTS);
+        assert!(
+            fitter
+                .fit_result
+                .iter()
+                .all(|peak| peak.fit_points.len() <= GaussianFitter::MAX_COMPONENT_DISPLAY_POINTS)
+        );
+        assert!(
+            native
+                .fit
+                .component_bands
+                .iter()
+                .any(|(name, _)| name == "g0_")
+        );
+        assert_eq!(
+            fitter.fit_metadata.as_ref().expect("metadata").peak_markers,
+            vec![5.0]
+        );
+
+        fitter.update_uuid_for_peak(0, 42).expect("UUID update");
+        fitter
+            .update_energy_for_peak(0, 1332.5, 0.2)
+            .expect("energy update");
+        let mut calibration = Calibration::default();
+        calibration.b.value = 2.0;
+        calibration.c.value = 1.0;
+        fitter.calibrate(&calibration);
+        let peak = &fitter.fit_result[0];
+        assert_eq!(peak.uuid, 42);
+        assert_eq!(peak.energy.value, Some(1332.5));
+        let expected_calibrated_mean = 2.0 * peak.mean.value.expect("mean") + 1.0;
+        assert!(
+            (peak.mean.calibrated_value.expect("calibrated mean") - expected_calibrated_mean).abs()
+                < 1.0e-10
+        );
+
+        let encoded = serde_json::to_string(&fitter).expect("serialize native fit");
+        let decoded: GaussianFitter =
+            serde_json::from_str(&encoded).expect("deserialize native fit");
+        assert_eq!(decoded.background_coupling, BackgroundCoupling::PrefitJoint);
+        assert_eq!(decoded.fit_result[0].uuid, 42);
+        assert_eq!(decoded.fit_result[0].energy.value, Some(1332.5));
+        assert!(decoded.native_result.is_some());
+    }
+
+    #[test]
+    fn frozen_manual_background_is_used_without_background_markers() {
+        let x = (0..=100)
+            .map(|index| index as f64 * 0.1 + 0.05)
+            .collect::<Vec<_>>();
+        let y = x
+            .iter()
+            .map(|independent| {
+                1.5 + 0.25 * independent
+                    + 85.0 / ((2.0 * std::f64::consts::PI).sqrt() * 0.32)
+                        * (-0.5 * ((*independent - 5.0) / 0.32).powi(2)).exp()
+            })
+            .collect();
+        let background = BackgroundResult::Linear(LinearFitter::new_from_parameters(
+            (0.25, 0.01),
+            (1.5, 0.02),
+            0.05,
+            10.05,
+        ));
+        let mut fitter = GaussianFitter::new(
+            Data { x, y },
+            vec![2.03, 7.97],
+            Vec::new(),
+            Vec::new(),
+            BackgroundModel::Linear(Default::default()),
+            Some(background),
+            true,
+            true,
+        );
+        fitter
+            .fit_native()
+            .expect("fit using frozen manual background");
+
+        let native = fitter.native_result.as_ref().expect("native payload");
+        for (name, expected) in [("bg_slope", 0.25), ("bg_intercept", 1.5)] {
+            let parameter = native
+                .fit
+                .parameters
+                .iter()
+                .find(|parameter| parameter.name == name)
+                .unwrap_or_else(|| panic!("missing {name}"));
+            assert_eq!(parameter.kind, ParameterKind::Fixed);
+            assert!((parameter.value - expected).abs() < 1.0e-12);
+        }
+        assert!(native.fit.termination.success);
+        assert_eq!(native.peak_markers.len(), 1);
     }
 }

@@ -5,7 +5,7 @@
 Spectrix is built around event data where users are often working with observables such as energy, time, position, detector channels, calibrated columns, and fitted peak yields. It uses the crates:  
 `egui`, `egui-tiles`, `egui_plot`, and `polars`.
 
-Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting is performed using Python’s **lmfit** library.
+Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Gaussian and background fitting is performed natively in Rust by the workspace's `spectrix-fitting` crate.
 
 ![spectrix_screenshot](./example/spectrix-screenshot.png)
 
@@ -21,7 +21,7 @@ Additionally, using **uproot**, you can view 1D and 2D ROOT histograms. Fitting 
 - Column-group aliases for detector families, histogram sources, and grouped computed-column creation  
 - Searchable picker improvements including natural numeric sorting, glob-style filtering, and bulk select/clear actions  
 - Interactive histogram-created cuts for 1D and 2D views  
-- Gaussian fitting with Python’s lmfit, including total-fit uncertainty bands  
+- Native Gaussian/background fitting with covariance and total-fit uncertainty bands
 - Visible-range auto-Y scaling for 1D histograms, with log-Y support  
 - UUID peak labels with configurable size/lift and optional guide lines  
 - UI-based histogram and cut definition  
@@ -620,12 +620,12 @@ The 1D histogram interface in **Spectrix** is designed for fast, interactive pea
 
 ### Fitting Engine
 
-Spectrix uses Python [lmfit](https://lmfit.github.io/lmfit-py/builtin_models.html) for nonlinear fitting, called from Rust via [PyO3](https://docs.rs/pyo3/latest/pyo3/).
+Spectrix uses the Python- and UI-independent [`spectrix-fitting`](./crates/spectrix-fitting) Rust crate. Version 0.1 provides Gaussian peaks plus none/constant, linear, quadratic, exponential, and power-law backgrounds. Its `Lmfit134` profile uses MINPACK-compatible Levenberg-Marquardt settings, lmfit-style bounds, reduced-chi-square-scaled covariance, derived-parameter propagation, and Student-t-scaled confidence bands.
 
-Fitting was originally implemented with [varpro](https://github.com/geo-ant/varpro), but `lmfit` now powers the current pipeline because it provides flexible model composition, robust parameter constraints, and detailed fit reporting with less custom maintenance.
+Background coupling is explicit: **Prefit & Fix** is the persisted default and excludes background covariance from the total peak-fit band; **Prefit & Refine Jointly** includes background/peak cross-correlation. Python remains in Spectrix for unrelated features such as uproot, but the production fitter never falls back to Python.
 
 
-### Energy Calibration, UUIDs, and Exported lmfit Results
+### Energy Calibration and UUIDs
 
 Each fitted Gaussian peak carries two pieces of analysis metadata:
 
@@ -641,17 +641,7 @@ Calibration is built from stored fits using peak centroids (`mean`) versus assig
 
 After solving for calibration coefficients, Spectrix propagates uncertainties and attaches calibrated quantities to fit parameters.
 
-This metadata is also written into the underlying lmfit `ModelResult` payload:
-
-- peak UUID (`g{i}_uuid`)
-- assigned energy and uncertainty (`g{i}_energy`, `g{i}_energy_uncertainty`)
-- calibrated Gaussian parameters, including `g{i}_center_calibrated`, `g{i}_sigma_calibrated`, `g{i}_fwhm_calibrated`, plus calibrated copies for area/amplitude/height
-- calibration constants and uncertainties, including `calibration_a`, `calibration_b`, `calibration_c`, and `calibration_a_uncertainty`, `calibration_b_uncertainty`, `calibration_c_uncertainty`
- - fit marker metadata for Python interoperability:
-  - `region_marker_count`, `region_marker_0`, `region_marker_1`, ...
-  - `peak_marker_count`, `peak_marker_0`, `peak_marker_1`, ...
-  - `bg_marker_count`, `bg_marker_start_0`, `bg_marker_end_0`, ...
-  - fit/background flags: `bg_model_type`, `fit_equal_sigma`, `fit_free_position`
+This metadata is updated directly in Rust and saved with the native structured fit payload. No temporary files or Python calls are made when UUIDs, energies, or calibration values change.
 
 Stored-fit modify/refit behavior:
 
@@ -660,15 +650,10 @@ Stored-fit modify/refit behavior:
 - If background model is `None`, no background markers are restored/generated.
 
 
-Because of that, exported lmfit `.sav` files include both fit parameters and calibration/UUID context, so they can be loaded and further analyzed directly in Python (for example with `lmfit.model.load_modelresult`).
-
-When an exported lmfit `.sav` file is loaded back into Spectrix, the total-fit `1σ` uncertainty band is rebuilt immediately. Spectrix first tries lmfit `eval_uncertainty`; if the saved result cannot provide that directly, Spectrix falls back to an approximate band reconstructed from the stored parameter errors.
-
 ### Which Save Format To Use
 
-- **Save Fits / Load Fits (`.json`)**: best for restoring and continuing your work inside Spectrix.
-- **Export All lmfit Results / Load lmfit `.sav`**: best when you want to continue analysis in Python with `lmfit`.
-- If you are not planning to continue in Python/lmfit, prefer **Save Fits / Load Fits**.
+- **Save Fits / Load Fits (`.json`)** stores native fit results, covariance, bands, markers, assignments, and calibration metadata.
+- Existing Spectrix JSON remains loadable. A legacy `lmfit_result` field is ignored, and new saves omit it; refitting upgrades the record with complete native covariance data.
 
 ### Keybind Reference
 
@@ -692,9 +677,9 @@ Cursor must be inside the plot for keybinds to be active.
 
 ### Fit Behavior Notes
 
-- The default background model is **Linear**.
+- The default background model is **None**.
 - 1D auto-fit Y is enabled by default and uses the maximum bin height in the current visible X range with `1.15x` headroom in both linear and log modes.
-- If no background markers are present, Spectrix will still fit Gaussians on top of a fitted background model.
+- If no background markers are present, Spectrix samples the fit-region edges (expanding the sample when required by the selected background model) and still fits the Gaussians on top of that background.
 - Background markers and an explicit background fit help the solver converge faster and let you control which region is used to determine the background.
 - Multiple Gaussian peaks can be fit simultaneously when multiple peak markers exist in the active region.
 - Peak finding settings are available from the right-click **Peak Finder** submenu, including min/max height, prominence, difference, plateau size, and distance controls with hover help.
@@ -702,7 +687,9 @@ Cursor must be inside the plot for keybinds to be active.
 - If a background fit is active, Spectrix subtracts that background before peak finding.
 - Detected peaks are written back into the plot as peak markers so they can be fitted immediately.
 - The **1σ Uncertainty** checkbox under **Show Fit Lines** toggles the total Gaussian uncertainty band.
-- That total-fit uncertainty band uses lmfit `eval_uncertainty` at `1σ`.
+- That total-fit uncertainty band propagates the native covariance and applies the corresponding Student-t scale at `1σ`.
+- Stored-fit curves use peak-preserving display sampling and off-screen culling. This limits plotting work without changing fitted parameters, covariance, residuals, statistics, or the uncertainty values represented by the displayed band.
+- The fit table is virtualized, so only visible rows are rendered when many fits are stored.
 - By default, peaks share a common standard deviation; this can be changed in fit settings.
 - Peak positions and widths can be constrained or locked from the *Fits* menu.
 - UUID labels are drawn above the composition curve using the larger of the composition height or the tallest nearby bin, so they stay readable on real peaks.

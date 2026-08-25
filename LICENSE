@@ -6,6 +6,11 @@ Spectrix and its associated source code, binaries, documentation, user
 interfaces, designs, and project files (the "Software") are owned by Alex
 Conley.
 
+License exception: the independent `crates/spectrix-fitting` package is not
+covered by this license. That package is offered separately under the user's
+choice of the MIT License or the Apache License, Version 2.0, as stated in its
+own `Cargo.toml`, `LICENSE-MIT`, and `LICENSE-APACHE` files.
+
 1. Permitted Use
 
 You may view, run, study, and use the Software for personal, academic,

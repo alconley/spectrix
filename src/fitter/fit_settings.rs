@@ -3,6 +3,7 @@ use crate::fitter::models::exponential::ExponentialParameters;
 use crate::fitter::models::linear::LinearParameters;
 use crate::fitter::models::powerlaw::PowerLawParameters;
 use crate::fitter::models::quadratic::QuadraticParameters;
+use spectrix_fitting::BackgroundCoupling;
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -19,6 +20,7 @@ pub struct FitSettings {
     pub equal_stddev: bool,
     pub free_position: bool,
     pub background_model: BackgroundModel,
+    pub background_coupling: BackgroundCoupling,
     pub linear_params: LinearParameters,
     pub quadratic_params: QuadraticParameters,
     pub power_law_params: PowerLawParameters,
@@ -44,6 +46,7 @@ impl Default for FitSettings {
             equal_stddev: true,
             free_position: true,
             background_model: BackgroundModel::None,
+            background_coupling: BackgroundCoupling::PrefitFrozen,
             linear_params: LinearParameters::default(),
             quadratic_params: QuadraticParameters::default(),
             power_law_params: PowerLawParameters::default(),
@@ -106,6 +109,28 @@ impl FitSettings {
             self.exponential_params = params.clone();
         }
 
+        if !matches!(self.background_model, BackgroundModel::None) {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Background coupling");
+                ui.radio_value(
+                    &mut self.background_coupling,
+                    BackgroundCoupling::PrefitFrozen,
+                    "Prefit & Fix",
+                )
+                .on_hover_text(
+                    "Fit the background first, then hold it fixed while fitting peaks.",
+                );
+                ui.radio_value(
+                    &mut self.background_coupling,
+                    BackgroundCoupling::PrefitJoint,
+                    "Prefit & Refine Jointly",
+                )
+                .on_hover_text(
+                    "Use the background prefit as a starting point, then include background and peak cross-covariance.",
+                );
+            });
+        }
+
         ui.separator();
 
         ui.horizontal_wrapped(|ui| {
@@ -148,7 +173,7 @@ impl FitSettings {
                 .on_hover_text("Show the background line");
             ui.checkbox(&mut self.show_fit_lines_area, "1σ Uncertainty")
                 .on_hover_text(
-                    "Draw the total-fit 1σ uncertainty band from lmfit `eval_uncertainty`.",
+                    "Draw the covariance-based, Student-t-scaled total-fit 1σ uncertainty band.",
                 );
         });
 

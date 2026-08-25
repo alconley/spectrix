@@ -45,8 +45,11 @@ impl FitUUIDMap {
     /// Simple table + actions. Call this from your panel.
     pub fn ui(&mut self, ui: &mut egui::Ui, histogrammer: Option<&mut histogrammer::Histogrammer>) {
         ui.horizontal(|ui| {
-
-            if ui.button("Load CSV").on_hover_text("Format->UUID,Energy,Uncertainty (with header)").clicked() {
+            if ui
+                .button("Load CSV")
+                .on_hover_text("Format->UUID,Energy,Uncertainty (with header)")
+                .clicked()
+            {
                 self.load_fit_uuid_csv();
             }
 
@@ -60,13 +63,20 @@ impl FitUUIDMap {
                         ui.label("Syncing…");
                         ui.add(egui::widgets::Spinner::default());
                         if let Ok(p) = self.progress.lock() {
-                            ui.add(egui::ProgressBar::new(*p).show_percentage().desired_width(100.0));
+                            ui.add(
+                                egui::ProgressBar::new(*p)
+                                    .show_percentage()
+                                    .desired_width(100.0),
+                            );
                         }
                         if ui.button("Cancel").clicked() {
                             self.abort.store(true, std::sync::atomic::Ordering::Relaxed);
                         }
-                    } else if ui.button("Sync ➡ Histograms")
-                        .on_hover_text("Runs off-thread; writes energies into lmfit results for each histogram")
+                    } else if ui
+                        .button("Sync ➡ Histograms")
+                        .on_hover_text(
+                            "Runs off-thread; writes assigned energies into native fit results",
+                        )
                         .clicked()
                     {
                         self.sync_uuid_with_histogrammer_bg(hist);
