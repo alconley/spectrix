@@ -16,9 +16,12 @@ use super::models::gaussian::{HistogramDrawContext, UuidDrawOptions};
 use super::common::{Calibration, fit_measurement_label};
 
 use crate::custom_analysis::se_sps_analysis::uuid_map::FitUUID;
+use crate::defaults::FitPaletteDefaults;
 use crate::fitter::common::Data;
 use crate::fitter::models::linear::LinearFitter;
 use crate::fitter::models::quadratic;
+use crate::histoer::histo1d::markers::FitMarkers;
+use spectrix_fitting::{Bound, FitQualityIssue, FitQualityStatus, ManualPeakBounds, ManualPeakSeed};
 
 use std::collections::HashMap;
 
@@ -200,6 +203,81 @@ fn fmt_value_uncertainty(value: f64, uncertainty: f64, precision: usize) -> Stri
     }
 }
 
+const MANUAL_FWHM_FACTOR: f64 = 2.354_82;
+
+#[derive(Clone)]
+struct ManualInitialTableRow {
+    id: u64,
+    seed: ManualPeakSeed,
+    bounds: ManualPeakBounds,
+    net_height: f64,
+    source: String,
+    valid: bool,
+}
+
+#[derive(Clone)]
+struct ManualTempTableRow {
+    peak: usize,
+    center: (f64, Option<f64>),
+    fwhm: (f64, Option<f64>),
+    height: (f64, Option<f64>),
+    area: (f64, Option<f64>),
+    amplitude: (f64, Option<f64>),
+    sigma: (f64, Option<f64>),
+}
+
+fn bound_value(bound: Bound, fallback: f64) -> f64 {
+    match bound {
+        Bound::Inclusive(value) => value,
+        Bound::Unbounded => fallback,
+    }
+}
+
+fn range_label(ui: &mut egui::Ui, minimum: f64, guess: f64, maximum: f64) {
+    ui.label(format!("{minimum:.5} ≤ {guess:.5} ≤ {maximum:.5}"));
+}
+
+fn range_drag_ui(
+    ui: &mut egui::Ui,
+    minimum: &mut f64,
+    guess: &mut f64,
+    maximum: &mut f64,
+    speed: f64,
+    hard_minimum: f64,
+    hard_maximum: f64,
+) -> [bool; 3] {
+    let mut changed = [false; 3];
+    ui.horizontal(|ui| {
+        changed[0] = ui
+            .add(
+                egui::DragValue::new(minimum)
+                    .speed(speed)
+                    .range(hard_minimum..=*guess),
+            )
+            .on_hover_text("Minimum allowed value")
+            .changed();
+        ui.label("≤");
+        changed[1] = ui
+            .add(
+                egui::DragValue::new(guess)
+                    .speed(speed)
+                    .range(*minimum..=*maximum),
+            )
+            .on_hover_text("Initial value used by the solver")
+            .changed();
+        ui.label("≤");
+        changed[2] = ui
+            .add(
+                egui::DragValue::new(maximum)
+                    .speed(speed)
+                    .range(*guess..=hard_maximum),
+            )
+            .on_hover_text("Maximum allowed value")
+            .changed();
+    });
+    changed
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum SortCol {
     Fit,
@@ -228,6 +306,8 @@ pub struct Fits {
     pub settings: FitSettings,
     pub calibration: Calibration,
     pub sort_state: SortState,
+    #[serde(default)]
+    pub palette: FitPaletteDefaults,
     #[serde(skip)]
     pub pending_modify_fit: Option<usize>,
     #[serde(skip)]
@@ -264,6 +344,7 @@ impl Fits {
             settings: FitSettings::default(),
             calibration: Calibration::default(),
             sort_state: SortState::default(),
+            palette: FitPaletteDefaults::default(),
             pending_modify_fit: None,
             pending_refit_all: false,
         }
@@ -278,11 +359,27 @@ impl Fits {
     }
 
     pub fn store_temp_fit(&mut self) {
+        if !self.temp_fit_is_storable() {
+            return;
+        }
+        self.store_temp_fit_unchecked();
+    }
+
+    pub fn temp_fit_is_storable(&self) -> bool {
+        self.temp_fit.as_ref().is_some_and(|fit| {
+            fit.last_fit_error.is_none()
+                && matches!(fit.fit_result, Some(FitResult::Gaussian(_)))
+        })
+    }
+
+    fn store_temp_fit_unchecked(&mut self) {
         if let Some(mut temp_fit) = self.temp_fit.take() {
             temp_fit.compact_display_data();
-            temp_fit.set_background_color(egui::Color32::DARK_GREEN);
-            temp_fit.set_composition_color(egui::Color32::DARK_BLUE);
-            temp_fit.set_decomposition_color(egui::Color32::from_rgb(150, 0, 255));
+            temp_fit.apply_line_defaults(
+                &self.palette.stored_background,
+                &self.palette.stored_composition,
+                &self.palette.stored_decomposition,
+            );
 
             // remove Temp Fit from name
             let name = temp_fit.name.clone();
@@ -302,6 +399,41 @@ impl Fits {
         for fit in &mut self.stored_fits {
             fit.set_log(log_y, log_x);
         }
+    }
+
+    pub fn style_temporary_fit(&self, fit: &mut Fitter) {
+        fit.apply_line_defaults(
+            &self.palette.temporary_background,
+            &self.palette.temporary_composition,
+            &self.palette.temporary_decomposition,
+        );
+    }
+
+    pub fn apply_generation_defaults(
+        &mut self,
+        defaults: &FitSettings,
+        palette: &FitPaletteDefaults,
+    ) {
+        let calibrated = self.settings.calibrated;
+        self.settings = defaults.clone();
+        self.settings.calibrated = calibrated;
+        self.palette = palette.clone();
+
+        if let Some(temp_fit) = &mut self.temp_fit {
+            temp_fit.apply_line_defaults(
+                &palette.temporary_background,
+                &palette.temporary_composition,
+                &palette.temporary_decomposition,
+            );
+        }
+        for fit in &mut self.stored_fits {
+            fit.apply_line_defaults(
+                &palette.stored_background,
+                &palette.stored_composition,
+                &palette.stored_decomposition,
+            );
+        }
+        self.apply_visibility_settings();
     }
 
     pub fn set_stored_fits_background_color(&mut self, color: egui::Color32) {
@@ -1067,9 +1199,391 @@ impl Fits {
             || self.stored_fits.iter().any(fit_has_uuid_labels)
     }
 
+    fn manual_peak_table_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        markers: &mut FitMarkers,
+        bin_width: f64,
+        equal_sigma: bool,
+    ) -> bool {
+        markers.ensure_peak_ids();
+        let snapshot = self
+            .temp_fit
+            .as_ref()
+            .and_then(|fit| match &fit.fit_result {
+                Some(FitResult::Gaussian(gaussian)) => gaussian.native_result.as_ref(),
+                None => None,
+            })
+            .map(|result| {
+                let initial = result
+                    .peak_seeds
+                    .iter()
+                    .enumerate()
+                    .map(|(index, seed)| {
+                        let definition = |suffix: &str| {
+                            result
+                                .initial_parameters
+                                .iter()
+                                .find(|parameter| parameter.name == format!("g{index}_{suffix}"))
+                        };
+                        let center = definition("center");
+                        let sigma = definition("sigma");
+                        let height = definition("height");
+                        let center_bounds = center.map_or(
+                            [seed.center, seed.center],
+                            |parameter| {
+                                [
+                                    bound_value(parameter.bounds.lower, seed.center),
+                                    bound_value(parameter.bounds.upper, seed.center),
+                                ]
+                            },
+                        );
+                        let sigma_bounds = sigma.map_or([seed.sigma, seed.sigma], |parameter| {
+                            [
+                                bound_value(parameter.bounds.lower, seed.sigma),
+                                bound_value(parameter.bounds.upper, seed.sigma),
+                            ]
+                        });
+                        let response = spectrix_fitting::evaluate_manual_peak(
+                            ManualPeakSeed {
+                                center: seed.center,
+                                sigma: seed.sigma,
+                                amplitude: 1.0,
+                            },
+                            seed.center,
+                            bin_width,
+                        )
+                        .unwrap_or(0.0);
+                        let net_height = height.map_or(seed.amplitude * response, |value| value.initial);
+                        let height_bounds = height.map_or([net_height, net_height], |parameter| {
+                            [
+                                bound_value(parameter.bounds.lower, net_height),
+                                bound_value(parameter.bounds.upper, net_height),
+                            ]
+                        });
+                        ManualInitialTableRow {
+                            id: markers
+                                .peak_markers
+                                .get(index)
+                                .map_or(index as u64 + 1, |guess| guess.id),
+                            seed: *seed,
+                            bounds: ManualPeakBounds {
+                                center: center_bounds,
+                                sigma: sigma_bounds,
+                                net_height: height_bounds,
+                            },
+                            net_height,
+                            source: "Fit input".to_owned(),
+                            valid: true,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let fitted = (0..result.peak_seeds.len())
+                    .filter_map(|index| {
+                        let estimate = |suffix: &str| {
+                            result
+                                .fit
+                                .parameters
+                                .iter()
+                                .find(|parameter| parameter.name == format!("g{index}_{suffix}"))
+                        };
+                        let pair = |suffix: &str| {
+                            estimate(suffix)
+                                .map(|parameter| (parameter.value, parameter.standard_error))
+                                .unwrap_or((f64::NAN, None))
+                        };
+                        estimate("center")?;
+                        Some(ManualTempTableRow {
+                            peak: index,
+                            center: pair("center"),
+                            fwhm: pair("fwhm"),
+                            height: pair("height"),
+                            area: pair("area"),
+                            amplitude: pair("amplitude"),
+                            sigma: pair("sigma"),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                (initial, fitted)
+            });
+
+        if markers.peak_markers.is_empty()
+            && snapshot
+                .as_ref()
+                .is_none_or(|(initial, _)| initial.is_empty())
+        {
+            return false;
+        }
+
+        ui.separator();
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Initial / Temporary Peak Parameters");
+            ui.label(if equal_sigma {
+                "Shared FWHM: changing a width preserves each peak's height."
+            } else {
+                "Independent FWHM: each width preserves its peak's height."
+            });
+        });
+        if let Some(error) = &markers.estimate_error {
+            ui.colored_label(Color32::YELLOW, error);
+        }
+
+        let mut changed = false;
+        let mut reset_all = false;
+        let mut reestimate = Vec::new();
+        let mut shared_fwhm = None;
+        let mut shared_fwhm_bounds = None;
+        if snapshot.is_none() {
+            reset_all = ui.button("Reset All").clicked();
+        }
+
+        egui::ScrollArea::horizontal()
+            .id_salt("manual_peak_results_scroll")
+            .show(ui, |ui| {
+                egui::Grid::new("manual_peak_results_table")
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for heading in [
+                            "Stage",
+                            "Peak",
+                            "Center (min ≤ guess ≤ max)",
+                            "FWHM (min ≤ guess ≤ max)",
+                            "Net height (min ≤ guess ≤ max)",
+                            "Area",
+                            "Amplitude",
+                            "Sigma",
+                            "Source / status",
+                            "Options",
+                        ] {
+                            ui.strong(heading);
+                        }
+                        ui.end_row();
+
+                        if let Some((initial_rows, fitted_rows)) = &snapshot {
+                            for (index, initial) in initial_rows.iter().enumerate() {
+                                ui.label("Initial");
+                                ui.label(format!("#{}", initial.id));
+                                range_label(
+                                    ui,
+                                    initial.bounds.center[0],
+                                    initial.seed.center,
+                                    initial.bounds.center[1],
+                                );
+                                range_label(
+                                    ui,
+                                    initial.bounds.sigma[0] * MANUAL_FWHM_FACTOR,
+                                    initial.seed.sigma * MANUAL_FWHM_FACTOR,
+                                    initial.bounds.sigma[1] * MANUAL_FWHM_FACTOR,
+                                );
+                                range_label(
+                                    ui,
+                                    initial.bounds.net_height[0],
+                                    initial.net_height,
+                                    initial.bounds.net_height[1],
+                                );
+                                ui.label(format!("{:.5}", initial.seed.amplitude / bin_width));
+                                ui.label(format!("{:.5}", initial.seed.amplitude));
+                                ui.label(format!("{:.5}", initial.seed.sigma));
+                                ui.colored_label(
+                                    if initial.valid {
+                                        Color32::GREEN
+                                    } else {
+                                        Color32::RED
+                                    },
+                                    &initial.source,
+                                );
+                                ui.label("—");
+                                ui.end_row();
+
+                                if let Some(fitted) = fitted_rows.get(index) {
+                                    ui.label("Temp");
+                                    ui.label(format!("#{}", fitted.peak + 1));
+                                    for measurement in [
+                                        fitted.center,
+                                        fitted.fwhm,
+                                        fitted.height,
+                                        fitted.area,
+                                        fitted.amplitude,
+                                        fitted.sigma,
+                                    ] {
+                                        fit_measurement_label(
+                                            ui,
+                                            Some(measurement.0),
+                                            measurement.1,
+                                        );
+                                    }
+                                    ui.label("Fitted");
+                                    ui.label("—");
+                                    ui.end_row();
+                                }
+                            }
+                        } else {
+                            let region_positions = markers.get_region_marker_positions();
+                            let (region_minimum, region_maximum) = if region_positions.len() == 2 {
+                                (
+                                    region_positions[0].min(region_positions[1]),
+                                    region_positions[0].max(region_positions[1]),
+                                )
+                            } else {
+                                (f64::NEG_INFINITY, f64::INFINITY)
+                            };
+                            let maximum_width = if region_minimum.is_finite()
+                                && region_maximum.is_finite()
+                            {
+                                (region_maximum - region_minimum).max(bin_width)
+                            } else {
+                                f64::INFINITY
+                            };
+                            for guess in &mut markers.peak_markers {
+                                ui.label("Initial");
+                                ui.label(format!("#{}", guess.id));
+
+                                let mut center_minimum = guess.center_min.min(guess.center.x_value);
+                                let mut center = guess.center.x_value;
+                                let mut center_maximum = guess.center_max.max(guess.center.x_value);
+                                center_minimum = center_minimum.max(region_minimum);
+                                center_maximum = center_maximum.min(region_maximum);
+                                let center_changes = range_drag_ui(
+                                    ui,
+                                    &mut center_minimum,
+                                    &mut center,
+                                    &mut center_maximum,
+                                    bin_width.max(1.0e-9) * 0.1,
+                                    region_minimum,
+                                    region_maximum,
+                                );
+                                if center_changes.iter().any(|value| *value) {
+                                    guess.center_min = center_minimum;
+                                    guess.center.x_value = center;
+                                    guess.center_max = center_maximum;
+                                    guess.hold_current_seed();
+                                    changed = true;
+                                }
+
+                                let mut fwhm_minimum = guess.fwhm_min.min(guess.fwhm);
+                                let mut fwhm = guess.fwhm;
+                                let mut fwhm_maximum = guess.fwhm_max.max(guess.fwhm);
+                                let fwhm_changes = range_drag_ui(
+                                    ui,
+                                    &mut fwhm_minimum,
+                                    &mut fwhm,
+                                    &mut fwhm_maximum,
+                                    bin_width.max(1.0e-9) * 0.05,
+                                    (0.5 * bin_width).max(f64::EPSILON),
+                                    maximum_width,
+                                );
+                                if fwhm_changes[1] {
+                                    guess.set_fwhm_preserving_height(fwhm, bin_width);
+                                    shared_fwhm = equal_sigma.then_some(fwhm);
+                                }
+                                if fwhm_changes[0] || fwhm_changes[2] {
+                                    guess.fwhm_min = fwhm_minimum;
+                                    guess.fwhm_max = fwhm_maximum;
+                                    shared_fwhm_bounds =
+                                        equal_sigma.then_some([fwhm_minimum, fwhm_maximum]);
+                                }
+                                if fwhm_changes.iter().any(|value| *value) {
+                                    guess.hold_current_seed();
+                                    changed = true;
+                                }
+
+                                let mut height_minimum = guess.net_height_min.min(guess.net_height);
+                                let mut height = guess.net_height;
+                                let mut height_maximum = guess.net_height_max.max(guess.net_height);
+                                let height_speed = height.abs().max(1.0) * 0.01;
+                                let height_changes = range_drag_ui(
+                                    ui,
+                                    &mut height_minimum,
+                                    &mut height,
+                                    &mut height_maximum,
+                                    height_speed,
+                                    0.0,
+                                    f64::INFINITY,
+                                );
+                                if height_changes[1] {
+                                    guess.set_net_height(height, bin_width);
+                                }
+                                if height_changes[0] || height_changes[2] {
+                                    guess.net_height_min = height_minimum;
+                                    guess.net_height_max = height_maximum;
+                                }
+                                if height_changes.iter().any(|value| *value) {
+                                    guess.hold_current_seed();
+                                    changed = true;
+                                }
+
+                                ui.label(format!("{:.5}", guess.amplitude / bin_width));
+                                ui.label(format!("{:.5}", guess.amplitude));
+                                ui.label(format!("{:.5}", guess.fwhm / MANUAL_FWHM_FACTOR));
+                                guess.valid = guess.center.x_value.is_finite()
+                                    && guess.fwhm.is_finite()
+                                    && guess.fwhm > 0.0
+                                    && guess.amplitude.is_finite()
+                                    && guess.amplitude > 0.0
+                                    && guess.bounds_valid();
+                                ui.colored_label(
+                                    if guess.valid {
+                                        Color32::GREEN
+                                    } else {
+                                        Color32::RED
+                                    },
+                                    format!(
+                                        "W:{} H:{} B:{} · {}",
+                                        guess.width_source.label(),
+                                        guess.amplitude_source.label(),
+                                        guess.bounds_source.label(),
+                                        if guess.valid { "valid" } else { "invalid" },
+                                    ),
+                                );
+                                if ui.button("Re-estimate").clicked() {
+                                    reestimate.push(guess.id);
+                                }
+                                ui.end_row();
+                            }
+                        }
+                    });
+            });
+
+        if let Some(fwhm) = shared_fwhm {
+            for guess in &mut markers.peak_markers {
+                guess.set_fwhm_preserving_height(fwhm, bin_width);
+                guess.hold_current_seed();
+            }
+        }
+        if let Some([minimum, maximum]) = shared_fwhm_bounds {
+            for guess in &mut markers.peak_markers {
+                guess.fwhm_min = minimum;
+                guess.fwhm_max = maximum;
+                guess.hold_current_seed();
+            }
+        }
+        if reset_all {
+            for guess in &mut markers.peak_markers {
+                guess.reset_estimates();
+            }
+            changed = true;
+        }
+        if !reestimate.is_empty() {
+            for guess in &mut markers.peak_markers {
+                if reestimate.contains(&guess.id) {
+                    guess.reset_estimates();
+                }
+            }
+            changed = true;
+        }
+        if changed {
+            markers
+                .peak_markers
+                .sort_by(|left, right| left.center.x_value.total_cmp(&right.center.x_value));
+            markers.estimate_signature = 0;
+        }
+        changed
+    }
+
     pub fn fit_stats_grid_ui(&mut self, ui: &mut egui::Ui) {
-        // only show the grid if there is something to show
-        if self.temp_fit.is_none() && self.stored_fits.is_empty() {
+        // Current Initial/Temp rows are rendered together above. This table retains
+        // the sortable stored-fit workflow.
+        if self.stored_fits.is_empty() {
             return;
         }
 
@@ -1104,48 +1618,6 @@ impl Fits {
 
         let mut rows: Vec<Row> = Vec::new();
         let calibrated = self.settings.calibrated;
-
-        // Temp fit rows (if any)
-        if let Some(temp) = &mut self.temp_fit
-            && let Some(super::main_fitter::FitResult::Gaussian(g)) = &temp.fit_result
-        {
-            for (i, p) in g.fit_result.iter().enumerate() {
-                rows.push(Row {
-                    fit_idx: None,
-                    peak: i,
-                    mean: pick_cal(
-                        (p.mean.value, p.mean.uncertainty),
-                        (p.mean.calibrated_value, p.mean.calibrated_uncertainty),
-                        calibrated,
-                    ),
-                    fwhm: pick_cal(
-                        (p.fwhm.value, p.fwhm.uncertainty),
-                        (p.fwhm.calibrated_value, p.fwhm.calibrated_uncertainty),
-                        calibrated,
-                    ),
-                    area: pick_cal(
-                        (p.area.value, p.area.uncertainty),
-                        (p.area.calibrated_value, p.area.calibrated_uncertainty),
-                        calibrated,
-                    ),
-                    amplitude: pick_cal(
-                        (p.amplitude.value, p.amplitude.uncertainty),
-                        (
-                            p.amplitude.calibrated_value,
-                            p.amplitude.calibrated_uncertainty,
-                        ),
-                        calibrated,
-                    ),
-                    sigma: pick_cal(
-                        (p.sigma.value, p.sigma.uncertainty),
-                        (p.sigma.calibrated_value, p.sigma.calibrated_uncertainty),
-                        calibrated,
-                    ),
-                    uuid: p.uuid,
-                    energy: pick(p.energy.value, p.energy.uncertainty),
-                });
-            }
-        }
 
         // Stored fits rows
         for (fi, fit) in self.stored_fits.iter().enumerate() {
@@ -1276,17 +1748,19 @@ impl Fits {
 
         sort_rows(&mut rows, current);
         TableBuilder::new(ui)
-            .id_salt("fit_params_table_sortable")
+            .id_salt("fit_params_table_compact")
             .striped(true)
             .vscroll(true)
             .min_scrolled_height(120.0)
             .max_scroll_height(480.0)
-            .column(Column::exact(72.0))
-            .column(Column::exact(58.0))
-            .columns(Column::exact(118.0), 5)
-            .column(Column::exact(72.0))
-            .column(Column::exact(175.0))
-            .column(Column::remainder().at_least(88.0))
+            // Size each column from its header and visible cells. Unlike fixed widths, these
+            // stay compact for ordinary fits while still expanding for longer numeric values.
+            .column(Column::auto())
+            .column(Column::auto())
+            .columns(Column::auto(), 5)
+            .column(Column::auto())
+            .column(Column::auto())
+            .column(Column::auto())
             .header(24.0, |mut header| {
                 let mut add_header =
                     |header: &mut egui_extras::TableRow<'_, '_>, label: &str, col: SortCol| {
@@ -1500,7 +1974,126 @@ impl Fits {
         self.pending_modify_fit = to_modify;
     }
 
-    fn fit_panel_contents_ui(&mut self, ui: &mut egui::Ui, histogram_range: (f64, f64)) {
+    fn fit_quality_ui(&self, ui: &mut egui::Ui) {
+        let Some(temp) = &self.temp_fit else {
+            return;
+        };
+        if let Some(error) = &temp.last_fit_error {
+            ui.colored_label(Color32::RED, error);
+        }
+        let Some(FitResult::Gaussian(gaussian)) = &temp.fit_result else {
+            return;
+        };
+        let Some(result) = &gaussian.native_result else {
+            return;
+        };
+        let statistics = &result.fit.statistics;
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!(
+                "Objective: {:?}  ·  widths: {}  ·  termination: {}",
+                statistics.objective,
+                if gaussian.fit_settings.equal_stdev {
+                    "Shared"
+                } else {
+                    "Independent"
+                },
+                result.fit.termination.reason,
+            ));
+        });
+        ui.label(format!(
+            "Objective: {} → {:.5}  ·  improvement: {}  ·  RMSE: {:.5}  ·  R²: {}",
+            statistics
+                .initial_objective
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
+            statistics.final_objective,
+            statistics.objective_improvement.map_or_else(
+                || "—".to_owned(),
+                |value| format!("{:.2}%", 100.0 * value),
+            ),
+            statistics.rmse,
+            statistics
+                .r_squared
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
+        ));
+        ui.label(format!(
+            "Deviance / reduced: {} / {}  ·  Pearson / reduced: {} / {}  ·  p: {}",
+            statistics
+                .deviance
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
+            statistics
+                .reduced_deviance
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
+            statistics
+                .pearson_chi_square
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
+            statistics
+                .reduced_pearson_chi_square
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
+            statistics
+                .goodness_of_fit_p_value
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.4e}")),
+        ));
+        ui.label(format!(
+            "BIC: {}  ·  covariance: {}  ·  evaluations: {}",
+            statistics
+                .bic
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.3}")),
+            if result.fit.covariance.is_some() {
+                "available"
+            } else {
+                "unavailable"
+            },
+            statistics.evaluations,
+        ));
+        let (color, label) = match result.quality_status {
+            FitQualityStatus::Good => (Color32::GREEN, "Good"),
+            FitQualityStatus::Review => (Color32::YELLOW, "Review"),
+            FitQualityStatus::Poor => (Color32::from_rgb(230, 130, 20), "Poor"),
+            FitQualityStatus::Failed => (Color32::RED, "Failed"),
+        };
+        ui.colored_label(color, format!("Advisory fit quality: {label}"));
+        for issue in &result.quality_issues {
+            let message = match issue {
+                FitQualityIssue::FailedConvergence { reason } => {
+                    format!("Optimizer did not converge: {reason}")
+                }
+                FitQualityIssue::MissingCovariance => {
+                    "Parameter covariance is unavailable.".to_owned()
+                }
+                FitQualityIssue::NonFiniteResult => {
+                    "The returned parameters or curve contain a non-finite value.".to_owned()
+                }
+                FitQualityIssue::ActiveBounds { parameters } => {
+                    format!("Active bounds: {}", parameters.join(", "))
+                }
+                FitQualityIssue::NonpositivePrediction => {
+                    "The Poisson model has an invalid expected count.".to_owned()
+                }
+                FitQualityIssue::ObjectiveWorsened {
+                    initial,
+                    final_value,
+                } => format!(
+                    "Objective worsened from {initial:.5} to {final_value:.5}."
+                ),
+                FitQualityIssue::PoorGoodnessOfFit { p_value } => {
+                    format!("Poisson goodness-of-fit p-value is {p_value:.4e}.")
+                }
+                FitQualityIssue::UnmodeledResidualPeaks { positions } => format!(
+                    "Possible unmarked residual peaks near {positions:?}."
+                ),
+            };
+            ui.label(format!("• {message}"));
+        }
+        ui.small("Quality is advisory; this completed fit can always be stored.");
+    }
+
+    fn fit_panel_contents_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        histogram_range: (f64, f64),
+        markers: &mut FitMarkers,
+        bin_width: f64,
+    ) -> bool {
         ui.horizontal(|ui| {
             ui.heading("Fit Panel");
             ui.separator();
@@ -1508,9 +2101,45 @@ impl Fits {
                 .on_hover_text("Open the fit panel in a separate native window when supported.");
         });
 
+        let storable = self.temp_fit_is_storable();
+        let mut store = false;
+        ui.horizontal_wrapped(|ui| {
+            store = ui
+                .add_enabled(storable, egui::Button::new("Store Fit"))
+                .on_hover_text("Store the completed temporary fit. Quality messages are advisory.")
+                .clicked();
+        });
+        if store {
+            self.store_temp_fit();
+        }
+
+        let mut manual_changed = false;
+        ui.group(|ui| {
+            self.fit_quality_ui(ui);
+            manual_changed |= self.manual_peak_table_ui(
+                ui,
+                markers,
+                bin_width,
+                self.settings.equal_stddev,
+            );
+        });
+
         self.save_and_load_ui(ui);
 
-        self.settings.ui(ui);
+        let background_parameters_are_current = self
+            .temp_fit
+            .as_ref()
+            .and_then(|fit| fit.background_result.as_ref())
+            .is_some_and(|result| self.settings.background_parameters_match(result));
+        let manual_background_available = self
+            .temp_fit
+            .as_ref()
+            .is_some_and(|fit| fit.background_was_fit_manually && fit.background_result.is_some());
+        self.settings.ui(
+            ui,
+            background_parameters_are_current,
+            manual_background_available,
+        );
 
         self.calubration_ui(ui);
 
@@ -1518,6 +2147,7 @@ impl Fits {
         self.energy_calibration_plots_ui(ui, histogram_range);
 
         ui.add_space(10.0);
+        manual_changed
     }
 
     pub fn calubration_ui(&mut self, ui: &mut egui::Ui) {
@@ -1548,7 +2178,15 @@ impl Fits {
         ui.separator();
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, hist_name: &str, histogram_range: (f64, f64)) {
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        hist_name: &str,
+        histogram_range: (f64, f64),
+        markers: &mut FitMarkers,
+        bin_width: f64,
+    ) -> bool {
+        let mut manual_changed = false;
         if self.settings.show_fit_stats {
             let title = format!("Fit Panel: {hist_name}");
             let scroll_id = format!("fit_panel_scroll_{hist_name}");
@@ -1573,7 +2211,12 @@ impl Fits {
                             egui::ScrollArea::both()
                                 .id_salt(scroll_id.as_str())
                                 .show(ui, |ui| {
-                                    self.fit_panel_contents_ui(ui, histogram_range);
+                                    manual_changed |= self.fit_panel_contents_ui(
+                                        ui,
+                                        histogram_range,
+                                        markers,
+                                        bin_width,
+                                    );
                                 });
                         });
                     });
@@ -1584,22 +2227,37 @@ impl Fits {
                         egui::ScrollArea::both()
                             .id_salt(scroll_id.as_str())
                             .show(ui, |ui| {
-                                self.fit_panel_contents_ui(ui, histogram_range);
+                                manual_changed |= self.fit_panel_contents_ui(
+                                    ui,
+                                    histogram_range,
+                                    markers,
+                                    bin_width,
+                                );
                             });
                     });
             }
 
             self.settings.show_fit_stats = open;
         }
+        manual_changed
     }
 
-    pub fn fit_context_menu_ui(&mut self, ui: &mut egui::Ui, histogram_range: (f64, f64)) {
+    pub fn fit_context_menu_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        histogram_range: (f64, f64),
+        markers: &mut FitMarkers,
+        bin_width: f64,
+    ) -> bool {
+        let mut manual_changed = false;
         egui::ScrollArea::both()
             .id_salt(ui.id().with("fit_context_menu_scroll"))
             .max_height(450.0)
             .show(ui, |ui| {
-                self.fit_panel_contents_ui(ui, histogram_range);
+                manual_changed |=
+                    self.fit_panel_contents_ui(ui, histogram_range, markers, bin_width);
             });
+        manual_changed
     }
 
     pub fn sync_uuid(&mut self, uuid_map: &[FitUUID]) {

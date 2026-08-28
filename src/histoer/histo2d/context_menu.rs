@@ -28,16 +28,8 @@ impl Histogram2D {
     }
 
     fn next_cut_color(&self) -> Color32 {
-        const DEFAULT_CUT_COLORS: [Color32; 6] = [
-            Color32::RED,
-            Color32::GREEN,
-            Color32::BLUE,
-            Color32::YELLOW,
-            Color32::from_rgb(255, 0, 255),
-            Color32::from_rgb(0, 255, 255),
-        ];
-
-        DEFAULT_CUT_COLORS[self.plot_settings.cuts.len() % DEFAULT_CUT_COLORS.len()]
+        let palette = &self.generation_defaults.cuts.palette;
+        palette[self.plot_settings.cuts.len() % palette.len()]
     }
 
     pub fn context_menu(&mut self, ui: &mut egui::Ui) {
@@ -193,7 +185,7 @@ impl Histogram2D {
         let mut cut = Cut2D::default();
         cut.set_source_pairs(&source_pairs);
         cut.polygon.name = self.next_cut_name(&cut.x_column, &cut.y_column, source_pairs.len());
-        cut.polygon.set_color(self.next_cut_color());
+        cut.apply_defaults(&self.generation_defaults.cuts, self.next_cut_color());
 
         cut.polygon.interactive_clicking = true;
         self.plot_settings.cuts.push(cut);

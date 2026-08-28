@@ -1,5 +1,6 @@
 use core::f64;
 
+use crate::defaults::ProjectionDefaults;
 use crate::egui_plot_stuff::egui_horizontal_line::EguiHorizontalLine;
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::egui_plot_stuff::egui_vertical_line::EguiVerticalLine;
@@ -83,7 +84,10 @@ impl Histogram2D {
                 y_histogram.plot_settings.rebin_factor = 1;
                 y_histogram.plot_settings.column_name = self.plot_settings.y_column.clone();
                 y_histogram.rebin();
-                y_histogram.line.color = egui::Color32::from_rgb(255, 0, 0);
+                y_histogram
+                    .line
+                    .set_color(self.plot_settings.projections.defaults.y_color);
+                y_histogram.follow_theme_colors = false;
 
                 self.plot_settings.projections.y_projection = Some(y_histogram);
 
@@ -134,7 +138,10 @@ impl Histogram2D {
                 x_histogram.rebin();
                 x_histogram.bins = bins.clone();
                 x_histogram.original_bins = bins;
-                x_histogram.line.color = egui::Color32::from_rgb(0, 0, 255);
+                x_histogram
+                    .line
+                    .set_color(self.plot_settings.projections.defaults.x_color);
+                x_histogram.follow_theme_colors = false;
 
                 self.plot_settings.projections.x_projection = Some(x_histogram);
 
@@ -166,6 +173,8 @@ pub struct Projections {
     pub x_projection_line_1: EguiHorizontalLine,
     pub x_projection_line_2: EguiHorizontalLine,
     pub fill_x_line: EguiLine,
+    #[serde(default)]
+    pub defaults: ProjectionDefaults,
 
     pub dragging: bool,
     #[serde(skip)]
@@ -180,8 +189,6 @@ pub struct Projections {
     pub x_drag_anchor: Option<f64>,
 }
 impl Projections {
-    const DEFAULT_AXIS_OFFSET_FRACTION: f64 = 0.05;
-
     pub fn new() -> Self {
         Self {
             add_y_projection: false,
@@ -233,6 +240,7 @@ impl Projections {
                 reference_fill: true,
                 ..EguiLine::default()
             },
+            defaults: ProjectionDefaults::default(),
             dragging: false,
             current_plot_bounds: None,
             y_area_dragging: false,
@@ -242,12 +250,37 @@ impl Projections {
         }
     }
 
-    fn axis_offset(min: f64, max: f64) -> f64 {
-        let width = (max - min).abs();
-        if width > 0.0 {
-            width * Self::DEFAULT_AXIS_OFFSET_FRACTION
-        } else {
-            0.0
+    pub fn apply_defaults(&mut self, defaults: &ProjectionDefaults) {
+        self.defaults = defaults.clone();
+        self.add_x_projection = defaults.add_x_projection;
+        self.add_y_projection = defaults.add_y_projection;
+
+        for line in [&mut self.y_projection_line_1, &mut self.y_projection_line_2] {
+            line.set_color(defaults.y_color);
+            line.width = defaults.line_width;
+            line.style = defaults.line_style;
+            line.style_length = defaults.style_length;
+            line.mid_point_radius = defaults.midpoint_radius;
+        }
+        for line in [&mut self.x_projection_line_1, &mut self.x_projection_line_2] {
+            line.set_color(defaults.x_color);
+            line.width = defaults.line_width;
+            line.style = defaults.line_style;
+            line.style_length = defaults.style_length;
+            line.mid_point_radius = defaults.midpoint_radius;
+        }
+        self.fill_y_line.set_color(defaults.y_color);
+        self.fill_y_line.fill_alpha = defaults.fill_alpha;
+        self.fill_x_line.set_color(defaults.x_color);
+        self.fill_x_line.fill_alpha = defaults.fill_alpha;
+
+        if let Some(histogram) = &mut self.y_projection {
+            histogram.line.set_color(defaults.y_color);
+            histogram.follow_theme_colors = false;
+        }
+        if let Some(histogram) = &mut self.x_projection {
+            histogram.line.set_color(defaults.x_color);
+            histogram.follow_theme_colors = false;
         }
     }
 
@@ -256,7 +289,7 @@ impl Projections {
             .current_plot_bounds
             .map(|(x_range, _)| x_range)
             .unwrap_or(fallback_x_range);
-        let offset = Self::axis_offset(x_min, x_max);
+        let offset = (x_max - x_min).abs() * self.defaults.initial_inset_fraction.clamp(0.0, 0.5);
 
         self.y_projection_line_1.x_value = x_min + offset;
         self.y_projection_line_2.x_value = x_max - offset;
@@ -267,7 +300,7 @@ impl Projections {
             .current_plot_bounds
             .map(|(_, y_range)| y_range)
             .unwrap_or(fallback_y_range);
-        let offset = Self::axis_offset(y_min, y_max);
+        let offset = (y_max - y_min).abs() * self.defaults.initial_inset_fraction.clamp(0.0, 0.5);
 
         self.x_projection_line_1.y_value = y_min + offset;
         self.x_projection_line_2.y_value = y_max - offset;

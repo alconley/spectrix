@@ -1,4 +1,5 @@
 use super::plot_settings::PlotSettings;
+use crate::defaults::{Histogram1DDefaults, apply_plot_defaults};
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::fitter::common::Calibration;
 use crate::fitter::fit_handler::Fits;
@@ -15,12 +16,29 @@ pub struct Histogram {
     pub plot_settings: PlotSettings,
     pub fits: Fits,
     pub original_bins: Vec<u64>,
+    #[serde(default)]
+    pub generation_defaults: Histogram1DDefaults,
+    #[serde(default = "default_true")]
+    pub follow_theme_colors: bool,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 impl Histogram {
     // Create a new Histogram with specified min, max, and number of bins
     pub fn new(name: &str, number_of_bins: usize, range: (f64, f64)) -> Self {
-        Self {
+        Self::new_with_defaults(name, number_of_bins, range, &Histogram1DDefaults::default())
+    }
+
+    pub fn new_with_defaults(
+        name: &str,
+        number_of_bins: usize,
+        range: (f64, f64),
+        defaults: &Histogram1DDefaults,
+    ) -> Self {
+        let mut histogram = Self {
             name: name.to_owned(),
             bins: vec![0; number_of_bins],
             range,
@@ -34,7 +52,31 @@ impl Histogram {
             plot_settings: PlotSettings::default(),
             fits: Fits::new(),
             original_bins: vec![0; number_of_bins],
+            generation_defaults: defaults.clone(),
+            follow_theme_colors: true,
+        };
+        histogram.apply_generation_defaults(defaults);
+        histogram
+    }
+
+    pub fn apply_generation_defaults(&mut self, defaults: &Histogram1DDefaults) {
+        self.generation_defaults = defaults.clone();
+        defaults.line.apply_to(&mut self.line);
+        self.follow_theme_colors = true;
+        apply_plot_defaults(&defaults.plot, &mut self.plot_settings.egui_settings);
+        self.plot_settings.stats_info = defaults.show_statistics;
+        self.plot_settings.auto_fit_y_to_visible_range = defaults.auto_fit_y_to_visible_range;
+        self.plot_settings.auto_fit_y_max_multiplier_linear =
+            defaults.auto_fit_y_multiplier_linear.max(1.0);
+        self.plot_settings.auto_fit_y_max_multiplier_log =
+            defaults.auto_fit_y_multiplier_log.max(1.0);
+        self.plot_settings.markers.apply_defaults(&defaults.markers);
+        for (index, cut) in self.plot_settings.cuts.iter_mut().enumerate() {
+            let color = defaults.cuts.palette[index % defaults.cuts.palette.len()];
+            cut.apply_defaults(&defaults.cuts, color);
         }
+        self.fits
+            .apply_generation_defaults(&defaults.fit, &defaults.fit_palette);
     }
 
     pub fn reset(&mut self) {
@@ -155,9 +197,13 @@ impl Histogram {
         let calibration_ref = calibration.as_ref();
 
         self.line.draw(plot_ui, calibration_ref);
-        self.plot_settings
-            .markers
-            .draw_all_markers(plot_ui, calibration_ref);
+        self.plot_settings.markers.draw_all_markers(
+            plot_ui,
+            calibration_ref,
+            log_x,
+            log_y,
+            self.bin_width,
+        );
 
         self.fits.set_log(log_y, log_x);
         self.fits.draw(
@@ -177,7 +223,6 @@ impl Histogram {
 
         if plot_ui.response().hovered() {
             self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
-            self.plot_settings.egui_settings.limit_scrolling = true;
         } else {
             self.plot_settings.cursor_position = None;
         }
@@ -202,16 +247,35 @@ impl Histogram {
     }
 
     pub fn render(&mut self, ui: &mut egui::Ui) {
-        if ui.visuals().dark_mode {
-            self.line.set_color(egui::Color32::LIGHT_BLUE);
-        } else {
-            self.line.set_color(egui::Color32::BLACK);
+        // Process plot shortcuts before any fit-panel DragValue/TextEdit can see the same key
+        // event. On Windows, letting a still-focused numeric editor reject a letter first can
+        // play the system notification sound even if the plot consumes that key later.
+        if self.plot_settings.cursor_position.is_some() {
+            self.keybinds(ui);
+        }
+
+        if self.follow_theme_colors {
+            let color = if ui.visuals().dark_mode {
+                self.generation_defaults.dark_theme_color
+            } else {
+                self.generation_defaults.light_theme_color
+            };
+            self.line.set_color(color);
         }
 
         self.update_line_points();
-        self.keybinds(ui);
+        self.refresh_manual_peak_guesses();
 
-        self.fits.ui(ui, &self.name, self.range);
+        if self.fits.ui(
+            ui,
+            &self.name,
+            self.range,
+            &mut self.plot_settings.markers,
+            self.bin_width,
+        ) {
+            self.invalidate_manual_gaussian_preview();
+            self.refresh_manual_peak_guesses();
+        }
         self.apply_refit_all_request();
         self.apply_modify_fit_request();
 
@@ -224,7 +288,10 @@ impl Histogram {
         let mut plot = egui_plot::Plot::new(self.name.clone())
             .id(plot_id)
             .width(width);
-        plot = self.plot_settings.egui_settings.apply_to_plot(plot);
+        let mut effective_plot_settings = self.plot_settings.egui_settings.clone();
+        effective_plot_settings.allow_drag &= !self.plot_settings.interactions_dragging;
+        effective_plot_settings.allow_double_click_reset &= !self.plot_settings.cuts_clicking;
+        plot = effective_plot_settings.apply_to_plot(plot);
 
         let (scroll, _pointer_down, _modifiers) = ui.input(|i| {
             let scroll = i.events.iter().find_map(|e| match e {
@@ -270,7 +337,22 @@ impl Histogram {
         let calibration = self.display_calibration().cloned();
         let calibration_ref = calibration.as_ref();
 
-        self.plot_settings
-            .interactive_response(&plot_response, calibration_ref, self.range);
+        let markers_changed = self.plot_settings.interactive_response(
+            &plot_response,
+            calibration_ref,
+            self.range,
+            self.plot_settings.egui_settings.log_x,
+            self.plot_settings.egui_settings.log_y,
+            self.bin_width,
+            self.fits.settings.equal_stddev,
+        );
+        if markers_changed {
+            self.invalidate_manual_gaussian_preview();
+        }
+
+        if plot_response.response.hovered() {
+            // Keep keyboard focus on the plot for the next frame's early shortcut pass.
+            plot_response.response.request_focus();
+        }
     }
 }

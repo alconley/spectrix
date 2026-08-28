@@ -5,6 +5,7 @@ use super::response::{
     ConversationMessage, ConversationRole, format_assistant_message, normalize_help_response,
     parse_model_response, response_schema,
 };
+use crate::defaults::AiDefaults;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -118,11 +119,25 @@ impl Default for AiAssistant {
 }
 
 impl AiAssistant {
+    pub fn app_defaults(&self) -> AiDefaults {
+        AiDefaults {
+            base_url: self.base_url.clone(),
+            model: self.model.clone(),
+        }
+    }
+
     pub fn is_busy(&self) -> bool {
         self.generating.load(Ordering::Relaxed) || self.listing_models.load(Ordering::Relaxed)
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, snapshot: AiContextSnapshot) {
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        snapshot: AiContextSnapshot,
+        app_defaults: &mut AiDefaults,
+    ) {
+        self.base_url.clone_from(&app_defaults.base_url);
+        self.model.clone_from(&app_defaults.model);
         self.ensure_ollama_provider();
         self.take_pending_result();
         self.take_pending_models();
@@ -139,6 +154,8 @@ impl AiAssistant {
 
         ui.add_space(4.0);
         self.setup_ui(ui);
+        app_defaults.base_url.clone_from(&self.base_url);
+        app_defaults.model.clone_from(&self.model);
 
         ui.separator();
         self.composer_ui(ui, snapshot);

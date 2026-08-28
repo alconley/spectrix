@@ -16,11 +16,27 @@ use super::{
 
 pub(crate) fn background_kind(model: &BackgroundModel) -> BackgroundKind {
     match model {
+        BackgroundModel::Constant(_) => BackgroundKind::Constant,
         BackgroundModel::Linear(_) => BackgroundKind::Linear,
         BackgroundModel::Quadratic(_) => BackgroundKind::Quadratic,
         BackgroundModel::PowerLaw(_) => BackgroundKind::PowerLaw,
         BackgroundModel::Exponential(_) => BackgroundKind::Exponential,
-        BackgroundModel::None => BackgroundKind::None,
+        BackgroundModel::LegacyAuto | BackgroundModel::None => BackgroundKind::None,
+    }
+}
+
+pub(crate) fn concrete_background_model(kind: BackgroundKind) -> BackgroundModel {
+    match kind {
+        BackgroundKind::None => BackgroundModel::None,
+        BackgroundKind::Constant => BackgroundModel::Constant(Parameter {
+            name: "Constant".to_owned(),
+            min: 0.0,
+            ..Parameter::default()
+        }),
+        BackgroundKind::Linear => BackgroundModel::Linear(Default::default()),
+        BackgroundKind::Quadratic => BackgroundModel::Quadratic(Default::default()),
+        BackgroundKind::Exponential => BackgroundModel::Exponential(Default::default()),
+        BackgroundKind::PowerLaw => BackgroundModel::PowerLaw(Default::default()),
     }
 }
 
@@ -29,6 +45,10 @@ pub(crate) fn background_seed(
     previous: Option<&BackgroundResult>,
 ) -> BackgroundSeed {
     let parameters = match model {
+        BackgroundModel::LegacyAuto => vec![ParameterDefinition::fixed("bg_c", 0.0)],
+        BackgroundModel::Constant(parameter) => {
+            vec![parameter_definition("bg_c", parameter, None)]
+        }
         BackgroundModel::Linear(parameters) => vec![
             parameter_definition(
                 "bg_slope",
@@ -119,15 +139,53 @@ pub(crate) fn background_result_from_native(
     result: &NativeFitResult,
     data: Data,
 ) -> Option<BackgroundResult> {
+    background_result_from_values(model, result, data, &result.best_fit)
+}
+
+pub(crate) fn background_result_from_composite_native(
+    model: &BackgroundModel,
+    result: &NativeFitResult,
+    data: Data,
+) -> Option<BackgroundResult> {
+    let background_values = result
+        .components
+        .iter()
+        .find(|component| component.name == "background")
+        .map(|component| component.values.as_slice())?;
+    background_result_from_values(model, result, data, background_values)
+}
+
+fn background_result_from_values(
+    model: &BackgroundModel,
+    result: &NativeFitResult,
+    data: Data,
+    background_values: &[f64],
+) -> Option<BackgroundResult> {
     let fit_points = result
         .evaluation_x
         .iter()
         .copied()
-        .zip(result.best_fit.iter().copied())
+        .zip(background_values.iter().copied())
         .map(Into::into)
         .collect::<Vec<_>>();
     let report = fit_report(result);
     match model {
+        BackgroundModel::Constant(parameter) => {
+            let mut intercept = parameter.clone();
+            apply_estimate(&mut intercept, result, "bg_c");
+            let slope = Parameter {
+                name: "Slope".to_owned(),
+                vary: false,
+                value: Some(0.0),
+                ..Parameter::default()
+            };
+            Some(BackgroundResult::Constant(LinearFitter {
+                data,
+                paramaters: super::models::linear::LinearParameters { slope, intercept },
+                fit_points,
+                fit_report: report,
+            }))
+        }
         BackgroundModel::Linear(parameters) => {
             let mut parameters = parameters.clone();
             apply_estimate(&mut parameters.slope, result, "bg_slope");
@@ -174,14 +232,14 @@ pub(crate) fn background_result_from_native(
                 fit_report: report,
             }))
         }
-        BackgroundModel::None => None,
+        BackgroundModel::LegacyAuto | BackgroundModel::None => None,
     }
 }
 
 pub(crate) fn fit_report(result: &NativeFitResult) -> String {
     let statistics = &result.statistics;
     let mut report = format!(
-        "[[Native least-squares fit]]\n\
+        "[[Native {:?} fit]]\n\
          success = {}\n\
          termination = {} ({})\n\
          function evaluations = {}\n\
@@ -193,6 +251,7 @@ pub(crate) fn fit_report(result: &NativeFitResult) -> String {
          Bayesian information criterion = {}\n\
          R-squared = {}\n\
          [[Variables]]\n",
+        statistics.objective,
         result.termination.success,
         result.termination.reason,
         result.termination.message,

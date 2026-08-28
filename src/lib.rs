@@ -3,6 +3,7 @@
 
 pub mod ai;
 pub mod custom_analysis;
+pub mod defaults;
 pub mod egui_plot_stuff;
 pub mod fitter;
 pub mod histoer;

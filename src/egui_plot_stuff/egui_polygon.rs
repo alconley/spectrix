@@ -241,6 +241,11 @@ impl EguiPolygon {
                     });
 
                     ui.horizontal(|ui| {
+                        ui.label("Fill Color");
+                        color_picker_color32(ui, &mut self.fill_color, Alpha::BlendOrAdditive);
+                    });
+
+                    ui.horizontal(|ui| {
                         ui.label("Line Style: ");
                         ui.radio_value(&mut self.style, SerializableLineStyle::Solid, "Solid");
                         ui.radio_value(&mut self.style, SerializableLineStyle::Dotted, "Dotted");

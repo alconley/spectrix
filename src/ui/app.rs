@@ -1,3 +1,4 @@
+use crate::defaults::{DEFAULTS_SCHEMA_VERSION, SpectrixDefaults};
 use crate::util::processer::Processor;
 use std::path::{Path, PathBuf};
 
@@ -6,13 +7,29 @@ use std::path::{Path, PathBuf};
 pub struct Spectrix {
     sessions: Vec<Processor>,
     current_session: usize,
+    #[serde(default)]
+    defaults: SpectrixDefaults,
+    #[serde(default)]
+    defaults_schema_version: u32,
+    #[serde(default)]
+    defaults_panel_open: bool,
+    #[serde(skip)]
+    defaults_search: String,
 }
 
 impl Default for Spectrix {
     fn default() -> Self {
+        let defaults = SpectrixDefaults::default();
         Self {
-            sessions: vec![Processor::new(Self::default_session_name(1))],
+            sessions: vec![Processor::new_with_defaults(
+                Self::default_session_name(1),
+                &defaults.new_sessions,
+            )],
             current_session: 0,
+            defaults,
+            defaults_schema_version: DEFAULTS_SCHEMA_VERSION,
+            defaults_panel_open: false,
+            defaults_search: String::new(),
         }
     }
 }
@@ -33,6 +50,7 @@ impl Spectrix {
             }
             let mut app = loaded.unwrap_or_default();
             app.normalize_sessions();
+            app.migrate_defaults_if_needed();
             app
         } else {
             Default::default()
@@ -80,7 +98,10 @@ impl Spectrix {
 
     fn add_session(&mut self) {
         let name = self.next_default_session_name();
-        self.sessions.push(Processor::new(name));
+        self.sessions.push(Processor::new_with_defaults(
+            name,
+            &self.defaults.new_sessions,
+        ));
         self.current_session = self.sessions.len() - 1;
     }
 
@@ -100,7 +121,7 @@ impl Spectrix {
 
     fn reset_session(&mut self, index: usize) {
         if let Some(session) = self.sessions.get_mut(index) {
-            session.reset();
+            session.reset_with_defaults(&self.defaults.new_sessions);
         }
     }
 
@@ -142,8 +163,10 @@ impl Spectrix {
 
     fn normalize_sessions(&mut self) {
         if self.sessions.is_empty() {
-            self.sessions
-                .push(Processor::new(Self::default_session_name(1)));
+            self.sessions.push(Processor::new_with_defaults(
+                Self::default_session_name(1),
+                &self.defaults.new_sessions,
+            ));
             self.current_session = 0;
         }
 
@@ -156,6 +179,39 @@ impl Spectrix {
         if self.current_session >= self.sessions.len() {
             self.current_session = self.sessions.len() - 1;
         }
+    }
+
+    fn migrate_defaults_if_needed(&mut self) {
+        if self.defaults_schema_version >= DEFAULTS_SCHEMA_VERSION {
+            return;
+        }
+
+        if let Some(session) = self.sessions.get(self.current_session) {
+            self.defaults.general.estimated_memory_gb = session.settings.estimated_memory.max(0.1);
+            self.defaults.ai = session.ai.app_defaults();
+            self.defaults.new_sessions.files_panel_open = session.settings.left_panel_open;
+            self.defaults.new_sessions.histogram_script_open =
+                session.settings.histogram_script_open;
+            self.defaults.new_sessions.ai_open = session.settings.ai_open;
+            self.defaults.new_sessions.calculate_histograms_separately =
+                session.settings.calculate_histograms_seperately;
+            self.defaults.new_sessions.file_sort = session.file_sort;
+            self.defaults.histogrammer = session.histogrammer.behavior.layout_defaults();
+        }
+
+        self.defaults_schema_version = DEFAULTS_SCHEMA_VERSION;
+    }
+
+    fn defaults_panel_ui(&mut self, ui: &mut egui::Ui) {
+        let mut open = self.defaults_panel_open;
+        egui::Panel::left("spectrix_defaults_panel")
+            .resizable(true)
+            .default_size(320.0)
+            .size_range(260.0..=520.0)
+            .show_collapsible(ui, &mut open, |ui| {
+                super::defaults_panel::show(ui, &mut self.defaults, &mut self.defaults_search);
+            });
+        self.defaults_panel_open = open;
     }
 
     fn ensure_extension_if_missing(path: PathBuf, extension: &str) -> PathBuf {
@@ -236,6 +292,9 @@ impl eframe::App for Spectrix {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         Self::handle_screenshot_events(ui.ctx());
+        for session in &mut self.sessions {
+            session.histogrammer.set_app_defaults(&self.defaults);
+        }
 
         egui::Panel::top("spectrix_top_panel").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
@@ -246,6 +305,15 @@ impl eframe::App for Spectrix {
                         ui.horizontal(|ui| {
                             egui::global_theme_preference_switch(ui);
                             ui.heading("Spectrix");
+                            ui.separator();
+
+                            if ui
+                                .selectable_label(self.defaults_panel_open, "Defaults")
+                                .on_hover_text("Open app-wide defaults")
+                                .clicked()
+                            {
+                                self.defaults_panel_open = !self.defaults_panel_open;
+                            }
                             ui.separator();
 
                             if ui
@@ -298,7 +366,7 @@ impl eframe::App for Spectrix {
 
                                         ui.separator();
 
-                                        session.session_processor_menu_ui(ui);
+                                        session.session_processor_menu_ui(ui, &mut self.defaults);
 
                                         ui.separator();
 
@@ -373,9 +441,45 @@ impl eframe::App for Spectrix {
             });
         });
 
+        self.defaults_panel_ui(ui);
+
         // Draw the UI for the current session
         if let Some(current) = self.sessions.get_mut(self.current_session) {
-            current.ui(ui);
+            current.ui(ui, &mut self.defaults);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Spectrix;
+    use crate::defaults::DEFAULTS_SCHEMA_VERSION;
+
+    #[test]
+    fn legacy_session_preferences_migrate_to_app_defaults() {
+        let mut app = Spectrix::default();
+        app.defaults_schema_version = 0;
+        app.sessions[0].settings.estimated_memory = 2.5;
+        app.sessions[0].settings.left_panel_open = false;
+        app.sessions[0].settings.calculate_histograms_seperately = true;
+        app.migrate_defaults_if_needed();
+
+        assert_eq!(app.defaults_schema_version, DEFAULTS_SCHEMA_VERSION);
+        assert_eq!(app.defaults.general.estimated_memory_gb, 2.5);
+        assert!(!app.defaults.new_sessions.files_panel_open);
+        assert!(app.defaults.new_sessions.calculate_histograms_separately);
+        assert_eq!(app.sessions.len(), 1);
+    }
+
+    #[test]
+    fn legacy_app_without_defaults_fields_deserializes() {
+        let mut app: Spectrix =
+            ron::from_str("(sessions:[],current_session:0)").expect("legacy app state");
+        app.normalize_sessions();
+        app.migrate_defaults_if_needed();
+
+        assert_eq!(app.defaults_schema_version, DEFAULTS_SCHEMA_VERSION);
+        assert_eq!(app.sessions.len(), 1);
+        assert!(!app.defaults_panel_open);
     }
 }

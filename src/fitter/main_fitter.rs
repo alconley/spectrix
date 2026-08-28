@@ -1,15 +1,17 @@
-use super::common::Data;
+use super::common::{Data, Parameter};
 use super::models::exponential::{ExponentialFitter, ExponentialParameters};
 use super::models::gaussian::GaussianFitter;
 use super::models::linear::{LinearFitter, LinearParameters};
 use super::models::powerlaw::{PowerLawFitter, PowerLawParameters};
 use super::models::quadratic::{QuadraticFitter, QuadraticParameters};
+use crate::defaults::LineDefaults;
 use crate::egui_plot_stuff::{egui_filled_area::EguiFilledArea, egui_line::EguiLine};
 use crate::fitter::common::Calibration;
 use crate::fitter::native;
 use spectrix_fitting::{
     BackgroundCoupling, BackgroundFitRequest, FitOptions as NativeFitOptions,
-    FitResult as NativeFitResult, fit_background as fit_native_background,
+    FitResult as NativeFitResult, ManualPeakBounds, ManualPeakSeed, ObjectiveKind,
+    fit_background as fit_native_background,
 };
 
 fn fit_display_line(color: egui::Color32) -> EguiLine {
@@ -22,7 +24,7 @@ fn fit_display_line(color: egui::Color32) -> EguiLine {
 pub enum FitModel {
     Gaussian(
         Vec<f64>,
-        Vec<f64>,
+        Vec<ManualPeakSeed>,
         Vec<(f64, f64)>,
         bool,
         bool,
@@ -47,6 +49,11 @@ impl FitResult {
 
 #[derive(Default, PartialEq, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum BackgroundModel {
+    /// Migration-only representation of the removed automatic background choice.
+    /// All fitting paths treat it as `None`.
+    #[serde(rename = "Auto")]
+    LegacyAuto,
+    Constant(Parameter),
     Linear(LinearParameters),
     Quadratic(QuadraticParameters),
     PowerLaw(PowerLawParameters),
@@ -57,6 +64,7 @@ pub enum BackgroundModel {
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum BackgroundResult {
+    Constant(LinearFitter),
     Linear(LinearFitter),
     Quadratic(QuadraticFitter),
     PowerLaw(PowerLawFitter),
@@ -66,7 +74,7 @@ pub enum BackgroundResult {
 impl BackgroundResult {
     pub fn get_fit_points(&self) -> Vec<[f64; 2]> {
         match self {
-            Self::Linear(fit) => fit.fit_points.clone(),
+            Self::Constant(fit) | Self::Linear(fit) => fit.fit_points.clone(),
             Self::Quadratic(fit) => fit.fit_points.clone(),
             Self::PowerLaw(fit) => fit.fit_points.clone(),
             Self::Exponential(fit) => fit.fit_points.clone(),
@@ -75,10 +83,41 @@ impl BackgroundResult {
 
     pub fn evaluate(&self, x: f64) -> f64 {
         match self {
-            Self::Linear(fit) => fit.evaluate(x),
+            Self::Constant(fit) | Self::Linear(fit) => fit.evaluate(x),
             Self::Quadratic(fit) => fit.evaluate(x),
             Self::PowerLaw(fit) => fit.evaluate(x),
             Self::Exponential(fit) => fit.evaluate(x),
+        }
+    }
+
+    fn set_display_range(&mut self, range: (f64, f64)) {
+        let (minimum, maximum) = if range.0 <= range.1 {
+            range
+        } else {
+            (range.1, range.0)
+        };
+        if !minimum.is_finite() || !maximum.is_finite() || minimum == maximum {
+            return;
+        }
+
+        const DISPLAY_POINTS: usize = 256;
+        let step = (maximum - minimum) / (DISPLAY_POINTS - 1) as f64;
+        let fit_points = (0..DISPLAY_POINTS)
+            .map(|index| {
+                let x = if index + 1 == DISPLAY_POINTS {
+                    maximum
+                } else {
+                    minimum + index as f64 * step
+                };
+                [x, self.evaluate(x)]
+            })
+            .collect();
+
+        match self {
+            Self::Constant(fit) | Self::Linear(fit) => fit.fit_points = fit_points,
+            Self::Quadratic(fit) => fit.fit_points = fit_points,
+            Self::PowerLaw(fit) => fit.fit_points = fit_points,
+            Self::Exponential(fit) => fit.fit_points = fit_points,
         }
     }
 }
@@ -86,6 +125,8 @@ impl BackgroundResult {
 impl BackgroundModel {
     pub fn type_name(&self) -> String {
         match self {
+            Self::LegacyAuto => "None",
+            Self::Constant(_) => "constant",
             Self::Linear(_) => "linear",
             Self::Quadratic(_) => "quadratic",
             Self::PowerLaw(_) => "powerlaw",
@@ -106,7 +147,13 @@ pub struct Fitter {
     pub background_model: BackgroundModel,
     pub background_result: Option<BackgroundResult>,
     pub native_background_result: Option<NativeFitResult>,
+    /// True only when the user explicitly ran a background-only fit.
+    pub background_was_fit_manually: bool,
     pub background_coupling: BackgroundCoupling,
+    pub manual_peak_bounds: Option<Vec<ManualPeakBounds>>,
+    pub objective: ObjectiveKind,
+    #[serde(skip)]
+    pub last_fit_error: Option<String>,
 
     pub fit_model: FitModel,
     pub fit_result: Option<FitResult>,
@@ -128,7 +175,11 @@ impl Default for Fitter {
             background_model: BackgroundModel::None,
             background_result: None,
             native_background_result: None,
+            background_was_fit_manually: false,
             background_coupling: BackgroundCoupling::PrefitFrozen,
+            manual_peak_bounds: None,
+            objective: ObjectiveKind::PoissonDeviance,
+            last_fit_error: None,
 
             fit_model: FitModel::None,
             fit_result: None,
@@ -143,6 +194,19 @@ impl Default for Fitter {
 }
 
 impl Fitter {
+    pub fn apply_line_defaults(
+        &mut self,
+        background: &LineDefaults,
+        composition: &LineDefaults,
+        decomposition: &LineDefaults,
+    ) {
+        background.apply_to(&mut self.background_line);
+        composition.apply_to(&mut self.composition_line);
+        for line in &mut self.decomposition_lines {
+            decomposition.apply_to(line);
+        }
+    }
+
     // Constructor to create a new Fitter with empty data and specified model
     pub fn new(data: Data) -> Self {
         Self {
@@ -153,7 +217,11 @@ impl Fitter {
             background_model: BackgroundModel::None,
             background_result: None,
             native_background_result: None,
+            background_was_fit_manually: false,
             background_coupling: BackgroundCoupling::PrefitFrozen,
+            manual_peak_bounds: None,
+            objective: ObjectiveKind::PoissonDeviance,
+            last_fit_error: None,
 
             fit_model: FitModel::None,
             fit_result: None,
@@ -167,31 +235,28 @@ impl Fitter {
     }
 
     pub fn fit(&mut self) {
+        self.last_fit_error = None;
         match &self.fit_model {
             FitModel::Gaussian(
                 region_markers,
-                peak_markers,
+                peak_seeds,
                 background_markrs,
                 equal_stdev,
                 free_position,
                 sigma_bounds_ui,
                 bounds_are_calibrated,
             ) => {
-                if peak_markers.is_empty() && region_markers.len() < 2 {
+                if region_markers.len() != 2 || peak_seeds.is_empty() {
                     log::error!(
-                        "Fit aborted: need either ≥1 peak marker or two region markers (got {}).",
-                        region_markers.len()
+                        "Fit aborted: manual Gaussian fitting requires exactly two region markers and at least one valid peak seed."
                     );
                     return;
                 }
 
-                // choose reference x positions (peaks if any, else region midpoint)
-                let xs: Vec<f64> = if !peak_markers.is_empty() {
-                    peak_markers.clone()
-                } else {
-                    let xm = 0.5 * (region_markers[0] + region_markers[1]);
-                    vec![xm]
-                };
+                let xs = peak_seeds
+                    .iter()
+                    .map(|seed| seed.center)
+                    .collect::<Vec<_>>();
 
                 // build x-space bounds (or None)
                 let sigma_bounds_x: Option<(Vec<f64>, Vec<f64>)> = if let Some((min_e, max_e)) =
@@ -247,7 +312,7 @@ impl Fitter {
                 let mut fit = GaussianFitter::new(
                     self.data.clone(),
                     region_markers.clone(),
-                    peak_markers.clone(),
+                    peak_seeds.clone(),
                     background_markrs.clone(),
                     self.background_model.clone(),
                     self.background_result.clone(),
@@ -256,15 +321,15 @@ impl Fitter {
                 );
 
                 fit.sigma_bounds = sigma_bounds_x;
+                fit.manual_peak_bounds = self.manual_peak_bounds.clone();
                 fit.background_coupling = self.background_coupling;
+                fit.fit_settings.objective = self.objective;
 
                 match fit.fit_native() {
                     Ok(_) => {
                         self.apply_gaussian_fit_visuals(&fit);
 
-                        if self.background_result.is_none()
-                            && let Some(background_result) = &fit.background_result
-                        {
+                        if let Some(background_result) = &fit.background_result {
                             self.background_line
                                 .set_points(background_result.get_fit_points());
                             self.background_result = Some(background_result.clone());
@@ -273,7 +338,9 @@ impl Fitter {
                         self.fit_result = Some(FitResult::Gaussian(fit));
                     }
                     Err(e) => {
-                        eprintln!("Error: {e}");
+                        let message = format!("Fit failed: {e}");
+                        log::error!("{message}");
+                        self.last_fit_error = Some(message);
                     }
                 }
             }
@@ -308,9 +375,14 @@ impl Fitter {
 
     pub fn fit_background(&mut self) {
         log::info!("Fitting background");
-        if matches!(self.background_model, BackgroundModel::None) {
+        if matches!(
+            self.background_model,
+            BackgroundModel::None | BackgroundModel::LegacyAuto
+        ) {
+            self.background_model = BackgroundModel::None;
             self.background_result = None;
             self.native_background_result = None;
+            self.background_was_fit_manually = false;
             log::info!("No background fitting required for 'None'");
             return;
         }
@@ -333,20 +405,26 @@ impl Fitter {
             })
             .reduce(f64::min)
             .unwrap_or(1.0);
+        let model = self.background_model.clone();
+        let options = NativeFitOptions {
+            objective: self.objective,
+            ..NativeFitOptions::default()
+        };
         let request = BackgroundFitRequest {
             x: self.data.x.clone(),
             y: self.data.y.clone(),
             bin_width,
             region: [minimum, maximum],
             markers: vec![(minimum, maximum)],
-            kind: native::background_kind(&self.background_model),
+            kind: native::background_kind(&model),
             seed: Some(native::background_seed(
-                &self.background_model,
+                &model,
                 self.background_result.as_ref(),
             )),
         };
-        match fit_native_background(&request, &NativeFitOptions::default()) {
+        match fit_native_background(&request, &options) {
             Ok(result) => {
+                self.background_model = model;
                 self.background_result = native::background_result_from_native(
                     &self.background_model,
                     &result,
@@ -354,18 +432,31 @@ impl Fitter {
                 );
                 if let Some(background) = &self.background_result {
                     self.background_line.set_points(background.get_fit_points());
+                    self.background_was_fit_manually = true;
                 }
                 self.native_background_result = Some(result);
             }
-            Err(error) => log::error!("Native background fit failed: {error}"),
+            Err(error) => {
+                log::warn!("Background fit failed: {error}");
+                self.last_fit_error = Some(error.to_string());
+            }
         }
         log::info!("Finished fitting background");
+    }
+
+    pub fn set_background_display_range(&mut self, range: (f64, f64)) {
+        if let Some(background) = &mut self.background_result {
+            background.set_display_range(range);
+            self.background_line.set_points(background.get_fit_points());
+        }
     }
 
     pub fn get_peak_markers(&self) -> Vec<f64> {
         if self.fit_result.is_none() {
             match &self.fit_model {
-                FitModel::Gaussian(_, peak_markers, _, _, _, _, _) => peak_markers.clone(),
+                FitModel::Gaussian(_, peak_seeds, _, _, _, _, _) => {
+                    peak_seeds.iter().map(|seed| seed.center).collect()
+                }
                 FitModel::None => Vec::new(),
             }
         } else {
@@ -467,7 +558,7 @@ impl Fitter {
                     if let Some(background_result) = &self.background_result {
                         ui.label("Background");
                         match background_result {
-                            BackgroundResult::Linear(fit) => {
+                            BackgroundResult::Constant(fit) | BackgroundResult::Linear(fit) => {
                                 fit.ui(ui);
                             }
                             BackgroundResult::Quadratic(fit) => {
@@ -600,5 +691,25 @@ impl Fitter {
         } else {
             "No fit result available.".to_owned()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BackgroundResult, Fitter};
+    use crate::fitter::models::linear::LinearFitter;
+
+    #[test]
+    fn background_display_range_extends_curve_without_refitting() {
+        let mut fitter = Fitter::default();
+        fitter.background_result = Some(BackgroundResult::Linear(
+            LinearFitter::new_from_parameters((2.0, 0.0), (1.0, 0.0), 4.0, 5.0),
+        ));
+
+        fitter.set_background_display_range((0.0, 10.0));
+
+        assert_eq!(fitter.background_line.points.len(), 256);
+        assert_eq!(fitter.background_line.points.first(), Some(&[0.0, 1.0]));
+        assert_eq!(fitter.background_line.points.last(), Some(&[10.0, 21.0]));
     }
 }

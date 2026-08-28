@@ -1,3 +1,4 @@
+use crate::defaults::Cut1DDefaults;
 use crate::egui_plot_stuff::egui_line::EguiLine;
 use crate::egui_plot_stuff::egui_vertical_line::EguiVerticalLine;
 use crate::fitter::common::Calibration;
@@ -20,14 +21,30 @@ pub struct InteractiveCut1D {
 }
 
 impl InteractiveCut1D {
-    const DEFAULT_AXIS_OFFSET_FRACTION: f64 = 0.05;
-
     pub fn new(
         name: &str,
         source_columns: &[String],
         axis_range: (f64, f64),
         visible_range: (f64, f64),
         color: egui::Color32,
+    ) -> Self {
+        Self::new_with_defaults(
+            name,
+            source_columns,
+            axis_range,
+            visible_range,
+            color,
+            &Cut1DDefaults::default(),
+        )
+    }
+
+    pub fn new_with_defaults(
+        name: &str,
+        source_columns: &[String],
+        axis_range: (f64, f64),
+        visible_range: (f64, f64),
+        color: egui::Color32,
+        defaults: &Cut1DDefaults,
     ) -> Self {
         let primary_column = source_columns.first().cloned().unwrap_or_default();
         let source_columns = source_columns.to_vec();
@@ -63,9 +80,23 @@ impl InteractiveCut1D {
             drag_anchor: None,
         };
 
-        cut.initialize_lines(visible_range);
+        cut.apply_defaults(defaults, color);
+        cut.initialize_lines_with_fraction(visible_range, defaults.initial_inset_fraction);
         cut.sync_definition();
         cut
+    }
+
+    pub fn apply_defaults(&mut self, defaults: &Cut1DDefaults, color: egui::Color32) {
+        self.cut.active = defaults.active;
+        for line in [&mut self.line_1, &mut self.line_2] {
+            line.set_color(color);
+            line.width = defaults.line_width;
+            line.style = defaults.line_style;
+            line.style_length = defaults.style_length;
+            line.mid_point_radius = defaults.midpoint_radius;
+        }
+        self.fill_line.set_color(color);
+        self.fill_line.fill_alpha = defaults.fill_alpha;
     }
 
     fn normalized_source_columns(&self) -> Vec<String> {
@@ -82,18 +113,9 @@ impl InteractiveCut1D {
         }
     }
 
-    fn axis_offset(min: f64, max: f64) -> f64 {
-        let width = (max - min).abs();
-        if width > 0.0 {
-            width * Self::DEFAULT_AXIS_OFFSET_FRACTION
-        } else {
-            0.0
-        }
-    }
-
-    fn initialize_lines(&mut self, visible_range: (f64, f64)) {
+    fn initialize_lines_with_fraction(&mut self, visible_range: (f64, f64), fraction: f64) {
         let (min_x, max_x) = visible_range;
-        let offset = Self::axis_offset(min_x, max_x);
+        let offset = (max_x - min_x).abs() * fraction.clamp(0.0, 0.5);
         self.line_1.x_value = min_x + offset;
         self.line_2.x_value = max_x - offset;
         self.clamp_line_positions(self.axis_range);
@@ -441,6 +463,53 @@ impl InteractiveCut1D {
                 self.set_center_and_width(self.center(), width, self.axis_range);
                 changed = true;
             }
+
+            ui.collapsing("Style", |ui| {
+                let mut color = self.line_1.color;
+                ui.horizontal(|ui| {
+                    ui.label("Color");
+                    changed |= ui.color_edit_button_srgba(&mut color).changed();
+                });
+                changed |= ui
+                    .add(egui::Slider::new(&mut self.line_1.width, 0.0..=10.0).text("Line width"))
+                    .changed();
+                ui.horizontal_wrapped(|ui| {
+                    changed |= ui
+                        .radio_value(
+                            &mut self.line_1.style,
+                            crate::egui_plot_stuff::line_style::SerializableLineStyle::Solid,
+                            "Solid",
+                        )
+                        .changed();
+                    changed |= ui
+                        .radio_value(
+                            &mut self.line_1.style,
+                            crate::egui_plot_stuff::line_style::SerializableLineStyle::Dotted,
+                            "Dotted",
+                        )
+                        .changed();
+                    changed |= ui
+                        .radio_value(
+                            &mut self.line_1.style,
+                            crate::egui_plot_stuff::line_style::SerializableLineStyle::Dashed,
+                            "Dashed",
+                        )
+                        .changed();
+                });
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut self.fill_line.fill_alpha, 0.0..=1.0)
+                            .text("Fill alpha"),
+                    )
+                    .changed();
+
+                self.line_1.set_color(color);
+                self.line_2.set_color(color);
+                self.fill_line.set_color(color);
+                self.line_2.width = self.line_1.width;
+                self.line_2.style = self.line_1.style;
+                self.line_2.style_length = self.line_1.style_length;
+            });
 
             ui.label(&self.cut.expression);
         });

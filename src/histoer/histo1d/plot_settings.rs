@@ -14,6 +14,10 @@ pub struct PlotSettings {
     pub cursor_position: Option<egui_plot::PlotPoint>,
     #[serde(skip)]
     pub current_plot_bounds: Option<(f64, f64)>,
+    #[serde(skip)]
+    pub interactions_dragging: bool,
+    #[serde(skip)]
+    pub cuts_clicking: bool,
     pub egui_settings: EguiPlotSettings,
     pub column_name: String,
     #[serde(default)]
@@ -26,6 +30,7 @@ pub struct PlotSettings {
     pub auto_fit_y_max_multiplier_log: f64,
     pub markers: FitMarkers,
     pub rebin_factor: usize,
+    #[serde(default)]
     pub find_peaks_settings: PeakFindingSettings,
 
     #[serde(skip)] // Skip serialization for progress
@@ -36,6 +41,8 @@ impl Default for PlotSettings {
         Self {
             cursor_position: None,
             current_plot_bounds: None,
+            interactions_dragging: false,
+            cuts_clicking: false,
             egui_settings: EguiPlotSettings::default(),
             column_name: String::new(),
             source_columns: Vec::new(),
@@ -83,9 +90,20 @@ impl PlotSettings {
         response: &egui_plot::PlotResponse<()>,
         calibration: Option<&Calibration>,
         raw_axis_range: (f64, f64),
-    ) {
-        self.markers
-            .interactive_dragging(response, calibration, raw_axis_range);
+        log_x: bool,
+        log_y: bool,
+        bin_width: f64,
+        equal_sigma: bool,
+    ) -> bool {
+        let markers_changed = self.markers.interactive_dragging(
+            response,
+            calibration,
+            raw_axis_range,
+            log_x,
+            log_y,
+            bin_width,
+            equal_sigma,
+        );
 
         let mut cuts_dragging = false;
         for cut in &mut self.cuts {
@@ -93,8 +111,9 @@ impl PlotSettings {
             cuts_dragging |= cut.is_dragging();
         }
 
-        self.egui_settings.allow_drag = !self.markers.is_dragging() && !cuts_dragging;
-        self.egui_settings.allow_double_click_reset = !cuts_dragging;
+        self.interactions_dragging = self.markers.is_dragging() || cuts_dragging;
+        self.cuts_clicking = cuts_dragging;
+        markers_changed
     }
 
     pub fn draw(&mut self, plot_ui: &mut egui_plot::PlotUi<'_>, calibration: Option<&Calibration>) {

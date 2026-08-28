@@ -20,6 +20,7 @@ use super::histo1d::histogram1d::Histogram;
 use super::histo2d::histogram2d::Histogram2D;
 use super::pane::Pane;
 use super::tree::TreeBehavior;
+use crate::defaults::{Histogram1DDefaults, Histogram2DDefaults, SpectrixDefaults};
 #[derive(serde::Deserialize, serde::Serialize, PartialEq, Eq, Debug)]
 pub enum ContainerType {
     Grid,
@@ -54,6 +55,10 @@ pub struct Histogrammer {
     pub root_export_in_progress: Arc<AtomicBool>,
     #[serde(skip)]
     active_histogram_cuts_cache: Arc<Mutex<Vec<ActiveHistogramCut>>>,
+    #[serde(skip)]
+    histogram_1d_defaults: Histogram1DDefaults,
+    #[serde(skip)]
+    histogram_2d_defaults: Histogram2DDefaults,
 }
 
 impl Default for Histogrammer {
@@ -69,6 +74,8 @@ impl Default for Histogrammer {
             fill_column_wise: true,
             root_export_in_progress: Arc::new(AtomicBool::new(false)),
             active_histogram_cuts_cache: Arc::new(Mutex::new(Vec::new())),
+            histogram_1d_defaults: Histogram1DDefaults::default(),
+            histogram_2d_defaults: Histogram2DDefaults::default(),
         }
     }
 }
@@ -980,6 +987,12 @@ fn reset_default_histogram_axes_2d(histograms: &[Hist2DHandle]) {
 }
 
 impl Histogrammer {
+    pub fn set_app_defaults(&mut self, defaults: &SpectrixDefaults) {
+        self.histogram_1d_defaults = defaults.histogram_1d.clone();
+        self.histogram_2d_defaults = defaults.histogram_2d.clone();
+        self.behavior.apply_layout_defaults(&defaults.histogrammer);
+    }
+
     pub fn find_existing_histogram(&self, name: &str) -> Option<TileId> {
         self.tree.tiles.iter().find_map(|(id, tile)| match tile {
             egui_tiles::Tile::Pane(Pane::Histogram(hist))
@@ -1043,8 +1056,11 @@ impl Histogrammer {
                     range.0,
                     range.1
                 );
-                **hist = Histogram::new(name, bins, range);
+                **hist =
+                    Histogram::new_with_defaults(name, bins, range, &self.histogram_1d_defaults);
                 hist.plot_settings.egui_settings.reset_axis = true;
+            } else {
+                hist.apply_generation_defaults(&self.histogram_1d_defaults);
             }
         }
     }
@@ -1077,15 +1093,18 @@ impl Histogrammer {
                     range.1.0,
                     range.1.1
                 );
-                **hist = Histogram2D::new(name, bins, range);
+                **hist =
+                    Histogram2D::new_with_defaults(name, bins, range, &self.histogram_2d_defaults);
                 hist.plot_settings.recalculate_image = true;
                 hist.plot_settings.egui_settings.reset_axis = true;
+            } else {
+                hist.apply_generation_defaults(&self.histogram_2d_defaults);
             }
         }
     }
 
     fn create_1d_pane(&mut self, name: &str, bins: usize, range: (f64, f64)) -> TileId {
-        let hist = Histogram::new(name, bins, range);
+        let hist = Histogram::new_with_defaults(name, bins, range, &self.histogram_1d_defaults);
         let pane = Pane::Histogram(Arc::new(Mutex::new(Box::new(hist))));
         let pane_id = self.tree.tiles.insert_pane(pane);
         self.format_pane_in_containers(name, pane_id);
@@ -1099,7 +1118,7 @@ impl Histogrammer {
         bins: (usize, usize),
         range: ((f64, f64), (f64, f64)),
     ) -> TileId {
-        let hist = Histogram2D::new(name, bins, range);
+        let hist = Histogram2D::new_with_defaults(name, bins, range, &self.histogram_2d_defaults);
         let pane = Pane::Histogram2D(Arc::new(Mutex::new(Box::new(hist))));
         let pane_id = self.tree.tiles.insert_pane(pane);
         self.format_pane_in_containers(name, pane_id);
@@ -1612,10 +1631,6 @@ impl Histogrammer {
 
         if let Some(root) = self.tree.root() {
             ui.separator();
-
-            ui.collapsing("Layout Settings", |ui| {
-                self.behavior.settings_ui(ui);
-            });
 
             ui.collapsing("Tree", |ui| {
                 tree_ui(ui, &mut self.behavior, &mut self.tree.tiles, root);
@@ -2587,11 +2602,13 @@ fn tree_ui(
 #[cfg(test)]
 mod tests {
     use super::{
-        CutGroupBuilder, Histogram, Histogram2D, Prepared1DHistogramColumn,
+        CutGroupBuilder, Histogram, Histogram2D, Histogrammer, Prepared1DHistogramColumn,
         Prepared1DHistogramGroup, Prepared2DHistogramColumnPair, Prepared2DHistogramGroup,
         fill_1d_histogram_group, fill_2d_histogram_group, histogram_2d_has_default_x_bounds,
     };
+    use crate::defaults::SpectrixDefaults;
     use crate::histoer::cuts::{Cut, Cut1D, Cut2D, Cuts};
+    use crate::histoer::pane::Pane;
     use polars::df;
     use std::sync::{Arc, Mutex};
 
@@ -2609,6 +2626,103 @@ mod tests {
         histogram.plot_settings.projections.current_plot_bounds = Some(((0.0, 16.0), (0.0, 16.0)));
 
         assert!(!histogram_2d_has_default_x_bounds(&histogram));
+    }
+
+    #[test]
+    fn regeneration_reapplies_1d_defaults_without_replacing_content_state() {
+        let mut app_defaults = SpectrixDefaults::default();
+        app_defaults.histogram_1d.line.width = 3.0;
+        app_defaults.histogram_1d.cuts.line_width = 3.0;
+        let mut histogrammer = Histogrammer::default();
+        histogrammer.set_app_defaults(&app_defaults);
+        histogrammer.add_hist1d("energy", 16, (0.0, 16.0));
+
+        let pane_id = histogrammer
+            .find_existing_histogram("energy")
+            .expect("created histogram");
+        let histogram = match histogrammer.tree.tiles.get(pane_id) {
+            Some(egui_tiles::Tile::Pane(Pane::Histogram(histogram))) => Arc::clone(histogram),
+            _ => panic!("expected 1D histogram"),
+        };
+        {
+            let mut histogram = histogram.lock().expect("histogram lock");
+            assert_eq!(histogram.line.width, 3.0);
+            histogram.line.width = 9.0;
+            histogram.plot_settings.column_name = "Energy".to_owned();
+            histogram.plot_settings.markers.add_region_marker(4.0);
+            histogram.new_cut();
+            assert_eq!(histogram.plot_settings.cuts[0].line_1.width, 3.0);
+            histogram.follow_theme_colors = false;
+        }
+
+        app_defaults.histogram_1d.line.width = 4.0;
+        app_defaults.histogram_1d.cuts.line_width = 5.0;
+        histogrammer.set_app_defaults(&app_defaults);
+        {
+            let mut histogram = histogram.lock().expect("histogram lock");
+            histogram.new_cut();
+            assert_eq!(histogram.plot_settings.cuts[1].line_1.width, 3.0);
+        }
+        histogrammer.add_hist1d("energy", 16, (0.0, 16.0));
+
+        let histogram = match histogrammer.tree.tiles.get(pane_id) {
+            Some(egui_tiles::Tile::Pane(Pane::Histogram(histogram))) => Arc::clone(histogram),
+            _ => panic!("expected 1D histogram"),
+        };
+        let histogram = histogram.lock().expect("histogram lock");
+        assert_eq!(histogram.line.width, 4.0);
+        assert_eq!(histogram.plot_settings.column_name, "Energy");
+        assert_eq!(histogram.plot_settings.markers.region_markers.len(), 1);
+        assert_eq!(
+            histogram.plot_settings.markers.region_markers[0].x_value,
+            4.0
+        );
+        assert!(histogram.follow_theme_colors);
+        assert!(
+            histogram
+                .plot_settings
+                .cuts
+                .iter()
+                .all(|cut| cut.line_1.width == 5.0)
+        );
+    }
+
+    #[test]
+    fn regeneration_reapplies_2d_defaults_without_replacing_vertices() {
+        let mut app_defaults = SpectrixDefaults::default();
+        app_defaults.histogram_2d.cuts.line_width = 3.0;
+        let mut histogrammer = Histogrammer::default();
+        histogrammer.set_app_defaults(&app_defaults);
+        histogrammer.add_hist2d("matrix", (8, 8), ((0.0, 8.0), (0.0, 8.0)));
+
+        let pane_id = histogrammer
+            .find_existing_histogram("matrix")
+            .expect("created histogram");
+        let histogram = match histogrammer.tree.tiles.get(pane_id) {
+            Some(egui_tiles::Tile::Pane(Pane::Histogram2D(histogram))) => Arc::clone(histogram),
+            _ => panic!("expected 2D histogram"),
+        };
+        {
+            let mut histogram = histogram.lock().expect("histogram lock");
+            let mut cut = Cut2D::default();
+            cut.polygon.vertices = vec![[1.0, 1.0], [2.0, 1.0], [1.0, 2.0]];
+            histogram.plot_settings.cuts.push(cut);
+        }
+
+        app_defaults.histogram_2d.cuts.line_width = 5.0;
+        histogrammer.set_app_defaults(&app_defaults);
+        histogrammer.add_hist2d("matrix", (8, 8), ((0.0, 8.0), (0.0, 8.0)));
+
+        let histogram = match histogrammer.tree.tiles.get(pane_id) {
+            Some(egui_tiles::Tile::Pane(Pane::Histogram2D(histogram))) => Arc::clone(histogram),
+            _ => panic!("expected 2D histogram"),
+        };
+        let histogram = histogram.lock().expect("histogram lock");
+        assert_eq!(histogram.plot_settings.cuts[0].polygon.width, 5.0);
+        assert_eq!(
+            histogram.plot_settings.cuts[0].polygon.vertices,
+            vec![[1.0, 1.0], [2.0, 1.0], [1.0, 2.0]]
+        );
     }
 
     #[test]

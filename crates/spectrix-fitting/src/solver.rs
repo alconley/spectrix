@@ -4,7 +4,10 @@ use levenberg_marquardt::{
     LeastSquaresProblem, LevenbergMarquardt, MinimizationReport, TerminationReason,
 };
 use nalgebra::{DMatrix, DVector, Dyn, storage::Owned};
-use statrs::{distribution::ContinuousCDF as _, distribution::StudentsT, function::erf::erf};
+use statrs::{
+    distribution::{ChiSquared, ContinuousCDF as _, StudentsT},
+    function::erf::erf,
+};
 
 use crate::{
     Bounds, ComponentCurve, DerivedParameter, FitError, Model, ParameterBinding,
@@ -21,11 +24,24 @@ pub enum SolverProfile {
     Lmfit134,
 }
 
-/// Configuration for a least-squares fit.
+/// Residual objective minimized by the nonlinear solver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub enum ObjectiveKind {
+    /// Minimize the weighted squared difference between observations and the model.
+    #[default]
+    LeastSquares,
+    /// Minimize the Poisson deviance for non-negative count observations.
+    PoissonDeviance,
+}
+
+/// Configuration for a nonlinear least-squares or Poisson-deviance fit.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FitOptions {
     /// Numerical compatibility profile.
     pub profile: SolverProfile,
+    /// Residual objective used by the solver.
+    pub objective: ObjectiveKind,
     /// Maximum evaluation factor; the effective limit is this value times `nvarys + 1`.
     pub evaluation_patience: usize,
     /// Relative objective-function tolerance.
@@ -40,6 +56,8 @@ pub struct FitOptions {
     pub epsfcn: f64,
     /// Gaussian-equivalent sigma used for confidence bands.
     pub confidence_sigma: f64,
+    /// Whether to calculate covariance, propagated uncertainties, and confidence bands.
+    pub calculate_covariance: bool,
     /// Optional grid for reported curves and confidence bands.
     pub evaluation_x: Option<Vec<f64>>,
 }
@@ -48,6 +66,7 @@ impl Default for FitOptions {
     fn default() -> Self {
         Self {
             profile: SolverProfile::Lmfit134,
+            objective: ObjectiveKind::LeastSquares,
             evaluation_patience: 2_000,
             ftol: 1.5e-8,
             xtol: 1.5e-8,
@@ -55,6 +74,7 @@ impl Default for FitOptions {
             step_bound: 100.0,
             epsfcn: 1.0e-10,
             confidence_sigma: 1.0,
+            calculate_covariance: true,
             evaluation_x: None,
         }
     }
@@ -106,10 +126,13 @@ impl FitProblem {
     }
 }
 
-/// Scalar fit statistics matching lmfit's least-squares definitions.
+/// Scalar fit statistics for the selected objective.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct FitStatistics {
+    /// Objective used to produce this fit.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub objective: ObjectiveKind,
     /// Number of fitted observations.
     pub observations: usize,
     /// Number of independently varied parameters.
@@ -120,6 +143,33 @@ pub struct FitStatistics {
     pub chi_square: f64,
     /// Chi-square divided by the degrees of freedom.
     pub reduced_chi_square: f64,
+    /// Selected objective evaluated at the exact user-supplied starting values.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub initial_objective: Option<f64>,
+    /// Selected objective evaluated at the returned parameters.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub final_objective: f64,
+    /// Fractional objective reduction `(initial - final) / initial`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub objective_improvement: Option<f64>,
+    /// Root-mean-square unweighted difference between observations and the model.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub rmse: f64,
+    /// Poisson deviance when [`ObjectiveKind::PoissonDeviance`] was used.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub deviance: Option<f64>,
+    /// Poisson deviance divided by the degrees of freedom.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub reduced_deviance: Option<f64>,
+    /// Pearson chi-square for a Poisson fit.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub pearson_chi_square: Option<f64>,
+    /// Pearson chi-square divided by the degrees of freedom for a Poisson fit.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub reduced_pearson_chi_square: Option<f64>,
+    /// Chi-square survival probability for the final Poisson deviance.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub goodness_of_fit_p_value: Option<f64>,
     /// Akaike information criterion.
     pub aic: Option<f64>,
     /// Bayesian information criterion.
@@ -170,7 +220,7 @@ pub struct ConfidenceBand {
     pub upper: Vec<f64>,
 }
 
-/// Complete structured result of a least-squares fit.
+/// Complete structured result of a nonlinear fit.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct FitResult {
@@ -182,6 +232,9 @@ pub struct FitResult {
     pub statistics: FitStatistics,
     /// Weighted residuals on the observation grid (`data - model`).
     pub residuals: Vec<f64>,
+    /// Untransformed residuals on the observation grid (`data - model`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub raw_residuals: Vec<f64>,
     /// Grid used for `best_fit`, components, and confidence bands.
     pub evaluation_x: Vec<f64>,
     /// Best-fit total curve on the evaluation grid.
@@ -225,6 +278,7 @@ pub fn fit(problem: &FitProblem, options: &FitOptions) -> Result<FitResult, FitE
         x: &problem.x,
         y: &problem.y,
         weights: problem.weights.as_deref(),
+        objective: options.objective,
         layout: &layout,
         epsfcn: options.epsfcn,
     };
@@ -234,6 +288,13 @@ pub fn fit(problem: &FitProblem, options: &FitOptions) -> Result<FitResult, FitE
     problem
         .model
         .evaluate(&problem.x, &initial_values, &mut initial_curve)?;
+    let initial_residuals = objective_residuals(
+        &problem.y,
+        &initial_curve,
+        problem.weights.as_deref(),
+        options.objective,
+    );
+    let initial_objective = objective_value(&initial_residuals);
 
     let (report, evaluations) = if layout.free.is_empty() {
         (None, 1)
@@ -256,30 +317,39 @@ pub fn fit(problem: &FitProblem, options: &FitOptions) -> Result<FitResult, FitE
     problem
         .model
         .evaluate(&problem.x, &external, &mut fitted_observations)?;
-    let residuals = problem
+    let raw_residuals = problem
         .y
         .iter()
         .zip(&fitted_observations)
-        .enumerate()
-        .map(|(index, (data, model))| {
-            let weight = problem.weights.as_ref().map_or(1.0, |all| all[index]);
-            (data - model) * weight
-        })
+        .map(|(data, model)| data - model)
         .collect::<Vec<_>>();
+    let residuals = objective_residuals(
+        &problem.y,
+        &fitted_observations,
+        problem.weights.as_deref(),
+        options.objective,
+    );
     let statistics = statistics(
         &problem.y,
         &fitted_observations,
         &residuals,
         layout.free.len(),
         evaluations,
+        options.objective,
+        initial_objective,
     );
 
-    let covariance_internal = if layout.free.is_empty() {
+    let covariance_internal = if !options.calculate_covariance || layout.free.is_empty() {
         None
     } else {
-        target
-            .jacobian()
-            .and_then(|jacobian| invert_normal_matrix(&jacobian, statistics.reduced_chi_square))
+        target.jacobian().and_then(|jacobian| {
+            let scale = if options.objective == ObjectiveKind::PoissonDeviance {
+                1.0
+            } else {
+                statistics.reduced_chi_square
+            };
+            invert_normal_matrix(&jacobian, scale)
+        })
     };
     let covariance_external = covariance_internal
         .as_ref()
@@ -311,6 +381,7 @@ pub fn fit(problem: &FitProblem, options: &FitOptions) -> Result<FitResult, FitE
                 &layout,
                 matrix,
                 &statistics,
+                options.objective,
                 options.confidence_sigma,
                 &best_fit,
                 &components,
@@ -324,6 +395,7 @@ pub fn fit(problem: &FitProblem, options: &FitOptions) -> Result<FitResult, FitE
         parameters,
         statistics,
         residuals,
+        raw_residuals,
         evaluation_x: evaluation_x.to_vec(),
         best_fit,
         components,
@@ -364,6 +436,14 @@ fn validate_problem(problem: &FitProblem, options: &FitOptions) -> Result<(), Fi
     {
         return Err(FitError::NonFinite {
             context: "fit inputs".to_owned(),
+        });
+    }
+    if options.objective == ObjectiveKind::PoissonDeviance
+        && problem.y.iter().any(|value| *value < 0.0)
+    {
+        return Err(FitError::Domain {
+            model: "poisson objective".to_owned(),
+            message: "observations must be non-negative".to_owned(),
         });
     }
     if options.evaluation_patience == 0
@@ -572,6 +652,7 @@ struct InternalProblem<'a> {
     x: &'a [f64],
     y: &'a [f64],
     weights: Option<&'a [f64]>,
+    objective: ObjectiveKind,
     layout: &'a ParameterLayout,
     epsfcn: f64,
 }
@@ -582,7 +663,12 @@ impl LeastSquaresProblem<f64, Dyn, Dyn> for InternalProblem<'_> {
     type JacobianStorage = Owned<f64, Dyn, Dyn>;
 
     fn set_params(&mut self, parameters: &DVector<f64>) {
-        self.parameters.copy_from(parameters);
+        for column in 0..self.parameters.len() {
+            let bounds = self.layout.entries[self.layout.free[column]]
+                .definition
+                .bounds;
+            self.parameters[column] = clamp_internal(parameters[column], bounds);
+        }
     }
 
     fn params(&self) -> DVector<f64> {
@@ -598,17 +684,12 @@ impl LeastSquaresProblem<f64, Dyn, Dyn> for InternalProblem<'_> {
         self.model
             .evaluate(self.x, &external, &mut predicted)
             .ok()?;
-        Some(DVector::from_iterator(
-            self.x.len(),
-            self.y
-                .iter()
-                .zip(predicted)
-                .enumerate()
-                .map(|(index, (observed, predicted))| {
-                    let weight = self.weights.map_or(1.0, |weights| weights[index]);
-                    (observed - predicted) * weight
-                }),
-        ))
+        Some(DVector::from_vec(objective_residuals(
+            self.y,
+            &predicted,
+            self.weights,
+            self.objective,
+        )))
     }
 
     fn jacobian(&self) -> Option<DMatrix<f64>> {
@@ -623,6 +704,45 @@ impl LeastSquaresProblem<f64, Dyn, Dyn> for InternalProblem<'_> {
         self.model
             .evaluate(self.x, &baseline_values, &mut baseline_curve)
             .ok()?;
+        let parameter_names = self
+            .layout
+            .free
+            .iter()
+            .map(|entry| self.layout.entries[*entry].definition.name.clone())
+            .collect::<Vec<_>>();
+        let mut model_jacobian = vec![0.0; rows.saturating_mul(columns)];
+        if self
+            .model
+            .analytic_jacobian(
+                self.x,
+                &baseline_values,
+                &parameter_names,
+                &mut model_jacobian,
+            )
+            .ok()?
+        {
+            for row in 0..rows {
+                let weight = self.weights.map_or(1.0, |weights| weights[row]);
+                let residual_gradient = match self.objective {
+                    ObjectiveKind::LeastSquares => -weight,
+                    ObjectiveKind::PoissonDeviance => poisson_deviance_residual_gradient(
+                        self.y[row],
+                        baseline_curve[row],
+                    ) * weight,
+                };
+                for column in 0..columns {
+                    let bounds = self.layout.entries[self.layout.free[column]]
+                        .definition
+                        .bounds;
+                    jacobian[(row, column)] = model_jacobian[row * columns + column]
+                        * residual_gradient
+                        * bound_gradient(self.parameters[column], bounds);
+                }
+            }
+            return Some(jacobian);
+        }
+        let baseline_residuals =
+            objective_residuals(self.y, &baseline_curve, self.weights, self.objective);
         for column in 0..columns {
             let mut step = finite_difference_step(self.parameters[column], self.epsfcn);
             let mut shifted = self.parameters.clone();
@@ -643,10 +763,10 @@ impl LeastSquaresProblem<f64, Dyn, Dyn> for InternalProblem<'_> {
             self.model
                 .evaluate(self.x, &shifted_values, &mut shifted_curve)
                 .ok()?;
+            let shifted_residuals =
+                objective_residuals(self.y, &shifted_curve, self.weights, self.objective);
             for row in 0..rows {
-                let weight = self.weights.map_or(1.0, |weights| weights[row]);
-                jacobian[(row, column)] =
-                    -(shifted_curve[row] - baseline_curve[row]) / step * weight;
+                jacobian[(row, column)] = (shifted_residuals[row] - baseline_residuals[row]) / step;
             }
         }
         jacobian
@@ -654,6 +774,86 @@ impl LeastSquaresProblem<f64, Dyn, Dyn> for InternalProblem<'_> {
             .all(|value| value.is_finite())
             .then_some(jacobian)
     }
+}
+
+const POISSON_FLOOR: f64 = 1.0e-12;
+
+fn objective_residuals(
+    observations: &[f64],
+    predicted: &[f64],
+    weights: Option<&[f64]>,
+    objective: ObjectiveKind,
+) -> Vec<f64> {
+    observations
+        .iter()
+        .zip(predicted)
+        .enumerate()
+        .map(|(index, (observed, predicted))| {
+            let weight = weights.map_or(1.0, |all| all[index]);
+            let residual = match objective {
+                ObjectiveKind::LeastSquares => observed - predicted,
+                ObjectiveKind::PoissonDeviance => poisson_deviance_residual(*observed, *predicted),
+            };
+            residual * weight
+        })
+        .collect()
+}
+
+fn poisson_deviance_residual(observed: f64, predicted: f64) -> f64 {
+    let mean = predicted.max(POISSON_FLOOR);
+    let deviance = if observed == 0.0 {
+        2.0 * mean
+    } else {
+        let relative = (mean - observed) / observed;
+        2.0 * observed * stable_poisson_term(relative)
+    }
+    .max(0.0);
+    let signed = if observed >= mean { 1.0 } else { -1.0 };
+    let base = signed * deviance.sqrt();
+    if predicted >= POISSON_FLOOR {
+        base
+    } else {
+        let barrier_slope = (observed.max(1.0) / POISSON_FLOOR).sqrt().min(1.0e6);
+        let direction = if base < 0.0 { -1.0 } else { 1.0 };
+        base + direction * (POISSON_FLOOR - predicted) * barrier_slope
+    }
+}
+
+fn stable_poisson_term(relative: f64) -> f64 {
+    if relative.abs() < 1.0e-4 {
+        let square = relative * relative;
+        square
+            * (0.5
+                + relative
+                    * (-1.0 / 3.0
+                        + relative * (0.25 + relative * (-0.2 + relative / 6.0))))
+    } else {
+        relative - relative.ln_1p()
+    }
+}
+
+fn poisson_deviance_residual_gradient(observed: f64, predicted: f64) -> f64 {
+    if predicted < POISSON_FLOOR {
+        let base = poisson_deviance_residual(observed, POISSON_FLOOR);
+        let direction = if base < 0.0 { -1.0 } else { 1.0 };
+        let barrier_slope = (observed.max(1.0) / POISSON_FLOOR).sqrt().min(1.0e6);
+        return -direction * barrier_slope;
+    }
+    let mean = predicted;
+    if observed == 0.0 {
+        return -1.0 / (2.0 * mean).sqrt();
+    }
+    let relative = (mean - observed) / observed;
+    if relative.abs() <= f64::EPSILON.sqrt() {
+        return -1.0 / observed.sqrt();
+    }
+    let deviance = 2.0 * observed * stable_poisson_term(relative);
+    let signed = if observed >= mean { 1.0 } else { -1.0 };
+    signed * (1.0 - observed / mean) / deviance.sqrt()
+}
+
+fn objective_value(residuals: &[f64]) -> f64 {
+    residuals.iter().map(|value| value * value).sum()
 }
 
 fn to_internal(external: f64, bounds: Bounds) -> f64 {
@@ -670,6 +870,7 @@ fn to_internal(external: f64, bounds: Bounds) -> f64 {
 }
 
 fn from_internal(internal: f64, bounds: Bounds) -> f64 {
+    let internal = clamp_internal(internal, bounds);
     let lower = bounds.lower.lower_value();
     let upper = bounds.upper.upper_value();
     match (lower.is_finite(), upper.is_finite()) {
@@ -681,6 +882,7 @@ fn from_internal(internal: f64, bounds: Bounds) -> f64 {
 }
 
 fn bound_gradient(internal: f64, bounds: Bounds) -> f64 {
+    let internal = clamp_internal(internal, bounds);
     let lower = bounds.lower.lower_value();
     let upper = bounds.upper.upper_value();
     match (lower.is_finite(), upper.is_finite()) {
@@ -688,6 +890,19 @@ fn bound_gradient(internal: f64, bounds: Bounds) -> f64 {
         (true, false) => internal / internal.hypot(1.0),
         (false, true) => -internal / internal.hypot(1.0),
         (true, true) => internal.cos() * (upper - lower) / 2.0,
+    }
+}
+
+fn clamp_internal(internal: f64, bounds: Bounds) -> f64 {
+    let lower = bounds.lower.lower_value();
+    let upper = bounds.upper.upper_value();
+    match (lower.is_finite(), upper.is_finite()) {
+        (false, false) => internal,
+        (true, false) | (false, true) => internal.max(0.0),
+        (true, true) => internal.clamp(
+            -std::f64::consts::FRAC_PI_2,
+            std::f64::consts::FRAC_PI_2,
+        ),
     }
 }
 
@@ -829,18 +1044,37 @@ fn statistics(
     residuals: &[f64],
     variables: usize,
     evaluations: usize,
+    objective: ObjectiveKind,
+    initial_objective: f64,
 ) -> FitStatistics {
     let count = observations.len();
     let degrees_of_freedom = count - variables;
     let chi_square = residuals.iter().map(|value| value * value).sum::<f64>();
     let reduced_chi_square = chi_square / degrees_of_freedom as f64;
-    let log_term = (chi_square / count as f64).ln();
-    let aic = log_term
-        .is_finite()
-        .then_some(count as f64 * log_term + 2.0 * variables as f64);
-    let bic = log_term
-        .is_finite()
-        .then(|| count as f64 * log_term + (count as f64).ln() * variables as f64);
+    let objective_improvement = initial_objective.is_finite().then(|| {
+        (initial_objective - chi_square) / initial_objective.abs().max(f64::EPSILON)
+    });
+    let (aic, bic, deviance, reduced_deviance) = match objective {
+        ObjectiveKind::LeastSquares => {
+            let log_term = (chi_square / count as f64).ln();
+            (
+                log_term
+                    .is_finite()
+                    .then_some(count as f64 * log_term + 2.0 * variables as f64),
+                log_term
+                    .is_finite()
+                    .then(|| count as f64 * log_term + (count as f64).ln() * variables as f64),
+                None,
+                None,
+            )
+        }
+        ObjectiveKind::PoissonDeviance => (
+            Some(chi_square + 2.0 * variables as f64),
+            Some(chi_square + (count as f64).ln() * variables as f64),
+            Some(chi_square),
+            Some(reduced_chi_square),
+        ),
+    };
     let mean = observations.iter().sum::<f64>() / count as f64;
     let total_sum = observations
         .iter()
@@ -851,13 +1085,38 @@ fn statistics(
         .zip(predicted)
         .map(|(observed, model)| (observed - model).powi(2))
         .sum::<f64>();
+    let rmse = (unweighted_sum / count as f64).sqrt();
     let r_squared = (total_sum > 0.0).then(|| 1.0 - unweighted_sum / total_sum);
+    let pearson_chi_square = (objective == ObjectiveKind::PoissonDeviance).then(|| {
+        observations
+            .iter()
+            .zip(predicted)
+            .map(|(observed, model)| (observed - model).powi(2) / model.max(POISSON_FLOOR))
+            .sum::<f64>()
+    });
+    let reduced_pearson_chi_square =
+        pearson_chi_square.map(|value| value / degrees_of_freedom as f64);
+    let goodness_of_fit_p_value = deviance.and_then(|value| {
+        ChiSquared::new(degrees_of_freedom as f64)
+            .ok()
+            .map(|distribution| (1.0 - distribution.cdf(value)).clamp(0.0, 1.0))
+    });
     FitStatistics {
+        objective,
         observations: count,
         variables,
         degrees_of_freedom,
         chi_square,
         reduced_chi_square,
+        initial_objective: Some(initial_objective),
+        final_objective: chi_square,
+        objective_improvement,
+        rmse,
+        deviance,
+        reduced_deviance,
+        pearson_chi_square,
+        reduced_pearson_chi_square,
+        goodness_of_fit_p_value,
         aic,
         bic,
         r_squared,
@@ -876,6 +1135,7 @@ fn confidence_bands(
     layout: &ParameterLayout,
     covariance: &DMatrix<f64>,
     statistics: &FitStatistics,
+    objective: ObjectiveKind,
     sigma: f64,
     best_fit: &[f64],
     components: &[ComponentCurve],
@@ -891,7 +1151,7 @@ fn confidence_bands(
         .iter()
         .map(|component| Ok((component.name.clone(), empty_band(x.len())?)))
         .collect::<Result<Vec<_>, FitError>>()?;
-    let scale = confidence_scale(statistics, sigma)?;
+    let scale = confidence_scale(statistics, objective, sigma)?;
 
     for start in (0..x.len()).step_by(chunk_length) {
         let end = (start + chunk_length).min(x.len());
@@ -1050,7 +1310,14 @@ fn append_band_from_jacobian(
     }
 }
 
-fn confidence_scale(statistics: &FitStatistics, sigma: f64) -> Result<f64, FitError> {
+fn confidence_scale(
+    statistics: &FitStatistics,
+    objective: ObjectiveKind,
+    sigma: f64,
+) -> Result<f64, FitError> {
+    if objective == ObjectiveKind::PoissonDeviance {
+        return Ok(sigma);
+    }
     let probability = (erf(sigma / std::f64::consts::SQRT_2) + 1.0) / 2.0;
     let distribution =
         StudentsT::new(0.0, 1.0, statistics.degrees_of_freedom as f64).map_err(|error| {
@@ -1122,7 +1389,10 @@ fn checked_zeros(length: usize) -> Result<Vec<f64>, FitError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{bound_gradient, from_internal, to_internal};
+    use super::{
+        bound_gradient, from_internal, poisson_deviance_residual,
+        poisson_deviance_residual_gradient, to_internal,
+    };
     use crate::Bounds;
 
     #[test]
@@ -1146,5 +1416,56 @@ mod tests {
                 assert!(bound_gradient(internal, bounds).is_finite());
             }
         }
+    }
+
+    #[test]
+    fn bounded_transforms_do_not_wrap_outside_their_monotonic_branch() {
+        let finite = Bounds::finite(-2.0, 7.0);
+        assert_eq!(from_internal(-100.0, finite), -2.0);
+        assert_eq!(from_internal(100.0, finite), 7.0);
+        let values = (-40..=40)
+            .map(|index| from_internal(index as f64 * 0.1, finite))
+            .collect::<Vec<_>>();
+        assert!(values.windows(2).all(|pair| pair[0] <= pair[1]));
+
+        let lower = Bounds::lower_bounded(2.0);
+        assert_eq!(from_internal(-10.0, lower), 2.0);
+        assert!(from_internal(3.0, lower) > from_internal(2.0, lower));
+    }
+
+    #[test]
+    fn poisson_deviance_gradient_matches_central_differences() {
+        for (observed, predicted) in [
+            (0.0_f64, 0.2_f64),
+            (0.0, 15.0),
+            (0.5, 0.2),
+            (1.0, 0.8),
+            (10.0, 9.999),
+            (10.0, 10.001),
+            (1000.0, 820.0),
+            (1000.0, 1250.0),
+        ] {
+            let step = predicted.abs().max(1.0) * 1.0e-6;
+            let numerical = (poisson_deviance_residual(observed, predicted + step)
+                - poisson_deviance_residual(observed, predicted - step))
+                / (2.0 * step);
+            let analytic = poisson_deviance_residual_gradient(observed, predicted);
+            let scale = numerical.abs().max(analytic.abs()).max(1.0);
+            assert!(
+                (analytic - numerical).abs() <= 2.0e-6 * scale,
+                "y={observed}, mu={predicted}: analytic={analytic}, numerical={numerical}",
+            );
+        }
+    }
+
+    #[test]
+    fn poisson_deviance_is_smooth_at_observed_equals_predicted() {
+        let observed = 1.0e6;
+        let below = poisson_deviance_residual(observed, observed * (1.0 - 1.0e-10));
+        let above = poisson_deviance_residual(observed, observed * (1.0 + 1.0e-10));
+        assert!(below.is_finite() && above.is_finite());
+        assert!(below > 0.0 && above < 0.0);
+        let gradient = poisson_deviance_residual_gradient(observed, observed);
+        assert!((gradient + 1.0 / observed.sqrt()).abs() < 1.0e-12);
     }
 }

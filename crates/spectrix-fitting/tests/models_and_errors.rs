@@ -1,9 +1,75 @@
 use spectrix_fitting::{
     BackgroundCoupling, BackgroundKind, Bounds, CompositeModel, ConstantModel, ExponentialModel,
-    FitError, FitOptions, FitProblem, GaussianModel, LinearModel, Model as _, ModelComponent,
-    ParameterDefinition, ParameterKind, ParameterValues, PeakFitRequest, PowerLawModel,
-    QuadraticModel, fit, fit_peaks,
+    FitError, FitOptions, FitProblem, GaussianModel, LinearModel, ManualPeakSeed, Model as _,
+    ModelComponent, ObjectiveKind, ParameterDefinition, ParameterKind, ParameterValues,
+    PeakFitRequest, PowerLawModel, QuadraticModel, fit, fit_peaks,
 };
+
+#[test]
+fn bin_integrated_gaussian_preserves_spectrix_area_semantics() {
+    let x = (0..401)
+        .map(|index| -20.0 + index as f64 * 0.1)
+        .collect::<Vec<_>>();
+    let model = GaussianModel::new("g0_", 12.0, 0.13, 0.7).with_bin_integration(0.1);
+    let mut values = ParameterValues::new();
+    values.insert("g0_amplitude", 12.0);
+    values.insert("g0_center", 0.13);
+    values.insert("g0_sigma", 0.7);
+    let mut output = vec![0.0; x.len()];
+    model
+        .evaluate(&x, &values, &mut output)
+        .expect("integrated Gaussian");
+    close(output.iter().sum(), 120.0, 1.0e-9);
+
+    let names = vec![
+        "g0_amplitude".to_owned(),
+        "g0_center".to_owned(),
+        "g0_sigma".to_owned(),
+    ];
+    let mut jacobian = vec![0.0; x.len() * names.len()];
+    assert!(
+        model
+            .analytic_jacobian(&x, &values, &names, &mut jacobian)
+            .expect("integrated analytic Jacobian")
+    );
+    for (column, name) in names.iter().enumerate() {
+        let initial = values.get(name).expect("parameter value");
+        let step = 1.0e-6 * initial.abs().max(1.0);
+        let mut lower_values = values.clone();
+        let mut upper_values = values.clone();
+        lower_values.insert(name.clone(), initial - step);
+        upper_values.insert(name.clone(), initial + step);
+        let mut lower = vec![0.0; x.len()];
+        let mut upper = vec![0.0; x.len()];
+        model
+            .evaluate(&x, &lower_values, &mut lower)
+            .expect("lower curve");
+        model
+            .evaluate(&x, &upper_values, &mut upper)
+            .expect("upper curve");
+        for row in 0..x.len() {
+            let numerical = (upper[row] - lower[row]) / (2.0 * step);
+            close(jacobian[row * names.len() + column], numerical, 2.0e-6);
+        }
+    }
+}
+
+#[test]
+fn poisson_deviance_accepts_zero_count_bins_and_reports_likelihood_statistics() {
+    let x = (0..8).map(|index| index as f64).collect::<Vec<_>>();
+    let y = vec![0.0, 1.0, 0.0, 2.0, 1.0, 0.0, 2.0, 0.0];
+    let model = ConstantModel::new("bg_", [1.0]);
+    let options = FitOptions {
+        objective: ObjectiveKind::PoissonDeviance,
+        ..FitOptions::default()
+    };
+    let result =
+        fit(&FitProblem::new(Box::new(model), x, y), &options).expect("Poisson constant fit");
+    assert!(result.termination.success);
+    assert!(result.statistics.deviance.is_some_and(f64::is_finite));
+    assert!(result.statistics.bic.is_some_and(f64::is_finite));
+    assert!(result.covariance.is_some());
+}
 
 fn close(actual: f64, expected: f64, tolerance: f64) {
     assert!(
@@ -272,7 +338,12 @@ fn invalid_inputs_return_typed_errors() {
         y: vec![1.0; 4],
         bin_width: 1.0,
         region: [-1.0, 3.0],
-        peak_markers: vec![1.0],
+        peak_seeds: vec![ManualPeakSeed {
+            center: 1.0,
+            sigma: 0.5,
+            amplitude: 1.0,
+        }],
+        peak_bounds: None,
         background_markers: vec![(1.0, 3.0)],
         background: BackgroundKind::PowerLaw,
         background_seed: None,
@@ -318,7 +389,19 @@ fn malformed_spectrum_requests_never_panic() {
             y,
             bin_width: if case % 7 == 0 { -1.0 } else { next() + 0.01 },
             region: [next() * 10.0, next() * 10.0],
-            peak_markers: vec![next() * 10.0, f64::NAN],
+            peak_seeds: vec![
+                ManualPeakSeed {
+                    center: next() * 10.0,
+                    sigma: next(),
+                    amplitude: next(),
+                },
+                ManualPeakSeed {
+                    center: f64::NAN,
+                    sigma: next(),
+                    amplitude: next(),
+                },
+            ],
+            peak_bounds: None,
             background_markers: vec![(next() * 5.0, next() * 5.0)],
             background: if case % 5 == 0 {
                 BackgroundKind::PowerLaw
@@ -358,7 +441,12 @@ fn joint_background_covariance_contains_background_variables() {
             y,
             bin_width: 0.1,
             region: [2.0, 8.0],
-            peak_markers: vec![5.0],
+            peak_seeds: vec![ManualPeakSeed {
+                center: 5.0,
+                sigma: 0.4,
+                amplitude: 55.0,
+            }],
+            peak_bounds: None,
             background_markers: vec![(2.0, 3.0), (7.0, 8.0)],
             background: BackgroundKind::Linear,
             background_seed: None,
@@ -371,9 +459,9 @@ fn joint_background_covariance_contains_background_variables() {
     )
     .expect("joint fit");
     let names = &result.fit.covariance.expect("covariance").parameter_names;
-    assert!(names.iter().any(|name| name == "bg_slope"));
-    assert!(names.iter().any(|name| name == "bg_intercept"));
-    assert!(names.iter().any(|name| name == "g0_amplitude"));
+    assert!(names.iter().any(|name| name == "bg_scaled_slope"));
+    assert!(names.iter().any(|name| name == "bg_scaled_level"));
+    assert!(names.iter().any(|name| name == "g0_height"));
 }
 
 #[cfg(feature = "serde")]

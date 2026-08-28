@@ -98,12 +98,13 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
 - Press `R` twice to place the two region markers that define the fit interval. `R` keeps at most two active region markers, so adding another region marker after two are present clears the old pair and starts again.
 - Press `B` to add a green background marker pair at the cursor. It starts as a very narrow region, and you can click and drag the green marker lines to widen or narrow it. The bins between each background pair are the points used when Spectrix fits just the background with `G`.
 - Press `G` to fit only the selected background model. `G` requires at least one background marker pair.
-- Press `P` to add peak markers manually. If you do not place peak markers, Spectrix still needs the two region markers, then it seeds one peak from the strongest bin inside that region.
-- Press `O` to run the peak finder. You can adjust the peak-finder settings from the 1D histogram right-click menu under `Peak Finder` before running it.
+- Press `P` to add every peak marker manually. Gaussian fitting requires at least one explicit peak marker and exactly two region markers.
 - Press `F` to perform the Gaussian fit with Spectrix's native Rust fitting engine.
-- If you run `F` with a background model selected but no background marker pairs, Spectrix does not use the whole region as background. It falls back to two tiny background windows at the left and right edges of the region.
-- The fit settings in the `Fits` panel include `Equal σ`, `Free Position`, optional `Constrain σ` bounds, background coupling (`Prefit & Fix` by default or `Prefit & Refine Jointly`), and the fit-line display toggles `Decomposition`, `Composition`, `Background`, and `1σ Uncertainty`.
-- After a successful fit, the result appears in the Fit Panel as the `Temp` fit. Spectrix also replaces the peak markers with the fitted peak means when available.
+- If a non-`None` background model is selected, `F` also requires at least one explicit background marker window; there is no automatic fallback.
+- The fit-results table pairs editable Initial rows (min/guess/max position, FWHM, and net height) with fitted Temp rows. Editing one guess holds the other displayed variables fixed. The plot shows only a translucent width/height envelope; position bounds are edited in the table and are not drawn.
+- `O` runs the original peak finder to populate editable manual peak markers. It never launches a fit or chooses a model.
+- The fit settings include Shared/Independent FWHM, Free Position, optional additional σ bounds, background lock/refine coupling, and fit-line display toggles.
+- After a successful fit, the result appears as the `Temp` fit and its fitted position, FWHM, and height become the new handles.
 - Press `S` / `Store Fit` when you want to keep the temp fit as a stored fit for later comparison, calibration, saving, or refitting.
 - In the Fit Panel you can assign per-peak UUID values and energies. `UUID = 0` is the default invalid UUID. `Energy = -1` means that peak is invalid for calibration.
 - UUID labels can be drawn above peaks and adjusted in the Fit Panel with `Size`, `Lift`, and `Guide`.
@@ -485,7 +486,8 @@ mod tests {
         assert!(prompt.contains("Source-derived workflow hints for Gaussian fitting"));
         assert!(prompt.contains("Press `R` twice"));
         assert!(prompt.contains("Press `B`"));
-        assert!(prompt.contains("Press `O`"));
+        assert!(prompt.contains("Press `P` to add every peak marker manually"));
+        assert!(prompt.contains("Editing one guess holds the other displayed variables fixed"));
         assert!(prompt.contains("Press `F`"));
         assert!(prompt.contains("Press `S`"));
     }

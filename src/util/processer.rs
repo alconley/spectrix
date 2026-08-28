@@ -1,5 +1,6 @@
 use crate::ai::{AiAssistant, AiContextSnapshot};
 use crate::custom_analysis::analysis::AnalysisScripts;
+use crate::defaults::{NewSessionDefaults, SpectrixDefaults};
 use crate::histoer::configs::{
     apply_computed_columns_to_lazyframe, get_column_names_from_lazyframe,
 };
@@ -159,8 +160,16 @@ struct RootImportHist2D {
 
 impl Processor {
     pub fn new(name: impl Into<String>) -> Self {
+        Self::new_with_defaults(name, &NewSessionDefaults::default())
+    }
+
+    pub fn new_with_defaults(name: impl Into<String>, defaults: &NewSessionDefaults) -> Self {
         let settings = ProcessorSettings {
             name: name.into(),
+            left_panel_open: defaults.files_panel_open,
+            histogram_script_open: defaults.histogram_script_open,
+            ai_open: defaults.ai_open,
+            calculate_histograms_seperately: defaults.calculate_histograms_separately,
             ..ProcessorSettings::default()
         };
 
@@ -185,13 +194,18 @@ impl Processor {
             ai: AiAssistant::default(),
             settings,
             analysis: AnalysisScripts::default(),
-            file_sort: FileSortState::default(),
+            file_sort: defaults.file_sort,
         }
     }
 
     pub fn reset(&mut self) {
         let name = self.settings.name.clone();
         *self = Self::new(name);
+    }
+
+    pub fn reset_with_defaults(&mut self, defaults: &NewSessionDefaults) {
+        let name = self.settings.name.clone();
+        *self = Self::new_with_defaults(name, defaults);
     }
 
     fn checked_files(&self) -> Vec<PathBuf> {
@@ -448,13 +462,17 @@ impl Processor {
         }
     }
 
-    pub fn session_processor_menu_ui(&mut self, ui: &mut egui::Ui) {
+    pub fn session_processor_menu_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        defaults: &mut SpectrixDefaults,
+    ) {
         ui.label("Processor");
 
         ui.horizontal(|ui| {
             ui.label("Estimated Memory:");
             ui.add(
-                precise_drag_value(&mut self.settings.estimated_memory)
+                precise_drag_value(&mut defaults.general.estimated_memory_gb)
                     .range(0.1..=f64::INFINITY)
                     .speed(1)
                     .suffix(" GB"),
@@ -1612,7 +1630,7 @@ def get_2d_histograms(file_name):
         });
     }
 
-    fn ai_panel_ui(&mut self, ui: &mut egui::Ui) {
+    fn ai_panel_ui(&mut self, ui: &mut egui::Ui, defaults: &mut SpectrixDefaults) {
         let mut ai_open = self.settings.ai_open;
         egui::Panel::right("spectrix_ai_panel")
             .resizable(true)
@@ -1625,7 +1643,7 @@ def get_2d_histograms(file_name):
                     &self.histogram_script,
                     &self.histogrammer,
                 );
-                self.ai.ui(ui, snapshot);
+                self.ai.ui(ui, snapshot, &mut defaults.ai);
             });
         self.settings.ai_open = ai_open;
     }
@@ -1652,14 +1670,16 @@ def get_2d_histograms(file_name):
             });
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, defaults: &mut SpectrixDefaults) {
+        self.settings.estimated_memory = defaults.general.estimated_memory_gb.max(0.1);
+        self.histogrammer.set_app_defaults(defaults);
         self.flush_root_import_result();
         self.ensure_parquet_column_names_loaded();
         if self.histogrammer.calculating.load(Ordering::Relaxed) {
             self.histogram_progress_bottom_panel_ui(ui);
         }
         self.left_side_panels_ui(ui);
-        self.ai_panel_ui(ui);
+        self.ai_panel_ui(ui, defaults);
         self.central_panel_ui(ui);
 
         if !self.histogrammer.calculating.load(Ordering::Relaxed) {

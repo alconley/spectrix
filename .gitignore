@@ -1,6 +1,7 @@
 /target
 /dist
 *.json
+!crates/spectrix-fitting/tests/fixtures/run_83_xavg_600.json
 *.yaml
 .venv
 *.root

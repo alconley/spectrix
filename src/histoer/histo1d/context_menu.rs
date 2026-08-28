@@ -21,16 +21,8 @@ impl Histogram {
     }
 
     fn next_cut_color(&self) -> egui::Color32 {
-        const DEFAULT_CUT_COLORS: [egui::Color32; 6] = [
-            egui::Color32::RED,
-            egui::Color32::GREEN,
-            egui::Color32::BLUE,
-            egui::Color32::YELLOW,
-            egui::Color32::from_rgb(255, 0, 255),
-            egui::Color32::from_rgb(0, 255, 255),
-        ];
-
-        DEFAULT_CUT_COLORS[self.plot_settings.cuts.len() % DEFAULT_CUT_COLORS.len()]
+        let palette = &self.generation_defaults.cuts.palette;
+        palette[self.plot_settings.cuts.len() % palette.len()]
     }
 
     pub fn new_cut(&mut self) {
@@ -45,13 +37,16 @@ impl Histogram {
 
         let visible_range = self.plot_settings.current_plot_bounds.unwrap_or(self.range);
 
-        self.plot_settings.cuts.push(InteractiveCut1D::new(
-            &self.next_cut_name(),
-            &source_columns,
-            self.range,
-            visible_range,
-            self.next_cut_color(),
-        ));
+        self.plot_settings
+            .cuts
+            .push(InteractiveCut1D::new_with_defaults(
+                &self.next_cut_name(),
+                &source_columns,
+                self.range,
+                visible_range,
+                self.next_cut_color(),
+                &self.generation_defaults.cuts,
+            ));
     }
 
     // Handles the context menu for the histogram
@@ -59,7 +54,15 @@ impl Histogram {
         SubMenuButton::new("Line")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
             .ui(ui, |ui| {
+                ui.checkbox(&mut self.follow_theme_colors, "Use app theme colors")
+                    .on_hover_text(
+                        "Use the light/dark colors captured when this histogram was generated.",
+                    );
+                let previous_color = self.line.color;
                 self.line.menu_button(ui);
+                if self.line.color != previous_color {
+                    self.follow_theme_colors = false;
+                }
             });
 
         SubMenuButton::new("Settings")
@@ -126,6 +129,7 @@ impl Histogram {
                 self.keybinds_ui(ui);
             });
 
+        let mut manual_guesses_changed = false;
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.fits.settings.show_fit_stats, "Show")
                 .on_hover_text("Open the fit panel.");
@@ -133,9 +137,18 @@ impl Histogram {
             SubMenuButton::new("Fits")
                 .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
                 .ui(ui, |ui| {
-                    self.fits.fit_context_menu_ui(ui, self.range);
+                    manual_guesses_changed |= self.fits.fit_context_menu_ui(
+                        ui,
+                        self.range,
+                        &mut self.plot_settings.markers,
+                        self.bin_width,
+                    );
                 });
         });
+        if manual_guesses_changed {
+            self.invalidate_manual_gaussian_preview();
+            self.refresh_manual_peak_guesses();
+        }
 
         SubMenuButton::new("Peak Finder")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
@@ -144,10 +157,10 @@ impl Histogram {
                 if ui
                     .button("Detect Peaks")
                     .on_hover_text(
-                        "Find peaks with `find_peaks` using the settings below.\n\
-                         If region markers are set, only the data between them is searched.\n\
-                         If an active background fit exists, it is subtracted before searching.\n\
-                         Keybind: O",
+                        "Populate editable peak markers using the original detector.\n\
+                         Region markers limit the search when both are present.\n\
+                         The active fitted background is subtracted when available.\n\
+                         Detection never launches a fit. Keybind: O",
                     )
                     .clicked()
                 {

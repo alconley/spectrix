@@ -1,5 +1,4 @@
-use find_peaks::Peak;
-use find_peaks::PeakFinder;
+use find_peaks::{Peak, PeakFinder};
 
 use super::histogram1d::Histogram;
 use crate::fitter::main_fitter::BackgroundResult;
@@ -24,7 +23,6 @@ impl Histogram {
         let (x_data, mut y_data) = if region_marker_positions.len() == 2 {
             let start_x = region_marker_positions[0];
             let end_x = region_marker_positions[1];
-
             (
                 self.get_bin_centers_between(start_x, end_x),
                 self.get_bin_counts_between(start_x, end_x),
@@ -46,12 +44,13 @@ impl Histogram {
         }
 
         self.plot_settings.markers.clear_peak_markers();
-
         for peak in self.plot_settings.find_peaks_settings.find_peaks(&y_data) {
             if let Some(x) = x_data.get(peak.middle_position()) {
                 self.plot_settings.markers.add_peak_marker(*x);
             }
         }
+        self.invalidate_manual_gaussian_preview();
+        self.refresh_manual_peak_guesses();
     }
 }
 
@@ -92,6 +91,7 @@ fn usize_setting_row(
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct PeakFindingSettings {
     min_height: f64,
     max_height: f64,
@@ -103,7 +103,6 @@ pub struct PeakFindingSettings {
     max_plateau_size: usize,
     min_distance: usize,
     max_distance: usize,
-
     enable_min_height: bool,
     enable_max_height: bool,
     enable_min_prominence: bool,
@@ -129,7 +128,6 @@ impl Default for PeakFindingSettings {
             max_plateau_size: 1,
             min_distance: 4,
             max_distance: 0,
-
             enable_min_height: false,
             enable_max_height: false,
             enable_min_prominence: true,
@@ -147,13 +145,10 @@ impl Default for PeakFindingSettings {
 impl PeakFindingSettings {
     pub fn menu_button(&mut self, ui: &mut egui::Ui) {
         ui.heading("Peak Finder Settings");
-
         if ui.button("Reset").clicked() {
             *self = Self::default();
         }
-
         ui.separator();
-
         egui::ScrollArea::vertical().show(ui, |ui| {
             float_setting_row(
                 ui,
@@ -162,7 +157,6 @@ impl PeakFindingSettings {
                 "Min Height",
                 "Minimum peak height after optional background subtraction. Raise this to ignore smaller peaks.",
             );
-
             float_setting_row(
                 ui,
                 &mut self.enable_max_height,
@@ -170,7 +164,6 @@ impl PeakFindingSettings {
                 "Max Height",
                 "Maximum peak height after optional background subtraction. Useful for excluding very tall or saturated peaks.",
             );
-
             float_setting_row(
                 ui,
                 &mut self.enable_min_prominence,
@@ -178,7 +171,6 @@ impl PeakFindingSettings {
                 "Min Prominence",
                 "Minimum prominence. Higher values keep only peaks that stand out clearly above nearby valleys.",
             );
-
             float_setting_row(
                 ui,
                 &mut self.enable_max_prominence,
@@ -186,7 +178,6 @@ impl PeakFindingSettings {
                 "Max Prominence",
                 "Maximum prominence. Useful if you want to ignore very dominant peaks.",
             );
-
             float_setting_row(
                 ui,
                 &mut self.enable_min_difference,
@@ -194,7 +185,6 @@ impl PeakFindingSettings {
                 "Min Difference",
                 "Minimum absolute drop to the nearest neighboring bins on each side. Helps reject tiny wiggles and noise.",
             );
-
             float_setting_row(
                 ui,
                 &mut self.enable_max_difference,
@@ -202,7 +192,6 @@ impl PeakFindingSettings {
                 "Max Difference",
                 "Maximum absolute drop to the nearest neighboring bins on each side.",
             );
-
             usize_setting_row(
                 ui,
                 &mut self.enable_min_plateau_size,
@@ -210,7 +199,6 @@ impl PeakFindingSettings {
                 "Min Plateau Size",
                 "Minimum number of bins allowed in a flat-topped peak.",
             );
-
             usize_setting_row(
                 ui,
                 &mut self.enable_max_plateau_size,
@@ -218,7 +206,6 @@ impl PeakFindingSettings {
                 "Max Plateau Size",
                 "Maximum number of bins allowed in a flat-topped peak.",
             );
-
             usize_setting_row(
                 ui,
                 &mut self.enable_min_distance,
@@ -226,7 +213,6 @@ impl PeakFindingSettings {
                 "Min Distance",
                 "Minimum separation in bins between accepted peaks. If peaks are too close, the taller one wins.",
             );
-
             usize_setting_row(
                 ui,
                 &mut self.enable_max_distance,
@@ -239,47 +225,53 @@ impl PeakFindingSettings {
 
     pub fn find_peaks(&self, y_data: &[f64]) -> Vec<Peak<f64>> {
         let mut peak_finder = PeakFinder::new(y_data);
-
         if self.enable_min_height {
             peak_finder.with_min_height(self.min_height);
         }
-
         if self.enable_max_height {
             peak_finder.with_max_height(self.max_height);
         }
-
         if self.enable_min_prominence {
             peak_finder.with_min_prominence(self.min_prominence);
         }
-
         if self.enable_max_prominence {
             peak_finder.with_max_prominence(self.max_prominence);
         }
-
         if self.enable_min_difference {
             peak_finder.with_min_difference(self.min_difference);
         }
-
         if self.enable_max_difference {
             peak_finder.with_max_difference(self.max_difference);
         }
-
         if self.enable_min_plateau_size {
             peak_finder.with_min_plateau_size(self.min_plateau_size);
         }
-
         if self.enable_max_plateau_size {
             peak_finder.with_max_plateau_size(self.max_plateau_size);
         }
-
         if self.enable_min_distance {
             peak_finder.with_min_distance(self.min_distance);
         }
-
         if self.enable_max_distance {
             peak_finder.with_max_distance(self.max_distance);
         }
-
         peak_finder.find_peaks()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PeakFindingSettings;
+
+    #[test]
+    fn default_detector_retains_the_original_prominent_peaks() {
+        let settings = PeakFindingSettings::default();
+        let data = [0.0, 1.0, 12.0, 1.0, 0.0, 2.0, 25.0, 2.0, 0.0];
+        let positions = settings
+            .find_peaks(&data)
+            .into_iter()
+            .map(|peak| peak.middle_position())
+            .collect::<Vec<_>>();
+        assert_eq!(positions, vec![2, 6]);
     }
 }

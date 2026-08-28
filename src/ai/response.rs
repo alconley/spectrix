@@ -175,7 +175,7 @@ fn source_backed_gaussian_fit_fallback_response(prompt: &str) -> Option<AiRespon
     }
 
     Some(AiResponse {
-        summary: "The current fitting workflow in Spectrix is the 1D Gaussian fit workflow. First create or open a 1D histogram, then move the cursor into that histogram plot, because the fit keybinds act at the current cursor position inside the plot. The default background model is `None`. If you want background fitting, right-click the histogram, open `Fits`, and choose a background model. Press `R` twice to place the two region markers that define the fit interval. Press `B` to add a green background marker pair at the cursor; it starts very narrow, and you can click and drag the green marker lines to widen or narrow it. Press `P` to add peak markers manually, or press `O` to run the peak finder and tune its settings from the right-click `Peak Finder` panel. Then press `F` to run the Gaussian fit with Spectrix's native Rust fitting engine.\n\nPress `G` if you want a background-only fit from the background marker pairs. If you run `F` with a background model selected but no background marker pairs, Spectrix falls back to two tiny background windows at the left and right edges of the region. If you run `F` with no peak markers, Spectrix still needs the two region markers, then it seeds one peak from the strongest bin inside that region. After a successful fit, the Fit Panel opens and the result is the `Temp` fit. Press `S` / `Store Fit` to keep it as a stored fit.\n\nIn the Fit Panel you can assign per-peak UUID values and energies. `UUID = 0` is the default invalid UUID. `Energy = -1` means that peak is not used for calibration. The fit settings also let you adjust `Equal σ`, `Free Position`, optional `Constrain σ`, background coupling (`Prefit & Fix` or `Prefit & Refine Jointly`), the UUID label controls, and the displayed fit lines (`Decomposition`, `Composition`, `Background`, `1σ Uncertainty`). Use `Save Fits` / `Load Fits` for Spectrix JSON workflows. Legacy JSON remains loadable; its old Python model-result payload is ignored and omitted from new saves. If you enable `Calibration`, you can type coefficients manually and click `Calibrate`, or use `Linear` with at least 2 valid points or `Quadratic` with at least 3 distinct valid points.".to_owned(),
+        summary: "Gaussian fitting in Spectrix is manual-first. Place exactly two region markers with `R`, then place every intended peak with `P`, or press `O` to populate editable markers with the original peak finder. Choose the explicit background family in `Fits`; any non-`None` background also requires one or more background windows placed with `B`. Detection never launches a fit or chooses a model.\n\nThe fit-results table pairs Initial rows with Temp rows. Initial rows expose min/guess/max values for position, FWHM, and background-subtracted height. Editing one parameter holds the other displayed variables fixed. The plot shows only a translucent envelope spanning the width/height ranges; position bounds are not drawn. Shared FWHM applies one width to every peak while preserving each height; Independent FWHM permits individual widths. The displayed values and ranges are passed to one deterministic composite solve.\n\nA successful result becomes the temporary fit and its fitted centers, FWHM values, and heights become the new handles. Fit-quality metrics are advisory and never block `S` or Store Fit. Stored fits are not changed by later handle edits.".to_owned(),
         clarification_questions: Vec::new(),
         notes: vec![
             "This answer is based on the 1D histogram keybinds, Gaussian fitter, Fit Panel, and calibration code paths.".to_owned(),
@@ -499,13 +499,18 @@ mod tests {
             "How do I fit Gaussian peaks?",
         );
 
-        assert!(response.summary.contains("right-click the histogram"));
-        assert!(response.summary.contains("Press `R` twice"));
-        assert!(response.summary.contains("Press `B`"));
-        assert!(response.summary.contains("`F`"));
-        assert!(response.summary.contains("`Temp` fit"));
-        assert!(response.summary.contains("`UUID = 0`"));
-        assert!(response.summary.contains("`Energy = -1`"));
+        assert!(response.summary.contains("manual-first"));
+        assert!(response.summary.contains("region markers with `R`"));
+        assert!(response.summary.contains("peak with `P`"));
+        assert!(
+            response
+                .summary
+                .contains("background windows placed with `B`")
+        );
+        assert!(response.summary.contains("Press `F`"));
+        assert!(response.summary.contains("translucent envelope"));
+        assert!(response.summary.contains("press `O`"));
+        assert!(response.summary.contains("temporary fit"));
         assert!(response.clarification_questions.is_empty());
     }
 
@@ -520,11 +525,15 @@ mod tests {
             "how do i do fits?",
         );
 
-        assert!(response.summary.contains("1D Gaussian fit workflow"));
-        assert!(response.summary.contains("Press `R` twice"));
-        assert!(response.summary.contains("Press `B`"));
-        assert!(response.summary.contains("`O`"));
-        assert!(response.summary.contains("`F`"));
+        assert!(response.summary.contains("manual-first"));
+        assert!(response.summary.contains("region markers with `R`"));
+        assert!(response.summary.contains("peak with `P`"));
+        assert!(
+            response
+                .summary
+                .contains("background windows placed with `B`")
+        );
+        assert!(response.summary.contains("Press `F`"));
         assert!(response.summary.contains("Press `S`"));
         assert!(response.clarification_questions.is_empty());
     }

@@ -4,6 +4,7 @@ use rayon::prelude::*;
 use crate::egui_plot_stuff::egui_image::EguiImage;
 
 use super::plot_settings::PlotSettings;
+use crate::defaults::{Histogram2DDefaults, apply_plot_defaults};
 
 use polars::prelude::*;
 
@@ -17,6 +18,8 @@ pub struct Histogram2D {
     pub plot_settings: PlotSettings,
     pub image: EguiImage,
     pub backup_bins: Option<Bins>,
+    #[serde(default)]
+    pub generation_defaults: Histogram2DDefaults,
     #[serde(skip)]
     pub(crate) stats_cache: Option<StatsCache>,
     #[serde(skip)]
@@ -32,7 +35,16 @@ pub(crate) struct StatsCache {
 impl Histogram2D {
     // Create a new 2D Histogram with specified ranges and number of bins for each axis
     pub fn new(name: &str, bins: (usize, usize), range: ((f64, f64), (f64, f64))) -> Self {
-        Self {
+        Self::new_with_defaults(name, bins, range, &Histogram2DDefaults::default())
+    }
+
+    pub fn new_with_defaults(
+        name: &str,
+        bins: (usize, usize),
+        range: ((f64, f64), (f64, f64)),
+        defaults: &Histogram2DDefaults,
+    ) -> Self {
+        let mut histogram = Self {
             name: name.to_owned(),
             bins: Bins {
                 x: bins.0,
@@ -62,9 +74,44 @@ impl Histogram2D {
                 [range.1.0, range.1.1],
             ),
             backup_bins: None,
+            generation_defaults: defaults.clone(),
             stats_cache: None,
             stats_dirty: true,
+        };
+        histogram.apply_generation_defaults(defaults);
+        histogram
+    }
+
+    pub fn apply_generation_defaults(&mut self, defaults: &Histogram2DDefaults) {
+        self.generation_defaults = defaults.clone();
+        apply_plot_defaults(&defaults.plot, &mut self.plot_settings.egui_settings);
+        self.plot_settings.stats_info = defaults.show_statistics;
+        self.plot_settings.colormap = defaults.colormap;
+        self.plot_settings.colormap_options = defaults.colormap_options;
+        self.plot_settings
+            .projections
+            .apply_defaults(&defaults.projections);
+
+        self.image.draw = defaults.image.draw;
+        self.image.name_in_legend = defaults.image.name_in_legend;
+        self.image.highlighted = defaults.image.highlighted;
+        self.image.add_background = defaults.image.add_background;
+        self.image.bg_color = if defaults.image.add_background {
+            defaults.image.background_color
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        self.image.tint = defaults.image.tint;
+        self.image.rotate = defaults.image.rotate_degrees;
+        self.image.texture_options.magnification = defaults.image.magnification;
+        self.image.texture_options.minification = defaults.image.minification;
+        self.image.texture = None;
+
+        for (index, cut) in self.plot_settings.cuts.iter_mut().enumerate() {
+            let color = defaults.cuts.palette[index % defaults.cuts.palette.len()];
+            cut.apply_defaults(&defaults.cuts, color);
         }
+        self.plot_settings.recalculate_image = true;
     }
 
     pub fn reset(&mut self) {
@@ -294,14 +341,11 @@ impl Histogram2D {
 
         if plot_ui.response().hovered() {
             self.plot_settings.cursor_position = plot_ui.pointer_coordinate();
-            self.plot_settings.egui_settings.limit_scrolling = true;
         } else {
             self.plot_settings.cursor_position = None;
         }
 
         self.plot_settings.draw(plot_ui);
-
-        self.plot_settings.egui_settings.allow_drag = !self.plot_settings.projections.dragging;
 
         if self.plot_settings.egui_settings.reset_axis {
             self.plot_settings.egui_settings.reset_axis_lims(plot_ui);
@@ -333,7 +377,10 @@ impl Histogram2D {
 
         let plot_id = egui::Id::new(("histogram2d-plot", std::ptr::from_ref(self) as usize));
         let mut plot = egui_plot::Plot::new(self.name.clone()).id(plot_id);
-        plot = self.plot_settings.egui_settings.apply_to_plot(plot);
+        let mut effective_plot_settings = self.plot_settings.egui_settings.clone();
+        effective_plot_settings.allow_drag &= !self.plot_settings.interactions_dragging;
+        effective_plot_settings.allow_double_click_reset &= !self.plot_settings.cuts_clicking;
+        plot = effective_plot_settings.apply_to_plot(plot);
 
         if self.image.texture.is_none() {
             self.calculate_image(ui);

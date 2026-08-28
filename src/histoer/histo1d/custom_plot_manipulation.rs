@@ -170,7 +170,7 @@ impl Histogram {
         if self.plot_settings.egui_settings.reset_axis {
             plot_ui.set_plot_bounds(self.full_plot_bounds());
             self.plot_settings.egui_settings.reset_axis = false;
-        } else {
+        } else if self.plot_settings.egui_settings.limit_scrolling {
             self.limit_scrolling(plot_ui);
         }
     }

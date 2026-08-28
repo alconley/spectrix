@@ -26,6 +26,10 @@ pub struct PlotSettings {
     pub rebin_y_factor: usize,
     #[serde(skip)]
     pub recalculate_image: bool,
+    #[serde(skip)]
+    pub interactions_dragging: bool,
+    #[serde(skip)]
+    pub cuts_clicking: bool,
 }
 impl Default for PlotSettings {
     fn default() -> Self {
@@ -43,6 +47,8 @@ impl Default for PlotSettings {
             rebin_x_factor: 1,
             rebin_y_factor: 1,
             recalculate_image: false,
+            interactions_dragging: false,
+            cuts_clicking: false,
         }
     }
 }
@@ -123,7 +129,7 @@ impl PlotSettings {
             }
         }
 
-        self.egui_settings.allow_drag = !interactions_dragging;
-        self.egui_settings.allow_double_click_reset = !cuts_clicking;
+        self.interactions_dragging = interactions_dragging;
+        self.cuts_clicking = cuts_clicking;
     }
 }

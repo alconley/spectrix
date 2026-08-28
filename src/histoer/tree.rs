@@ -1,4 +1,5 @@
 use super::pane::Pane;
+use crate::defaults::TileLayoutDefaults;
 use egui_tiles::{Tile, TileId, Tiles};
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -38,6 +39,36 @@ impl Default for TreeBehavior {
 }
 
 impl TreeBehavior {
+    pub fn layout_defaults(&self) -> TileLayoutDefaults {
+        TileLayoutDefaults {
+            tab_bar_height: self.tab_bar_height,
+            gap_width: self.gap_width,
+            min_size: self.min_size,
+            preview_dragged_panes: self.preview_dragged_panes,
+            prune_empty_tabs: self.prune_empty_tabs,
+            prune_empty_containers: self.prune_empty_containers,
+            prune_single_child_tabs: self.prune_single_child_tabs,
+            prune_single_child_containers: self.prune_single_child_containers,
+            all_panes_must_have_tabs: self.all_panes_must_have_tabs,
+            join_nested_linear_containers: self.join_nested_linear_containers,
+            flatten_tabs_in_tabs: self.flatten_tabs_in_tabs,
+        }
+    }
+
+    pub fn apply_layout_defaults(&mut self, defaults: &TileLayoutDefaults) {
+        self.tab_bar_height = defaults.tab_bar_height;
+        self.gap_width = defaults.gap_width;
+        self.min_size = defaults.min_size;
+        self.preview_dragged_panes = defaults.preview_dragged_panes;
+        self.prune_empty_tabs = defaults.prune_empty_tabs;
+        self.prune_empty_containers = defaults.prune_empty_containers;
+        self.prune_single_child_tabs = defaults.prune_single_child_tabs;
+        self.prune_single_child_containers = defaults.prune_single_child_containers;
+        self.all_panes_must_have_tabs = defaults.all_panes_must_have_tabs;
+        self.join_nested_linear_containers = defaults.join_nested_linear_containers;
+        self.flatten_tabs_in_tabs = defaults.flatten_tabs_in_tabs;
+    }
+
     pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
         egui::Grid::new("behavior_ui")
             .num_columns(2)

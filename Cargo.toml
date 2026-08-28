@@ -65,9 +65,15 @@ ron = "0.12.2"
 [profile.release]
 opt-level = 2 # fast and small wasm
 
-# Optimize all dependencies even in debug builds:
+# Keep enough debug information for useful backtraces without generating the
+# very large full PDBs that make Windows development links expensive.
+[profile.dev]
+debug = 1
+
+# Keep data-heavy dependencies usable during development while avoiding the
+# compile-time cost of fully optimizing every dependency.
 [profile.dev.package."*"]
-opt-level = 2
+opt-level = 1
 
 
 [patch.crates-io]

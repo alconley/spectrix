@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use statrs::function::erf::erf;
+
 use crate::{Bounds, DerivedParameter, FitError, ParameterDefinition, ParameterValues};
 
 const SQRT_TWO_PI: f64 = 2.506_628_274_631_000_2;
@@ -311,6 +313,7 @@ pub struct GaussianModel {
     center: ParameterDefinition,
     sigma: ParameterDefinition,
     bin_width: Option<f64>,
+    integrate_bins: bool,
 }
 
 impl GaussianModel {
@@ -325,6 +328,7 @@ impl GaussianModel {
                 .with_bounds(Bounds::lower_bounded(0.0)),
             prefix,
             bin_width: None,
+            integrate_bins: false,
         }
     }
 
@@ -346,6 +350,17 @@ impl GaussianModel {
     #[must_use]
     pub const fn with_bin_width(mut self, bin_width: f64) -> Self {
         self.bin_width = Some(bin_width);
+        self
+    }
+
+    /// Evaluates expected bin counts by integrating the Gaussian over each bin.
+    ///
+    /// The public amplitude convention is unchanged: Spectrix area remains
+    /// `amplitude / bin_width`.
+    #[must_use]
+    pub const fn with_bin_integration(mut self, bin_width: f64) -> Self {
+        self.bin_width = Some(bin_width);
+        self.integrate_bins = true;
         self
     }
 }
@@ -379,10 +394,29 @@ impl Model for GaussianModel {
                 message: "sigma must be positive and finite".to_owned(),
             });
         }
-        let scale = amplitude / (SQRT_TWO_PI * sigma);
-        for (value, independent) in output.iter_mut().zip(x) {
-            let standardized = (*independent - center) / sigma;
-            *value = scale * (-0.5 * standardized * standardized).exp();
+        if self.integrate_bins {
+            let bin_width = self.bin_width.ok_or_else(|| FitError::Domain {
+                model: self.prefix.clone(),
+                message: "bin integration requires a positive bin width".to_owned(),
+            })?;
+            if !bin_width.is_finite() || bin_width <= 0.0 {
+                return Err(FitError::Domain {
+                    model: self.prefix.clone(),
+                    message: "bin integration requires a positive bin width".to_owned(),
+                });
+            }
+            let denominator = sigma * std::f64::consts::SQRT_2;
+            for (value, independent) in output.iter_mut().zip(x) {
+                let lower = (*independent - 0.5 * bin_width - center) / denominator;
+                let upper = (*independent + 0.5 * bin_width - center) / denominator;
+                *value = amplitude / bin_width * 0.5 * (erf(upper) - erf(lower));
+            }
+        } else {
+            let scale = amplitude / (SQRT_TWO_PI * sigma);
+            for (value, independent) in output.iter_mut().zip(x) {
+                let standardized = (*independent - center) / sigma;
+                *value = scale * (-0.5 * standardized * standardized).exp();
+            }
         }
         ensure_finite(output, &self.prefix)
     }
@@ -422,6 +456,32 @@ impl Model for GaussianModel {
             AnalyticColumn::UnresolvedBinding => return Ok(false),
         };
         output.fill(0.0);
+        if self.integrate_bins {
+            let Some(bin_width) = self.bin_width.filter(|value| *value > 0.0) else {
+                return Ok(false);
+            };
+            let denominator = sigma * std::f64::consts::SQRT_2;
+            for (row, independent) in x.iter().enumerate() {
+                let lower = (*independent - 0.5 * bin_width - center) / denominator;
+                let upper = (*independent + 0.5 * bin_width - center) / denominator;
+                let fraction = 0.5 * (erf(upper) - erf(lower)) / bin_width;
+                let offset = row * parameter_names.len();
+                if let Some(column) = amplitude_column {
+                    output[offset + column] += fraction;
+                }
+                if let Some(column) = center_column {
+                    output[offset + column] += amplitude / bin_width
+                        * (lower.mul_add(-lower, 0.0).exp() - upper.mul_add(-upper, 0.0).exp())
+                        / (SQRT_TWO_PI * sigma);
+                }
+                if let Some(column) = sigma_column {
+                    output[offset + column] += amplitude / bin_width
+                        * (lower * (-lower * lower).exp() - upper * (-upper * upper).exp())
+                        / (std::f64::consts::PI.sqrt() * sigma);
+                }
+            }
+            return Ok(true);
+        }
         for (row, independent) in x.iter().enumerate() {
             let delta = *independent - center;
             let base = (-0.5 * (delta / sigma).powi(2)).exp() / (SQRT_TWO_PI * sigma);
@@ -458,6 +518,17 @@ impl Model for GaussianModel {
                 x: expected,
                 y: output[0].len(),
             });
+        }
+        if self.integrate_bins {
+            return compatibility_finite_difference(
+                self,
+                [&self.amplitude, &self.center, &self.sigma],
+                x,
+                parameters,
+                parameter_names,
+                steps,
+                &mut output[0],
+            );
         }
         let amplitude = parameters.require(&self.amplitude.name)?;
         let center = parameters.require(&self.center.name)?;

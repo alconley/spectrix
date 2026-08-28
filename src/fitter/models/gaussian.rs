@@ -5,8 +5,9 @@ use crate::fitter::main_fitter::{BackgroundModel, BackgroundResult};
 use crate::fitter::native;
 
 use spectrix_fitting::{
-    BackgroundCoupling, FitError as NativeFitError, FitOptions as NativeFitOptions, PeakFitRequest,
-    SigmaBounds, SpectrumFitResult as NativeSpectrumFitResult, fit_peaks as fit_native_peaks,
+    BackgroundCoupling, FitError as NativeFitError, FitOptions as NativeFitOptions,
+    ManualPeakBounds, ManualPeakSeed, ObjectiveKind, PeakFitRequest, SigmaBounds,
+    SpectrumFitResult as NativeSpectrumFitResult, fit_peaks as fit_native_peaks,
 };
 
 fn auto_fmt(value: Option<f64>, unc: Option<f64>, units: Option<&str>) -> String {
@@ -307,6 +308,7 @@ impl GaussianParameters {
 pub struct GaussianFitSettings {
     pub equal_stdev: bool,
     pub free_position: bool,
+    pub objective: ObjectiveKind,
     pub sigma_bounds: Option<(f64, f64)>,
     pub per_peak_sigma_bounds: Option<(Vec<f64>, Vec<f64>)>,
 }
@@ -316,6 +318,8 @@ pub struct GaussianFitSettings {
 pub struct GaussianFitMetadata {
     pub region_markers: Vec<f64>,
     pub peak_markers: Vec<f64>,
+    pub peak_seeds: Vec<ManualPeakSeed>,
+    pub peak_bounds: Vec<ManualPeakBounds>,
     pub background_markers: Vec<(f64, f64)>,
     pub background_model: String,
 }
@@ -326,6 +330,8 @@ pub struct GaussianFitter {
     pub data: Data,
     pub region_markers: Vec<f64>,
     pub peak_markers: Vec<f64>,
+    pub manual_peak_seeds: Vec<ManualPeakSeed>,
+    pub manual_peak_bounds: Option<Vec<ManualPeakBounds>>,
     pub background_markers: Vec<(f64, f64)>,
     pub fit_settings: GaussianFitSettings,
     pub background_model: BackgroundModel,
@@ -334,6 +340,7 @@ pub struct GaussianFitter {
     pub fit_points: Vec<[f64; 2]>,
     pub uncertainty_band: EguiFilledArea,
     pub fit_report: String,
+    pub fit_warning: Option<String>,
     #[serde(default, skip_serializing)]
     pub lmfit_result: Option<String>,
     pub native_result: Option<NativeSpectrumFitResult>,
@@ -353,7 +360,7 @@ impl GaussianFitter {
     pub fn new(
         data: Data,
         region_markers: Vec<f64>,
-        peak_markers: Vec<f64>,
+        manual_peak_seeds: Vec<ManualPeakSeed>,
         background_markers: Vec<(f64, f64)>,
         background_model: BackgroundModel,
         background_result: Option<BackgroundResult>,
@@ -363,7 +370,9 @@ impl GaussianFitter {
         Self {
             data,
             region_markers,
-            peak_markers,
+            peak_markers: manual_peak_seeds.iter().map(|seed| seed.center).collect(),
+            manual_peak_seeds,
+            manual_peak_bounds: None,
             background_markers,
             background_model,
             background_result,
@@ -376,6 +385,7 @@ impl GaussianFitter {
             fit_points: Vec::new(),
             uncertainty_band: EguiFilledArea::default(),
             fit_report: String::new(),
+            fit_warning: None,
             lmfit_result: None,
             native_result: None,
             background_coupling: BackgroundCoupling::PrefitFrozen,
@@ -413,11 +423,39 @@ impl GaussianFitter {
             GaussianFitMetadata {
                 region_markers,
                 peak_markers,
+                peak_seeds: self.manual_peak_seeds_with_fallback(),
+                peak_bounds: self.manual_peak_bounds.clone().unwrap_or_default(),
                 background_markers: self.background_markers.clone(),
                 background_model: self.background_model.type_name(),
             },
             false,
         )
+    }
+
+    fn manual_peak_seeds_with_fallback(&self) -> Vec<ManualPeakSeed> {
+        if !self.manual_peak_seeds.is_empty() {
+            return self.manual_peak_seeds.clone();
+        }
+        self.peak_markers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &center)| {
+                let fitted = self.fit_result.get(index);
+                let sigma = fitted
+                    .and_then(|peak| peak.sigma.value)
+                    .filter(|value| value.is_finite() && *value > 0.0)
+                    .unwrap_or(1.0);
+                let amplitude = fitted
+                    .and_then(|peak| peak.amplitude.value)
+                    .filter(|value| value.is_finite() && *value > 0.0)
+                    .unwrap_or(1.0);
+                center.is_finite().then_some(ManualPeakSeed {
+                    center,
+                    sigma,
+                    amplitude,
+                })
+            })
+            .collect()
     }
 
     fn build_uncertainty_band(
@@ -685,11 +723,7 @@ impl GaussianFitter {
             });
         let mut background_seed =
             native::background_seed(&self.background_model, self.background_result.as_ref());
-        // A background fitted explicitly with G is the prefit for the default
-        // Prefit & Fix workflow. Preserve the lmfit behavior by keeping those
-        // fitted values fixed instead of trying to estimate them again from the
-        // automatic region-edge bins. Joint mode deliberately leaves enabled
-        // parameters variable so it can refine the background with the peaks.
+        // An explicitly fitted and locked background is the only fixed-background path.
         if self.background_result.is_some()
             && self.background_coupling == BackgroundCoupling::PrefitFrozen
         {
@@ -697,6 +731,7 @@ impl GaussianFitter {
                 parameter.vary = false;
             }
         }
+        let fitted_background_kind = native::background_kind(&self.background_model);
         let request = PeakFitRequest {
             x: self.data.x.clone(),
             y: self.data.y.clone(),
@@ -707,7 +742,8 @@ impl GaussianFitter {
                 .next()
                 .map_or(1.0, |pair| (pair[1] - pair[0]).abs()),
             region: [self.region_markers[0], self.region_markers[1]],
-            peak_markers: self.peak_markers.clone(),
+            peak_seeds: self.manual_peak_seeds_with_fallback(),
+            peak_bounds: self.manual_peak_bounds.clone(),
             background_markers: self.background_markers.clone(),
             background: native::background_kind(&self.background_model),
             background_seed: Some(background_seed),
@@ -716,7 +752,12 @@ impl GaussianFitter {
             free_centers: self.fit_settings.free_position,
             sigma_bounds,
         };
-        let mut native_result = fit_native_peaks(&request, &NativeFitOptions::default())?;
+        let options = NativeFitOptions {
+            objective: self.fit_settings.objective,
+            ..NativeFitOptions::default()
+        };
+        let mut native_result = fit_native_peaks(&request, &options)?;
+        self.background_model = native::concrete_background_model(fitted_background_kind);
 
         let estimate = |name: &str| {
             native_result
@@ -778,6 +819,17 @@ impl GaussianFitter {
             self.peak_markers.push(center.value);
             self.fit_result.push(parameters);
         }
+        self.manual_peak_seeds = self
+            .fit_result
+            .iter()
+            .filter_map(|peak| {
+                Some(ManualPeakSeed {
+                    center: peak.mean.value?,
+                    sigma: peak.sigma.value?,
+                    amplitude: peak.amplitude.value?,
+                })
+            })
+            .collect();
 
         let uncertainties = native_result.fit.confidence_band.as_ref().map_or_else(
             || vec![0.0; native_result.fit.best_fit.len()],
@@ -799,14 +851,62 @@ impl GaussianFitter {
             Self::build_uncertainty_band(&composition_x, &composition_y, &composition_uncertainty)
                 .unwrap_or_default();
         self.fit_report = native::fit_report(&native_result.fit);
-        self.background_result = native::background_result_from_native(
+        self.fit_warning = (!native_result.quality_issues.is_empty()).then(|| {
+            native_result
+                .quality_issues
+                .iter()
+                .map(|issue| match issue {
+                    spectrix_fitting::FitQualityIssue::FailedConvergence { reason } => {
+                        format!("The optimizer did not converge: {reason}")
+                    }
+                    spectrix_fitting::FitQualityIssue::MissingCovariance => {
+                        "Parameter covariance and uncertainties are unavailable.".to_owned()
+                    }
+                    spectrix_fitting::FitQualityIssue::NonFiniteResult => {
+                        "The fit contains a non-finite parameter or curve value.".to_owned()
+                    }
+                    spectrix_fitting::FitQualityIssue::ActiveBounds { parameters } => {
+                        format!("Parameters stopped on active bounds: {}", parameters.join(", "))
+                    }
+                    spectrix_fitting::FitQualityIssue::NonpositivePrediction => {
+                        "The Poisson model has an invalid expected count in at least one bin."
+                            .to_owned()
+                    }
+                    spectrix_fitting::FitQualityIssue::ObjectiveWorsened {
+                        initial,
+                        final_value,
+                    } => {
+                        format!("The objective worsened from {initial:.6} to {final_value:.6}.")
+                    }
+                    spectrix_fitting::FitQualityIssue::PoorGoodnessOfFit { p_value } => {
+                        format!("The Poisson goodness-of-fit p-value is {p_value:.4e}.")
+                    }
+                    spectrix_fitting::FitQualityIssue::UnmodeledResidualPeaks { positions } => {
+                        format!("Possible unmarked peak remains near {positions:?}; add a peak marker and refit.")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
+        if let Some(warning) = &self.fit_warning {
+            log::warn!("{warning}");
+            self.fit_report.push_str("\n[[Fit warning]]\n");
+            self.fit_report.push_str(warning);
+            self.fit_report.push('\n');
+        }
+        // The display background for a joint fit comes from the composite component, so compact
+        // the dense evaluation grid before copying that curve into the UI-facing result.
+        Self::compact_native_evaluation(&mut native_result);
+        self.background_result = native::background_result_from_composite_native(
             &self.background_model,
-            &native_result.background_prefit,
+            &native_result.fit,
             self.data.clone(),
         );
         self.fit_metadata = Some(GaussianFitMetadata {
             region_markers: native_result.region.to_vec(),
             peak_markers: native_result.peak_markers.clone(),
+            peak_seeds: self.manual_peak_seeds.clone(),
+            peak_bounds: self.manual_peak_bounds.clone().unwrap_or_default(),
             background_markers: if matches!(self.background_model, BackgroundModel::None) {
                 Vec::new()
             } else {
@@ -818,9 +918,62 @@ impl GaussianFitter {
         // The full parameter covariance, residuals, and statistics are retained.
         // Dense evaluation/component grids are display payload, so keeping hundreds
         // of thousands of redundant samples per stored fit only wastes memory.
-        Self::compact_native_evaluation(&mut native_result);
         self.native_result = Some(native_result);
         Ok(())
+    }
+
+    #[expect(
+        dead_code,
+        reason = "structured native quality issues supersede the legacy warning"
+    )]
+    fn unmodeled_peak_warning(&self, result: &NativeSpectrumFitResult) -> Option<String> {
+        let region_min = self.region_markers[0].min(self.region_markers[1]);
+        let region_max = self.region_markers[0].max(self.region_markers[1]);
+        let observations = self
+            .data
+            .x
+            .iter()
+            .copied()
+            .zip(self.data.y.iter().copied())
+            .filter(|(x, _)| *x >= region_min && *x <= region_max)
+            .collect::<Vec<_>>();
+        if observations.len() != result.fit.residuals.len() || observations.len() < 3 {
+            return None;
+        }
+        let mut absolute_residuals = result
+            .fit
+            .residuals
+            .iter()
+            .map(|residual| residual.abs())
+            .collect::<Vec<_>>();
+        absolute_residuals.sort_by(f64::total_cmp);
+        let robust_noise = absolute_residuals[absolute_residuals.len() / 2].max(1.0);
+        let fitted_peaks = self
+            .fit_result
+            .iter()
+            .filter_map(|peak| Some((peak.mean.value?, peak.sigma.value?.abs())))
+            .collect::<Vec<_>>();
+        let candidates = (1..observations.len() - 1)
+            .filter(|index| {
+                let residual = result.fit.residuals[*index];
+                let model_count = (observations[*index].1 - residual).max(1.0);
+                let threshold = (5.0 * model_count.sqrt()).max(6.0 * robust_noise);
+                residual > threshold
+                    && residual >= result.fit.residuals[*index - 1]
+                    && residual >= result.fit.residuals[*index + 1]
+                    && fitted_peaks.iter().all(|(center, sigma)| {
+                        (observations[*index].0 - center).abs() > (2.5 * sigma).max(1.0e-12)
+                    })
+            })
+            .count();
+        (candidates > 0).then(|| {
+            format!(
+                "Possible unmarked peak{} remain{} in the fit residuals ({candidates}). Add peak marker{} and refit.",
+                if candidates == 1 { "" } else { "s" },
+                if candidates == 1 { "s" } else { "" },
+                if candidates == 1 { "" } else { "s" },
+            )
+        })
     }
 
     pub fn update_uuid_for_peak(
@@ -1059,10 +1212,15 @@ impl GaussianFitter {
             });
 
             if i == 0 {
-                ui.menu_button("Fit Report", |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(self.fit_report.clone());
+                ui.vertical(|ui| {
+                    if let Some(warning) = &self.fit_warning {
+                        ui.colored_label(egui::Color32::YELLOW, warning);
+                    }
+                    ui.menu_button("Fit Report", |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(self.fit_report.clone());
+                            });
                         });
                     });
                 });
@@ -1101,7 +1259,7 @@ mod tests {
         main_fitter::{BackgroundModel, BackgroundResult},
         models::linear::LinearFitter,
     };
-    use spectrix_fitting::{BackgroundCoupling, ParameterKind};
+    use spectrix_fitting::{BackgroundCoupling, ManualPeakSeed, ParameterKind};
 
     #[test]
     fn decimate_composition_arrays_limits_density_and_keeps_endpoints() {
@@ -1190,7 +1348,11 @@ mod tests {
         let mut fitter = GaussianFitter::new(
             Data { x, y },
             vec![2.0, 8.0],
-            vec![5.0],
+            vec![ManualPeakSeed {
+                center: 5.0,
+                sigma: 0.4,
+                amplitude: 85.0,
+            }],
             vec![(2.0, 3.0), (7.0, 8.0)],
             BackgroundModel::Linear(Default::default()),
             None,
@@ -1234,6 +1396,30 @@ mod tests {
                 .iter()
                 .any(|(name, _)| name == "g0_")
         );
+        let native_background = native
+            .fit
+            .components
+            .iter()
+            .find(|component| component.name == "background")
+            .expect("joint background component");
+        let BackgroundResult::Linear(background) = fitter
+            .background_result
+            .as_ref()
+            .expect("displayed joint background")
+        else {
+            panic!("expected linear background");
+        };
+        assert_eq!(
+            background.fit_points,
+            native
+                .fit
+                .evaluation_x
+                .iter()
+                .copied()
+                .zip(native_background.values.iter().copied())
+                .map(Into::into)
+                .collect::<Vec<[f64; 2]>>()
+        );
         assert_eq!(
             fitter.fit_metadata.as_ref().expect("metadata").peak_markers,
             vec![5.0]
@@ -1266,7 +1452,7 @@ mod tests {
     }
 
     #[test]
-    fn frozen_manual_background_is_used_without_background_markers() {
+    fn frozen_manual_background_uses_explicit_background_markers() {
         let x = (0..=100)
             .map(|index| index as f64 * 0.1 + 0.05)
             .collect::<Vec<_>>();
@@ -1287,8 +1473,12 @@ mod tests {
         let mut fitter = GaussianFitter::new(
             Data { x, y },
             vec![2.03, 7.97],
-            Vec::new(),
-            Vec::new(),
+            vec![ManualPeakSeed {
+                center: 5.0,
+                sigma: 0.4,
+                amplitude: 85.0,
+            }],
+            vec![(2.03, 3.0), (7.0, 7.97)],
             BackgroundModel::Linear(Default::default()),
             Some(background),
             true,
@@ -1311,5 +1501,46 @@ mod tests {
         }
         assert!(native.fit.termination.success);
         assert_eq!(native.peak_markers.len(), 1);
+    }
+
+    #[test]
+    fn unmarked_residual_peak_is_reported_without_adding_a_gaussian() {
+        let x = (0..=200)
+            .map(|index| index as f64 * 0.05)
+            .collect::<Vec<_>>();
+        let y = x
+            .iter()
+            .map(|value| {
+                3.0 + 80.0 / (2.506_628_274_631_000_2 * 0.2)
+                    * (-0.5 * ((*value - 3.0) / 0.2).powi(2)).exp()
+                    + 60.0 / (2.506_628_274_631_000_2 * 0.25)
+                        * (-0.5 * ((*value - 8.0) / 0.25).powi(2)).exp()
+            })
+            .collect::<Vec<_>>();
+        let mut fitter = GaussianFitter::new(
+            Data { x, y },
+            vec![0.0, 10.0],
+            vec![ManualPeakSeed {
+                center: 3.0,
+                sigma: 0.25,
+                amplitude: 80.0,
+            }],
+            Vec::new(),
+            BackgroundModel::None,
+            None,
+            true,
+            true,
+        );
+        fitter.background_coupling = BackgroundCoupling::PrefitJoint;
+
+        fitter.fit_native().expect("single marked peak fit");
+
+        assert_eq!(fitter.fit_result.len(), 1);
+        assert!(
+            fitter
+                .fit_warning
+                .as_deref()
+                .is_some_and(|warning| warning.contains("unmarked peak"))
+        );
     }
 }

@@ -53,6 +53,13 @@ impl Default for EguiHorizontalLine {
 }
 
 impl EguiHorizontalLine {
+    pub fn set_color(&mut self, color: Color32) {
+        self.color = color;
+        self.color_rgb = Rgb::from_color32(color);
+        self.stroke.color = color;
+        self.stroke_rgb = Rgb::from_color32(color);
+    }
+
     pub fn new(y_value: f64, color: Color32) -> Self {
         let line = Self::default();
         Self {

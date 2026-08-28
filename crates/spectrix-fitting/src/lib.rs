@@ -23,10 +23,12 @@ pub use parameter::{
     ParameterKind, ParameterValues,
 };
 pub use solver::{
-    ConfidenceBand, Covariance, FitOptions, FitProblem, FitResult, FitStatistics, SolverProfile,
-    TerminationStatus, fit,
+    ConfidenceBand, Covariance, FitOptions, FitProblem, FitResult, FitStatistics, ObjectiveKind,
+    SolverProfile, TerminationStatus, fit,
 };
 pub use spectrum::{
-    BackgroundCoupling, BackgroundFitRequest, BackgroundKind, BackgroundSeed, PeakFitRequest,
-    SigmaBounds, SpectrumFitResult, fit_background, fit_peaks,
+    BackgroundCoupling, BackgroundFitRequest, BackgroundKind, BackgroundSeed, FitQualityIssue,
+    FitQualityStatus, ManualPeakBounds, ManualPeakEstimate, ManualPeakSeed, ManualSeedEstimate,
+    ManualSeedEstimateRequest, PeakFitRequest, SigmaBounds, SpectrumFitResult,
+    estimate_manual_peak_seeds, evaluate_manual_peak, fit_background, fit_peaks,
 };

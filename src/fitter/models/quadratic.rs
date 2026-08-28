@@ -18,9 +18,13 @@ impl Default for QuadraticParameters {
 }
 
 impl QuadraticParameters {
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, parameters_are_current: bool) {
         ui.horizontal(|ui| {
-            ui.label("Fit Parameters");
+            ui.label(if parameters_are_current {
+                "Current Background Fit Parameters"
+            } else {
+                "Background Starting Parameters"
+            });
             if ui.small_button("Reset").clicked() {
                 *self = Self::default();
             }
@@ -30,7 +34,7 @@ impl QuadraticParameters {
             .num_columns(5)
             .show(ui, |ui| {
                 ui.label("Parameter");
-                ui.label("Initial Guess");
+                ui.label("Current / Next Guess");
                 ui.label("Min");
                 ui.label("Max");
                 ui.label("Vary");

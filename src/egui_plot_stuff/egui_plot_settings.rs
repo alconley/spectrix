@@ -41,7 +41,7 @@ impl Default for EguiPlotSettings {
             sharp_grid_lines: true,
             show_background: true,
             allow_double_click_reset: true,
-            limit_scrolling: false,
+            limit_scrolling: true,
             reset_axis: false,
             x_label: String::new(),
             y_label: String::new(),

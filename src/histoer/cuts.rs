@@ -9,6 +9,7 @@ use std::sync::{Mutex, OnceLock};
 
 use polars::prelude::*;
 
+use crate::defaults::Cut2DDefaults;
 use crate::egui_plot_stuff::egui_polygon::EguiPolygon;
 use crate::histoer::ui_helpers::{
     SearchableColumnPickerSize, precise_drag_value, searchable_column_picker_with_width_ui,
@@ -787,6 +788,18 @@ impl Default for Cut2D {
 }
 
 impl Cut2D {
+    pub fn apply_defaults(&mut self, defaults: &Cut2DDefaults, color: egui::Color32) {
+        self.active = defaults.active;
+        self.polygon.draw = defaults.draw;
+        self.polygon.name_in_legend = defaults.name_in_legend;
+        self.polygon.width = defaults.line_width;
+        self.polygon.style = defaults.line_style;
+        self.polygon.style_length = defaults.style_length;
+        self.polygon.fill_color = defaults.fill_color;
+        self.polygon.interactive_dragging = defaults.interactive_dragging;
+        self.polygon.set_color(color);
+    }
+
     fn normalize_after_load(&mut self) {
         self.polygon.interactive_clicking = false;
     }
