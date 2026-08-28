@@ -1033,8 +1033,7 @@ fn integrated_gaussian_response(
     let lower_exponential = (-lower * lower).exp();
     let upper_exponential = (-upper * upper).exp();
     let value =
-        0.5 * (statrs::function::erf::erf(upper) - statrs::function::erf::erf(lower))
-            / bin_width;
+        0.5 * (statrs::function::erf::erf(upper) - statrs::function::erf::erf(lower)) / bin_width;
     let center_derivative = (lower_exponential - upper_exponential)
         / (2.0 * std::f64::consts::PI).sqrt()
         / sigma
@@ -1157,8 +1156,7 @@ impl Model for HeightGaussianModel {
                 output[offset + column] += response / center_response;
             }
             if let Some(column) = center_column {
-                output[offset + column] +=
-                    height * response_center_derivative / center_response;
+                output[offset + column] += height * response_center_derivative / center_response;
             }
             if let Some(column) = sigma_column {
                 output[offset + column] += height
@@ -2422,9 +2420,8 @@ mod manual_tests {
                     if *observed == 0.0 {
                         2.0 * predicted.max(1.0e-12)
                     } else {
-                        2.0
-                            * (predicted.max(1.0e-12) - observed
-                                + observed * (observed / predicted.max(1.0e-12)).ln())
+                        2.0 * (predicted.max(1.0e-12) - observed
+                            + observed * (observed / predicted.max(1.0e-12)).ln())
                     }
                 })
                 .sum::<f64>()

@@ -121,20 +121,20 @@ fn canonical_manual_fit_uses_the_ten_explicit_run_83_markers() {
         .map(|(_, count)| *count)
         .collect::<Vec<_>>();
     let request = PeakFitRequest {
-            x,
-            y: y.clone(),
-            bin_width: 1.0,
-            region: [-220.0, 100.0],
-            peak_seeds: estimate.peaks.iter().map(|peak| peak.seed).collect(),
-            peak_bounds: Some(estimate.peaks.iter().map(|peak| peak.bounds).collect()),
-            background_markers,
-            background: BackgroundKind::Constant,
-            background_seed: None,
-            background_coupling: BackgroundCoupling::PrefitJoint,
-            equal_sigma: false,
-            free_centers: true,
-            sigma_bounds: None,
-        };
+        x,
+        y: y.clone(),
+        bin_width: 1.0,
+        region: [-220.0, 100.0],
+        peak_seeds: estimate.peaks.iter().map(|peak| peak.seed).collect(),
+        peak_bounds: Some(estimate.peaks.iter().map(|peak| peak.bounds).collect()),
+        background_markers,
+        background: BackgroundKind::Constant,
+        background_seed: None,
+        background_coupling: BackgroundCoupling::PrefitJoint,
+        equal_sigma: false,
+        free_centers: true,
+        sigma_bounds: None,
+    };
     let least_squares = fit_peaks(
         &request,
         &FitOptions {
@@ -186,7 +186,10 @@ fn canonical_manual_fit_uses_the_ten_explicit_run_83_markers() {
             .iter()
             .find(|parameter| parameter.name == format!("g{index}_center"))
             .expect("fitted center");
-        assert!(!fitted_center.active_bound, "peak {marker} hit a center bound");
+        assert!(
+            !fitted_center.active_bound,
+            "peak {marker} hit a center bound"
+        );
         assert!(
             (maximum_x - fitted_center.value).abs() <= 1.0,
             "peak {marker}: component maximum {maximum_x} is not aligned with center {}",
@@ -294,8 +297,7 @@ fn every_run_83_marker_has_a_stable_poisson_single_peak_fit() {
         let least_squares_deviance = poisson_deviance(&region_y, &least_squares_prediction);
         let fitted_deviance = poisson_deviance(&region_y, &poisson_prediction);
         assert!(
-            fitted_deviance
-                <= least_squares_deviance + 1.0e-7 * least_squares_deviance.max(1.0),
+            fitted_deviance <= least_squares_deviance + 1.0e-7 * least_squares_deviance.max(1.0),
             "marker {marker}: Poisson deviance {fitted_deviance} exceeded LS deviance {least_squares_deviance}",
         );
         let center = poisson

@@ -1,7 +1,7 @@
 use crate::egui_plot_stuff::{egui_line::EguiLine, egui_vertical_line::EguiVerticalLine};
 use crate::fitter::common::Calibration;
-use egui::Id;
-use egui_plot::{FilledArea, Line, LineStyle, PlotPoint, PlotPoints, PlotUi, Points, VLine};
+use egui::{Color32, Id};
+use egui_plot::{FilledArea, Line, LineStyle, PlotPoint, PlotPoints, PlotUi, VLine};
 use serde::Deserialize;
 use spectrix_fitting::{ManualPeakBounds, ManualPeakSeed, evaluate_manual_peak};
 use std::cmp::Ordering;
@@ -18,6 +18,20 @@ fn apply_marker_style(line: &mut EguiVerticalLine, defaults: &MarkerStyleDefault
 }
 
 const FWHM_FACTOR: f64 = 2.354_82;
+/// Extra screen-space tolerance around draggable preview curves.
+const PREVIEW_HIT_RADIUS_PX: f32 = 18.0;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PreviewHit {
+    Seed,
+    UpperBounds,
+    LowerBounds,
+    FwhmMinLower,
+    FwhmMinUpper,
+    FwhmMaxLower,
+    FwhmMaxUpper,
+    Position,
+}
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GuessSource {
@@ -73,6 +87,24 @@ pub struct PeakGuess {
     pub net_height_max_dragging: bool,
     #[serde(skip)]
     pub background_at_center: f64,
+    #[serde(skip)]
+    pub preview_hovered: bool,
+    #[serde(skip)]
+    pub preview_upper_bounds_hovered: bool,
+    #[serde(skip)]
+    pub preview_lower_bounds_hovered: bool,
+    #[serde(skip)]
+    pub seed_drag_start: Option<egui::Pos2>,
+    #[serde(skip)]
+    pub seed_drag_vertical: Option<bool>,
+    #[serde(skip)]
+    pub width_drag_upper: Option<bool>,
+    #[serde(skip)]
+    pub preview_position_hovered: bool,
+    /// Legacy plain peak markers stored their position directly as `x_value`.
+    /// Read it during migration but never write it into new saves.
+    #[serde(default, skip_serializing, alias = "x_value")]
+    legacy_x_value: Option<f64>,
 }
 
 impl Default for PeakGuess {
@@ -102,18 +134,19 @@ impl Default for PeakGuess {
             net_height_min_dragging: false,
             net_height_max_dragging: false,
             background_at_center: 0.0,
+            preview_hovered: false,
+            preview_upper_bounds_hovered: false,
+            preview_lower_bounds_hovered: false,
+            seed_drag_start: None,
+            seed_drag_vertical: None,
+            width_drag_upper: None,
+            preview_position_hovered: false,
+            legacy_x_value: None,
         }
     }
 }
 
 impl PeakGuess {
-    fn from_legacy(center: EguiVerticalLine) -> Self {
-        Self {
-            center,
-            ..Self::default()
-        }
-    }
-
     pub fn seed(&self) -> ManualPeakSeed {
         ManualPeakSeed {
             center: self.center.x_value,
@@ -210,19 +243,13 @@ fn deserialize_peak_guesses<'de, D>(deserializer: D) -> Result<Vec<PeakGuess>, D
 where
     D: serde::Deserializer<'de>,
 {
-    let values = Vec::<serde_json::Value>::deserialize(deserializer)?;
-    Ok(values
-        .into_iter()
-        .map(|value| {
-            if value.get("center").is_some() {
-                serde_json::from_value(value).map_err(serde::de::Error::custom)
-            } else {
-                serde_json::from_value(value)
-                    .map(PeakGuess::from_legacy)
-                    .map_err(serde::de::Error::custom)
-            }
-        })
-        .collect::<Result<Vec<_>, _>>()?)
+    let mut guesses = Vec::<PeakGuess>::deserialize(deserializer)?;
+    for guess in &mut guesses {
+        if let Some(x_value) = guess.legacy_x_value.take() {
+            guess.center.x_value = x_value;
+        }
+    }
+    Ok(guesses)
 }
 
 impl Histogram {
@@ -508,85 +535,16 @@ impl PeakGuess {
         let Some(center_x) = display_x_value(seed.center, calibration, log_x) else {
             return;
         };
-        let (
-            center_id,
-            left_id,
-            right_id,
-            apex_id,
-            fwhm_min_id,
-            fwhm_max_id,
-            height_min_id,
-            height_max_id,
-        ) = self.ids();
+        let (center_id, ..) = self.ids();
         let color = self.center.color;
-        let faded = color.gamma_multiply(if self.valid { 0.22 } else { 0.10 });
+        let preview_color = Color32::from_rgb(245, 145, 30);
 
         if self.valid && self.fwhm.is_finite() && self.fwhm > 0.0 {
             let raw_left = seed.center - 0.5 * self.fwhm;
             let raw_right = seed.center + 0.5 * self.fwhm;
-            if let (Some(left), Some(right)) = (
-                display_x_value(raw_left, calibration, log_x),
-                display_x_value(raw_right, calibration, log_x),
-            ) {
-                let half_height_raw = self.background_at_center + 0.5 * self.net_height;
-                let half_height = display_y_value(half_height_raw, log_y).unwrap_or(0.0);
-                for (value, id, dragging) in [
-                    (left, left_id, self.left_dragging),
-                    (right, right_id, self.right_dragging),
-                ] {
-                    plot_ui.points(
-                        Points::new("", vec![[value, half_height]])
-                            .id(id)
-                            .allow_hover(true)
-                            .highlight(dragging)
-                            .color(faded)
-                            .radius(4.0),
-                    );
-                }
-
-                // The range handles are deliberately on the right edge and apex so that
-                // changing a bound never moves the current seed or another parameter.
-                let range_handle_color = color.gamma_multiply(0.16);
-                for (fwhm, id, dragging) in [
-                    (self.fwhm_min, fwhm_min_id, self.fwhm_min_dragging),
-                    (self.fwhm_max, fwhm_max_id, self.fwhm_max_dragging),
-                ] {
-                    if let Some(x) = display_x_value(seed.center + 0.5 * fwhm, calibration, log_x)
-                    {
-                        plot_ui.points(
-                            Points::new("", vec![[x, half_height]])
-                                .id(id)
-                                .allow_hover(true)
-                                .highlight(dragging)
-                                .color(range_handle_color)
-                                .radius(3.0),
-                        );
-                    }
-                }
-                for (height, id, dragging) in [
-                    (
-                        self.net_height_min,
-                        height_min_id,
-                        self.net_height_min_dragging,
-                    ),
-                    (
-                        self.net_height_max,
-                        height_max_id,
-                        self.net_height_max_dragging,
-                    ),
-                ] {
-                    if let Some(y) = display_y_value(self.background_at_center + height, log_y) {
-                        plot_ui.points(
-                            Points::new("", vec![[center_x, y]])
-                                .id(id)
-                                .allow_hover(true)
-                                .highlight(dragging)
-                                .color(range_handle_color)
-                                .radius(3.0),
-                        );
-                    }
-                }
-
+            if display_x_value(raw_left, calibration, log_x).is_some()
+                && display_x_value(raw_right, calibration, log_x).is_some()
+            {
                 let seed_for = |fwhm: f64, height: f64| {
                     let sigma = fwhm / FWHM_FACTOR;
                     let unit = evaluate_manual_peak(
@@ -647,8 +605,51 @@ impl PeakGuess {
                             FilledArea::new("", &xs, &lower, &upper)
                                 .id(Id::new(("manual-peak-preview-envelope", self.id)))
                                 .allow_hover(false)
-                                .fill_color(color.gamma_multiply(0.09)),
+                                .fill_color(preview_color.gamma_multiply(
+                                    if self.preview_position_hovered || self.center.is_dragging {
+                                        0.24
+                                    } else {
+                                        0.12
+                                    },
+                                )),
                         );
+                        for (edge, highlighted) in [
+                            (
+                                &lower,
+                                self.preview_lower_bounds_hovered
+                                    || self.width_drag_upper == Some(false)
+                                    || self.net_height_min_dragging,
+                            ),
+                            (
+                                &upper,
+                                self.preview_upper_bounds_hovered
+                                    || self.width_drag_upper == Some(true)
+                                    || self.net_height_max_dragging,
+                            ),
+                        ] {
+                            plot_ui.line(
+                                Line::new(
+                                    "",
+                                    PlotPoints::Owned(
+                                        xs.iter()
+                                            .zip(edge)
+                                            .map(|(&x, &y)| PlotPoint::new(x, y))
+                                            .collect(),
+                                    ),
+                                )
+                                .allow_hover(false)
+                                .color(preview_color.gamma_multiply(if highlighted {
+                                    1.0
+                                } else {
+                                    0.45
+                                }))
+                                .width(if highlighted {
+                                    2.2
+                                } else {
+                                    0.9
+                                }),
+                            );
+                        }
                     }
                 }
 
@@ -659,20 +660,32 @@ impl PeakGuess {
                         let raw_x = start + (end - start) * index as f64 / 140.0;
                         let y = interpolate_background(background, raw_x)
                             + evaluate_manual_peak(seed, raw_x, bin_width).ok()?;
-                        Some([display_x_value(raw_x, calibration, log_x)?, display_y_value(y, log_y)?])
+                        Some([
+                            display_x_value(raw_x, calibration, log_x)?,
+                            display_y_value(y, log_y)?,
+                        ])
                     })
                     .collect::<Vec<_>>();
                 if points.len() >= 2 {
+                    let seed_highlighted = self.preview_hovered
+                        || self.apex_dragging
+                        || self.left_dragging
+                        || self.right_dragging;
                     plot_ui.line(
                         Line::new(
                             "",
                             PlotPoints::Owned(points.into_iter().map(Into::into).collect()),
                         )
-                            .id(Id::new(("manual-peak-preview-seed", self.id)))
-                            .allow_hover(false)
-                            .color(color.gamma_multiply(0.30))
-                            .width(0.8)
-                            .style(LineStyle::Dashed { length: 4.0 }),
+                        .id(Id::new(("manual-peak-preview-seed", self.id)))
+                        .allow_hover(false)
+                        .highlight(seed_highlighted)
+                        .color(preview_color.gamma_multiply(if seed_highlighted {
+                            1.0
+                        } else {
+                            0.55
+                        }))
+                        .width(if seed_highlighted { 2.0 } else { 0.8 })
+                        .style(LineStyle::Dashed { length: 4.0 }),
                     );
                 }
             }
@@ -688,29 +701,135 @@ impl PeakGuess {
                 .color(color)
                 .style(self.center.style.to_egui(self.center.style_length)),
         );
-        let bounds = plot_ui.plot_bounds();
-        let mid_y = 0.5 * (bounds.min()[1] + bounds.max()[1]);
-        plot_ui.points(
-            Points::new("", vec![[center_x, mid_y]])
-                .id(center_id)
-                .allow_hover(true)
-                .highlight(self.center.is_dragging)
-                .color(color)
-                .radius(self.center.mid_point_radius.max(4.0)),
-        );
+    }
 
-        if self.valid {
-            let raw_apex = self.background_at_center + self.model_height(bin_width);
-            if let Some(apex_y) = display_y_value(raw_apex, log_y) {
-                plot_ui.points(
-                    Points::new("", vec![[center_x, apex_y]])
-                        .id(apex_id)
-                        .allow_hover(true)
-                        .highlight(self.apex_dragging)
-                        .color(color)
-                        .radius(5.0),
-                );
+    #[allow(clippy::too_many_arguments)]
+    fn preview_hit(
+        &self,
+        pointer_position: egui::Pos2,
+        plot_response: &egui_plot::PlotResponse<()>,
+        calibration: Option<&Calibration>,
+        raw_axis_range: (f64, f64),
+        log_x: bool,
+        log_y: bool,
+        bin_width: f64,
+        background: &[[f64; 2]],
+    ) -> Option<PreviewHit> {
+        if !self.valid || self.fwhm <= 0.0 {
+            return None;
+        }
+        let plot_point = plot_response
+            .transform
+            .value_from_position(pointer_position);
+        let Some(raw_x) = raw_x_value(
+            plot_point.x,
+            calibration,
+            log_x,
+            raw_axis_range,
+            self.center.x_value,
+        ) else {
+            return None;
+        };
+
+        let seed_for = |fwhm: f64, height: f64| {
+            let sigma = fwhm / FWHM_FACTOR;
+            let unit = evaluate_manual_peak(
+                ManualPeakSeed {
+                    center: self.center.x_value,
+                    sigma,
+                    amplitude: 1.0,
+                },
+                self.center.x_value,
+                bin_width,
+            )
+            .ok()?;
+            (unit > 0.0).then_some(ManualPeakSeed {
+                center: self.center.x_value,
+                sigma,
+                amplitude: height / unit,
+            })
+        };
+        let baseline = interpolate_background(background, raw_x);
+        let Some(seed_y) = evaluate_manual_peak(self.seed(), raw_x, bin_width)
+            .ok()
+            .and_then(|height| display_y_value(baseline + height, log_y))
+        else {
+            return None;
+        };
+        let seed_position = plot_response
+            .transform
+            .position_from_point(&PlotPoint::new(plot_point.x, seed_y));
+        if pointer_position.distance(seed_position) <= PREVIEW_HIT_RADIUS_PX {
+            return Some(PreviewHit::Seed);
+        }
+
+        let mut envelope_ys = Vec::with_capacity(4);
+        let offset = (raw_x - self.center.x_value).abs();
+        let mut width_hit = None;
+        for (seed, hit) in [
+            (
+                seed_for(self.fwhm_min, self.net_height_min),
+                PreviewHit::FwhmMinLower,
+            ),
+            (
+                seed_for(self.fwhm_min, self.net_height_max),
+                PreviewHit::FwhmMinUpper,
+            ),
+            (
+                seed_for(self.fwhm_max, self.net_height_min),
+                PreviewHit::FwhmMaxLower,
+            ),
+            (
+                seed_for(self.fwhm_max, self.net_height_max),
+                PreviewHit::FwhmMaxUpper,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(seed, hit)| seed.map(|seed| (seed, hit)))
+        {
+            let Some(display_y) = evaluate_manual_peak(seed, raw_x, bin_width)
+                .ok()
+                .and_then(|height| display_y_value(baseline + height, log_y))
+            else {
+                continue;
+            };
+            let position = plot_response
+                .transform
+                .position_from_point(&PlotPoint::new(plot_point.x, display_y));
+            if offset > 0.15 * self.fwhm
+                && pointer_position.distance(position) <= PREVIEW_HIT_RADIUS_PX
+            {
+                width_hit = Some(hit);
             }
+            envelope_ys.push(display_y);
+        }
+        if envelope_ys.len() != 4 {
+            return None;
+        }
+        let half_span = 5.0 * self.fwhm_max / FWHM_FACTOR;
+        let low = envelope_ys.iter().copied().fold(f64::INFINITY, f64::min);
+        let high = envelope_ys
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        if (raw_x - self.center.x_value).abs() > half_span || !(low..=high).contains(&plot_point.y)
+        {
+            return None;
+        }
+        let lower_edge = plot_response
+            .transform
+            .position_from_point(&PlotPoint::new(plot_point.x, low));
+        let upper_edge = plot_response
+            .transform
+            .position_from_point(&PlotPoint::new(plot_point.x, high));
+        if let Some(hit) = width_hit {
+            Some(hit)
+        } else if pointer_position.distance(upper_edge) <= PREVIEW_HIT_RADIUS_PX {
+            Some(PreviewHit::UpperBounds)
+        } else if pointer_position.distance(lower_edge) <= PREVIEW_HIT_RADIUS_PX {
+            Some(PreviewHit::LowerBounds)
+        } else {
+            Some(PreviewHit::Position)
         }
     }
 
@@ -722,6 +841,8 @@ impl PeakGuess {
         log_x: bool,
         log_y: bool,
         bin_width: f64,
+        background: &[[f64; 2]],
+        preview_owner: Option<u64>,
     ) -> PeakInteraction {
         let pointer = plot_response
             .response
@@ -739,7 +860,16 @@ impl PeakGuess {
         ) = self.ids();
         let mut interaction = PeakInteraction::default();
         if let Some(pointer_position) = pointer.hover_pos() {
+            let mut grabbed_explicit_handle = false;
             if let Some(hovered) = plot_response.hovered_plot_item {
+                grabbed_explicit_handle = hovered == center_id
+                    || hovered == left_id
+                    || hovered == right_id
+                    || hovered == apex_id
+                    || hovered == fwhm_min_id
+                    || hovered == fwhm_max_id
+                    || hovered == height_min_id
+                    || hovered == height_max_id;
                 if pointer.button_pressed(egui::PointerButton::Primary) {
                     self.center.is_dragging = hovered == center_id;
                     self.left_dragging = hovered == left_id;
@@ -756,6 +886,63 @@ impl PeakGuess {
             let plot_point = plot_response
                 .transform
                 .value_from_position(pointer_position);
+            let preview_hit = (!grabbed_explicit_handle
+                && preview_owner.is_none_or(|id| id == self.id))
+            .then(|| {
+                self.preview_hit(
+                    pointer_position,
+                    plot_response,
+                    calibration,
+                    raw_axis_range,
+                    log_x,
+                    log_y,
+                    bin_width,
+                    background,
+                )
+            })
+            .flatten();
+            self.preview_hovered = preview_hit == Some(PreviewHit::Seed);
+            self.preview_upper_bounds_hovered = matches!(
+                preview_hit,
+                Some(PreviewHit::UpperBounds | PreviewHit::FwhmMinUpper | PreviewHit::FwhmMaxUpper)
+            );
+            self.preview_lower_bounds_hovered = matches!(
+                preview_hit,
+                Some(PreviewHit::LowerBounds | PreviewHit::FwhmMinLower | PreviewHit::FwhmMaxLower)
+            );
+            self.preview_position_hovered = preview_hit == Some(PreviewHit::Position);
+            if pointer.button_pressed(egui::PointerButton::Primary)
+                && let Some(preview_hit) = preview_hit
+            {
+                match preview_hit {
+                    PreviewHit::Seed => {
+                        self.seed_drag_start = Some(pointer_position);
+                        self.seed_drag_vertical = None;
+                    }
+                    PreviewHit::UpperBounds => self.net_height_max_dragging = true,
+                    PreviewHit::LowerBounds => self.net_height_min_dragging = true,
+                    PreviewHit::FwhmMinLower | PreviewHit::FwhmMinUpper => {
+                        self.fwhm_min_dragging = true;
+                        self.width_drag_upper = Some(preview_hit == PreviewHit::FwhmMinUpper);
+                    }
+                    PreviewHit::FwhmMaxLower | PreviewHit::FwhmMaxUpper => {
+                        self.fwhm_max_dragging = true;
+                        self.width_drag_upper = Some(preview_hit == PreviewHit::FwhmMaxUpper);
+                    }
+                    PreviewHit::Position => self.center.is_dragging = true,
+                }
+            }
+            if let Some(start) = self.seed_drag_start
+                && self.seed_drag_vertical.is_none()
+            {
+                let delta = pointer_position - start;
+                if delta.length_sq() >= 9.0 {
+                    let vertical = delta.y.abs() >= delta.x.abs();
+                    self.seed_drag_vertical = Some(vertical);
+                    self.apex_dragging = vertical;
+                    self.right_dragging = !vertical;
+                }
+            }
             if self.center.is_dragging
                 && let Some(raw_x) = raw_x_value(
                     plot_point.x,
@@ -818,15 +1005,13 @@ impl PeakGuess {
                 if self.fwhm_min_dragging {
                     self.fwhm_min = value.clamp(absolute_minimum, self.fwhm);
                 } else {
-                    let absolute_maximum = (raw_axis_range.1 - raw_axis_range.0)
-                        .abs()
-                        .max(self.fwhm);
+                    let absolute_maximum =
+                        (raw_axis_range.1 - raw_axis_range.0).abs().max(self.fwhm);
                     self.fwhm_max = value.clamp(self.fwhm, absolute_maximum);
                 }
                 self.hold_bounds();
-                self.valid = self.amplitude.is_finite()
-                    && self.amplitude > 0.0
-                    && self.bounds_valid();
+                self.valid =
+                    self.amplitude.is_finite() && self.amplitude > 0.0 && self.bounds_valid();
                 interaction.shared_fwhm_bounds = Some([self.fwhm_min, self.fwhm_max]);
                 interaction.changed = true;
             }
@@ -854,14 +1039,16 @@ impl PeakGuess {
                     self.net_height_max = value.max(self.net_height);
                 }
                 self.hold_bounds();
-                self.valid = self.amplitude.is_finite()
-                    && self.amplitude > 0.0
-                    && self.bounds_valid();
+                self.valid =
+                    self.amplitude.is_finite() && self.amplitude > 0.0 && self.bounds_valid();
                 interaction.changed = true;
             }
         }
 
-        if pointer.button_released(egui::PointerButton::Primary) {
+        // Plot responses may miss the one-frame `button_released` transition when a drag ends
+        // outside their active area. Clear every mode whenever the primary button is up so a
+        // later click can select the curve or band afresh.
+        if !pointer.primary_down() {
             self.center.is_dragging = false;
             self.left_dragging = false;
             self.right_dragging = false;
@@ -870,6 +1057,15 @@ impl PeakGuess {
             self.fwhm_max_dragging = false;
             self.net_height_min_dragging = false;
             self.net_height_max_dragging = false;
+            self.seed_drag_start = None;
+            self.seed_drag_vertical = None;
+            self.width_drag_upper = None;
+        }
+        if pointer.hover_pos().is_none() {
+            self.preview_hovered = false;
+            self.preview_upper_bounds_hovered = false;
+            self.preview_lower_bounds_hovered = false;
+            self.preview_position_hovered = false;
         }
         interaction
     }
@@ -903,6 +1099,28 @@ impl FitMarkers {
             guess.center.name = format!("Peak Marker {}", guess.id);
         }
         self.next_peak_id = next;
+    }
+
+    /// Highest upper initial-guess envelope value whose peak center is visible.
+    /// The envelope reaches its maximum at the peak center, where its FWHM does not affect
+    /// the height, so this is sufficient for plot Y-range fitting.
+    pub fn visible_peak_preview_max(&self, raw_x_min: f64, raw_x_max: f64) -> Option<f64> {
+        let minimum = raw_x_min.min(raw_x_max);
+        let maximum = raw_x_min.max(raw_x_max);
+        self.peak_markers
+            .iter()
+            .filter(|peak| {
+                peak.valid
+                    && peak.net_height_max.is_finite()
+                    && peak.center.x_value >= minimum
+                    && peak.center.x_value <= maximum
+            })
+            .map(|peak| {
+                interpolate_background(&self.preview_background, peak.center.x_value)
+                    + peak.net_height_max
+            })
+            .filter(|height| height.is_finite())
+            .max_by(|left, right| left.total_cmp(right))
     }
 
     pub fn is_dragging(&self) -> bool {
@@ -1210,6 +1428,51 @@ impl FitMarkers {
         let mut changed = false;
         let mut shared_fwhm = None;
         let mut shared_fwhm_bounds = None;
+        let pointer = plot_response
+            .response
+            .ctx
+            .input(|input| input.pointer.clone());
+        let preview_owner = pointer
+            .button_pressed(egui::PointerButton::Primary)
+            .then(|| pointer.hover_pos())
+            .flatten()
+            .and_then(|pointer_position| {
+                self.peak_markers
+                    .iter()
+                    .filter(|marker| {
+                        marker
+                            .preview_hit(
+                                pointer_position,
+                                plot_response,
+                                calibration,
+                                raw_axis_range,
+                                log_x,
+                                log_y,
+                                bin_width,
+                                &self.preview_background,
+                            )
+                            .is_some()
+                    })
+                    .min_by(|left, right| {
+                        let x = plot_response
+                            .transform
+                            .value_from_position(pointer_position)
+                            .x;
+                        let left_distance =
+                            raw_x_value(x, calibration, log_x, raw_axis_range, left.center.x_value)
+                                .map_or(f64::INFINITY, |value| (value - left.center.x_value).abs());
+                        let right_distance = raw_x_value(
+                            x,
+                            calibration,
+                            log_x,
+                            raw_axis_range,
+                            right.center.x_value,
+                        )
+                        .map_or(f64::INFINITY, |value| (value - right.center.x_value).abs());
+                        left_distance.total_cmp(&right_distance)
+                    })
+                    .map(|marker| marker.id)
+            });
         for marker in &mut self.peak_markers {
             let interaction = marker.interactive_dragging(
                 plot_response,
@@ -1218,6 +1481,8 @@ impl FitMarkers {
                 log_x,
                 log_y,
                 bin_width,
+                &self.preview_background,
+                preview_owner,
             );
             changed |= interaction.changed;
             shared_fwhm = shared_fwhm.or(interaction.shared_fwhm);
@@ -1251,9 +1516,8 @@ impl FitMarkers {
                 marker.fwhm_min = minimum;
                 marker.fwhm_max = maximum;
                 marker.hold_bounds();
-                marker.valid = marker.amplitude.is_finite()
-                    && marker.amplitude > 0.0
-                    && marker.bounds_valid();
+                marker.valid =
+                    marker.amplitude.is_finite() && marker.amplitude > 0.0 && marker.bounds_valid();
             }
         }
         changed |= before_background != self.get_background_marker_positions();
@@ -1649,5 +1913,47 @@ mod tests {
             GuessSource::Estimated
         );
         assert_ne!(restored.peak_markers[0].id, 0);
+    }
+
+    #[test]
+    fn peak_guess_round_trip_preserves_saved_values_and_resets_ui_state() {
+        let mut markers = FitMarkers::new();
+        let mut saved_guess = guess();
+        saved_guess.valid = true;
+        saved_guess.clean_width = true;
+        saved_guess.preview_hovered = true;
+        saved_guess.preview_upper_bounds_hovered = true;
+        saved_guess.preview_lower_bounds_hovered = true;
+        saved_guess.seed_drag_start = Some(egui::pos2(12.0, 34.0));
+        saved_guess.seed_drag_vertical = Some(true);
+        saved_guess.preview_position_hovered = true;
+        markers.peak_markers = vec![saved_guess];
+
+        let serialized = serde_json::to_value(&markers).expect("markers serialize");
+        let restored: FitMarkers = serde_json::from_value(serialized).expect("markers load");
+        let guess = &restored.peak_markers[0];
+
+        assert_eq!(guess.id, 7);
+        assert_eq!(guess.center.x_value, 10.0);
+        assert_eq!(guess.fwhm, 6.0);
+        assert_eq!(guess.amplitude, 1_000.0);
+        assert!(guess.net_height.is_finite() && guess.net_height > 0.0);
+        assert_eq!(guess.center_min, 8.0);
+        assert_eq!(guess.center_max, 12.0);
+        assert_eq!(guess.fwhm_min, 4.0);
+        assert_eq!(guess.fwhm_max, 12.0);
+        assert_eq!(guess.net_height_min, 0.5 * guess.net_height);
+        assert_eq!(guess.net_height_max, 1.5 * guess.net_height);
+        assert_eq!(guess.width_source, GuessSource::Manual);
+        assert_eq!(guess.amplitude_source, GuessSource::Manual);
+        assert_eq!(guess.bounds_source, GuessSource::Manual);
+        assert!(guess.valid);
+        assert!(guess.clean_width);
+        assert!(!guess.preview_hovered);
+        assert!(!guess.preview_upper_bounds_hovered);
+        assert!(!guess.preview_lower_bounds_hovered);
+        assert_eq!(guess.seed_drag_start, None);
+        assert_eq!(guess.seed_drag_vertical, None);
+        assert!(!guess.preview_position_hovered);
     }
 }

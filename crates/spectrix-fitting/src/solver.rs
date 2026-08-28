@@ -725,10 +725,10 @@ impl LeastSquaresProblem<f64, Dyn, Dyn> for InternalProblem<'_> {
                 let weight = self.weights.map_or(1.0, |weights| weights[row]);
                 let residual_gradient = match self.objective {
                     ObjectiveKind::LeastSquares => -weight,
-                    ObjectiveKind::PoissonDeviance => poisson_deviance_residual_gradient(
-                        self.y[row],
-                        baseline_curve[row],
-                    ) * weight,
+                    ObjectiveKind::PoissonDeviance => {
+                        poisson_deviance_residual_gradient(self.y[row], baseline_curve[row])
+                            * weight
+                    }
                 };
                 for column in 0..columns {
                     let bounds = self.layout.entries[self.layout.free[column]]
@@ -824,9 +824,7 @@ fn stable_poisson_term(relative: f64) -> f64 {
         let square = relative * relative;
         square
             * (0.5
-                + relative
-                    * (-1.0 / 3.0
-                        + relative * (0.25 + relative * (-0.2 + relative / 6.0))))
+                + relative * (-1.0 / 3.0 + relative * (0.25 + relative * (-0.2 + relative / 6.0))))
     } else {
         relative - relative.ln_1p()
     }
@@ -899,10 +897,7 @@ fn clamp_internal(internal: f64, bounds: Bounds) -> f64 {
     match (lower.is_finite(), upper.is_finite()) {
         (false, false) => internal,
         (true, false) | (false, true) => internal.max(0.0),
-        (true, true) => internal.clamp(
-            -std::f64::consts::FRAC_PI_2,
-            std::f64::consts::FRAC_PI_2,
-        ),
+        (true, true) => internal.clamp(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2),
     }
 }
 
@@ -1051,9 +1046,9 @@ fn statistics(
     let degrees_of_freedom = count - variables;
     let chi_square = residuals.iter().map(|value| value * value).sum::<f64>();
     let reduced_chi_square = chi_square / degrees_of_freedom as f64;
-    let objective_improvement = initial_objective.is_finite().then(|| {
-        (initial_objective - chi_square) / initial_objective.abs().max(f64::EPSILON)
-    });
+    let objective_improvement = initial_objective
+        .is_finite()
+        .then(|| (initial_objective - chi_square) / initial_objective.abs().max(f64::EPSILON));
     let (aic, bic, deviance, reduced_deviance) = match objective {
         ObjectiveKind::LeastSquares => {
             let log_term = (chi_square / count as f64).ln();

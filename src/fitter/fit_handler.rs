@@ -21,7 +21,9 @@ use crate::fitter::common::Data;
 use crate::fitter::models::linear::LinearFitter;
 use crate::fitter::models::quadratic;
 use crate::histoer::histo1d::markers::FitMarkers;
-use spectrix_fitting::{Bound, FitQualityIssue, FitQualityStatus, ManualPeakBounds, ManualPeakSeed};
+use spectrix_fitting::{
+    Bound, FitQualityIssue, FitQualityStatus, ManualPeakBounds, ManualPeakSeed,
+};
 
 use std::collections::HashMap;
 
@@ -367,8 +369,7 @@ impl Fits {
 
     pub fn temp_fit_is_storable(&self) -> bool {
         self.temp_fit.as_ref().is_some_and(|fit| {
-            fit.last_fit_error.is_none()
-                && matches!(fit.fit_result, Some(FitResult::Gaussian(_)))
+            fit.last_fit_error.is_none() && matches!(fit.fit_result, Some(FitResult::Gaussian(_)))
         })
     }
 
@@ -1229,15 +1230,13 @@ impl Fits {
                         let center = definition("center");
                         let sigma = definition("sigma");
                         let height = definition("height");
-                        let center_bounds = center.map_or(
-                            [seed.center, seed.center],
-                            |parameter| {
+                        let center_bounds =
+                            center.map_or([seed.center, seed.center], |parameter| {
                                 [
                                     bound_value(parameter.bounds.lower, seed.center),
                                     bound_value(parameter.bounds.upper, seed.center),
                                 ]
-                            },
-                        );
+                            });
                         let sigma_bounds = sigma.map_or([seed.sigma, seed.sigma], |parameter| {
                             [
                                 bound_value(parameter.bounds.lower, seed.sigma),
@@ -1254,7 +1253,8 @@ impl Fits {
                             bin_width,
                         )
                         .unwrap_or(0.0);
-                        let net_height = height.map_or(seed.amplitude * response, |value| value.initial);
+                        let net_height =
+                            height.map_or(seed.amplitude * response, |value| value.initial);
                         let height_bounds = height.map_or([net_height, net_height], |parameter| {
                             [
                                 bound_value(parameter.bounds.lower, net_height),
@@ -1280,13 +1280,12 @@ impl Fits {
                     .collect::<Vec<_>>();
                 let fitted = (0..result.peak_seeds.len())
                     .filter_map(|index| {
-                        let estimate = |suffix: &str| {
-                            result
-                                .fit
-                                .parameters
-                                .iter()
-                                .find(|parameter| parameter.name == format!("g{index}_{suffix}"))
-                        };
+                        let estimate =
+                            |suffix: &str| {
+                                result.fit.parameters.iter().find(|parameter| {
+                                    parameter.name == format!("g{index}_{suffix}")
+                                })
+                            };
                         let pair = |suffix: &str| {
                             estimate(suffix)
                                 .map(|parameter| (parameter.value, parameter.standard_error))
@@ -1427,13 +1426,12 @@ impl Fits {
                             } else {
                                 (f64::NEG_INFINITY, f64::INFINITY)
                             };
-                            let maximum_width = if region_minimum.is_finite()
-                                && region_maximum.is_finite()
-                            {
-                                (region_maximum - region_minimum).max(bin_width)
-                            } else {
-                                f64::INFINITY
-                            };
+                            let maximum_width =
+                                if region_minimum.is_finite() && region_maximum.is_finite() {
+                                    (region_maximum - region_minimum).max(bin_width)
+                                } else {
+                                    f64::INFINITY
+                                };
                             for guess in &mut markers.peak_markers {
                                 ui.label("Initial");
                                 ui.label(format!("#{}", guess.id));
@@ -2006,10 +2004,9 @@ impl Fits {
                 .initial_objective
                 .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
             statistics.final_objective,
-            statistics.objective_improvement.map_or_else(
-                || "—".to_owned(),
-                |value| format!("{:.2}%", 100.0 * value),
-            ),
+            statistics
+                .objective_improvement
+                .map_or_else(|| "—".to_owned(), |value| format!("{:.2}%", 100.0 * value),),
             statistics.rmse,
             statistics
                 .r_squared
@@ -2072,15 +2069,13 @@ impl Fits {
                 FitQualityIssue::ObjectiveWorsened {
                     initial,
                     final_value,
-                } => format!(
-                    "Objective worsened from {initial:.5} to {final_value:.5}."
-                ),
+                } => format!("Objective worsened from {initial:.5} to {final_value:.5}."),
                 FitQualityIssue::PoorGoodnessOfFit { p_value } => {
                     format!("Poisson goodness-of-fit p-value is {p_value:.4e}.")
                 }
-                FitQualityIssue::UnmodeledResidualPeaks { positions } => format!(
-                    "Possible unmarked residual peaks near {positions:?}."
-                ),
+                FitQualityIssue::UnmodeledResidualPeaks { positions } => {
+                    format!("Possible unmarked residual peaks near {positions:?}.")
+                }
             };
             ui.label(format!("• {message}"));
         }
@@ -2116,12 +2111,8 @@ impl Fits {
         let mut manual_changed = false;
         ui.group(|ui| {
             self.fit_quality_ui(ui);
-            manual_changed |= self.manual_peak_table_ui(
-                ui,
-                markers,
-                bin_width,
-                self.settings.equal_stddev,
-            );
+            manual_changed |=
+                self.manual_peak_table_ui(ui, markers, bin_width, self.settings.equal_stddev);
         });
 
         self.save_and_load_ui(ui);

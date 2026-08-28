@@ -454,6 +454,7 @@ impl eframe::App for Spectrix {
 mod tests {
     use super::Spectrix;
     use crate::defaults::DEFAULTS_SCHEMA_VERSION;
+    use crate::histoer::pane::Pane;
 
     #[test]
     fn legacy_session_preferences_migrate_to_app_defaults() {
@@ -481,5 +482,45 @@ mod tests {
         assert_eq!(app.defaults_schema_version, DEFAULTS_SCHEMA_VERSION);
         assert_eq!(app.sessions.len(), 1);
         assert!(!app.defaults_panel_open);
+    }
+
+    #[test]
+    fn workspace_with_histogram_and_peak_markers_round_trips() {
+        let mut app = Spectrix::default();
+        let histogrammer = &mut app.sessions[0].histogrammer;
+        histogrammer.add_hist1d("energy", 32, (0.0, 32.0));
+        let pane_id = histogrammer
+            .find_existing_histogram("energy")
+            .expect("created histogram");
+        let Some(egui_tiles::Tile::Pane(Pane::Histogram(histogram))) =
+            histogrammer.tree.tiles.get(pane_id)
+        else {
+            panic!("expected 1D histogram pane");
+        };
+        let mut histogram = histogram.lock().expect("histogram lock");
+        histogram.bins[12] = 41;
+        histogram.plot_settings.markers.add_peak_marker(12.5);
+        drop(histogram);
+
+        let serialized = ron::ser::to_string(&app).expect("workspace serializes");
+        let restored: Spectrix = ron::from_str(&serialized).expect("workspace deserializes");
+        let histogrammer = &restored.sessions[0].histogrammer;
+        let pane_id = histogrammer
+            .find_existing_histogram("energy")
+            .expect("restored histogram");
+        let Some(egui_tiles::Tile::Pane(Pane::Histogram(histogram))) =
+            histogrammer.tree.tiles.get(pane_id)
+        else {
+            panic!("expected restored 1D histogram pane");
+        };
+        let histogram = histogram.lock().expect("restored histogram lock");
+        assert_eq!(histogram.bins[12], 41);
+        assert_eq!(histogram.plot_settings.markers.peak_markers.len(), 1);
+        assert_eq!(
+            histogram.plot_settings.markers.peak_markers[0]
+                .center
+                .x_value,
+            12.5
+        );
     }
 }

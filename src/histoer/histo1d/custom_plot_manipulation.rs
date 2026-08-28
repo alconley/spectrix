@@ -91,7 +91,12 @@ impl Histogram {
             0.0
         };
 
-        let visible_max = self.max_bin_value_in_raw_range(raw_x_min, raw_x_max) as f64;
+        let histogram_max = self.max_bin_value_in_raw_range(raw_x_min, raw_x_max) as f64;
+        let visible_max = self
+            .plot_settings
+            .markers
+            .visible_peak_preview_max(raw_x_min, raw_x_max)
+            .map_or(histogram_max, |peak_max| histogram_max.max(peak_max));
         let base_top_multiplier = if self.plot_settings.egui_settings.log_y {
             self.plot_settings.auto_fit_y_max_multiplier_log.max(1.0)
         } else {
@@ -178,7 +183,7 @@ impl Histogram {
 
 #[cfg(test)]
 mod tests {
-    use super::default_plot_bounds;
+    use super::{Histogram, default_plot_bounds};
 
     #[test]
     fn recognizes_egui_default_1d_plot_bounds() {
@@ -190,5 +195,20 @@ mod tests {
     fn does_not_treat_non_default_1d_bounds_as_default() {
         assert!(!default_plot_bounds(0.0, 4.0, 0.0, 1.0));
         assert!(!default_plot_bounds(0.0, 1.0, 0.0, 12.0));
+    }
+
+    #[test]
+    fn auto_fit_y_bounds_includes_visible_peak_envelope() {
+        let mut histogram = Histogram::new("test", 10, (0.0, 10.0));
+        histogram.bins[4] = 10;
+        histogram.plot_settings.markers.add_peak_marker(5.0);
+
+        let peak = &mut histogram.plot_settings.markers.peak_markers[0];
+        peak.valid = true;
+        peak.net_height_max = 50.0;
+
+        let (_, y_max) = histogram.auto_fit_y_bounds(0.0, 10.0);
+
+        assert!(y_max >= 50.0 * histogram.plot_settings.auto_fit_y_max_multiplier_linear);
     }
 }
