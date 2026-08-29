@@ -101,9 +101,9 @@ fn source_derived_workflow_hints(prompt: &str) -> String {
 - Press `P` to add every peak marker manually. Gaussian fitting requires at least one explicit peak marker and exactly two region markers.
 - Press `F` to perform the Gaussian fit with Spectrix's native Rust fitting engine.
 - If a non-`None` background model is selected, `F` also requires at least one explicit background marker window; there is no automatic fallback.
-- The fit-results table pairs editable Initial rows (min/guess/max position, FWHM, and net height) with fitted Temp rows. Editing one guess holds the other displayed variables fixed. The plot shows only a translucent width/height envelope; position bounds are edited in the table and are not drawn.
+- The fit-results table keeps editable Initial min/guess/max controls and fitted Temp results on the same peak row. Temp values use PDG-style scientific notation with their uncertainties. Editing one guess holds the other displayed variables fixed. The plot shows only a translucent width/height envelope; position bounds are edited in the table and are not drawn.
 - `O` runs the original peak finder to populate editable manual peak markers. It never launches a fit or chooses a model.
-- The fit settings include Shared/Independent FWHM, Free Position, optional additional σ bounds, background lock/refine coupling, and fit-line display toggles.
+- The fit settings include Shared/Independent FWHM, Free Position, automatic re-estimation after moving a peak, background lock/refine coupling, and fit-line display toggles. Per-peak initial FWHM bounds control each fit's width range.
 - After a successful fit, the result appears as the `Temp` fit and its fitted position, FWHM, and height become the new handles.
 - Press `S` / `Store Fit` when you want to keep the temp fit as a stored fit for later comparison, calibration, saving, or refitting.
 - In the Fit Panel you can assign per-peak UUID values and energies. `UUID = 0` is the default invalid UUID. `Energy = -1` means that peak is invalid for calibration.

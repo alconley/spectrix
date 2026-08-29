@@ -61,6 +61,7 @@ pub struct HistogramDrawContext<'a> {
 #[serde(default)]
 pub struct GaussianParameters {
     pub amplitude: Parameter,
+    pub height: Parameter,
     pub mean: Parameter,
     pub sigma: Parameter,
     pub fwhm: Parameter,
@@ -75,6 +76,10 @@ impl Default for GaussianParameters {
         Self {
             amplitude: Parameter {
                 name: "amplitude".to_owned(),
+                ..Default::default()
+            },
+            height: Parameter {
+                name: "height".to_owned(),
                 ..Default::default()
             },
             mean: Parameter {
@@ -117,6 +122,10 @@ impl GaussianParameters {
                 name: "amplitude".to_owned(),
                 value: Some(amp.0),
                 uncertainty: Some(amp.1),
+                ..Default::default()
+            },
+            height: Parameter {
+                name: "height".to_owned(),
                 ..Default::default()
             },
             mean: Parameter {
@@ -699,6 +708,9 @@ impl GaussianFitter {
             param.amplitude.calibrated_value = param.amplitude.value;
             param.amplitude.calibrated_uncertainty = param.amplitude.uncertainty;
 
+            param.height.calibrated_value = param.height.value;
+            param.height.calibrated_uncertainty = param.height.uncertainty;
+
             param.area.calibrated_value = param.area.value;
             param.area.calibrated_uncertainty = param.area.uncertainty;
         }
@@ -775,6 +787,11 @@ impl GaussianFitter {
                     parameter: format!("{prefix}amplitude"),
                 }
             })?;
+            let height = estimate(&format!("{prefix}height")).ok_or_else(|| {
+                NativeFitError::InvalidParameter {
+                    parameter: format!("{prefix}height"),
+                }
+            })?;
             let center = estimate(&format!("{prefix}center")).ok_or_else(|| {
                 NativeFitError::InvalidParameter {
                     parameter: format!("{prefix}center"),
@@ -799,6 +816,8 @@ impl GaussianFitter {
             let mut parameters = GaussianParameters::default();
             parameters.amplitude.value = Some(amplitude.value);
             parameters.amplitude.uncertainty = amplitude.standard_error;
+            parameters.height.value = Some(height.value);
+            parameters.height.uncertainty = height.standard_error;
             parameters.mean.value = Some(center.value);
             parameters.mean.uncertainty = center.standard_error;
             parameters.sigma.value = Some(sigma.value);

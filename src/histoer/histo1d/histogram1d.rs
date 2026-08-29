@@ -345,9 +345,14 @@ impl Histogram {
             self.plot_settings.egui_settings.log_y,
             self.bin_width,
             self.fits.settings.equal_stddev,
+            self.fits.settings.auto_estimate_moved_peak,
         );
         if markers_changed {
             self.invalidate_manual_gaussian_preview();
+            // A drag clears the temporary fit because its results are no longer valid.
+            // Refresh in the same frame so an enabled moved-peak estimate does not
+            // leave the editable marker state invalid until the next repaint.
+            self.refresh_manual_peak_guesses();
         }
 
         if plot_response.response.hovered() {

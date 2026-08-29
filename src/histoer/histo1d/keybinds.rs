@@ -60,6 +60,9 @@ impl Histogram {
 
             if remove_closest || remove_all {
                 self.fits.remove_temp_fits();
+                if remove_closest {
+                    self.refresh_manual_peak_guesses();
+                }
             }
 
             if fit_background {
@@ -71,7 +74,12 @@ impl Histogram {
             }
 
             if store_fit {
-                self.fits.store_temp_fit();
+                if self.fits.temp_fit_is_storable() {
+                    self.fits.store_temp_fit();
+                    self.plot_settings.markers.clear_peak_markers();
+                    self.plot_settings.markers.preview_background.clear();
+                    self.plot_settings.markers.estimate_error = None;
+                }
             }
 
             if toggle_stats {

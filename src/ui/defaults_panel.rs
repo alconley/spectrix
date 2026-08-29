@@ -256,6 +256,9 @@ fn histogram_1d_ui(ui: &mut egui::Ui, defaults: &mut Histogram1DDefaults, query:
             &[
                 "gaussian",
                 "sigma",
+                "initial estimates",
+                "auto estimate",
+                "show initial parameters",
                 "background model",
                 "composition",
                 "decomposition",

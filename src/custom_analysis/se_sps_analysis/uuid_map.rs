@@ -73,7 +73,7 @@ impl FitUUIDMap {
                             self.abort.store(true, std::sync::atomic::Ordering::Relaxed);
                         }
                     } else if ui
-                        .button("Sync ➡ Histograms")
+                        .button("Sync Histograms")
                         .on_hover_text(
                             "Runs off-thread; writes assigned energies into native fit results",
                         )

@@ -61,6 +61,10 @@ pub struct FitSettings {
     pub fit_panel_popout: bool,
     pub equal_stddev: bool,
     pub free_position: bool,
+    /// Whether the editable initial-parameter columns are visible in the peak table.
+    pub show_initial_parameters: bool,
+    /// Re-estimate width, height, and bounds when a peak's center is dragged.
+    pub auto_estimate_moved_peak: bool,
     pub background_model: BackgroundModel,
     pub lock_background: bool,
     /// Legacy persisted coupling mode; active fits derive this from `lock_background`.
@@ -72,6 +76,8 @@ pub struct FitSettings {
     pub constant_param: Parameter,
     pub objective: HistogramObjective,
     pub calibrated: bool,
+    /// Legacy global sigma limits retained only so older saved workspaces load without loss.
+    /// Per-peak initial FWHM bounds are the active constraint mechanism.
     pub constrain_sigma: bool,
     pub sigma_min: f64,
     pub sigma_max: f64,
@@ -91,6 +97,8 @@ impl Default for FitSettings {
             fit_panel_popout: false,
             equal_stddev: true,
             free_position: true,
+            show_initial_parameters: true,
+            auto_estimate_moved_peak: false,
             background_model: BackgroundModel::None,
             lock_background: false,
             background_coupling: BackgroundCoupling::PrefitFrozen,
@@ -121,37 +129,46 @@ impl FitSettings {
     ) {
         ui.separator();
 
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Background Models");
-
-            ui.radio_value(
-                &mut self.background_model,
-                BackgroundModel::Constant(self.constant_param.clone()),
-                "Constant",
-            );
-
-            ui.radio_value(
-                &mut self.background_model,
-                BackgroundModel::Linear(self.linear_params.clone()),
-                "Linear",
-            );
-            ui.radio_value(
-                &mut self.background_model,
-                BackgroundModel::Quadratic(self.quadratic_params.clone()),
-                "Quadratic",
-            );
-            ui.radio_value(
-                &mut self.background_model,
-                BackgroundModel::PowerLaw(self.power_law_params.clone()),
-                "Power Law",
-            );
-            ui.radio_value(
-                &mut self.background_model,
-                BackgroundModel::Exponential(self.exponential_params.clone()),
-                "Exponential",
-            );
-            ui.radio_value(&mut self.background_model, BackgroundModel::None, "None");
-        });
+        let background_label = match &self.background_model {
+            BackgroundModel::Constant(_) => "Constant",
+            BackgroundModel::Linear(_) => "Linear",
+            BackgroundModel::Quadratic(_) => "Quadratic",
+            BackgroundModel::PowerLaw(_) => "Power Law",
+            BackgroundModel::Exponential(_) => "Exponential",
+            BackgroundModel::None | BackgroundModel::LegacyAuto => "None",
+        };
+        egui::ComboBox::from_label("Background model")
+            .selected_text(background_label)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut self.background_model, BackgroundModel::None, "None");
+                ui.selectable_value(
+                    &mut self.background_model,
+                    BackgroundModel::Constant(self.constant_param.clone()),
+                    "Constant",
+                );
+                ui.selectable_value(
+                    &mut self.background_model,
+                    BackgroundModel::Linear(self.linear_params.clone()),
+                    "Linear",
+                );
+                ui.selectable_value(
+                    &mut self.background_model,
+                    BackgroundModel::Quadratic(self.quadratic_params.clone()),
+                    "Quadratic",
+                );
+                ui.selectable_value(
+                    &mut self.background_model,
+                    BackgroundModel::PowerLaw(self.power_law_params.clone()),
+                    "Power Law",
+                );
+                ui.selectable_value(
+                    &mut self.background_model,
+                    BackgroundModel::Exponential(self.exponential_params.clone()),
+                    "Exponential",
+                );
+            })
+            .response
+            .on_hover_text("Select the background function used during peak fitting.");
 
         if let BackgroundModel::Constant(parameter) = &mut self.background_model {
             parameter.ui(ui);
@@ -204,6 +221,17 @@ impl FitSettings {
             ui.radio_value(&mut self.equal_stddev, false, "Independent FWHM");
             ui.checkbox(&mut self.free_position, "Free Position")
                 .on_hover_text("Allow the position of the Gaussian to be free");
+            ui.checkbox(&mut self.show_initial_parameters, "Show initial parameters")
+                .on_hover_text(
+                    "Show the editable min ≤ value ≤ max columns in the peak table. Hide them to focus on fitted results; this does not change any initial values.",
+                );
+            ui.checkbox(
+                &mut self.auto_estimate_moved_peak,
+                "Auto-estimate moved peak",
+            )
+            .on_hover_text(
+                "When a peak center is dragged, re-estimate only that peak's width, height, and initial bounds from the histogram. This leaves the dragged center where you placed it.",
+            );
         });
 
         ui.collapsing("Advanced fitting", |ui| {
@@ -227,26 +255,6 @@ impl FitSettings {
                 );
             });
         });
-
-        ui.horizontal_wrapped(|ui| {
-            ui.checkbox(&mut self.constrain_sigma, "Constrain σ")
-                .on_hover_text(
-                    "Enable optional lower/upper bounds for σ.\n\
-                   If Equal Standard Deviation is ON, a single pair applies to all peaks.\n\
-                   If OFF, this pair is broadcast to all peaks.",
-                );
-            ui.add_enabled_ui(self.constrain_sigma, |ui| {
-                ui.label("min:");
-                ui.add(egui::DragValue::new(&mut self.sigma_min).speed(0.01));
-                ui.label("max:");
-                ui.add(egui::DragValue::new(&mut self.sigma_max).speed(0.01));
-            });
-        });
-
-        // keep min ≤ max (when enabled)
-        if self.constrain_sigma && self.sigma_max < self.sigma_min {
-            std::mem::swap(&mut self.sigma_min, &mut self.sigma_max);
-        }
 
         ui.separator();
 
@@ -374,6 +382,23 @@ mod tests {
             serde_json::from_str(r#"{"equal_stddev":false}"#).expect("legacy independent settings");
         assert!(shared.equal_stddev);
         assert!(!independent.equal_stddev);
+        assert!(!shared.auto_estimate_moved_peak);
+        assert!(!independent.auto_estimate_moved_peak);
+        assert!(shared.show_initial_parameters);
+        assert!(independent.show_initial_parameters);
+    }
+
+    #[test]
+    fn auto_estimate_moved_peak_round_trips() {
+        let settings = FitSettings {
+            auto_estimate_moved_peak: true,
+            ..FitSettings::default()
+        };
+        let encoded = serde_json::to_string(&settings).expect("serialize fit settings");
+        let decoded: FitSettings =
+            serde_json::from_str(&encoded).expect("deserialize fit settings");
+        assert!(decoded.auto_estimate_moved_peak);
+        assert!(decoded.show_initial_parameters);
     }
 
     #[test]

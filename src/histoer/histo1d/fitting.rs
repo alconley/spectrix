@@ -66,10 +66,21 @@ impl Histogram {
         if self.plot_settings.markers.peak_markers.is_empty() {
             self.plot_settings.markers.preview_background.clear();
             self.plot_settings.markers.estimate_error = None;
+            self.plot_settings.markers.invalid_estimate_signature = 0;
             return;
         }
         let signature = self.manual_estimate_signature();
-        if self.plot_settings.markers.estimate_signature == signature {
+        let invalid_peak_ids = self
+            .plot_settings
+            .markers
+            .peak_markers
+            .iter()
+            .filter(|guess| !guess.valid)
+            .map(|guess| guess.id)
+            .collect::<Vec<_>>();
+        let retry_invalid_estimates = !invalid_peak_ids.is_empty()
+            && self.plot_settings.markers.invalid_estimate_signature != signature;
+        if self.plot_settings.markers.estimate_signature == signature && !retry_invalid_estimates {
             return;
         }
 
@@ -79,6 +90,7 @@ impl Histogram {
                 Some("Place exactly two region markers to estimate peak guesses.".to_owned());
             self.plot_settings.markers.preview_background.clear();
             self.plot_settings.markers.estimate_signature = signature;
+            self.plot_settings.markers.invalid_estimate_signature = signature;
             return;
         }
         let background_markers = self.plot_settings.markers.get_background_marker_positions();
@@ -91,7 +103,16 @@ impl Histogram {
             );
             self.plot_settings.markers.preview_background.clear();
             self.plot_settings.markers.estimate_signature = signature;
+            self.plot_settings.markers.invalid_estimate_signature = signature;
             return;
+        }
+
+        if retry_invalid_estimates {
+            for guess in &mut self.plot_settings.markers.peak_markers {
+                if invalid_peak_ids.contains(&guess.id) {
+                    guess.reset_estimates();
+                }
+            }
         }
 
         let equal_sigma = self.fits.settings.equal_stddev;
@@ -183,6 +204,14 @@ impl Histogram {
                         && guess.bounds_valid();
                 }
                 self.plot_settings.markers.estimate_error = None;
+                self.plot_settings.markers.invalid_estimate_signature = self
+                    .plot_settings
+                    .markers
+                    .peak_markers
+                    .iter()
+                    .any(|guess| !guess.valid)
+                    .then_some(signature)
+                    .unwrap_or(0);
             }
             Err(error) => {
                 self.plot_settings.markers.preview_background.clear();
@@ -196,6 +225,7 @@ impl Histogram {
                         guess.valid = false;
                     }
                 }
+                self.plot_settings.markers.invalid_estimate_signature = signature;
             }
         }
         self.plot_settings.markers.last_equal_sigma = Some(equal_sigma);
@@ -253,6 +283,9 @@ impl Histogram {
             self.fit_gaussians();
             self.fits.store_temp_fit();
         }
+        self.plot_settings.markers.clear_peak_markers();
+        self.plot_settings.markers.preview_background.clear();
+        self.plot_settings.markers.estimate_error = None;
     }
 
     pub fn apply_modify_fit_request(&mut self) {
@@ -468,22 +501,14 @@ impl Histogram {
         fitter.objective = self.resolved_objective(Some((region_markers[0], region_markers[1])));
         fitter.manual_peak_bounds = Some(peak_bounds);
 
-        // build optional σ-bounds from UI; when UI is “calibrated”, these are energy-bounds
-        let sigma_bounds_ui = if self.fits.settings.constrain_sigma {
-            Some((self.fits.settings.sigma_min, self.fits.settings.sigma_max))
-        } else {
-            None
-        };
-        let bounds_are_calibrated = self.fits.settings.calibrated;
-
         fitter.fit_model = FitModel::Gaussian(
             region_markers.clone(),
             peak_seeds,
             background_markers.clone(),
             equal_stdev,
             free_position,
-            sigma_bounds_ui,       // <- NEW: (min,max) from UI if enabled
-            bounds_are_calibrated, // <- NEW: interpret bounds as energy if true
+            None,  // Per-peak initial FWHM bounds are the only active width constraints.
+            false, // No global calibrated sigma limits are applied.
         );
 
         fitter.fit();

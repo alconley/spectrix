@@ -327,6 +327,11 @@ pub struct FitMarkers {
     #[serde(skip)]
     pub estimate_signature: u64,
 
+    /// Signature for an invalid-estimate retry already attempted. This prevents a
+    /// failed estimator from retrying every frame until its inputs change.
+    #[serde(skip)]
+    pub invalid_estimate_signature: u64,
+
     #[serde(skip)]
     pub preview_background: Vec<[f64; 2]>,
 
@@ -500,6 +505,7 @@ fn interpolate_background(points: &[[f64; 2]], x: f64) -> f64 {
 #[derive(Debug, Default, Clone, Copy)]
 struct PeakInteraction {
     changed: bool,
+    center_moved: bool,
     shared_fwhm: Option<f64>,
     shared_fwhm_bounds: Option<[f64; 2]>,
 }
@@ -963,6 +969,7 @@ impl PeakGuess {
                 self.center.x_value = raw_x.clamp(minimum, maximum);
                 self.hold_current_seed();
                 interaction.changed = true;
+                interaction.center_moved = true;
             }
             if (self.left_dragging || self.right_dragging)
                 && let Some(raw_x) = raw_x_value(
@@ -1161,6 +1168,7 @@ impl FitMarkers {
                 (false, false) => Ordering::Equal,
             },
         );
+        self.reset_all_estimates();
     }
 
     pub fn add_peak_marker(&mut self, x: f64) {
@@ -1253,6 +1261,7 @@ impl FitMarkers {
 
     pub fn clear_region_markers(&mut self) {
         self.region_markers.clear();
+        self.reset_all_estimates();
     }
 
     pub fn clear_peak_markers(&mut self) {
@@ -1294,8 +1303,20 @@ impl FitMarkers {
             .position(|guess| guess.center.x_value == marker_to_delete)
         {
             self.peak_markers.remove(index);
-            self.estimate_signature = 0;
+            self.reset_all_estimates();
         }
+    }
+
+    /// Mark every remaining peak for a fresh data-driven estimate.
+    ///
+    /// Region bounds and the set of peaks are shared fit inputs, so changing either
+    /// invalidates estimates for every peak, not only the marker that changed.
+    pub fn reset_all_estimates(&mut self) {
+        for guess in &mut self.peak_markers {
+            guess.reset_estimates();
+        }
+        self.estimate_signature = 0;
+        self.invalid_estimate_signature = 0;
     }
 
     pub fn delete_closest_marker(&mut self, cursor_x: f64) {
@@ -1321,7 +1342,10 @@ impl FitMarkers {
             })
         {
             match marker_type {
-                "region" => Self::delete_marker(&mut self.region_markers, closest_marker),
+                "region" => {
+                    Self::delete_marker(&mut self.region_markers, closest_marker);
+                    self.reset_all_estimates();
+                }
                 "peak" => self.delete_peak_marker(closest_marker),
                 "background" => {
                     self.background_markers
@@ -1364,6 +1388,7 @@ impl FitMarkers {
     }
 
     pub fn remove_peak_markers_outside_region(&mut self) {
+        let before = self.peak_markers.len();
         self.peak_markers.retain(|peak| {
             self.region_markers
                 .first()
@@ -1373,6 +1398,9 @@ impl FitMarkers {
                     .get(1)
                     .is_some_and(|end| peak.center.x_value <= end.x_value)
         });
+        if self.peak_markers.len() != before {
+            self.reset_all_estimates();
+        }
     }
 
     pub fn draw_all_markers(
@@ -1413,6 +1441,7 @@ impl FitMarkers {
         log_y: bool,
         bin_width: f64,
         equal_sigma: bool,
+        auto_estimate_moved_peak: bool,
     ) -> bool {
         self.ensure_peak_ids();
         let before_background = self.get_background_marker_positions();
@@ -1426,6 +1455,7 @@ impl FitMarkers {
         }
 
         let mut changed = false;
+        let mut moved_peak_ids = Vec::new();
         let mut shared_fwhm = None;
         let mut shared_fwhm_bounds = None;
         let pointer = plot_response
@@ -1485,6 +1515,9 @@ impl FitMarkers {
                 preview_owner,
             );
             changed |= interaction.changed;
+            if interaction.center_moved {
+                moved_peak_ids.push(marker.id);
+            }
             shared_fwhm = shared_fwhm.or(interaction.shared_fwhm);
             shared_fwhm_bounds = shared_fwhm_bounds.or(interaction.shared_fwhm_bounds);
         }
@@ -1520,8 +1553,19 @@ impl FitMarkers {
                     marker.amplitude.is_finite() && marker.amplitude > 0.0 && marker.bounds_valid();
             }
         }
+        if auto_estimate_moved_peak {
+            for marker in &mut self.peak_markers {
+                if moved_peak_ids.contains(&marker.id) {
+                    marker.reset_estimates();
+                }
+            }
+        }
         changed |= before_background != self.get_background_marker_positions();
-        changed |= before_regions != self.get_region_marker_positions();
+        let regions_changed = before_regions != self.get_region_marker_positions();
+        if regions_changed {
+            self.reset_all_estimates();
+        }
+        changed |= regions_changed;
         if changed {
             self.peak_markers
                 .sort_by(|left, right| left.center.x_value.total_cmp(&right.center.x_value));
@@ -1896,6 +1940,27 @@ mod tests {
         markers.delete_closest_marker(2.0);
         assert_eq!(markers.peak_markers.len(), 1);
         assert_eq!(markers.peak_markers[0].id, retained_id);
+    }
+
+    #[test]
+    fn removing_a_peak_reestimates_the_remaining_peaks() {
+        let mut markers = FitMarkers::new();
+        let mut first = guess();
+        first.id = 1;
+        let mut second = guess();
+        second.id = 2;
+        second.center.x_value = 20.0;
+        markers.peak_markers = vec![first, second];
+
+        markers.delete_closest_marker(10.0);
+
+        assert_eq!(markers.peak_markers.len(), 1);
+        let remaining = &markers.peak_markers[0];
+        assert_eq!(remaining.width_source, GuessSource::Estimated);
+        assert_eq!(remaining.amplitude_source, GuessSource::Estimated);
+        assert_eq!(remaining.bounds_source, GuessSource::Estimated);
+        assert!(!remaining.valid);
+        assert_eq!(markers.estimate_signature, 0);
     }
 
     #[test]

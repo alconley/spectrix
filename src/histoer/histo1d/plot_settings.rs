@@ -94,6 +94,7 @@ impl PlotSettings {
         log_y: bool,
         bin_width: f64,
         equal_sigma: bool,
+        auto_estimate_moved_peak: bool,
     ) -> bool {
         let markers_changed = self.markers.interactive_dragging(
             response,
@@ -103,6 +104,7 @@ impl PlotSettings {
             log_y,
             bin_width,
             equal_sigma,
+            auto_estimate_moved_peak,
         );
 
         let mut cuts_dragging = false;

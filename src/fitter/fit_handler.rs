@@ -22,7 +22,7 @@ use crate::fitter::models::linear::LinearFitter;
 use crate::fitter::models::quadratic;
 use crate::histoer::histo1d::markers::FitMarkers;
 use spectrix_fitting::{
-    Bound, FitQualityIssue, FitQualityStatus, ManualPeakBounds, ManualPeakSeed,
+    Bound, FitQualityIssue, FitQualityStatus, ManualPeakBounds, ManualPeakSeed, ObjectiveKind,
 };
 
 use std::collections::HashMap;
@@ -219,7 +219,6 @@ struct ManualInitialTableRow {
 
 #[derive(Clone)]
 struct ManualTempTableRow {
-    peak: usize,
     center: (f64, Option<f64>),
     fwhm: (f64, Option<f64>),
     height: (f64, Option<f64>),
@@ -235,8 +234,100 @@ fn bound_value(bound: Bound, fallback: f64) -> f64 {
     }
 }
 
-fn range_label(ui: &mut egui::Ui, minimum: f64, guess: f64, maximum: f64) {
-    ui.label(format!("{minimum:.5} ≤ {guess:.5} ≤ {maximum:.5}"));
+fn decimal_places_for_resolution(resolution: f64) -> usize {
+    let resolution = resolution.abs();
+    if !resolution.is_finite() || resolution >= 1.0 {
+        return 2;
+    }
+    let places = (0..=6)
+        .find(|places| {
+            let scaled = resolution * 10_f64.powi(*places as i32);
+            (scaled - scaled.round()).abs() <= 1.0e-8
+        })
+        .unwrap_or(6);
+    // Keep two digits beyond the bin resolution: e.g. 1.0-wide bins use
+    // two decimals, while 0.2-wide bins use three.
+    (places + 2).min(8)
+}
+
+fn range_label(ui: &mut egui::Ui, minimum: f64, guess: f64, maximum: f64, decimals: usize) {
+    ui.label(format!(
+        "{minimum:.decimals$} ≤ {guess:.decimals$} ≤ {maximum:.decimals$}"
+    ))
+    .on_hover_text("Initial lower bound ≤ initial solver value ≤ initial upper bound");
+}
+
+fn calibrated_center_range(
+    calibration: &Calibration,
+    minimum: f64,
+    guess: f64,
+    maximum: f64,
+) -> Option<(f64, f64, f64)> {
+    let minimum = calibration.calibrate_checked(minimum)?;
+    let guess = calibration.calibrate_checked(guess)?;
+    let maximum = calibration.calibrate_checked(maximum)?;
+    Some((minimum.min(maximum), guess, minimum.max(maximum)))
+}
+
+fn calibrated_fwhm_range(
+    calibration: &Calibration,
+    center: f64,
+    minimum: f64,
+    guess: f64,
+    maximum: f64,
+) -> Option<(f64, f64, f64)> {
+    let scale = calibration.derivative_checked(center)?.abs();
+    (scale.is_finite() && scale > f64::EPSILON).then_some((
+        minimum * scale,
+        guess * scale,
+        maximum * scale,
+    ))
+}
+
+fn calibrated_center_measurement(
+    calibration: &Calibration,
+    value: f64,
+    uncertainty: Option<f64>,
+) -> (f64, Option<f64>) {
+    let Some(calibrated_value) = calibration.calibrate_checked(value) else {
+        return (value, uncertainty);
+    };
+    let calibrated_uncertainty = calibration
+        .derivative_checked(value)
+        .and_then(|derivative| {
+            let fit_uncertainty = uncertainty.unwrap_or(0.0);
+            let calibration_uncertainty = calibration.curve_uncertainty_checked(value)?;
+            (derivative * fit_uncertainty)
+                .hypot(calibration_uncertainty)
+                .is_finite()
+                .then_some((derivative * fit_uncertainty).hypot(calibration_uncertainty))
+        });
+    (calibrated_value, calibrated_uncertainty)
+}
+
+fn calibrated_width_measurement(
+    calibration: &Calibration,
+    center: f64,
+    value: f64,
+    uncertainty: Option<f64>,
+) -> (f64, Option<f64>) {
+    let Some(derivative) = calibration.derivative_checked(center) else {
+        return (value, uncertainty);
+    };
+    let calibrated_value = derivative.abs() * value;
+    let uncertainty = uncertainty.map(|uncertainty| {
+        let derivative_uncertainty =
+            (2.0 * center * calibration.a.uncertainty).hypot(calibration.b.uncertainty);
+        (derivative * uncertainty).hypot(value * derivative_uncertainty)
+    });
+    if calibrated_value.is_finite() {
+        (
+            calibrated_value,
+            uncertainty.filter(|value| value.is_finite()),
+        )
+    } else {
+        (value, uncertainty)
+    }
 }
 
 fn range_drag_ui(
@@ -256,7 +347,7 @@ fn range_drag_ui(
                     .speed(speed)
                     .range(hard_minimum..=*guess),
             )
-            .on_hover_text("Minimum allowed value")
+            .on_hover_text("Initial lower bound; drag horizontally or type a value")
             .changed();
         ui.label("≤");
         changed[1] = ui
@@ -265,7 +356,7 @@ fn range_drag_ui(
                     .speed(speed)
                     .range(*minimum..=*maximum),
             )
-            .on_hover_text("Initial value used by the solver")
+            .on_hover_text("Initial solver value; drag horizontally or type a value")
             .changed();
         ui.label("≤");
         changed[2] = ui
@@ -274,10 +365,109 @@ fn range_drag_ui(
                     .speed(speed)
                     .range(*guess..=hard_maximum),
             )
-            .on_hover_text("Maximum allowed value")
+            .on_hover_text("Initial upper bound; drag horizontally or type a value")
             .changed();
     });
     changed
+}
+
+fn calibrated_center_range_drag_ui(
+    ui: &mut egui::Ui,
+    minimum: &mut f64,
+    guess: &mut f64,
+    maximum: &mut f64,
+    speed: f64,
+    raw_domain: (f64, f64),
+    calibration: &Calibration,
+    decimals: usize,
+) -> [bool; 3] {
+    macro_rules! drag {
+        ($value:expr, $range:expr) => {{
+            let formatter = calibration.clone();
+            let parser = calibration.clone();
+            egui::DragValue::new($value)
+                .speed(speed)
+                .range($range)
+                .custom_formatter(move |raw, _| {
+                    formatter.calibrate_checked(raw).map_or_else(
+                        || raw.to_string(),
+                        |calibrated| format!("{calibrated:.decimals$}"),
+                    )
+                })
+                .custom_parser(move |text| {
+                    text.parse::<f64>()
+                        .ok()
+                        .and_then(|calibrated| parser.invert_in_range(calibrated, raw_domain))
+                })
+        }};
+    }
+    let mut changed = [false; 3];
+    ui.horizontal(|ui| {
+        changed[0] = ui
+            .add(drag!(minimum, raw_domain.0..=*guess))
+            .on_hover_text("Calibrated lower bound; drag horizontally or type a value")
+            .changed();
+        ui.label("≤");
+        changed[1] = ui
+            .add(drag!(guess, *minimum..=*maximum))
+            .on_hover_text("Calibrated initial center; drag horizontally or type a value")
+            .changed();
+        ui.label("≤");
+        changed[2] = ui
+            .add(drag!(maximum, *guess..=raw_domain.1))
+            .on_hover_text("Calibrated upper bound; drag horizontally or type a value")
+            .changed();
+    });
+    changed
+}
+
+fn calibrated_fwhm_range_drag_ui(
+    ui: &mut egui::Ui,
+    minimum: &mut f64,
+    guess: &mut f64,
+    maximum: &mut f64,
+    speed: f64,
+    hard_minimum: f64,
+    hard_maximum: f64,
+    center: f64,
+    calibration: &Calibration,
+    decimals: usize,
+) -> Option<[bool; 3]> {
+    let scale = calibration.derivative_checked(center)?.abs();
+    if !scale.is_finite() || scale <= f64::EPSILON {
+        return None;
+    }
+    macro_rules! drag {
+        ($value:expr, $range:expr) => {
+            egui::DragValue::new($value)
+                .speed(speed)
+                .range($range)
+                .custom_formatter(move |raw, _| format!("{:.decimals$}", raw * scale))
+                .custom_parser(move |text| {
+                    text.parse::<f64>()
+                        .ok()
+                        .map(|calibrated| calibrated / scale)
+                })
+        };
+    }
+    let mut changed = [false; 3];
+    ui.horizontal(|ui| {
+        changed[0] = ui
+            .add(drag!(minimum, hard_minimum..=*guess))
+            .on_hover_text("Calibrated FWHM lower bound; drag horizontally or type a value")
+            .changed();
+        ui.label("≤");
+        changed[1] = ui
+            .add(drag!(guess, *minimum..=*maximum))
+            .on_hover_text("Calibrated initial FWHM; drag horizontally or type a value")
+            .changed();
+        ui.label("≤");
+        changed[2] = ui
+            .add(drag!(maximum, *guess..=hard_maximum))
+            .on_hover_text("Calibrated FWHM upper bound; drag horizontally or type a value")
+            .changed();
+    });
+    Some(changed)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -286,6 +476,7 @@ pub enum SortCol {
     Peak,
     Mean,
     Fwhm,
+    Height,
     Area,
     Amplitude,
     Sigma,
@@ -1293,7 +1484,6 @@ impl Fits {
                         };
                         estimate("center")?;
                         Some(ManualTempTableRow {
-                            peak: index,
                             center: pair("center"),
                             fwhm: pair("fwhm"),
                             height: pair("height"),
@@ -1322,6 +1512,9 @@ impl Fits {
             } else {
                 "Independent FWHM: each width preserves its peak's height."
             });
+            if self.settings.calibrated {
+                ui.label("Initial center and FWHM values are shown in calibrated units.");
+            }
         });
         if let Some(error) = &markers.estimate_error {
             ui.colored_label(Color32::YELLOW, error);
@@ -1332,6 +1525,9 @@ impl Fits {
         let mut reestimate = Vec::new();
         let mut shared_fwhm = None;
         let mut shared_fwhm_bounds = None;
+        let show_initial_parameters = self.settings.show_initial_parameters;
+        let calibration = self.settings.calibrated.then_some(&self.calibration);
+        let raw_initial_decimals = decimal_places_for_resolution(bin_width);
         if snapshot.is_none() {
             reset_all = ui.button("Reset All").clicked();
         }
@@ -1342,47 +1538,191 @@ impl Fits {
                 egui::Grid::new("manual_peak_results_table")
                     .striped(true)
                     .show(ui, |ui| {
-                        for heading in [
-                            "Stage",
-                            "Peak",
-                            "Center (min ≤ guess ≤ max)",
-                            "FWHM (min ≤ guess ≤ max)",
-                            "Net height (min ≤ guess ≤ max)",
-                            "Area",
-                            "Amplitude",
-                            "Sigma",
-                            "Source / status",
-                            "Options",
-                        ] {
+                        let group_headings = if show_initial_parameters {
+                            vec![
+                                "Peak",
+                                "Initial",
+                                "",
+                                "",
+                                "Fitted",
+                                "",
+                                "",
+                                "",
+                                "",
+                                "",
+                                "Source / status",
+                                "Options",
+                            ]
+                        } else {
+                            vec![
+                                "Peak",
+                                "Fitted",
+                                "",
+                                "",
+                                "",
+                                "",
+                                "",
+                                "Source / status",
+                                "Options",
+                            ]
+                        };
+                        for heading in group_headings {
+                            ui.strong(heading);
+                        }
+                        ui.end_row();
+
+                        let parameter_headings = if show_initial_parameters {
+                            vec![
+                                "",
+                                "Center",
+                                "FWHM",
+                                "Height",
+                                "Center",
+                                "FWHM",
+                                "Height",
+                                "Area",
+                                "Amplitude",
+                                "Sigma",
+                                "",
+                                "",
+                            ]
+                        } else {
+                            vec![
+                                "",
+                                "Center",
+                                "FWHM",
+                                "Height",
+                                "Area",
+                                "Amplitude",
+                                "Sigma",
+                                "",
+                                "",
+                            ]
+                        };
+                        for heading in parameter_headings {
                             ui.strong(heading);
                         }
                         ui.end_row();
 
                         if let Some((initial_rows, fitted_rows)) = &snapshot {
                             for (index, initial) in initial_rows.iter().enumerate() {
-                                ui.label("Initial");
                                 ui.label(format!("#{}", initial.id));
-                                range_label(
-                                    ui,
-                                    initial.bounds.center[0],
-                                    initial.seed.center,
-                                    initial.bounds.center[1],
-                                );
-                                range_label(
-                                    ui,
-                                    initial.bounds.sigma[0] * MANUAL_FWHM_FACTOR,
-                                    initial.seed.sigma * MANUAL_FWHM_FACTOR,
-                                    initial.bounds.sigma[1] * MANUAL_FWHM_FACTOR,
-                                );
-                                range_label(
-                                    ui,
-                                    initial.bounds.net_height[0],
-                                    initial.net_height,
-                                    initial.bounds.net_height[1],
-                                );
-                                ui.label(format!("{:.5}", initial.seed.amplitude / bin_width));
-                                ui.label(format!("{:.5}", initial.seed.amplitude));
-                                ui.label(format!("{:.5}", initial.seed.sigma));
+                                let fitted = fitted_rows.get(index);
+                                if show_initial_parameters {
+                                    let center_range = calibration
+                                        .and_then(|calibration| {
+                                            calibrated_center_range(
+                                                calibration,
+                                                initial.bounds.center[0],
+                                                initial.seed.center,
+                                                initial.bounds.center[1],
+                                            )
+                                        })
+                                        .unwrap_or((
+                                            initial.bounds.center[0],
+                                            initial.seed.center,
+                                            initial.bounds.center[1],
+                                        ));
+                                    let center_decimals = calibration
+                                        .and_then(|calibration| {
+                                            calibration
+                                                .calibrate_checked(initial.seed.center + bin_width)
+                                                .zip(
+                                                    calibration
+                                                        .calibrate_checked(initial.seed.center),
+                                                )
+                                                .map(|(next, current)| (next - current).abs())
+                                        })
+                                        .map(decimal_places_for_resolution)
+                                        .unwrap_or(raw_initial_decimals);
+                                    range_label(
+                                        ui,
+                                        center_range.0,
+                                        center_range.1,
+                                        center_range.2,
+                                        center_decimals,
+                                    );
+                                    let fwhm_range = calibration
+                                        .and_then(|calibration| {
+                                            calibrated_fwhm_range(
+                                                calibration,
+                                                initial.seed.center,
+                                                initial.bounds.sigma[0] * MANUAL_FWHM_FACTOR,
+                                                initial.seed.sigma * MANUAL_FWHM_FACTOR,
+                                                initial.bounds.sigma[1] * MANUAL_FWHM_FACTOR,
+                                            )
+                                        })
+                                        .unwrap_or((
+                                            initial.bounds.sigma[0] * MANUAL_FWHM_FACTOR,
+                                            initial.seed.sigma * MANUAL_FWHM_FACTOR,
+                                            initial.bounds.sigma[1] * MANUAL_FWHM_FACTOR,
+                                        ));
+                                    let fwhm_decimals = calibration
+                                        .and_then(|calibration| {
+                                            calibration
+                                                .derivative_checked(initial.seed.center)
+                                                .map(|derivative| derivative.abs() * bin_width)
+                                        })
+                                        .map(decimal_places_for_resolution)
+                                        .unwrap_or(raw_initial_decimals);
+                                    range_label(
+                                        ui,
+                                        fwhm_range.0,
+                                        fwhm_range.1,
+                                        fwhm_range.2,
+                                        fwhm_decimals,
+                                    );
+                                    range_label(
+                                        ui,
+                                        initial.bounds.net_height[0],
+                                        initial.net_height,
+                                        initial.bounds.net_height[1],
+                                        0,
+                                    );
+                                }
+                                if let Some(fitted) = fitted {
+                                    let center = calibration.map_or(fitted.center, |calibration| {
+                                        calibrated_center_measurement(
+                                            calibration,
+                                            fitted.center.0,
+                                            fitted.center.1,
+                                        )
+                                    });
+                                    let fwhm = calibration.map_or(fitted.fwhm, |calibration| {
+                                        calibrated_width_measurement(
+                                            calibration,
+                                            fitted.center.0,
+                                            fitted.fwhm.0,
+                                            fitted.fwhm.1,
+                                        )
+                                    });
+                                    let sigma = calibration.map_or(fitted.sigma, |calibration| {
+                                        calibrated_width_measurement(
+                                            calibration,
+                                            fitted.center.0,
+                                            fitted.sigma.0,
+                                            fitted.sigma.1,
+                                        )
+                                    });
+                                    for measurement in [
+                                        center,
+                                        fwhm,
+                                        fitted.height,
+                                        fitted.area,
+                                        fitted.amplitude,
+                                        sigma,
+                                    ] {
+                                        fit_measurement_label(
+                                            ui,
+                                            Some(measurement.0),
+                                            measurement.1,
+                                        );
+                                    }
+                                } else {
+                                    for _ in 0..6 {
+                                        ui.label("—");
+                                    }
+                                }
                                 ui.colored_label(
                                     if initial.valid {
                                         Color32::GREEN
@@ -1393,28 +1733,6 @@ impl Fits {
                                 );
                                 ui.label("—");
                                 ui.end_row();
-
-                                if let Some(fitted) = fitted_rows.get(index) {
-                                    ui.label("Temp");
-                                    ui.label(format!("#{}", fitted.peak + 1));
-                                    for measurement in [
-                                        fitted.center,
-                                        fitted.fwhm,
-                                        fitted.height,
-                                        fitted.area,
-                                        fitted.amplitude,
-                                        fitted.sigma,
-                                    ] {
-                                        fit_measurement_label(
-                                            ui,
-                                            Some(measurement.0),
-                                            measurement.1,
-                                        );
-                                    }
-                                    ui.label("Fitted");
-                                    ui.label("—");
-                                    ui.end_row();
-                                }
                             }
                         } else {
                             let region_positions = markers.get_region_marker_positions();
@@ -1433,86 +1751,137 @@ impl Fits {
                                     f64::INFINITY
                                 };
                             for guess in &mut markers.peak_markers {
-                                ui.label("Initial");
                                 ui.label(format!("#{}", guess.id));
 
-                                let mut center_minimum = guess.center_min.min(guess.center.x_value);
-                                let mut center = guess.center.x_value;
-                                let mut center_maximum = guess.center_max.max(guess.center.x_value);
-                                center_minimum = center_minimum.max(region_minimum);
-                                center_maximum = center_maximum.min(region_maximum);
-                                let center_changes = range_drag_ui(
-                                    ui,
-                                    &mut center_minimum,
-                                    &mut center,
-                                    &mut center_maximum,
-                                    bin_width.max(1.0e-9) * 0.1,
-                                    region_minimum,
-                                    region_maximum,
-                                );
-                                if center_changes.iter().any(|value| *value) {
-                                    guess.center_min = center_minimum;
-                                    guess.center.x_value = center;
-                                    guess.center_max = center_maximum;
-                                    guess.hold_current_seed();
-                                    changed = true;
+                                if show_initial_parameters {
+                                    let mut center_minimum =
+                                        guess.center_min.min(guess.center.x_value);
+                                    let mut center = guess.center.x_value;
+                                    let mut center_maximum =
+                                        guess.center_max.max(guess.center.x_value);
+                                    center_minimum = center_minimum.max(region_minimum);
+                                    center_maximum = center_maximum.min(region_maximum);
+                                    let center_calibrated_decimals =
+                                        calibration.map_or(raw_initial_decimals, |calibration| {
+                                            decimal_places_for_resolution(
+                                                calibration
+                                                    .calibrate_checked(center + bin_width)
+                                                    .zip(calibration.calibrate_checked(center))
+                                                    .map_or(bin_width, |(next, current)| {
+                                                        (next - current).abs()
+                                                    }),
+                                            )
+                                        });
+                                    let center_changes = match calibration {
+                                        Some(calibration) => calibrated_center_range_drag_ui(
+                                            ui,
+                                            &mut center_minimum,
+                                            &mut center,
+                                            &mut center_maximum,
+                                            bin_width.max(1.0e-9) * 0.1,
+                                            (region_minimum, region_maximum),
+                                            calibration,
+                                            center_calibrated_decimals,
+                                        ),
+                                        None => range_drag_ui(
+                                            ui,
+                                            &mut center_minimum,
+                                            &mut center,
+                                            &mut center_maximum,
+                                            bin_width.max(1.0e-9) * 0.1,
+                                            region_minimum,
+                                            region_maximum,
+                                        ),
+                                    };
+                                    if center_changes.iter().any(|value| *value) {
+                                        guess.center_min = center_minimum;
+                                        guess.center.x_value = center;
+                                        guess.center_max = center_maximum;
+                                        guess.hold_current_seed();
+                                        changed = true;
+                                    }
+
+                                    let mut fwhm_minimum = guess.fwhm_min.min(guess.fwhm);
+                                    let mut fwhm = guess.fwhm;
+                                    let mut fwhm_maximum = guess.fwhm_max.max(guess.fwhm);
+                                    let fwhm_changes = calibration
+                                        .and_then(|calibration| {
+                                            calibrated_fwhm_range_drag_ui(
+                                                ui,
+                                                &mut fwhm_minimum,
+                                                &mut fwhm,
+                                                &mut fwhm_maximum,
+                                                bin_width.max(1.0e-9) * 0.05,
+                                                (0.5 * bin_width).max(f64::EPSILON),
+                                                maximum_width,
+                                                guess.center.x_value,
+                                                calibration,
+                                                decimal_places_for_resolution(
+                                                    calibration
+                                                        .derivative_checked(guess.center.x_value)
+                                                        .map_or(bin_width, |derivative| {
+                                                            derivative.abs() * bin_width
+                                                        }),
+                                                ),
+                                            )
+                                        })
+                                        .unwrap_or_else(|| {
+                                            range_drag_ui(
+                                                ui,
+                                                &mut fwhm_minimum,
+                                                &mut fwhm,
+                                                &mut fwhm_maximum,
+                                                bin_width.max(1.0e-9) * 0.05,
+                                                (0.5 * bin_width).max(f64::EPSILON),
+                                                maximum_width,
+                                            )
+                                        });
+                                    if fwhm_changes[1] {
+                                        guess.set_fwhm_preserving_height(fwhm, bin_width);
+                                        shared_fwhm = equal_sigma.then_some(fwhm);
+                                    }
+                                    if fwhm_changes[0] || fwhm_changes[2] {
+                                        guess.fwhm_min = fwhm_minimum;
+                                        guess.fwhm_max = fwhm_maximum;
+                                        shared_fwhm_bounds =
+                                            equal_sigma.then_some([fwhm_minimum, fwhm_maximum]);
+                                    }
+                                    if fwhm_changes.iter().any(|value| *value) {
+                                        guess.hold_current_seed();
+                                        changed = true;
+                                    }
+
+                                    let mut height_minimum =
+                                        guess.net_height_min.min(guess.net_height);
+                                    let mut height = guess.net_height;
+                                    let mut height_maximum =
+                                        guess.net_height_max.max(guess.net_height);
+                                    let height_speed = height.abs().max(1.0) * 0.01;
+                                    let height_changes = range_drag_ui(
+                                        ui,
+                                        &mut height_minimum,
+                                        &mut height,
+                                        &mut height_maximum,
+                                        height_speed,
+                                        0.0,
+                                        f64::INFINITY,
+                                    );
+                                    if height_changes[1] {
+                                        guess.set_net_height(height, bin_width);
+                                    }
+                                    if height_changes[0] || height_changes[2] {
+                                        guess.net_height_min = height_minimum;
+                                        guess.net_height_max = height_maximum;
+                                    }
+                                    if height_changes.iter().any(|value| *value) {
+                                        guess.hold_current_seed();
+                                        changed = true;
+                                    }
                                 }
 
-                                let mut fwhm_minimum = guess.fwhm_min.min(guess.fwhm);
-                                let mut fwhm = guess.fwhm;
-                                let mut fwhm_maximum = guess.fwhm_max.max(guess.fwhm);
-                                let fwhm_changes = range_drag_ui(
-                                    ui,
-                                    &mut fwhm_minimum,
-                                    &mut fwhm,
-                                    &mut fwhm_maximum,
-                                    bin_width.max(1.0e-9) * 0.05,
-                                    (0.5 * bin_width).max(f64::EPSILON),
-                                    maximum_width,
-                                );
-                                if fwhm_changes[1] {
-                                    guess.set_fwhm_preserving_height(fwhm, bin_width);
-                                    shared_fwhm = equal_sigma.then_some(fwhm);
+                                for _ in 0..6 {
+                                    ui.label("—");
                                 }
-                                if fwhm_changes[0] || fwhm_changes[2] {
-                                    guess.fwhm_min = fwhm_minimum;
-                                    guess.fwhm_max = fwhm_maximum;
-                                    shared_fwhm_bounds =
-                                        equal_sigma.then_some([fwhm_minimum, fwhm_maximum]);
-                                }
-                                if fwhm_changes.iter().any(|value| *value) {
-                                    guess.hold_current_seed();
-                                    changed = true;
-                                }
-
-                                let mut height_minimum = guess.net_height_min.min(guess.net_height);
-                                let mut height = guess.net_height;
-                                let mut height_maximum = guess.net_height_max.max(guess.net_height);
-                                let height_speed = height.abs().max(1.0) * 0.01;
-                                let height_changes = range_drag_ui(
-                                    ui,
-                                    &mut height_minimum,
-                                    &mut height,
-                                    &mut height_maximum,
-                                    height_speed,
-                                    0.0,
-                                    f64::INFINITY,
-                                );
-                                if height_changes[1] {
-                                    guess.set_net_height(height, bin_width);
-                                }
-                                if height_changes[0] || height_changes[2] {
-                                    guess.net_height_min = height_minimum;
-                                    guess.net_height_max = height_maximum;
-                                }
-                                if height_changes.iter().any(|value| *value) {
-                                    guess.hold_current_seed();
-                                    changed = true;
-                                }
-
-                                ui.label(format!("{:.5}", guess.amplitude / bin_width));
-                                ui.label(format!("{:.5}", guess.amplitude));
-                                ui.label(format!("{:.5}", guess.fwhm / MANUAL_FWHM_FACTOR));
                                 guess.valid = guess.center.x_value.is_finite()
                                     && guess.fwhm.is_finite()
                                     && guess.fwhm > 0.0
@@ -1592,6 +1961,7 @@ impl Fits {
             peak: usize,            // peak index
             mean: (f64, f64),       // (val, unc)
             fwhm: (f64, f64),
+            height: (f64, f64),
             area: (f64, f64),
             amplitude: (f64, f64),
             sigma: (f64, f64),
@@ -1632,6 +2002,11 @@ impl Fits {
                         fwhm: pick_cal(
                             (p.fwhm.value, p.fwhm.uncertainty),
                             (p.fwhm.calibrated_value, p.fwhm.calibrated_uncertainty),
+                            calibrated,
+                        ),
+                        height: pick_cal(
+                            (p.height.value, p.height.uncertainty),
+                            (p.height.calibrated_value, p.height.calibrated_uncertainty),
                             calibrated,
                         ),
                         area: pick_cal(
@@ -1675,6 +2050,7 @@ impl Fits {
                 SortCol::Peak => r.peak as f64,
                 SortCol::Mean => nan_hi(r.mean.0),
                 SortCol::Fwhm => nan_hi(r.fwhm.0),
+                SortCol::Height => nan_hi(r.height.0),
                 SortCol::Area => nan_hi(r.area.0),
                 SortCol::Amplitude => nan_hi(r.amplitude.0),
                 SortCol::Sigma => nan_hi(r.sigma.0),
@@ -1713,7 +2089,7 @@ impl Fits {
 
                 let mut csv_lines = Vec::with_capacity(rows.len() + 1);
                 csv_lines.push(
-                    "fit,peak,mean,mean_uncertainty,fwhm,fwhm_uncertainty,area,area_uncertainty,amplitude,amplitude_uncertainty,sigma,sigma_uncertainty,uuid,energy,energy_uncertainty".to_owned(),
+                    "fit,peak,mean,mean_uncertainty,fwhm,fwhm_uncertainty,height,height_uncertainty,area,area_uncertainty,amplitude,amplitude_uncertainty,sigma,sigma_uncertainty,uuid,energy,energy_uncertainty".to_owned(),
                 );
 
                 for row in &rows {
@@ -1721,13 +2097,15 @@ impl Fits {
                         .fit_idx
                         .map_or_else(|| "Temp".to_owned(), |fit_idx| fit_idx.to_string());
                     csv_lines.push(format!(
-                        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                         fit_label,
                         row.peak,
                         csv_number(row.mean.0),
                         csv_number(row.mean.1),
                         csv_number(row.fwhm.0),
                         csv_number(row.fwhm.1),
+                        csv_number(row.height.0),
+                        csv_number(row.height.1),
                         csv_number(row.area.0),
                         csv_number(row.area.1),
                         csv_number(row.amplitude.0),
@@ -1755,7 +2133,7 @@ impl Fits {
             // stay compact for ordinary fits while still expanding for longer numeric values.
             .column(Column::auto())
             .column(Column::auto())
-            .columns(Column::auto(), 5)
+            .columns(Column::auto(), 6)
             .column(Column::auto())
             .column(Column::auto())
             .column(Column::auto())
@@ -1784,6 +2162,7 @@ impl Fits {
                 add_header(&mut header, "Peak #", SortCol::Peak);
                 add_header(&mut header, "Mean", SortCol::Mean);
                 add_header(&mut header, "FWHM", SortCol::Fwhm);
+                add_header(&mut header, "Height", SortCol::Height);
                 add_header(&mut header, "Area", SortCol::Area);
                 add_header(&mut header, "Amplitude", SortCol::Amplitude);
                 add_header(&mut header, "Sigma", SortCol::Sigma);
@@ -1812,7 +2191,7 @@ impl Fits {
                     row.col(|ui| {
                         ui.label(r.peak.to_string());
                     });
-                    for measurement in [r.mean, r.fwhm, r.area, r.amplitude, r.sigma] {
+                    for measurement in [r.mean, r.fwhm, r.height, r.area, r.amplitude, r.sigma] {
                         row.col(|ui| {
                             fit_measurement_label(ui, Some(measurement.0), Some(measurement.1));
                         });
@@ -1999,7 +2378,7 @@ impl Fits {
             ));
         });
         ui.label(format!(
-            "Objective: {} → {:.5}  ·  improvement: {}  ·  RMSE: {:.5}  ·  R²: {}",
+            "Objective: {} to {:.5}  ·  improvement: {}  ·  RMSE: {:.5}  ·  R²: {}",
             statistics
                 .initial_objective
                 .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
@@ -2012,24 +2391,26 @@ impl Fits {
                 .r_squared
                 .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
         ));
-        ui.label(format!(
-            "Deviance / reduced: {} / {}  ·  Pearson / reduced: {} / {}  ·  p: {}",
-            statistics
-                .deviance
-                .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
-            statistics
-                .reduced_deviance
-                .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
-            statistics
-                .pearson_chi_square
-                .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
-            statistics
-                .reduced_pearson_chi_square
-                .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
-            statistics
-                .goodness_of_fit_p_value
-                .map_or_else(|| "—".to_owned(), |value| format!("{value:.4e}")),
-        ));
+        if statistics.objective == ObjectiveKind::PoissonDeviance {
+            ui.label(format!(
+                "Deviance / reduced: {} / {}  ·  Pearson / reduced: {} / {}  ·  p: {}",
+                statistics
+                    .deviance
+                    .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
+                statistics
+                    .reduced_deviance
+                    .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
+                statistics
+                    .pearson_chi_square
+                    .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
+                statistics
+                    .reduced_pearson_chi_square
+                    .map_or_else(|| "—".to_owned(), |value| format!("{value:.5}")),
+                statistics
+                    .goodness_of_fit_p_value
+                    .map_or_else(|| "—".to_owned(), |value| format!("{value:.4e}")),
+            ));
+        }
         ui.label(format!(
             "BIC: {}  ·  covariance: {}  ·  evaluations: {}",
             statistics
@@ -2106,6 +2487,9 @@ impl Fits {
         });
         if store {
             self.store_temp_fit();
+            markers.clear_peak_markers();
+            markers.preview_background.clear();
+            markers.estimate_error = None;
         }
 
         let mut manual_changed = false;
