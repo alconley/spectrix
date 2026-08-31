@@ -13,6 +13,10 @@ Run the smallest relevant test suite as well. For changes that affect shared cra
 
 Do not suppress a formatter, Clippy, or compiler warning merely to pass a check unless there is a documented, narrowly scoped reason.
 
+## Rust safety
+
+Do not introduce Rust `unsafe` code. This includes `unsafe` blocks, functions, traits, implementations, and attributes that permit unsafe behavior. Prefer safe Rust and supported library APIs; if an existing unsafe dependency or implementation needs to be changed, preserve its safety boundary and ask before expanding it.
+
 ## UI guidance and hover help
 
 Interactive UI elements must explain themselves when a user could reasonably need context to use them correctly. Add concise hover text/tooltips for controls that have non-obvious behavior, including drag targets, editable plot elements, buttons, toggles, inputs, icons, keyboard shortcuts, bounds, units, defaults, side effects, and feature interactions.

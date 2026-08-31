@@ -131,6 +131,32 @@ pub struct Value {
 }
 
 impl Value {
+    fn calibration_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        name: &str,
+        uncertainty_available: bool,
+    ) -> bool {
+        let mut changed = false;
+        ui.label(name);
+        changed |= ui
+            .add(egui::DragValue::new(&mut self.value).speed(0.1))
+            .on_hover_text("Value of the calibration coefficient")
+            .changed();
+        ui.label("±");
+        if uncertainty_available {
+            changed |= ui
+                .add(egui::DragValue::new(&mut self.uncertainty).speed(0.1))
+                .on_hover_text("Uncertainty of the calibration coefficient")
+                .changed();
+        } else {
+            ui.label("unavailable").on_hover_text(
+                "Two points determine an exact line, leaving no degrees of freedom to estimate uncertainty.",
+            );
+        }
+        changed
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui, name: Option<&str>) -> bool {
         let mut changed = false;
         ui.horizontal(|ui| {
@@ -160,6 +186,8 @@ pub struct Calibration {
     pub b: Value,
     pub c: Value,
     pub cov: Option<[[f64; 3]; 3]>,
+    #[serde(default = "default_true")]
+    pub uncertainty_available: bool,
 }
 
 impl Default for Calibration {
@@ -178,6 +206,7 @@ impl Default for Calibration {
                 uncertainty: 0.0,
             },
             cov: None,
+            uncertainty_available: true,
         }
     }
 }
@@ -189,12 +218,18 @@ impl Calibration {
     pub fn ui(&mut self, ui: &mut egui::Ui) -> bool {
         let mut changed = false;
         ui.horizontal(|ui| {
-            changed |= self.a.ui(ui, Some("a:"));
+            changed |= self.a.calibration_ui(ui, "a:", self.uncertainty_available);
             ui.separator();
-            changed |= self.b.ui(ui, Some("b:"));
+            changed |= self.b.calibration_ui(ui, "b:", self.uncertainty_available);
             ui.separator();
-            changed |= self.c.ui(ui, Some("c:"));
+            changed |= self.c.calibration_ui(ui, "c:", self.uncertainty_available);
         });
+        if changed {
+            self.uncertainty_available = true;
+        }
+        if !self.uncertainty_available {
+            ui.small("Calibration uncertainty is unavailable for this exact two-point fit.");
+        }
         changed
     }
 
@@ -259,7 +294,7 @@ impl Calibration {
     }
 
     pub fn curve_uncertainty_checked(&self, x: f64) -> Option<f64> {
-        if !self.coefficients_are_finite() || !x.is_finite() {
+        if !self.uncertainty_available || !self.coefficients_are_finite() || !x.is_finite() {
             return None;
         }
 
@@ -541,6 +576,10 @@ fn default_parameter_min() -> f64 {
 
 fn default_parameter_max() -> f64 {
     f64::INFINITY
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 impl Default for Parameter {

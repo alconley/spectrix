@@ -68,7 +68,9 @@ impl Histogram {
         SubMenuButton::new("Settings")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
             .ui(ui, |ui| {
-                self.plot_settings.settings_ui(ui);
+                if let Some(raw_x) = self.plot_settings.settings_ui(ui) {
+                    self.add_background_marker_at(raw_x);
+                }
             });
 
         SubMenuButton::new("Export")

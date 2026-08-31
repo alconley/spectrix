@@ -667,7 +667,7 @@ Cursor must be inside the plot for keybinds to be active.
 | Key | Action | Notes |
 |---|---|---|
 | **P** | Add peak marker | Places a Gaussian peak marker at cursor position. |
-| **B** | Add background marker | Used for background-only sampling points. |
+| **B** | Add background marker | Snaps a one-bin window to the hovered bin's edges; background fitting samples its center. Dragged background edges snap on release, with a bin center as the include/exclude threshold. |
 | **C** | Create 1D cut | Creates a draggable 1D cut region using the histogram’s current source column. |
 | **R** | Add region markers | Define fit interval; drag marker center with middle mouse button. |
 | **-** | Remove nearest marker | Deletes marker closest to cursor. |
@@ -684,6 +684,7 @@ Cursor must be inside the plot for keybinds to be active.
 - The default background model is **None**.
 - 1D auto-fit Y is enabled by default and uses the maximum bin height in the current visible X range with `1.15x` headroom in both linear and log modes.
 - Non-`None` backgrounds require explicit background windows; Spectrix does not synthesize fallback samples.
+- Adding or deleting a background window, or releasing a dragged window, automatically updates the background on a worker thread. No `G`, peak markers, or region markers are needed for a background-only preview. An active temporary background fit receives the new coefficients; an active temporary Gaussian fit is rebuilt with the new background, preserving peak assignments, bounds, and the lock setting. Stored fits are unchanged. Invalid windows keep the last successful fit and show an error.
 - Peak fitting does not run a hidden background-only optimization. An unlocked background is initialized robustly and then varies in the single composite fit; an explicitly fitted background is fixed only when **Lock manual background** is enabled.
 - After an explicit background-only fit succeeds, its current coefficients are shown in the background parameter controls so it is clear which values will be locked.
 - Multiple Gaussian peaks can be fit simultaneously when multiple peak markers exist in the active region.

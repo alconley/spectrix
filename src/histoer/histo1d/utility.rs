@@ -2,6 +2,17 @@ use super::histogram1d::Histogram;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
+/// Select samples by their centers, so a window on bin edges contains only those bins.
+pub(super) fn bin_center_range(centers: &[f64], start: f64, end: f64) -> std::ops::Range<usize> {
+    if !start.is_finite() || !end.is_finite() {
+        return 0..0;
+    }
+    let lower = start.min(end);
+    let upper = start.max(end);
+    centers.partition_point(|&center| center < lower)
+        ..centers.partition_point(|&center| center <= upper)
+}
+
 impl Histogram {
     pub fn get_bin_edges(&self) -> Vec<f64> {
         (0..=self.bins.len())

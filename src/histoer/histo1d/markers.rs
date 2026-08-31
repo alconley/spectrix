@@ -2,11 +2,12 @@ use crate::egui_plot_stuff::{egui_line::EguiLine, egui_vertical_line::EguiVertic
 use crate::fitter::common::Calibration;
 use egui::{Color32, Id};
 use egui_plot::{FilledArea, Line, LineStyle, PlotPoint, PlotPoints, PlotUi, VLine};
-use serde::Deserialize;
+use serde::Deserialize as _;
 use spectrix_fitting::{ManualPeakBounds, ManualPeakSeed, evaluate_manual_peak};
 use std::cmp::Ordering;
 
 use super::histogram1d::Histogram;
+use super::utility::bin_center_range;
 use crate::defaults::{MarkerDefaults, MarkerStyleDefaults};
 
 fn apply_marker_style(line: &mut EguiVerticalLine, defaults: &MarkerStyleDefaults) {
@@ -253,54 +254,42 @@ where
 }
 
 impl Histogram {
-    pub fn update_background_pair_lines(&mut self) {
-        // Extract bin edges and counts **before** modifying anything
-        let bin_edges = self.get_bin_edges();
-        let bin_counts = self.bins.clone();
-
-        // Extract immutable background marker positions first
-        let marker_positions: Vec<(f64, f64)> = self
-            .plot_settings
-            .markers
-            .background_markers
-            .iter()
-            .map(|bg_pair| (bg_pair.start.x_value, bg_pair.end.x_value))
-            .collect();
-
-        // Compute bin indices based on marker positions **before** modifying anything
-        let bin_indices: Vec<(usize, usize)> = marker_positions
-            .iter()
-            .map(|&(start_x, end_x)| {
-                let start_bin = self.get_bin_index(start_x).unwrap_or(0);
-                let end_bin = self
-                    .get_bin_index(end_x)
-                    .unwrap_or(self.bins.len().saturating_sub(1));
-                (start_bin, end_bin)
-            })
-            .collect();
-
-        // Now, modify `background_markers` without conflicting borrows
-        for (bg_pair, &(start_bin, end_bin)) in self
-            .plot_settings
-            .markers
-            .background_markers
-            .iter_mut()
-            .zip(bin_indices.iter())
+    /// Place a new background window on the containing bin; leave existing windows unchanged.
+    pub(super) fn add_background_marker_at(&mut self, raw_x: f64) {
+        if !raw_x.is_finite()
+            || self.bins.is_empty()
+            || !self.bin_width.is_finite()
+            || self.bin_width <= 0.0
+            || !self.range.0.is_finite()
+            || !self.range.1.is_finite()
+            || raw_x < self.range.0
+            || raw_x > self.range.1
         {
-            bg_pair.histogram_line.clear_points(); // Clear previous points
+            return;
+        }
+        // Compare against actual edges: dividing by fractional widths can round an
+        // exact edge into the preceding bin. The final histogram edge uses the last bin.
+        let edges = self.get_bin_edges();
+        let index = edges
+            .partition_point(|&edge| edge <= raw_x)
+            .saturating_sub(1)
+            .min(self.bins.len() - 1);
+        self.plot_settings
+            .markers
+            .add_background_pair(edges[index], edges[index + 1]);
+    }
 
-            // Collect the **actual bin edges** and counts in the correct range
-            for i in start_bin..=end_bin {
-                if i < bin_edges.len() - 1 {
-                    // Ensure no out-of-bounds access
-                    let x_start = bin_edges[i]; // Start of the bin
-                    let x_end = bin_edges[i + 1]; // End of the bin
-                    let y = bin_counts[i] as f64; // Bin count
+    pub fn update_background_pair_lines(&mut self) {
+        let bin_edges = self.get_bin_edges();
+        let bin_centers = self.get_bin_centers();
 
-                    // Add both edges of the bin to the histogram line
-                    bg_pair.histogram_line.add_point(x_start, y);
-                    bg_pair.histogram_line.add_point(x_end, y);
-                }
+        for bg_pair in &mut self.plot_settings.markers.background_markers {
+            bg_pair.histogram_line.clear_points();
+            // Highlight exactly the bins sampled by manual and automatic background fitting.
+            for i in bin_center_range(&bin_centers, bg_pair.start.x_value, bg_pair.end.x_value) {
+                let y = self.bins[i] as f64;
+                bg_pair.histogram_line.add_point(bin_edges[i], y);
+                bg_pair.histogram_line.add_point(bin_edges[i + 1], y);
             }
         }
     }
@@ -398,11 +387,38 @@ impl BackgroundPair {
         plot_response: &egui_plot::PlotResponse<()>,
         calibration: Option<&Calibration>,
         raw_axis_range: (f64, f64),
+        bin_width: f64,
     ) {
+        let start_was_dragging = self.start.is_dragging;
+        let end_was_dragging = self.end.is_dragging;
         self.start
             .interactive_dragging(plot_response, calibration, Some(raw_axis_range));
         self.end
             .interactive_dragging(plot_response, calibration, Some(raw_axis_range));
+        self.snap_released_edges(
+            start_was_dragging && !self.start.is_dragging,
+            end_was_dragging && !self.end.is_dragging,
+            raw_axis_range,
+            bin_width,
+        );
+    }
+
+    /// Snap only completed drags; loaded and untouched manually-sized windows are preserved.
+    fn snap_released_edges(
+        &mut self,
+        start_released: bool,
+        end_released: bool,
+        range: (f64, f64),
+        bin_width: f64,
+    ) {
+        if start_released {
+            self.start.x_value =
+                snap_background_edge(self.start.x_value, self.end.x_value, range, bin_width);
+        }
+        if end_released {
+            self.end.x_value =
+                snap_background_edge(self.end.x_value, self.start.x_value, range, bin_width);
+        }
     }
 
     /// Updates the `histogram_line` to match the histogram bins within this background pair
@@ -432,6 +448,44 @@ impl BackgroundPair {
         }
 
         self.histogram_line.set_points(line_points);
+    }
+}
+
+/// Preserve the bins selected at the release position: crossing a bin center is what includes
+/// or excludes that bin from a background window.
+fn snap_background_edge(x: f64, other_edge: f64, range: (f64, f64), bin_width: f64) -> f64 {
+    if !x.is_finite()
+        || !other_edge.is_finite()
+        || !range.0.is_finite()
+        || !range.1.is_finite()
+        || !bin_width.is_finite()
+        || bin_width <= 0.0
+        || range.1 <= range.0
+    {
+        return x;
+    }
+    if x <= range.0 {
+        return range.0;
+    }
+    if x >= range.1 {
+        return range.1;
+    }
+
+    let bin_count = ((range.1 - range.0) / bin_width).round() as usize;
+    if bin_count == 0 {
+        return x;
+    }
+    let index = ((x - range.0) / bin_width)
+        .floor()
+        .clamp(0.0, (bin_count - 1) as f64) as usize;
+    let lower = range.0 + index as f64 * bin_width;
+    let upper = range.0 + (index + 1) as f64 * bin_width;
+    let center = (lower + upper) * 0.5;
+
+    if x < center || (x == center && x <= other_edge) {
+        lower
+    } else {
+        upper
     }
 }
 
@@ -709,7 +763,10 @@ impl PeakGuess {
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "hit testing needs the complete plot-coordinate context"
+    )]
     fn preview_hit(
         &self,
         pointer_position: egui::Pos2,
@@ -727,15 +784,13 @@ impl PeakGuess {
         let plot_point = plot_response
             .transform
             .value_from_position(pointer_position);
-        let Some(raw_x) = raw_x_value(
+        let raw_x = raw_x_value(
             plot_point.x,
             calibration,
             log_x,
             raw_axis_range,
             self.center.x_value,
-        ) else {
-            return None;
-        };
+        )?;
 
         let seed_for = |fwhm: f64, height: f64| {
             let sigma = fwhm / FWHM_FACTOR;
@@ -756,12 +811,9 @@ impl PeakGuess {
             })
         };
         let baseline = interpolate_background(background, raw_x);
-        let Some(seed_y) = evaluate_manual_peak(self.seed(), raw_x, bin_width)
+        let seed_y = evaluate_manual_peak(self.seed(), raw_x, bin_width)
             .ok()
-            .and_then(|height| display_y_value(baseline + height, log_y))
-        else {
-            return None;
-        };
+            .and_then(|height| display_y_value(baseline + height, log_y))?;
         let seed_position = plot_response
             .transform
             .position_from_point(&PlotPoint::new(plot_point.x, seed_y));
@@ -839,6 +891,10 @@ impl PeakGuess {
         }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "peak dragging consumes shared plot interaction context"
+    )]
     fn interactive_dragging(
         &mut self,
         plot_response: &egui_plot::PlotResponse<()>,
@@ -1242,17 +1298,14 @@ impl FitMarkers {
         self.estimate_signature = 0;
     }
 
-    pub fn add_background_pair(&mut self, x: f64, bin_width: f64) {
-        let mut marker_start = EguiVerticalLine::new(x, self.defaults.background.color);
-        let mut marker_end = EguiVerticalLine::new(x, self.defaults.background.color);
+    pub fn add_background_pair(&mut self, start: f64, end: f64) {
+        let mut marker_start = EguiVerticalLine::new(start, self.defaults.background.color);
+        let mut marker_end = EguiVerticalLine::new(end, self.defaults.background.color);
         apply_marker_style(&mut marker_start, &self.defaults.background);
         apply_marker_style(&mut marker_end, &self.defaults.background);
 
         marker_start.name = format!("Background Pair {} Start", self.background_markers.len());
         marker_end.name = format!("Background Pair {} End", self.background_markers.len());
-
-        marker_start.x_value = x;
-        marker_end.x_value = x + bin_width;
 
         let mut markers = BackgroundPair::new(marker_start, marker_end);
         markers.apply_defaults(&self.defaults);
@@ -1432,6 +1485,14 @@ impl FitMarkers {
         }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "marker dragging consumes shared plot interaction context"
+    )]
+    #[expect(
+        clippy::fn_params_excessive_bools,
+        reason = "plot display modes and the user preference are independent controls"
+    )]
     pub fn interactive_dragging(
         &mut self,
         plot_response: &egui_plot::PlotResponse<()>,
@@ -1447,7 +1508,7 @@ impl FitMarkers {
         let before_background = self.get_background_marker_positions();
         let before_regions = self.get_region_marker_positions();
         for marker in &mut self.background_markers {
-            marker.interactive_dragging(plot_response, calibration, raw_axis_range);
+            marker.interactive_dragging(plot_response, calibration, raw_axis_range, bin_width);
         }
 
         for marker in &mut self.region_markers {
@@ -1590,11 +1651,6 @@ impl FitMarkers {
             .default_open(true)
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(if equal_sigma {
-                        "Shared FWHM: dragging or editing any width updates every peak."
-                    } else {
-                        "Independent FWHM: each peak width can be edited separately."
-                    });
                     reset_all = ui.button("Reset All").clicked();
                 });
                 if let Some(error) = &self.estimate_error {
@@ -1800,7 +1856,9 @@ impl FitMarkers {
         changed
     }
 
-    pub fn menu_button(&mut self, ui: &mut egui::Ui) {
+    /// Return a background placement request so the histogram can snap it to its bin grid.
+    pub fn menu_button(&mut self, ui: &mut egui::Ui) -> Option<f64> {
+        let mut background_position = None;
         ui.vertical_centered(|ui| {
             ui.add(
                 egui::DragValue::new(&mut self.manual_marker_position)
@@ -1815,8 +1873,12 @@ impl FitMarkers {
 
                 ui.separator();
 
-                if ui.button("Background").clicked() {
-                    self.add_background_pair(self.manual_marker_position, 1.0);
+                if ui
+                    .button("Background")
+                    .on_hover_text("Add a one-bin background window around the entered raw position, snapped to bin edges. Fitting uses the bin center; dragged edges snap on release at the center threshold and update automatically when valid.")
+                    .clicked()
+                {
+                    background_position = Some(self.manual_marker_position);
                 }
 
                 ui.separator();
@@ -1871,12 +1933,13 @@ impl FitMarkers {
         //         pair.histogram_line.menu_button(ui);
         //     }
         // });
+        background_position
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{FitMarkers, GuessSource, PeakGuess};
+    use super::{BackgroundPair, FitMarkers, GuessSource, PeakGuess};
     use crate::egui_plot_stuff::egui_vertical_line::EguiVerticalLine;
 
     fn guess() -> PeakGuess {
@@ -1900,6 +1963,65 @@ mod tests {
         guess.net_height_min = 0.5 * guess.net_height;
         guess.net_height_max = 1.5 * guess.net_height;
         guess
+    }
+
+    fn background_pair(start: f64, end: f64) -> BackgroundPair {
+        BackgroundPair::new(
+            EguiVerticalLine::new(start, egui::Color32::GREEN),
+            EguiVerticalLine::new(end, egui::Color32::GREEN),
+        )
+    }
+
+    #[test]
+    fn released_background_edges_snap_using_bin_centers_as_inclusion_thresholds() {
+        let mut pair = background_pair(1.49, 3.0);
+        pair.snap_released_edges(true, false, (0.0, 4.0), 1.0);
+        assert_eq!(pair.start.x_value, 1.0, "left half includes the bin");
+
+        pair.start.x_value = 1.5;
+        pair.snap_released_edges(true, false, (0.0, 4.0), 1.0);
+        assert_eq!(
+            pair.start.x_value, 1.0,
+            "the lower endpoint includes its center"
+        );
+
+        pair.start.x_value = 1.51;
+        pair.snap_released_edges(true, false, (0.0, 4.0), 1.0);
+        assert_eq!(pair.start.x_value, 2.0, "right half excludes the bin");
+
+        pair.end.x_value = 2.49;
+        pair.snap_released_edges(false, true, (0.0, 4.0), 1.0);
+        assert_eq!(pair.end.x_value, 2.0, "left half excludes the bin");
+
+        pair.end.x_value = 2.5;
+        pair.snap_released_edges(false, true, (0.0, 4.0), 1.0);
+        assert_eq!(
+            pair.end.x_value, 3.0,
+            "the upper endpoint includes its center"
+        );
+
+        pair.start.x_value = 2.5;
+        pair.end.x_value = 0.0;
+        pair.snap_released_edges(true, false, (0.0, 4.0), 1.0);
+        assert_eq!(
+            pair.start.x_value, 3.0,
+            "reversed windows preserve the selected bin"
+        );
+
+        pair.start.x_value = -4.0;
+        pair.end.x_value = 9.0;
+        pair.snap_released_edges(true, true, (0.0, 4.0), 1.0);
+        assert_eq!((pair.start.x_value, pair.end.x_value), (0.0, 4.0));
+    }
+
+    #[test]
+    fn background_edge_snapping_does_not_move_unreleased_or_invalid_windows() {
+        let mut pair = background_pair(1.23, 2.34);
+        pair.snap_released_edges(false, false, (0.0, 4.0), 1.0);
+        assert_eq!((pair.start.x_value, pair.end.x_value), (1.23, 2.34));
+
+        pair.snap_released_edges(true, false, (0.0, 4.0), 0.0);
+        assert_eq!((pair.start.x_value, pair.end.x_value), (1.23, 2.34));
     }
 
     #[test]

@@ -125,13 +125,12 @@ impl BackgroundResult {
 impl BackgroundModel {
     pub fn type_name(&self) -> String {
         match self {
-            Self::LegacyAuto => "None",
+            Self::LegacyAuto | Self::None => "None",
             Self::Constant(_) => "constant",
             Self::Linear(_) => "linear",
             Self::Quadratic(_) => "quadratic",
             Self::PowerLaw(_) => "powerlaw",
             Self::Exponential(_) => "exponential",
-            Self::None => "None",
         }
         .to_owned()
     }

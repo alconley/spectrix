@@ -47,6 +47,27 @@ impl HistogramObjective {
     }
 }
 
+/// How the histogram's displayed calibration coefficients are maintained.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub enum CalibrationMode {
+    #[default]
+    None,
+    Linear,
+    Quadratic,
+    Manual,
+}
+
+impl CalibrationMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Linear => "Linear",
+            Self::Quadratic => "Quadratic",
+            Self::Manual => "Manual",
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct FitSettings {
@@ -54,6 +75,8 @@ pub struct FitSettings {
     pub show_composition: bool,
     pub show_background: bool,
     pub show_fit_lines_area: bool,
+    /// Show the active fit separately from stored fits.
+    pub show_temp_fit: bool,
     pub uuid_label_size: f32,
     pub uuid_label_lift: f32,
     pub uuid_label_guides: bool,
@@ -76,6 +99,9 @@ pub struct FitSettings {
     pub constant_param: Parameter,
     pub objective: HistogramObjective,
     pub calibrated: bool,
+    /// The selected calibration workflow. Older calibrated workspaces infer `Manual` in the UI.
+    #[serde(default)]
+    pub calibration_mode: CalibrationMode,
     /// Legacy global sigma limits retained only so older saved workspaces load without loss.
     /// Per-peak initial FWHM bounds are the active constraint mechanism.
     pub constrain_sigma: bool,
@@ -90,6 +116,7 @@ impl Default for FitSettings {
             show_composition: true,
             show_background: true,
             show_fit_lines_area: true,
+            show_temp_fit: true,
             uuid_label_size: 14.0,
             uuid_label_lift: 1.6,
             uuid_label_guides: true,
@@ -113,6 +140,7 @@ impl Default for FitSettings {
             },
             objective: HistogramObjective::Auto,
             calibrated: false,
+            calibration_mode: CalibrationMode::None,
             constrain_sigma: false,
             sigma_min: 0.1,
             sigma_max: 10.0,
@@ -215,77 +243,44 @@ impl FitSettings {
 
         ui.separator();
 
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Gaussian Fit Settings");
-            ui.radio_value(&mut self.equal_stddev, true, "Shared FWHM");
-            ui.radio_value(&mut self.equal_stddev, false, "Independent FWHM");
-            ui.checkbox(&mut self.free_position, "Free Position")
-                .on_hover_text("Allow the position of the Gaussian to be free");
-            ui.checkbox(&mut self.show_initial_parameters, "Show initial parameters")
-                .on_hover_text(
-                    "Show the editable min ≤ value ≤ max columns in the peak table. Hide them to focus on fitted results; this does not change any initial values.",
-                );
-            ui.checkbox(
-                &mut self.auto_estimate_moved_peak,
-                "Auto-estimate moved peak",
-            )
-            .on_hover_text(
-                "When a peak center is dragged, re-estimate only that peak's width, height, and initial bounds from the histogram. This leaves the dragged center where you placed it.",
-            );
-        });
-
-        ui.collapsing("Advanced fitting", |ui| {
+        ui.collapsing("Fit Behavior", |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Histogram objective:");
-                ui.radio_value(
-                    &mut self.objective,
-                    HistogramObjective::Auto,
-                    "Auto",
+                ui.toggle_value(&mut self.equal_stddev, "Shared FWHM")
+                    .on_hover_text(
+                        "When on, all peaks share one FWHM. Turn off for independent FWHM values.",
+                    );
+                ui.checkbox(&mut self.free_position, "Free Position")
+                    .on_hover_text("Allow the position of the Gaussian to be free");
+                ui.checkbox(&mut self.show_initial_parameters, "Show initial parameters")
+                    .on_hover_text(
+                        "Show the editable min ≤ value ≤ max columns in the peak table. Hide them to focus on fitted results; this does not change any initial values.",
+                    );
+                ui.checkbox(
+                    &mut self.auto_estimate_moved_peak,
+                    "Auto-estimate moved peak",
                 )
-                .on_hover_text("Uses least squares when any selected bin has 100 or more counts; otherwise uses Poisson deviance.");
-                ui.radio_value(
-                    &mut self.objective,
-                    HistogramObjective::PoissonDeviance,
-                    "Poisson",
+                .on_hover_text(
+                    "When a peak center is dragged, re-estimate only that peak's width, height, and initial bounds from the histogram. This leaves the dragged center where you placed it.",
                 );
-                ui.radio_value(
-                    &mut self.objective,
-                    HistogramObjective::LeastSquares,
-                    "Least squares",
-                );
+                egui::ComboBox::from_label("Fit objective")
+                    .selected_text(self.objective.label())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.objective, HistogramObjective::Auto, "Auto")
+                            .on_hover_text("Uses least squares when any selected bin has 100 or more counts; otherwise uses Poisson deviance.");
+                        ui.selectable_value(
+                            &mut self.objective,
+                            HistogramObjective::PoissonDeviance,
+                            "Poisson",
+                        );
+                        ui.selectable_value(
+                            &mut self.objective,
+                            HistogramObjective::LeastSquares,
+                            "Least squares",
+                        );
+                    })
+                    .response
+                    .on_hover_text("Choose the objective used by background and Gaussian fits.");
             });
-        });
-
-        ui.separator();
-
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Show Fit Lines: ");
-            ui.checkbox(&mut self.show_decomposition, "Decomposition")
-                .on_hover_text("Show the decomposition peaks");
-            ui.checkbox(&mut self.show_composition, "Composition")
-                .on_hover_text("Show the composition line");
-            ui.checkbox(&mut self.show_background, "Background")
-                .on_hover_text("Show the background line");
-            ui.checkbox(&mut self.show_fit_lines_area, "1σ Uncertainty")
-                .on_hover_text(
-                    "Draw the covariance-based, Student-t-scaled total-fit 1σ uncertainty band.",
-                );
-        });
-
-        ui.horizontal_wrapped(|ui| {
-            ui.label("UUID Labels:");
-            ui.add(egui::Slider::new(&mut self.uuid_label_size, 8.0..=32.0).text("Size"))
-                .on_hover_text(
-                    "Adjust the UUID label size drawn above the fitted composition peaks.",
-                );
-            ui.add(egui::Slider::new(&mut self.uuid_label_lift, 0.0..=3.0).text("Lift"))
-                .on_hover_text(
-                    "Move UUID labels closer to or farther above their reference height.",
-                );
-            ui.checkbox(&mut self.uuid_label_guides, "Guide")
-                .on_hover_text(
-                    "Draw a dashed vertical guide from the bottom of the UUID label to its zero-lift reference height.",
-                );
         });
 
         ui.separator();
@@ -369,7 +364,7 @@ impl FitSettings {
 
 #[cfg(test)]
 mod tests {
-    use super::{FitSettings, HistogramObjective};
+    use super::{CalibrationMode, FitSettings, HistogramObjective};
     use crate::fitter::{
         main_fitter::{BackgroundModel, BackgroundResult},
         models::quadratic::QuadraticFitter,
@@ -386,6 +381,8 @@ mod tests {
         assert!(!independent.auto_estimate_moved_peak);
         assert!(shared.show_initial_parameters);
         assert!(independent.show_initial_parameters);
+        assert!(shared.show_temp_fit);
+        assert_eq!(shared.calibration_mode, CalibrationMode::None);
     }
 
     #[test]
@@ -399,6 +396,22 @@ mod tests {
             serde_json::from_str(&encoded).expect("deserialize fit settings");
         assert!(decoded.auto_estimate_moved_peak);
         assert!(decoded.show_initial_parameters);
+        assert!(decoded.show_temp_fit);
+        assert_eq!(decoded.calibration_mode, CalibrationMode::None);
+    }
+
+    #[test]
+    fn calibration_mode_round_trips_without_changing_legacy_calibrated_flag() {
+        let settings = FitSettings {
+            calibrated: true,
+            calibration_mode: CalibrationMode::Quadratic,
+            ..FitSettings::default()
+        };
+        let encoded = serde_json::to_string(&settings).expect("serialize fit settings");
+        let decoded: FitSettings =
+            serde_json::from_str(&encoded).expect("deserialize fit settings");
+        assert!(decoded.calibrated);
+        assert_eq!(decoded.calibration_mode, CalibrationMode::Quadratic);
     }
 
     #[test]

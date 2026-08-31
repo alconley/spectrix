@@ -267,11 +267,13 @@ mod tests {
     fn default_detector_retains_the_original_prominent_peaks() {
         let settings = PeakFindingSettings::default();
         let data = [0.0, 1.0, 12.0, 1.0, 0.0, 2.0, 25.0, 2.0, 0.0];
-        let positions = settings
+        let mut positions = settings
             .find_peaks(&data)
             .into_iter()
             .map(|peak| peak.middle_position())
             .collect::<Vec<_>>();
+        // The detector returns height order; the marker UI sorts the same detected peaks by X.
+        positions.sort_unstable();
         assert_eq!(positions, vec![2, 6]);
     }
 }

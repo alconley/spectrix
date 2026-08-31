@@ -5,6 +5,7 @@ pub mod fitting;
 pub mod histogram1d;
 pub mod interactive_cuts;
 pub mod keybinds;
+mod live_background;
 pub mod markers;
 pub mod peak_finder;
 pub mod plot_settings;

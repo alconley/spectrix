@@ -69,13 +69,14 @@ impl PlotSettings {
         }
     }
 
-    pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
+    pub fn settings_ui(&mut self, ui: &mut egui::Ui) -> Option<f64> {
+        let mut background_position = None;
         ui.checkbox(&mut self.stats_info, "Show Statistics");
 
         SubMenuButton::new("Markers")
             .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
             .ui(ui, |ui| {
-                self.markers.menu_button(ui);
+                background_position = self.markers.menu_button(ui);
             });
 
         SubMenuButton::new("Visual Settings")
@@ -83,8 +84,17 @@ impl PlotSettings {
             .ui(ui, |ui| {
                 self.egui_settings.menu_button(ui);
             });
+        background_position
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "forwards the complete plot interaction context to markers and cuts"
+    )]
+    #[expect(
+        clippy::fn_params_excessive_bools,
+        reason = "plot display modes and the user preference are independent controls"
+    )]
     pub fn interactive_response(
         &mut self,
         response: &egui_plot::PlotResponse<()>,

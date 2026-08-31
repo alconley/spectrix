@@ -1,3 +1,4 @@
+use super::live_background::LiveBackgroundState;
 use super::plot_settings::PlotSettings;
 use crate::defaults::{Histogram1DDefaults, apply_plot_defaults};
 use crate::egui_plot_stuff::egui_line::EguiLine;
@@ -20,6 +21,8 @@ pub struct Histogram {
     pub generation_defaults: Histogram1DDefaults,
     #[serde(default = "default_true")]
     pub follow_theme_colors: bool,
+    #[serde(skip)]
+    pub(crate) live_background: LiveBackgroundState,
 }
 
 const fn default_true() -> bool {
@@ -54,6 +57,7 @@ impl Histogram {
             original_bins: vec![0; number_of_bins],
             generation_defaults: defaults.clone(),
             follow_theme_colors: true,
+            live_background: LiveBackgroundState::default(),
         };
         histogram.apply_generation_defaults(defaults);
         histogram
@@ -197,6 +201,15 @@ impl Histogram {
         let calibration_ref = calibration.as_ref();
 
         self.line.draw(plot_ui, calibration_ref);
+        if self.fits.temp_fit.is_none()
+            && self.fits.settings.show_background
+            && let Some(preview) = &mut self.live_background.preview
+        {
+            self.fits.style_temporary_fit(preview);
+            preview.background_line.name = "Live Background Estimate".to_owned();
+            preview.set_log(log_y, log_x);
+            preview.background_line.draw(plot_ui, calibration_ref);
+        }
         self.plot_settings.markers.draw_all_markers(
             plot_ui,
             calibration_ref,
@@ -247,6 +260,10 @@ impl Histogram {
     }
 
     pub fn render(&mut self, ui: &mut egui::Ui) {
+        // Establish a loaded fit's baseline before the first keyboard or marker edit.
+        if self.live_background.last_attempt.is_none() && self.fits.temp_fit.is_some() {
+            self.live_background.last_attempt = Some(self.live_background_signature());
+        }
         // Process plot shortcuts before any fit-panel DragValue/TextEdit can see the same key
         // event. On Windows, letting a still-focused numeric editor reject a letter first can
         // play the system notification sound even if the plot consumes that key later.
@@ -263,6 +280,8 @@ impl Histogram {
             self.line.set_color(color);
         }
 
+        self.apply_live_background();
+        self.refresh_live_background(ui.ctx().clone());
         self.update_line_points();
         self.refresh_manual_peak_guesses();
 
@@ -275,6 +294,11 @@ impl Histogram {
         ) {
             self.invalidate_manual_gaussian_preview();
             self.refresh_manual_peak_guesses();
+        }
+        if let Some(status) = &self.live_background.status {
+            ui.small(status).on_hover_text(
+                "Adding a background window or releasing a moved window updates the background automatically, without G. Active temporary peak fits are rebuilt in the worker; stored fits are unchanged.",
+            );
         }
         self.apply_refit_all_request();
         self.apply_modify_fit_request();
@@ -336,6 +360,11 @@ impl Histogram {
 
         let calibration = self.display_calibration().cloned();
         let calibration_ref = calibration.as_ref();
+        let background_markers_before =
+            self.plot_settings.markers.get_background_marker_positions();
+        let regions_before = self.plot_settings.markers.get_region_marker_positions();
+        let peak_seeds_before = self.plot_settings.markers.get_peak_seeds();
+        let peak_bounds_before = self.plot_settings.markers.get_peak_bounds();
 
         let markers_changed = self.plot_settings.interactive_response(
             &plot_response,
@@ -348,12 +377,22 @@ impl Histogram {
             self.fits.settings.auto_estimate_moved_peak,
         );
         if markers_changed {
-            self.invalidate_manual_gaussian_preview();
-            // A drag clears the temporary fit because its results are no longer valid.
-            // Refresh in the same frame so an enabled moved-peak estimate does not
-            // leave the editable marker state invalid until the next repaint.
-            self.refresh_manual_peak_guesses();
+            let background_only_change = background_markers_before
+                != self.plot_settings.markers.get_background_marker_positions()
+                && regions_before == self.plot_settings.markers.get_region_marker_positions()
+                && peak_seeds_before == self.plot_settings.markers.get_peak_seeds()
+                && peak_bounds_before == self.plot_settings.markers.get_peak_bounds();
+            if !background_only_change {
+                self.invalidate_manual_gaussian_preview();
+                self.refresh_manual_peak_guesses();
+            }
+            // Region and peak edits immediately invalidate a temporary peak fit. Background-only
+            // edits retain it until the worker has produced a fresh background and can rebuild
+            // the composite result from the current marker inputs.
         }
+        // This is a no-op until the marker/model signature changes. During a drag the request is
+        // deferred; the first frame after release captures the completed marker positions.
+        self.refresh_live_background(ui.ctx().clone());
 
         if plot_response.response.hovered() {
             // Keep keyboard focus on the plot for the next frame's early shortcut pass.

@@ -45,7 +45,9 @@ pub(crate) fn background_seed(
     previous: Option<&BackgroundResult>,
 ) -> BackgroundSeed {
     let parameters = match model {
-        BackgroundModel::LegacyAuto => vec![ParameterDefinition::fixed("bg_c", 0.0)],
+        BackgroundModel::LegacyAuto | BackgroundModel::None => {
+            vec![ParameterDefinition::fixed("bg_c", 0.0)]
+        }
         BackgroundModel::Constant(parameter) => {
             vec![parameter_definition("bg_c", parameter, None)]
         }
@@ -129,7 +131,6 @@ pub(crate) fn background_seed(
                 }),
             ),
         ],
-        BackgroundModel::None => vec![ParameterDefinition::fixed("bg_c", 0.0)],
     };
     BackgroundSeed { parameters }
 }

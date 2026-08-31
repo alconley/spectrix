@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::Write as _;
 use std::path::PathBuf;
 
-use super::fit_settings::FitSettings;
+use super::fit_settings::{CalibrationMode, FitSettings};
 use super::main_fitter::{FitResult, Fitter};
 
 use super::models::gaussian::{HistogramDrawContext, UuidDrawOptions};
@@ -65,6 +65,36 @@ fn unique_value_count(values: &[f64]) -> usize {
         (*left - *right).abs() <= scale * 1e-9
     });
     unique.len()
+}
+
+fn exact_linear_calibration(mean: &[f64], energy: &[f64]) -> Option<Calibration> {
+    if mean.len() != 2 || energy.len() != 2 {
+        return None;
+    }
+    let denominator = mean[1] - mean[0];
+    let scale = mean[0].abs().max(mean[1].abs()).max(1.0);
+    if !denominator.is_finite() || denominator.abs() <= scale * 1e-9 {
+        return None;
+    }
+    let slope = (energy[1] - energy[0]) / denominator;
+    let intercept = energy[0] - slope * mean[0];
+    let candidate = Calibration {
+        a: crate::fitter::common::Value {
+            value: 0.0,
+            uncertainty: 0.0,
+        },
+        b: crate::fitter::common::Value {
+            value: slope,
+            uncertainty: 0.0,
+        },
+        c: crate::fitter::common::Value {
+            value: intercept,
+            uncertainty: 0.0,
+        },
+        cov: None,
+        uncertainty_available: false,
+    };
+    candidate.coefficients_are_finite().then_some(candidate)
 }
 
 fn draw_plot_segment(
@@ -371,6 +401,10 @@ fn range_drag_ui(
     changed
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the three linked values require their calibration display context"
+)]
 fn calibrated_center_range_drag_ui(
     ui: &mut egui::Ui,
     minimum: &mut f64,
@@ -421,6 +455,10 @@ fn calibrated_center_range_drag_ui(
     changed
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the three linked values require their calibration display context"
+)]
 fn calibrated_fwhm_range_drag_ui(
     ui: &mut egui::Ui,
     minimum: &mut f64,
@@ -495,6 +533,9 @@ pub struct SortState {
 #[serde(default)]
 pub struct Fits {
     pub temp_fit: Option<Fitter>,
+    /// Invalidates worker results whenever the temporary fit is replaced or removed.
+    #[serde(skip)]
+    pub(crate) temp_fit_revision: u64,
     pub stored_fits: Vec<Fitter>,
     pub settings: FitSettings,
     pub calibration: Calibration,
@@ -533,6 +574,7 @@ impl Fits {
     pub fn new() -> Self {
         Self {
             temp_fit: None,
+            temp_fit_revision: 0,
             stored_fits: Vec::new(),
             settings: FitSettings::default(),
             calibration: Calibration::default(),
@@ -545,6 +587,12 @@ impl Fits {
 
     pub fn take_pending_modify_fit(&mut self) -> Option<usize> {
         self.pending_modify_fit.take()
+    }
+
+    pub(crate) fn replace_temp_fit(&mut self, fit: Option<Fitter>) {
+        self.temp_fit_revision = self.temp_fit_revision.wrapping_add(1);
+        self.temp_fit = fit;
+        self.apply_visibility_settings();
     }
 
     pub fn take_pending_refit_all(&mut self) -> bool {
@@ -566,6 +614,7 @@ impl Fits {
 
     fn store_temp_fit_unchecked(&mut self) {
         if let Some(mut temp_fit) = self.temp_fit.take() {
+            self.temp_fit_revision = self.temp_fit_revision.wrapping_add(1);
             temp_fit.compact_display_data();
             temp_fit.apply_line_defaults(
                 &self.palette.stored_background,
@@ -580,6 +629,7 @@ impl Fits {
             temp_fit.set_name(name);
 
             self.stored_fits.push(temp_fit);
+            self.apply_visibility_settings();
         }
     }
 
@@ -607,8 +657,10 @@ impl Fits {
         palette: &FitPaletteDefaults,
     ) {
         let calibrated = self.settings.calibrated;
+        let calibration_mode = self.settings.calibration_mode;
         self.settings = defaults.clone();
         self.settings.calibrated = calibrated;
+        self.settings.calibration_mode = calibration_mode;
         self.palette = palette.clone();
 
         if let Some(temp_fit) = &mut self.temp_fit {
@@ -650,9 +702,12 @@ impl Fits {
 
     pub fn update_visibility(&mut self) {
         if let Some(temp_fit) = &mut self.temp_fit {
-            temp_fit.show_decomposition(self.settings.show_decomposition);
-            temp_fit.show_composition(self.settings.show_composition);
-            temp_fit.show_background(self.settings.show_background);
+            temp_fit.show_decomposition(
+                self.settings.show_temp_fit && self.settings.show_decomposition,
+            );
+            temp_fit
+                .show_composition(self.settings.show_temp_fit && self.settings.show_composition);
+            temp_fit.show_background(self.settings.show_temp_fit && self.settings.show_background);
         }
 
         for fit in &mut self.stored_fits {
@@ -713,8 +768,9 @@ impl Fits {
         self.calibration = loaded_fits.calibration;
         self.sort_state = loaded_fits.sort_state;
         self.stored_fits.extend(loaded_fits.stored_fits);
-        self.temp_fit = loaded_fits.temp_fit;
+        self.replace_temp_fit(loaded_fits.temp_fit);
         self.sync_calibration_values();
+        self.apply_visibility_settings();
     }
 
     fn load_from_file(&mut self) {
@@ -761,39 +817,44 @@ impl Fits {
                 return;
             }
 
-            // Fit a linear model
-            let mut fitter = LinearFitter::new(Data {
-                x: mean.clone(),
-                y: energy.clone(),
-            });
+            if let Some(candidate) = exact_linear_calibration(&mean, &energy) {
+                self.calibration = candidate;
+            } else {
+                // Fit a linear model when more than two points are available.
+                let mut fitter = LinearFitter::new(Data {
+                    x: mean.clone(),
+                    y: energy.clone(),
+                });
 
-            match fitter.fit() {
-                Ok(_) => {
-                    let candidate = Calibration {
-                        a: crate::fitter::common::Value {
-                            value: 0.0,
-                            uncertainty: 0.0,
-                        },
-                        b: crate::fitter::common::Value {
-                            value: fitter.paramaters.slope.value.unwrap_or(1.0),
-                            uncertainty: fitter.paramaters.slope.uncertainty.unwrap_or(0.0),
-                        },
-                        c: crate::fitter::common::Value {
-                            value: fitter.paramaters.intercept.value.unwrap_or(0.0),
-                            uncertainty: fitter.paramaters.intercept.uncertainty.unwrap_or(0.0),
-                        },
-                        cov: None,
-                    };
+                match fitter.fit() {
+                    Ok(_) => {
+                        let candidate = Calibration {
+                            a: crate::fitter::common::Value {
+                                value: 0.0,
+                                uncertainty: 0.0,
+                            },
+                            b: crate::fitter::common::Value {
+                                value: fitter.paramaters.slope.value.unwrap_or(1.0),
+                                uncertainty: fitter.paramaters.slope.uncertainty.unwrap_or(0.0),
+                            },
+                            c: crate::fitter::common::Value {
+                                value: fitter.paramaters.intercept.value.unwrap_or(0.0),
+                                uncertainty: fitter.paramaters.intercept.uncertainty.unwrap_or(0.0),
+                            },
+                            cov: None,
+                            uncertainty_available: true,
+                        };
 
-                    if !candidate.coefficients_are_finite() {
-                        log::error!("Calibration fit produced invalid linear coefficients.");
-                        return;
+                        if !candidate.coefficients_are_finite() {
+                            log::error!("Calibration fit produced invalid linear coefficients.");
+                            return;
+                        }
+
+                        self.calibration = candidate;
                     }
-
-                    self.calibration = candidate;
-                }
-                Err(e) => {
-                    log::error!("Calibration fit failed: {e:?}");
+                    Err(e) => {
+                        log::error!("Calibration fit failed: {e:?}");
+                    }
                 }
             }
         }
@@ -828,6 +889,7 @@ impl Fits {
                             uncertainty: fitter.paramaters.c.uncertainty.unwrap_or(0.0),
                         },
                         cov: fitter.covar,
+                        uncertainty_available: true,
                     };
 
                     if !candidate.coefficients_are_finite() {
@@ -1311,7 +1373,7 @@ impl Fits {
     }
 
     pub fn remove_temp_fits(&mut self) {
-        self.temp_fit = None;
+        self.replace_temp_fit(None);
     }
 
     pub fn draw(
@@ -1322,8 +1384,6 @@ impl Fits {
         histogram_bin_width: f64,
         calibration: Option<&Calibration>,
     ) {
-        self.apply_visibility_settings();
-
         let calibrated = calibration.is_some();
         let uuid_draw_options = UuidDrawOptions {
             calibrate: calibrated,
@@ -1338,7 +1398,9 @@ impl Fits {
             range: histogram_range,
             bin_width: histogram_bin_width,
         };
-        if let Some(temp_fit) = &self.temp_fit {
+        if self.settings.show_temp_fit
+            && let Some(temp_fit) = &self.temp_fit
+        {
             let visible = temp_fit.overlaps_visible_x(plot_ui, calibration);
             if visible {
                 temp_fit.draw(plot_ui, calibration, self.settings.show_fit_lines_area);
@@ -1387,12 +1449,12 @@ impl Fits {
             }
         };
 
-        self.temp_fit.as_ref().is_some_and(fit_has_uuid_labels)
+        (self.settings.show_temp_fit && self.temp_fit.as_ref().is_some_and(fit_has_uuid_labels))
             || self.stored_fits.iter().any(fit_has_uuid_labels)
     }
 
     fn manual_peak_table_ui(
-        &mut self,
+        &self,
         ui: &mut egui::Ui,
         markers: &mut FitMarkers,
         bin_width: f64,
@@ -1507,11 +1569,6 @@ impl Fits {
         ui.separator();
         ui.horizontal_wrapped(|ui| {
             ui.strong("Initial / Temporary Peak Parameters");
-            ui.label(if equal_sigma {
-                "Shared FWHM: changing a width preserves each peak's height."
-            } else {
-                "Independent FWHM: each width preserves its peak's height."
-            });
             if self.settings.calibrated {
                 ui.label("Initial center and FWHM values are shown in calibrated units.");
             }
@@ -2072,6 +2129,7 @@ impl Fits {
         let mut energy_updates: Vec<(Option<usize>, usize, f64, f64)> = Vec::new(); // (fit_idx, peak, energy, unc)
 
         ui.horizontal(|ui| {
+            ui.strong("Stored Fits");
             if ui
                 .button("\u{1F4CB}")
                 .on_hover_text(
@@ -2460,7 +2518,6 @@ impl Fits {
             };
             ui.label(format!("• {message}"));
         }
-        ui.small("Quality is advisory; this completed fit can always be stored.");
     }
 
     fn fit_panel_contents_ui(
@@ -2479,11 +2536,19 @@ impl Fits {
 
         let storable = self.temp_fit_is_storable();
         let mut store = false;
-        ui.horizontal_wrapped(|ui| {
-            store = ui
-                .add_enabled(storable, egui::Button::new("Store Fit"))
-                .on_hover_text("Store the completed temporary fit. Quality messages are advisory.")
-                .clicked();
+        let mut manual_changed = false;
+        ui.group(|ui| {
+            self.fit_quality_ui(ui);
+            if storable {
+                store = ui
+                    .button("Store Fit")
+                    .on_hover_text(
+                        "Store the completed temporary fit. Quality messages are advisory.",
+                    )
+                    .clicked();
+            }
+            manual_changed |=
+                self.manual_peak_table_ui(ui, markers, bin_width, self.settings.equal_stddev);
         });
         if store {
             self.store_temp_fit();
@@ -2491,13 +2556,6 @@ impl Fits {
             markers.preview_background.clear();
             markers.estimate_error = None;
         }
-
-        let mut manual_changed = false;
-        ui.group(|ui| {
-            self.fit_quality_ui(ui);
-            manual_changed |=
-                self.manual_peak_table_ui(ui, markers, bin_width, self.settings.equal_stddev);
-        });
 
         self.save_and_load_ui(ui);
 
@@ -2516,6 +2574,7 @@ impl Fits {
             manual_background_available,
         );
 
+        self.visuals_ui(ui);
         self.calubration_ui(ui);
 
         self.fit_stats_grid_ui(ui);
@@ -2525,29 +2584,140 @@ impl Fits {
         manual_changed
     }
 
-    pub fn calubration_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut self.settings.calibrated, "Calibration");
-
-            if self.settings.calibrated {
-                if self.calibration.ui(ui) {
-                    self.calibration.cov = None;
-                }
-
-                ui.separator();
-
-                if ui.button("Calibrate").clicked() {
-                    self.calibrate_stored_fits(false, false);
-                }
-
-                if ui.button("Linear").clicked() {
-                    self.calibrate_stored_fits(true, false);
-                }
-
-                if ui.button("Quadratic").clicked() {
-                    self.calibrate_stored_fits(false, true);
-                }
+    fn visuals_ui(&mut self, ui: &mut egui::Ui) {
+        ui.collapsing("Visuals", |ui| {
+            let mut visibility_changed = false;
+            ui.horizontal_wrapped(|ui| {
+                visibility_changed |= ui
+                    .checkbox(&mut self.settings.show_decomposition, "Decomposition")
+                    .on_hover_text("Show the individual Gaussian peak curves.")
+                    .changed();
+                visibility_changed |= ui
+                    .checkbox(&mut self.settings.show_composition, "Composition")
+                    .on_hover_text("Show the combined Gaussian and background curve.")
+                    .changed();
+                visibility_changed |= ui
+                    .checkbox(&mut self.settings.show_background, "Background")
+                    .on_hover_text("Show the fitted background curve.")
+                    .changed();
+                visibility_changed |= ui
+                    .checkbox(&mut self.settings.show_fit_lines_area, "1σ uncertainty")
+                    .on_hover_text(
+                        "Draw the covariance-based, Student-t-scaled total-fit 1σ uncertainty band.",
+                    )
+                    .changed();
+                visibility_changed |= ui
+                    .checkbox(&mut self.settings.show_temp_fit, "Temporary fit")
+                    .on_hover_text(
+                        "Show the active, un-stored fit. Stored fits remain visible when this is off.",
+                    )
+                    .changed();
+            });
+            if visibility_changed {
+                self.apply_visibility_settings();
             }
+
+            ui.separator();
+            ui.label("UUID labels");
+            ui.horizontal_wrapped(|ui| {
+                ui.add(egui::Slider::new(&mut self.settings.uuid_label_size, 8.0..=32.0).text("Size"))
+                    .on_hover_text(
+                        "Adjust the UUID label size drawn above the fitted composition peaks.",
+                    );
+                ui.add(egui::Slider::new(&mut self.settings.uuid_label_lift, 0.0..=3.0).text("Lift"))
+                    .on_hover_text(
+                        "Move UUID labels closer to or farther above their reference height.",
+                    );
+                ui.checkbox(&mut self.settings.uuid_label_guides, "Guide")
+                    .on_hover_text(
+                        "Draw a dashed vertical guide from the UUID label to its reference height.",
+                    );
+            });
+        });
+        ui.separator();
+    }
+
+    fn displayed_calibration_mode(&self) -> CalibrationMode {
+        if self.settings.calibration_mode == CalibrationMode::None && self.settings.calibrated {
+            // Workspaces saved before the mode existed used editable coefficients.
+            CalibrationMode::Manual
+        } else {
+            self.settings.calibration_mode
+        }
+    }
+
+    fn calibration_coefficient_label(&self, name: &str, value: &super::common::Value) -> String {
+        if self.calibration.uncertainty_available {
+            format!("{name} = {:.6} ± {:.6}", value.value, value.uncertainty)
+        } else {
+            format!("{name} = {:.6} (uncertainty unavailable)", value.value)
+        }
+    }
+
+    pub fn calubration_ui(&mut self, ui: &mut egui::Ui) {
+        ui.collapsing("Calibration", |ui| {
+            let previous_mode = self.displayed_calibration_mode();
+            let mut mode = previous_mode;
+            ui.horizontal_wrapped(|ui| {
+                egui::ComboBox::from_label("Mode")
+                    .selected_text(mode.label())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut mode, CalibrationMode::None, "None")
+                            .on_hover_text("Use raw histogram-bin coordinates.");
+                        ui.selectable_value(&mut mode, CalibrationMode::Linear, "Linear")
+                            .on_hover_text("Fit a line from assigned energies in stored fits.");
+                        ui.selectable_value(&mut mode, CalibrationMode::Quadratic, "Quadratic")
+                            .on_hover_text("Fit a quadratic from assigned energies in stored fits.");
+                        ui.selectable_value(&mut mode, CalibrationMode::Manual, "Manual")
+                            .on_hover_text("Enter the calibration coefficients directly.");
+                    });
+
+                if mode != previous_mode {
+                    self.settings.calibration_mode = mode;
+                    self.settings.calibrated = mode != CalibrationMode::None;
+                    match mode {
+                        CalibrationMode::Linear => self.calibrate_stored_fits(true, false),
+                        CalibrationMode::Quadratic => self.calibrate_stored_fits(false, true),
+                        CalibrationMode::None | CalibrationMode::Manual => {}
+                    }
+                }
+
+                match mode {
+                    CalibrationMode::None => {}
+                    CalibrationMode::Linear | CalibrationMode::Quadratic => {
+                        ui.label(self.calibration_coefficient_label("a", &self.calibration.a));
+                        ui.label(self.calibration_coefficient_label("b", &self.calibration.b));
+                        ui.label(self.calibration_coefficient_label("c", &self.calibration.c));
+                        if ui
+                            .button("Recalculate")
+                            .on_hover_text(
+                                "Re-fit this calibration using the assigned energies in stored fits.",
+                            )
+                            .clicked()
+                        {
+                            if mode == CalibrationMode::Linear {
+                                self.calibrate_stored_fits(true, false);
+                            } else {
+                                self.calibrate_stored_fits(false, true);
+                            }
+                        }
+                    }
+                    CalibrationMode::Manual => {
+                        if self.calibration.ui(ui) {
+                            self.calibration.cov = None;
+                        }
+                        if ui
+                            .button("Apply manual calibration")
+                            .on_hover_text(
+                                "Apply the entered coefficients to temporary and stored fits.",
+                            )
+                            .clicked()
+                        {
+                            self.calibrate_stored_fits(false, false);
+                        }
+                    }
+                }
+            });
         });
 
         ui.separator();
@@ -2695,7 +2865,24 @@ mod tests {
                 uncertainty: 0.0,
             },
             cov: None,
+            uncertainty_available: true,
         }
+    }
+
+    #[test]
+    fn exact_two_point_linear_calibration_has_no_uncertainty() {
+        let calibration = exact_linear_calibration(&[10.0, 20.0], &[100.0, 250.0])
+            .expect("two distinct points define a line");
+        assert_eq!(calibration.b.value, 15.0);
+        assert_eq!(calibration.c.value, -50.0);
+        assert!(calibration.cov.is_none());
+        assert!(!calibration.uncertainty_available);
+        assert!(calibration.curve_uncertainty_checked(15.0).is_none());
+    }
+
+    #[test]
+    fn exact_linear_calibration_rejects_duplicate_positions() {
+        assert!(exact_linear_calibration(&[10.0, 10.0], &[100.0, 250.0]).is_none());
     }
 
     #[test]

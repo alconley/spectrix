@@ -572,14 +572,13 @@ fn validated_manual_markers(
     }
     let mut sorted = markers.to_vec();
     sorted.sort_by(f64::total_cmp);
-    if let Some(pair) = sorted
+    if let Some([first, second]) = sorted
         .windows(2)
         .find(|pair| (pair[1] - pair[0]).abs() < bin_width)
     {
         return Err(FitError::InvalidParameter {
             parameter: format!(
-                "peak markers {:.6} and {:.6} are duplicate within one bin",
-                pair[0], pair[1]
+                "peak markers {first:.6} and {second:.6} are duplicate within one bin"
             ),
         });
     }
@@ -702,6 +701,10 @@ struct ManualPeakDraft {
     sigma_limits: [f64; 2],
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the ordered seed-estimation stages share intermediate peak geometry and are kept together for auditability"
+)]
 fn estimate_manual_components(
     x: &[f64],
     signal: &[f64],
@@ -1255,6 +1258,10 @@ fn build_peak_model(
     Ok(Box::new(composite))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "fit-quality checks deliberately run in their displayed priority order against one fitted result"
+)]
 fn assess_quality(
     fitted: &FitResult,
     x: &[f64],
